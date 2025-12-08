@@ -20,7 +20,7 @@ class DataStore(Base):
     
     vectorizer_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     vectorizer_config: Mapped[Dict[str, Any]] = mapped_column(JSON, default=lambda: {})
-    chunk_size: Mapped[int] = mapped_column(Integer, default=1024)
+    chunk_size: Mapped[int] = mapped_column(Integer, default=2048)
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=256)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

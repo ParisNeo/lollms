@@ -597,7 +597,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             new_comment = DBComment(
                 post_id=post_id,
                 author_id=lollms_bot_user.id,
-                content=ack_comment[:2000]
+                content=ack_comment
             )
             db.add(new_comment)
             db.commit()
@@ -636,7 +636,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         new_comment = DBComment(
             post_id=post_id,
             author_id=lollms_bot_user.id,
-            content=final_content[:2000]
+            content=final_content
         )
         db.add(new_comment)
         db.commit()

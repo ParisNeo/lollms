@@ -136,7 +136,7 @@ INITIAL_ADMIN_USER_CONFIG = {
 
 SAFE_STORE_DEFAULTS = {
     "cache_folder": get_env_var("SAFESTORE_CACHE_FOLDER", "data/cache/safestore"),
-    "chunk_size": get_env_var("SAFESTORE_CHUNK_SIZE", 2096, int),
+    "chunk_size": get_env_var("SAFESTORE_CHUNK_SIZE", 2048, int),
     "chunk_overlap": get_env_var("SAFESTORE_CHUNK_OVERLAP", 150, int),
     "global_default_vectorizer": get_env_var("SAFESTORE_GLOBAL_DEFAULT_VECTORIZER", "st:all-MiniLM-L6-v2"),
     "encryption_key": get_env_var("SAFESTORE_ENCRYPTION_KEY", "my_super_secret_safe_store_key_CHANGE_ME")

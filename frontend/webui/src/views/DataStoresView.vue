@@ -8,6 +8,7 @@ import { useUiStore } from '../stores/ui';
 import { useTasksStore } from '../stores/tasks';
 import { useAdminStore } from '../stores/admin';
 import { useAuthStore } from '../stores/auth';
+import apiClient from '../services/api';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import DataStoreGraphManager from '../components/datastores/DataStoreGraphManager.vue';
@@ -27,6 +28,8 @@ import IconArrowUpTray from '../assets/icons/IconArrowUpTray.vue';
 import IconEye from '../assets/icons/IconEye.vue';
 import IconEyeOff from '../assets/icons/IconEyeOff.vue';
 import IconMagnifyingGlass from '../assets/icons/IconMagnifyingGlass.vue';
+import IconCopy from '../assets/icons/IconCopy.vue';
+import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -52,8 +55,15 @@ const fileInputRef = ref(null);
 const folderInputRef = ref(null);
 const currentUploadTask = ref(null);
 const currentGraphTask = ref(null);
+const currentScrapeTask = ref(null);
 const dragOver = ref(false);
 const selectedFilesToDelete = ref(new Set());
+
+// Scrape URL State
+const scrapeUrl = ref('');
+const scrapeDepth = ref(0);
+const isUploading = ref(false); // Used for upload file button
+const isScraping = ref(false); // Used for scrape button
 
 const queryText = ref('');
 const queryTopK = ref(10);
@@ -109,7 +119,7 @@ const selectedVectorizerDetails = computed(() => {
 const allDataStores = computed(() => [...ownedDataStores.value, ...sharedDataStores.value].sort((a, b) => a.name.localeCompare(b.name)));
 const myDataStores = computed(() => ownedDataStores.value.sort((a, b) => a.name.localeCompare(b.name)));
 const currentSelectedStore = computed(() => allDataStores.value.find(s => s.id === selectedStoreId.value));
-const isAnyTaskRunningForSelectedStore = computed(() => !!currentUploadTask.value || !!currentGraphTask.value);
+const isAnyTaskRunningForSelectedStore = computed(() => !!currentUploadTask.value || !!currentGraphTask.value || !!currentScrapeTask.value);
 
 function highlightedChunk(text) {
     if (!text) return '';
@@ -132,15 +142,24 @@ onMounted(() => {
 onUnmounted(() => clearInterval(taskPollingInterval));
 
 watch(tasks, (newTasks) => {
-    if (!currentSelectedStore.value) { currentUploadTask.value = null; currentGraphTask.value = null; return; }
+    if (!currentSelectedStore.value) { currentUploadTask.value = null; currentGraphTask.value = null; currentScrapeTask.value = null; return; }
     const storeName = currentSelectedStore.value.name;
     const findLatestTask = (namePrefix) => newTasks.filter(task => task.name.startsWith(namePrefix) && task.name.includes(storeName) && (task.status === 'running' || task.status === 'pending')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
     const latestUploadTask = findLatestTask('Add files to DataStore:');
     const latestGraphTask = findLatestTask('Generate Graph for:') || findLatestTask('Update Graph for:');
-    const taskJustFinished = (currentTask, latestTask) => currentTask && !latestTask && (currentTask.status === 'running' || currentTask.status === 'pending');
-    if (taskJustFinished(currentUploadTask.value, latestUploadTask)) { fetchFilesInStore(currentSelectedStore.value.id); }
+    const latestScrapeTask = findLatestTask('Scrape URL to DataStore:');
+    
+    // Check for task completion to refresh file list
+    if (
+        (currentUploadTask.value && !latestUploadTask && (currentUploadTask.value.status === 'running' || currentUploadTask.value.status === 'pending')) ||
+        (currentScrapeTask.value && !latestScrapeTask && (currentScrapeTask.value.status === 'running' || currentScrapeTask.value.status === 'pending'))
+    ) { 
+        fetchFilesInStore(currentSelectedStore.value.id); 
+    }
+    
     currentUploadTask.value = latestUploadTask;
     currentGraphTask.value = latestGraphTask;
+    currentScrapeTask.value = latestScrapeTask;
 }, { deep: true });
 
 watch(selectedStoreId, (newId) => {
@@ -270,17 +289,35 @@ async function handleFileDrop(event) {
     }
 }
 function handleFileChange(event) { addFilesToSelection(Array.from(event.target.files)); }
+
+// Optimized to handle large number of files
 function addFilesToSelection(newFiles) {
+    const existingNames = new Set(selectedFilesToUpload.value.map(f => f.name + f.size));
+    const filesToAdd = [];
+    const newMetadata = {};
+    
     for (const file of newFiles) {
-        if (!selectedFilesToUpload.value.some(f => f.name === file.name && f.size === file.size)) {
-            selectedFilesToUpload.value.push(file);
-            manualMetadata.value[file.name] = 'title: \nsubject: \nauthors: ';
-        } else {
-            uiStore.addNotification(`File "${file.name}" is already selected.`, 'warning');
+        const key = file.name + file.size;
+        if (!existingNames.has(key)) {
+            filesToAdd.push(file);
+            newMetadata[file.name] = 'title: \nsubject: \nauthors: ';
+            existingNames.add(key);
         }
     }
+    
+    if (filesToAdd.length > 0) {
+        selectedFilesToUpload.value = [...selectedFilesToUpload.value, ...filesToAdd];
+        manualMetadata.value = { ...manualMetadata.value, ...newMetadata };
+    }
+    
+    if (filesToAdd.length < newFiles.length) {
+         uiStore.addNotification(`${newFiles.length - filesToAdd.length} duplicate files skipped.`, 'info');
+    }
+
     if (fileInputRef.value) fileInputRef.value.value = '';
+    if (folderInputRef.value) folderInputRef.value.value = '';
 }
+
 function removeFileFromSelection(index) {
     const removedFile = selectedFilesToUpload.value.splice(index, 1);
     if (removedFile.length > 0) {
@@ -288,63 +325,93 @@ function removeFileFromSelection(index) {
     }
 }
 async function fetchFilesInStore(storeId) { filesLoading.value = true; try { filesInSelectedStore.value = await dataStore.fetchStoreFiles(storeId); } finally { filesLoading.value = false; } }
+
 async function handleUploadFiles() {
     if (!currentSelectedStore.value || selectedFilesToUpload.value.length === 0) { uiStore.addNotification('Please select files to upload.', 'warning'); return; }
     if (isAnyTaskRunningForSelectedStore.value) { uiStore.addNotification('A task is already running for this Data Store.', 'warning'); return; }
 
-    const formData = new FormData();
-    selectedFilesToUpload.value.forEach(file => formData.append('files', file));
-    formData.append('metadata_option', metadataOption.value);
-    formData.append('vectorize_with_metadata', vectorizeWithMetadata.value);
+    isUploading.value = true; // Start spinner immediately
+    
+    try {
+        const formData = new FormData();
+        selectedFilesToUpload.value.forEach(file => formData.append('files', file));
+        formData.append('metadata_option', metadataOption.value);
+        formData.append('vectorize_with_metadata', vectorizeWithMetadata.value);
 
-    if (metadataOption.value === 'manual') {
-        let metadataPayload = {};
-        const parseKeyValueMetadata = (text) => {
-            const metadata = {};
-            if(!text) return metadata;
-            const lines = text.split('\n');
-            for (const line of lines) {
-                const parts = line.split(':');
-                if (parts.length >= 2) {
-                    const key = parts[0].trim();
-                    const value = parts.slice(1).join(':').trim();
-                    if (key) {
-                        if (['authors', 'tags', 'keywords'].includes(key.toLowerCase())) {
-                            metadata[key] = value.split(',').map(item => item.trim()).filter(Boolean);
-                        } else {
-                            metadata[key] = value;
+        if (metadataOption.value === 'manual') {
+            let metadataPayload = {};
+            const parseKeyValueMetadata = (text) => {
+                const metadata = {};
+                if(!text) return metadata;
+                const lines = text.split('\n');
+                for (const line of lines) {
+                    const parts = line.split(':');
+                    if (parts.length >= 2) {
+                        const key = parts[0].trim();
+                        const value = parts.slice(1).join(':').trim();
+                        if (key) {
+                            if (['authors', 'tags', 'keywords'].includes(key.toLowerCase())) {
+                                metadata[key] = value.split(',').map(item => item.trim()).filter(Boolean);
+                            } else {
+                                metadata[key] = value;
+                            }
                         }
                     }
                 }
-            }
-            return metadata;
-        };
+                return metadata;
+            };
 
-        try {
-            if (manualMetadataMode.value === 'all') {
-                const commonMetadata = allFilesMetadata.value.trim() ? parseKeyValueMetadata(allFilesMetadata.value) : {};
-                for (const file of selectedFilesToUpload.value) {
-                    metadataPayload[file.name] = commonMetadata;
+            try {
+                if (manualMetadataMode.value === 'all') {
+                    const commonMetadata = allFilesMetadata.value.trim() ? parseKeyValueMetadata(allFilesMetadata.value) : {};
+                    for (const file of selectedFilesToUpload.value) {
+                        metadataPayload[file.name] = commonMetadata;
+                    }
+                } else { // 'per-file'
+                    for (const file of selectedFilesToUpload.value) {
+                        const fileMetadataStr = manualMetadata.value[file.name] || '';
+                        metadataPayload[file.name] = fileMetadataStr.trim() ? parseKeyValueMetadata(fileMetadataStr) : {};
+                    }
                 }
-            } else { // 'per-file'
-                for (const file of selectedFilesToUpload.value) {
-                    const fileMetadataStr = manualMetadata.value[file.name] || '';
-                    metadataPayload[file.name] = fileMetadataStr.trim() ? parseKeyValueMetadata(fileMetadataStr) : {};
-                }
+                formData.append('manual_metadata_json', JSON.stringify(metadataPayload));
+            } catch (e) {
+                uiStore.addNotification(`Invalid metadata format. Please use 'key: value' pairs, with one entry per line.`, 'error');
+                console.error("Metadata parsing error:", e);
+                return;
             }
-            formData.append('manual_metadata_json', JSON.stringify(metadataPayload));
-        } catch (e) {
-            uiStore.addNotification(`Invalid metadata format. Please use 'key: value' pairs, with one entry per line.`, 'error');
-            console.error("Metadata parsing error:", e);
-            return;
         }
-    }
 
-    await dataStore.uploadFilesToStore({ storeId: currentSelectedStore.value.id, formData });
-    selectedFilesToUpload.value = [];
-    manualMetadata.value = {};
-    allFilesMetadata.value = 'title: \nsubject: \nauthors: ';
+        await dataStore.uploadFilesToStore({ storeId: currentSelectedStore.value.id, formData });
+        selectedFilesToUpload.value = [];
+        manualMetadata.value = {};
+        allFilesMetadata.value = 'title: \nsubject: \nauthors: ';
+    } finally {
+        isUploading.value = false; // Stop spinner
+    }
 }
+
+async function handleScrapeUrl() {
+    if (!scrapeUrl.value.trim()) { uiStore.addNotification('Please enter a URL.', 'warning'); return; }
+    if (isAnyTaskRunningForSelectedStore.value) { uiStore.addNotification('A task is already running for this Data Store.', 'warning'); return; }
+
+    isScraping.value = true;
+    try {
+        const response = await apiClient.post(`/api/store/${currentSelectedStore.value.id}/scrape-url`, {
+            url: scrapeUrl.value,
+            depth: scrapeDepth.value
+        });
+        const task = response.data;
+        uiStore.addNotification(`Scrape task '${task.name}' started.`, 'info');
+        tasksStore.addTask(task);
+        scrapeUrl.value = '';
+        scrapeDepth.value = 0;
+    } catch (e) {
+        console.error("Scrape failed:", e);
+    } finally {
+        isScraping.value = false;
+    }
+}
+
 function canReadWrite(store) { return store && ['owner', 'read_write', 'revectorize'].includes(store.permission_level); }
 
 function toggleFileSelection(filename) {
@@ -503,6 +570,13 @@ async function viewFileContent(file) {
         // notification handled in store
     } finally {
         loadingFileContent.value = null;
+    }
+}
+
+function copyContent() {
+    if (viewingFile.value && viewingFile.value.content) {
+        navigator.clipboard.writeText(viewingFile.value.content);
+        uiStore.addNotification("Content copied to clipboard", "success");
     }
 }
 </script>
@@ -682,13 +756,48 @@ async function viewFileContent(file) {
                                 </div>
                             </div>
                         </div>
-                        <div @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop" class="border-2 border-dashed rounded-lg p-6 text-center transition-colors" :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }">
-                            <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv">
-                            <input type="file" ref="folderInputRef" @change="handleFileChange" class="hidden" webkitdirectory directory multiple>
-                            <p class="text-gray-600 dark:text-gray-300">Drag & drop files or folders here</p>
-                            <div class="mt-4 flex justify-center gap-4">
-                                <button type="button" @click="fileInputRef.click()" class="btn btn-secondary">Select File(s)</button>
-                                <button type="button" @click="folderInputRef.click()" class="btn btn-secondary">Select Folder</button>
+                        
+                        <!-- Upload Options Grid -->
+                        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-4">
+                            <!-- File Upload Area -->
+                            <div 
+                                @dragover.prevent="dragOver = true" 
+                                @dragleave.prevent="dragOver = false" 
+                                @drop.prevent="handleFileDrop" 
+                                class="border-2 border-dashed rounded-lg p-6 text-center transition-colors flex flex-col justify-center min-h-[180px]" 
+                                :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }"
+                            >
+                                <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv">
+                                <input type="file" ref="folderInputRef" @change="handleFileChange" class="hidden" webkitdirectory directory multiple>
+                                
+                                <p class="text-gray-600 dark:text-gray-300 font-medium mb-4">Drag & drop files here</p>
+                                <div class="flex justify-center gap-2 flex-wrap">
+                                    <button type="button" @click="fileInputRef.click()" class="btn btn-secondary btn-sm">Select File(s)</button>
+                                    <button type="button" @click="folderInputRef.click()" class="btn btn-secondary btn-sm">Select Folder</button>
+                                </div>
+                            </div>
+
+                            <!-- Scrape URL Area -->
+                            <div class="border rounded-lg p-6 bg-white dark:bg-gray-800 dark:border-gray-600 flex flex-col min-h-[180px]">
+                                <h4 class="text-sm font-semibold mb-3 flex items-center gap-2">
+                                    <IconGlobeAlt class="w-4 h-4"/> Add from URL
+                                </h4>
+                                <div class="space-y-3 flex-grow">
+                                    <input type="text" v-model="scrapeUrl" placeholder="https://example.com/docs" class="input-field text-sm">
+                                    <div class="flex items-center gap-4">
+                                        <div class="flex-grow">
+                                            <label class="text-xs text-gray-500 uppercase font-bold">Depth</label>
+                                            <input type="number" v-model.number="scrapeDepth" min="0" max="5" class="input-field text-sm mt-1">
+                                        </div>
+                                        <div class="self-end">
+                                            <button @click="handleScrapeUrl" class="btn btn-primary btn-sm w-full" :disabled="isScraping || isAnyTaskRunningForSelectedStore || !scrapeUrl">
+                                                <IconAnimateSpin v-if="isScraping" class="w-4 h-4 mr-1 animate-spin" />
+                                                {{ isScraping ? 'Scraping...' : 'Scrape & Add' }}
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <p class="text-xs text-gray-500">Depth 0 = single page. Depth > 0 follows internal links.</p>
+                                </div>
                             </div>
                         </div>
                         
@@ -734,13 +843,25 @@ async function viewFileContent(file) {
                         <div v-else-if="metadataOption === 'manual'" class="mt-4 text-center text-sm text-gray-500 italic p-4 border-2 border-dashed rounded-lg dark:border-gray-600">
                             Select files to enter their metadata manually.
                         </div>
+                        
+                        <!-- Upload Button with Spinner -->
                         <div class="flex justify-end items-center mt-4">
-                            <button @click="handleUploadFiles" class="btn btn-primary" :disabled="isAnyTaskRunningForSelectedStore || selectedFilesToUpload.length === 0">
-                                <IconArrowUpTray class="w-5 h-5 mr-2" /> Add {{ selectedFilesToUpload.length }} File(s)
+                            <button @click="handleUploadFiles" class="btn btn-primary" :disabled="isAnyTaskRunningForSelectedStore || selectedFilesToUpload.length === 0 || isUploading">
+                                <IconAnimateSpin v-if="isUploading" class="w-5 h-5 mr-2 animate-spin" />
+                                <IconArrowUpTray v-else class="w-5 h-5 mr-2" /> 
+                                {{ isUploading ? 'Uploading...' : `Add ${selectedFilesToUpload.length} File(s)` }}
                             </button>
                         </div>
                     </div>
-                    <div v-if="currentUploadTask" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700"> ... </div>
+                    
+                    <!-- Task Indicators -->
+                    <div v-if="currentUploadTask" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700 text-sm">
+                        <span class="font-semibold text-blue-800 dark:text-blue-300">File Uploading:</span> {{ currentUploadTask.progress }}% - {{ currentUploadTask.description }}
+                    </div>
+                    <div v-if="currentScrapeTask" class="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-700 text-sm">
+                        <span class="font-semibold text-green-800 dark:text-green-300">Scraping:</span> {{ currentScrapeTask.progress }}% - {{ currentScrapeTask.description }}
+                    </div>
+
                     <div>
                         <h3 class="text-xl font-semibold mb-4">Indexed Documents ({{ filesInSelectedStore.length }})</h3>
                         <div v-if="!filesLoading && filesInSelectedStore.length > 0 && canReadWrite(currentSelectedStore)" class="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md mb-2">
@@ -864,15 +985,47 @@ async function viewFileContent(file) {
         </div>
         
         <!-- File Viewer Modal -->
-        <GenericModal modalName="fileContent" title="Document Viewer" size="3xl">
+        <GenericModal modalName="fileContent" title="Document Viewer" size="4xl">
             <template #body>
                 <div v-if="viewingFile" class="space-y-4">
-                    <div v-if="viewingFile.metadata && Object.keys(viewingFile.metadata).length > 0" class="bg-gray-100 dark:bg-gray-700/50 p-3 rounded-lg text-sm">
-                        <h4 class="font-bold mb-2">Metadata</h4>
-                        <JsonRenderer :json="viewingFile.metadata" />
+                    <!-- Info Header -->
+                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col gap-2">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <h3 class="text-lg font-bold text-gray-900 dark:text-white break-all">
+                                    {{ viewingFile.metadata?.title || viewingFile.filename }}
+                                </h3>
+                                <p class="text-sm text-gray-500 dark:text-gray-400 font-mono mt-1" v-if="viewingFile.metadata?.title && viewingFile.metadata?.title !== viewingFile.filename">
+                                    {{ viewingFile.filename }}
+                                </p>
+                            </div>
+                            <div class="text-right text-xs text-gray-500 dark:text-gray-400 space-y-1 flex-shrink-0 ml-4">
+                                <div title="Total characters"><span class="font-semibold">{{ viewingFile.content.length.toLocaleString() }}</span> chars</div>
+                                <div title="Approximate word count"><span class="font-semibold">{{ viewingFile.content.split(/\s+/).length.toLocaleString() }}</span> words</div>
+                                <div title="Estimated tokens (char/4)"><span class="font-semibold">~{{ Math.ceil(viewingFile.content.length / 4).toLocaleString() }}</span> tokens</div>
+                            </div>
+                        </div>
+                        
+                        <div v-if="viewingFile.metadata && Object.keys(viewingFile.metadata).length > 0" class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                            <details class="text-sm group">
+                                <summary class="cursor-pointer text-blue-600 dark:text-blue-400 font-medium select-none">Show Metadata</summary>
+                                <div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border dark:border-gray-700">
+                                    <JsonRenderer :json="viewingFile.metadata" />
+                                </div>
+                            </details>
+                        </div>
                     </div>
-                    <div class="p-4 border rounded-lg dark:border-gray-700 bg-white dark:bg-gray-900 overflow-auto max-h-[60vh] whitespace-pre-wrap font-mono text-sm">
-                        {{ viewingFile.content }}
+
+                    <!-- Content -->
+                    <div class="relative group">
+                        <div class="absolute top-2 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                             <button @click="copyContent" class="p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors" title="Copy Content">
+                                <IconCopy class="w-4 h-4" />
+                            </button>
+                        </div>
+                        <div class="p-4 border rounded-lg dark:border-gray-700 bg-white dark:bg-gray-900 overflow-auto max-h-[60vh] whitespace-pre-wrap font-mono text-sm leading-relaxed">
+                            {{ viewingFile.content }}
+                        </div>
                     </div>
                 </div>
             </template>

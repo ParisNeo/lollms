@@ -240,7 +240,7 @@ def build_llm_generation_router(router: APIRouter):
                     ds = get_safe_store_instance(owner_username, ds_id, db)
                     if not ds: return f"Error: Personality datastore '{ds_id}' not found or inaccessible."
                     try:
-                        results = ds.query(query, top_k=owner_db_user.rag_top_k)
+                        results = ds.query(query, top_k=owner_db_user.rag_top_k or 10)
                         return "\n".join([chunk.get("chunk_text", "") for chunk in results])
                     except Exception as e:
                         return f"Error querying personality datastore: {e}"

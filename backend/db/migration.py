@@ -88,7 +88,7 @@ def _bootstrap_global_settings(connection):
         "default_auto_title": { "value": False, "type": "boolean", "description": "Enable automatic discussion title generation for new users by default.", "category": "Defaults" },
         "default_safe_store_vectorizer": { "value": "default_st", "type": "string", "description": "Default vectorizer alias or name for newly created datastores.", "category": "RAG" },
         "restrict_vectorizers_to_aliases": { "value": False, "type": "boolean", "description": "If enabled, users can only choose from the admin-defined RAG Bindings when creating a new Data Store.", "category": "RAG" },
-        "default_chunk_size": { "value": 1024, "type": "integer", "description": "The default number of characters per text chunk for RAG indexing.", "category": "RAG" },
+        "default_chunk_size": { "value": 2048, "type": "integer", "description": "The default number of characters per text chunk for RAG indexing.", "category": "RAG" },
         "default_chunk_overlap": { "value": 256, "type": "integer", "description": "The default number of overlapping characters between adjacent text chunks.", "category": "RAG" },
         "allow_user_chunking_config": { "value": True, "type": "boolean", "description": "If enabled, users can specify their own chunk size and overlap when creating a Data Store.", "category": "RAG" },
         "force_model_mode": { "value": "disabled", "type": "string", "description": "Global model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global LLM Overrides" },
@@ -915,7 +915,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'chunk_overlap' not in datastore_columns_db: connection.execute(text("ALTER TABLE datastores ADD COLUMN chunk_overlap INTEGER"))
         connection.execute(text("UPDATE datastores SET vectorizer_name = 'st' WHERE vectorizer_name IS NULL"))
         connection.execute(text("UPDATE datastores SET vectorizer_config = '{}' WHERE vectorizer_config IS NULL"))
-        connection.execute(text(f"UPDATE datastores SET chunk_size = {SAFE_STORE_DEFAULTS.get('default_chunk_size', 1024)} WHERE chunk_size IS NULL"))
+        connection.execute(text(f"UPDATE datastores SET chunk_size = {SAFE_STORE_DEFAULTS.get('default_chunk_size', 2048)} WHERE chunk_size IS NULL"))
         connection.execute(text(f"UPDATE datastores SET chunk_overlap = {SAFE_STORE_DEFAULTS.get('default_chunk_overlap', 256)} WHERE chunk_overlap IS NULL"))
         connection.commit()
         

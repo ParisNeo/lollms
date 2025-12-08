@@ -9,6 +9,7 @@ import os
 from pydantic import BaseModel
 from sqlalchemy.orm import joinedload
 import json
+import time
 
 # Third-Party Imports
 from fastapi import (
@@ -47,6 +48,7 @@ from backend.models.datastore import (
     DataStoreBase,
     SharedWithUserPublic,
     SafeStoreDocumentInfo,
+    ScrapeRequest
 )
 
 from backend.session import get_datastore_db_path, build_lollms_client_from_params
@@ -67,6 +69,19 @@ except ImportError:
     SafeStoreLogLevel = None
     np = None
 
+# ScrapeMaster Import
+try:
+    from scrapemaster import ScrapeMaster
+except ImportError:
+    try:
+        import pipmaster as pm
+        print("ScrapeMaster not installed. Installing it for you.")
+        pm.install("ScrapeMaster")
+        from scrapemaster import ScrapeMaster
+    except Exception as ex:
+        print("Couldn't install ScrapeMaster. Please install it manually (`pip install ScrapeMaster`)")
+        ScrapeMaster = None
+
 from backend.session import (
     get_current_active_user,
     get_safe_store_instance,
@@ -74,6 +89,7 @@ from backend.session import (
     user_sessions
 )
 from backend.task_manager import task_manager, Task
+# FIX: Import RAGBinding as DBRAGBinding to match usage
 from backend.db.models.config import RAGBinding as DBRAGBinding
 from backend.routers.files import extract_text_from_file_bytes
 
@@ -192,28 +208,152 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
                         else:
                             task.log(f"Skipping metadata generation for empty file {file_path.name}", "WARNING")
 
-                    ss.add_document(
+                    # Use new add_document return format
+                    stats = ss.add_document(
                         str(file_path),
                         metadata=metadata,
                         vectorize_with_metadata=vectorize_with_metadata if metadata else False,
                     )
-                    processed_count += 1
-                    try:
-                        file_path.unlink()
-                        task.log(f"Successfully processed and removed temporary file: {file_path.name}")
-                    except Exception as del_err:
-                        task.log(f"Warning: Could not delete temporary file {file_path.name}: {del_err}", level="WARNING")
+                    
+                    num_added = stats.get('num_chunks_added', 0)
+                    num_ignored = stats.get('num_chunks_ignored', 0)
+
+                    if num_added > 0:
+                        processed_count += 1
+                        msg = f"Successfully added {num_added} chunks from {file_path.name}."
+                        if num_ignored > 0:
+                            msg += f" (Ignored {num_ignored} invalid/empty chunks)"
+                        task.log(msg)
+                        
+                        # DELETE FILE AFTER IMPORT
+                        try:
+                            file_path.unlink()
+                            task.log(f"File {file_path.name} deleted from server.")
+                        except Exception as del_err:
+                            task.log(f"Warning: Could not delete file {file_path.name}: {del_err}", level="WARNING")
+                    else:
+                        error_count += 1
+                        task.log(f"Skipped {file_path.name}: No valid text chunks extracted. File might be empty, encrypted, or unsupported format.", level="WARNING")
+                        # Remove empty/failed files as per requirement
+                        try:
+                            file_path.unlink()
+                            task.log(f"Deleted empty/invalid file {file_path.name}.")
+                        except: pass
+
                 except Exception as e:
                     error_count += 1
                     task.log(f"Error processing {file_path.name}: {e}", level="ERROR")
+                    # Remove files that caused errors
+                    try:
+                        if file_path.exists():
+                            file_path.unlink()
+                    except: pass
                 
                 progress = int(100 * (i + 1) / total_files)
                 task.set_progress(progress)
         
-        task.result = {"message": f"Processing complete. Added {processed_count} files. Encountered {error_count} errors."}
+        task.result = {"message": f"Processing complete. Added {processed_count} files. Encountered {error_count} issues."}
 
     except Exception as e:
         traceback.print_exc()
+        raise e
+    finally:
+        db.close()
+
+def _scrape_url_task(task: Task, username: str, datastore_id: str, url: str, depth: int):
+    if not ScrapeMaster:
+        raise ImportError("ScrapeMaster is not installed.")
+
+    db = next(get_db())
+    target_file_path = None 
+    
+    try:
+        datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+        if not datastore_record:
+            raise Exception(f"Datastore with ID {datastore_id} not found.")
+
+        ss = get_safe_store_instance(username, datastore_id, db, permission_level="read_write")
+        
+        task.log(f"Initializing scraper for URL: {url} (Depth: {depth})")
+        
+        # Robust ScrapeMaster initialization with Fallback
+        results = None
+        try:
+            # Try default strategies (Selenium first)
+            scraper = ScrapeMaster(url, strategy=["selenium", "beautifulsoup"], headless=True)
+            task.log("Starting scrape with Selenium strategy...")
+            results = scraper.scrape_all(max_depth=depth, convert_to_markdown=True)
+        except Exception as e:
+            task.log(f"Selenium scraping failed: {e}. Falling back to BeautifulSoup strategy.", level="WARNING")
+            try:
+                # Fallback to pure BeautifulSoup
+                scraper = ScrapeMaster(url, strategy=["beautifulsoup"], headless=True)
+                task.log("Restarting scrape with BeautifulSoup strategy...")
+                results = scraper.scrape_all(max_depth=depth, convert_to_markdown=True)
+            except Exception as e2:
+                task.log(f"BeautifulSoup fallback also failed: {e2}", level="ERROR")
+                raise e2
+
+        if not results:
+            error_msg = scraper.get_last_error() or "Unknown scraping error."
+            task.log(f"Scraping returned no results: {error_msg}", level="ERROR")
+            raise Exception(error_msg)
+            
+        markdown_content = results.get('markdown')
+        if not markdown_content:
+             # Fallback to texts if markdown conversion failed
+             texts = results.get('texts', [])
+             markdown_content = "\n\n".join(texts)
+        
+        if not markdown_content:
+             task.log("No content found at the given URL.", level="WARNING")
+             return
+
+        # Create the file in the PERSISTENT DataStore folder structure 
+        # (This ensures the path key in DB matches expected safestore structure)
+        safe_url_name = "".join(c for c in url if c.isalnum() or c in ('-', '_')).rstrip()[:50]
+        timestamp = int(time.time())
+        filename = f"scraped_{safe_url_name}_{timestamp}.md"
+        
+        # Resolve persistent path
+        datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
+        datastore_docs_path.mkdir(parents=True, exist_ok=True)
+        
+        target_file_path = datastore_docs_path / filename
+        
+        with open(target_file_path, "w", encoding="utf-8") as f:
+            f.write(f"# Scraped from {url}\n\n")
+            f.write(markdown_content)
+            
+        task.log(f"Content saved to {filename}. Indexing to SafeStore...")
+        
+        with ss:
+            stats = ss.add_document(str(target_file_path))
+            num_added = stats.get('num_chunks_added', 0)
+            if num_added == 0:
+                task.log("Warning: No content chunks were indexed from the scraped page.", level="WARNING")
+            else:
+                task.log(f"Successfully indexed {num_added} chunks from scraped content.")
+            
+        visited_urls = results.get('visited_urls', [])
+        task.log(f"Successfully scraped {len(visited_urls)} page(s).")
+        task.result = {"message": f"Scraping complete. Indexed content from {len(visited_urls)} page(s)."}
+
+        # DELETE FILE AFTER IMPORT
+        try:
+            if target_file_path and target_file_path.exists():
+                target_file_path.unlink()
+                task.log(f"Scraped file {filename} deleted from server.")
+        except Exception as e:
+            task.log(f"Warning: Could not delete scraped file: {e}", level="WARNING")
+
+    except Exception as e:
+        trace_exception(e)
+        task.log(f"Error during scraping task: {e}", level="ERROR")
+        # Cleanup on error
+        if target_file_path and target_file_path.exists():
+            try: target_file_path.unlink()
+            except: pass
         raise e
     finally:
         db.close()
@@ -394,6 +534,29 @@ async def upload_rag_documents_to_datastore(
         target=_upload_rag_files_task,
         args=(current_user.username, datastore_id, saved_file_paths, metadata_option, manual_metadata_json, vectorize_with_metadata),
         description=f"Adding {len(files)} files to the '{datastore_record.name}' DataStore.",
+        owner_username=current_user.username
+    )
+    return db_task
+
+@store_files_router.post("/scrape-url", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+async def scrape_url_to_datastore(
+    datastore_id: str,
+    request: ScrapeRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> TaskInfo:
+    if not safe_store: raise HTTPException(status_code=501, detail="SafeStore not available.")
+    if not ScrapeMaster: raise HTTPException(status_code=501, detail="ScrapeMaster not installed.")
+
+    get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+    datastore_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
+    if not datastore_record: raise HTTPException(status_code=404, detail="Datastore not found.")
+
+    db_task = task_manager.submit_task(
+        name=f"Scrape URL to DataStore: {datastore_record.name}",
+        target=_scrape_url_task,
+        args=(current_user.username, datastore_id, request.url, request.depth),
+        description=f"Scraping {request.url} (Depth: {request.depth}) into '{datastore_record.name}'.",
         owner_username=current_user.username
     )
     return db_task
@@ -1024,8 +1187,8 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreEdit, current_
              id=ds_db_obj.id, name=ds_db_obj.name, description=ds_db_obj.description,
              owner_username=ds_db_obj.owner.username, permission_level=permission_level,
              created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at,
-             vectorizer_name=ds_db_obj.vectorizer_name,
-             vectorizer_config=ds_db_obj.vectorizer_config or {},
+             vectorizer_name=ds_db.vectorizer_name,
+             vectorizer_config=ds_db.vectorizer_config or {},
              chunk_size=ds_db.chunk_size,
              chunk_overlap=ds_db.chunk_overlap
         )

@@ -1,4 +1,4 @@
-# [CREATE] backend/models/datastore.py
+# [UPDATE] backend/models/datastore.py
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -42,3 +42,7 @@ class SharedWithUserPublic(BaseModel):
 
 class SafeStoreDocumentInfo(BaseModel):
     filename: str
+
+class ScrapeRequest(BaseModel):
+    url: str
+    depth: int = 0

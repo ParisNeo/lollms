@@ -5,21 +5,22 @@ from backend.db.base import PostVisibility
 from .user import AuthorPublic
 
 class PostBase(BaseModel):
-    content: str = Field(..., max_length=10000)
+    content: str
     visibility: PostVisibility = PostVisibility.public
 
 class PostCreate(PostBase):
+    content: str = Field(..., max_length=50000)
     media: Optional[List[Dict[str, Any]]] = None
 
 class PostUpdate(BaseModel):
-    content: Optional[str] = Field(None, min_length=1, max_length=10000)
+    content: Optional[str] = Field(None, min_length=1, max_length=50000)
     visibility: Optional[PostVisibility] = None
 
 class CommentBase(BaseModel):
-    content: str = Field(..., min_length=1, max_length=2000)
+    content: str
 
 class CommentCreate(CommentBase):
-    pass
+    content: str = Field(..., min_length=1, max_length=10000)
 
 class CommentPublic(CommentBase):
     id: int
