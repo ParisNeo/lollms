@@ -12,7 +12,7 @@ import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import DataStoreGraphManager from '../components/datastores/DataStoreGraphManager.vue';
 import JsonRenderer from '../components/ui/JsonRenderer.vue';
-import GenericModal from '../components/modals/GenericModal.vue'; // Make sure this import is correct
+import GenericModal from '../components/modals/GenericModal.vue';
 
 // Icons
 import IconDatabase from '../assets/icons/IconDatabase.vue';
@@ -66,6 +66,7 @@ const searchMatches = ref([]);
 const currentMatchIndex = ref(-1);
 
 const viewingFile = ref(null); // Ref to hold file data for viewer
+const loadingFileContent = ref(null); // Track which file is being loaded
 
 const metadataOption = ref('none');
 const manualMetadata = ref({});
@@ -91,12 +92,9 @@ const selectedVectorizerDetails = computed(() => {
     if (parts.length < 2) return null;
     
     // The key format is `${group.alias}/${model.value}`
-    // Since model.value can contain slashes (e.g. 'ollama/llama3'), we need to be careful.
-    // The first part is always the alias.
     const bindingAlias = parts[0];
     const modelValue = parts.slice(1).join('/');
     
-    // Find the binding in availableVectorizers
     const foundBinding = vectorizerOptions.value.find(group => group.alias === bindingAlias);
     
     if (foundBinding) {
@@ -162,11 +160,7 @@ watch(selectedStoreId, (newId) => {
 watch(selectedVectorizerDetails, (details) => {
     newStoreForm.value.config = {};
     if (!details) return;
-    
-    // Copy base config from binding
     newStoreForm.value.config = { ...(details.vectorizer_config || {}) };
-    
-    // Override model name if selected
     if (details.selectedModelName) {
         newStoreForm.value.config['model_name'] = details.selectedModelName;
     }
@@ -494,7 +488,9 @@ function scrollToMatch(match) {
 }
 
 async function viewFileContent(file) {
-    uiStore.addNotification('Fetching document content...', 'info');
+    if (loadingFileContent.value) return; // Prevent multiple clicks
+    loadingFileContent.value = file.filename;
+    
     try {
         const content = await dataStore.fetchFileContent(currentSelectedStore.value.id, file.filename);
         viewingFile.value = {
@@ -505,6 +501,8 @@ async function viewFileContent(file) {
         uiStore.openModal('fileContent');
     } catch (e) {
         // notification handled in store
+    } finally {
+        loadingFileContent.value = null;
     }
 }
 </script>
@@ -542,308 +540,326 @@ async function viewFileContent(file) {
         </ul>
     </template>
     <template #main>
-        <div v-if="isAddFormVisible" class="p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm h-full overflow-y-auto">
-            <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Create New Data Store</h2>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">A Data Store turns your documents into a queryable knowledge base.</p>
-            <form @submit.prevent="handleAddStore" class="mt-6 space-y-6">
-                <div>
-                    <label for="new-ds-name" class="block text-sm font-medium">Name</label>
-                    <input id="new-ds-name" v-model="newStoreForm.name" type="text" class="input-field mt-1" required>
-                </div>
-                <div>
-                    <label for="new-ds-desc" class="block text-sm font-medium">Description</label>
-                    <textarea id="new-ds-desc" v-model="newStoreForm.description" rows="2" class="input-field mt-1"></textarea>
-                </div>
-
-                <div v-if="user && user.allow_user_chunking_config" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="relative h-full w-full">
+            <div v-if="isAddFormVisible" class="p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm h-full overflow-y-auto">
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Create New Data Store</h2>
+                <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">A Data Store turns your documents into a queryable knowledge base.</p>
+                <form @submit.prevent="handleAddStore" class="mt-6 space-y-6">
                     <div>
-                        <label for="new-ds-chunk-size" class="block text-sm font-medium">Chunk Size</label>
-                        <input id="new-ds-chunk-size" v-model.number="newStoreForm.chunk_size" type="number" min="1" class="input-field mt-1">
-                        <p class="text-xs text-gray-500 mt-1">Number of characters per data chunk.</p>
+                        <label for="new-ds-name" class="block text-sm font-medium">Name</label>
+                        <input id="new-ds-name" v-model="newStoreForm.name" type="text" class="input-field mt-1" required>
                     </div>
                     <div>
-                        <label for="new-ds-chunk-overlap" class="block text-sm font-medium">Chunk Overlap</label>
-                        <input id="new-ds-chunk-overlap" v-model.number="newStoreForm.chunk_overlap" type="number" min="0" class="input-field mt-1">
-                         <p class="text-xs text-gray-500 mt-1">Number of overlapping characters between chunks.</p>
+                        <label for="new-ds-desc" class="block text-sm font-medium">Description</label>
+                        <textarea id="new-ds-desc" v-model="newStoreForm.description" rows="2" class="input-field mt-1"></textarea>
                     </div>
-                </div>
 
-                <div>
-                    <label for="new-ds-vectorizer" class="block text-sm font-medium">Vectorizer</label>
-                    <select id="new-ds-vectorizer" v-model="newStoreForm.selectedVectorizerKey" class="input-field mt-1">
-                        <option :value="null" disabled>-- Select a Vectorizer Model --</option>
-                        <optgroup 
-                            v-for="group in vectorizerOptions" 
-                            :key="group.id" 
-                            :label="group.alias || group.vectorizer_name"
-                        >
-                            <option 
-                                v-for="model in group.models" 
-                                :key="`${group.id}-${model.value}`" 
-                                :value="`${group.alias}/${model.value}`"
+                    <div v-if="user && user.allow_user_chunking_config" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="new-ds-chunk-size" class="block text-sm font-medium">Chunk Size</label>
+                            <input id="new-ds-chunk-size" v-model.number="newStoreForm.chunk_size" type="number" min="1" class="input-field mt-1">
+                            <p class="text-xs text-gray-500 mt-1">Number of characters per data chunk.</p>
+                        </div>
+                        <div>
+                            <label for="new-ds-chunk-overlap" class="block text-sm font-medium">Chunk Overlap</label>
+                            <input id="new-ds-chunk-overlap" v-model.number="newStoreForm.chunk_overlap" type="number" min="0" class="input-field mt-1">
+                            <p class="text-xs text-gray-500 mt-1">Number of overlapping characters between chunks.</p>
+                        </div>
+                    </div>
+
+                    <div>
+                        <label for="new-ds-vectorizer" class="block text-sm font-medium">Vectorizer</label>
+                        <select id="new-ds-vectorizer" v-model="newStoreForm.selectedVectorizerKey" class="input-field mt-1">
+                            <option :value="null" disabled>-- Select a Vectorizer Model --</option>
+                            <optgroup 
+                                v-for="group in vectorizerOptions" 
+                                :key="group.id" 
+                                :label="group.alias || group.vectorizer_name"
                             >
-                                {{ model.name }}
-                            </option>
-                        </optgroup>
-                    </select>
-                    <p v-if="vectorizerOptions.length === 0" class="text-xs text-red-500 mt-1">
-                        No active RAG bindings found. Please configure them in Settings.
-                    </p>
+                                <option 
+                                    v-for="model in group.models" 
+                                    :key="`${group.id}-${model.value}`" 
+                                    :value="`${group.alias}/${model.value}`"
+                                >
+                                    {{ model.name }}
+                                </option>
+                            </optgroup>
+                        </select>
+                        <p v-if="vectorizerOptions.length === 0" class="text-xs text-red-500 mt-1">
+                            No active RAG bindings found. Please configure them in Settings.
+                        </p>
+                    </div>
+                    <div v-if="selectedVectorizerDetails" class="p-4 border dark:border-gray-700 rounded-lg space-y-4">
+                        <h4 class="font-medium text-lg">{{ selectedVectorizerDetails.title || selectedVectorizerDetails.name }}</h4>
+                        <p class="text-sm text-gray-500">{{ selectedVectorizerDetails.description }}</p>
+                        <div v-if="selectedVectorizerDetails.input_parameters?.length > 0" class="space-y-4">
+                            <div v-for="param in selectedVectorizerDetails.input_parameters" :key="param.name">
+                                <!-- Model parameter is handled by the main select, only show others -->
+                                <div v-if="param.name !== 'model'">
+                                    <label :for="`param-${param.name}`" class="block text-sm font-medium">{{ param.name }} <span v-if="param.mandatory" class="text-red-500">*</span></label>
+                                    <div class="relative mt-1">
+                                        <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'" v-model="newStoreForm.config[param.name]" class="input-field pr-10" :placeholder="param.description">
+                                        <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" :title="isKeyVisible[param.name] ? 'Hide' : 'Show'">
+                                            <IconEyeOff v-if="isKeyVisible[param.name]" class="w-5 h-5" /><IconEye v-else class="w-5 h-5" />
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-3">
+                        <button type="button" @click="isAddFormVisible=false; selectStore(myDataStores[0]?.id)" class="btn btn-secondary">Cancel</button>
+                        <button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add_store'">
+                            <IconAnimateSpin v-if="isLoadingAction === 'add_store'" class="w-5 h-5 mr-2 animate-spin" />
+                            {{ isLoadingAction === 'add_store' ? 'Creating...' : 'Create Data Store' }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+            <div v-else-if="!selectedStoreId" class="h-full flex items-center justify-center bg-white dark:bg-gray-800 rounded-lg shadow-sm">
+                <div class="text-center">
+                    <IconDatabase class="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 class="mt-2 text-xl font-semibold text-gray-900 dark:text-white">Select a Data Store</h3>
+                    <p class="mt-1 text-sm text-gray-500">Choose a store from the sidebar or create a new one to begin.</p>
                 </div>
-                <div v-if="selectedVectorizerDetails" class="p-4 border dark:border-gray-700 rounded-lg space-y-4">
-                    <h4 class="font-medium text-lg">{{ selectedVectorizerDetails.title || selectedVectorizerDetails.name }}</h4>
-                    <p class="text-sm text-gray-500">{{ selectedVectorizerDetails.description }}</p>
-                    <div v-if="selectedVectorizerDetails.input_parameters?.length > 0" class="space-y-4">
-                        <div v-for="param in selectedVectorizerDetails.input_parameters" :key="param.name">
-                            <!-- Model parameter is handled by the main select, only show others -->
-                            <div v-if="param.name !== 'model'">
-                                <label :for="`param-${param.name}`" class="block text-sm font-medium">{{ param.name }} <span v-if="param.mandatory" class="text-red-500">*</span></label>
-                                <div class="relative mt-1">
-                                    <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'" v-model="newStoreForm.config[param.name]" class="input-field pr-10" :placeholder="param.description">
-                                    <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" :title="isKeyVisible[param.name] ? 'Hide' : 'Show'">
-                                        <IconEyeOff v-if="isKeyVisible[param.name]" class="w-5 h-5" /><IconEye v-else class="w-5 h-5" />
+            </div>
+            <div v-else-if="!currentSelectedStore" class="text-center py-20 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
+                <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200">Data Store Not Found</h3>
+                <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">The selected data store could not be loaded.</p>
+            </div>
+            <div v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-md h-full overflow-hidden flex flex-col">
+                <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start flex-wrap gap-4">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ currentSelectedStore.name }}</h2>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ currentSelectedStore.description || 'No description provided.' }}</p>
+                        <div class="flex items-center text-xs text-gray-500 dark:text-gray-400 mt-2">
+                            <span class="mr-1">Owner:</span><UserAvatar :username="currentSelectedStore.owner_username" size-class="h-4 w-4" class="mr-1" /><span>{{ currentSelectedStore.owner_username }}</span>
+                        </div>
+                        <div class="mt-2 text-xs font-mono p-2 bg-gray-100 dark:bg-gray-700/50 rounded-md">
+                            <p><span class="font-semibold">Vectorizer:</span> {{ currentSelectedStore.vectorizer_name }}</p>
+                            <p><span class="font-semibold">Chunking:</span> {{ currentSelectedStore.chunk_size }} / {{ currentSelectedStore.chunk_overlap }}</p>
+                            <details v-if="Object.keys(currentSelectedStore.vectorizer_config).length > 0" class="mt-1"><summary class="cursor-pointer text-gray-500">View Config</summary><JsonRenderer :json="currentSelectedStore.vectorizer_config" class="mt-1 text-xs" /></details>
+                        </div>
+                    </div>
+                    <div class="flex items-center space-x-3 flex-shrink-0">
+                        <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleShareStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconShare class="w-4 h-4 mr-2" /> Share</button>
+                        <button v-if="canReadWrite(currentSelectedStore)" @click="handleEditStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconPencil class="w-4 h-4 mr-2" /> Edit</button>
+                        <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleDeleteStore(currentSelectedStore)" class="btn btn-danger btn-sm">
+                            <IconAnimateSpin v-if="isLoadingAction === `delete_store_${currentSelectedStore.id}`" class="w-4 h-4 mr-2 animate-spin" />
+                            <IconTrash v-else class="w-4 h-4 mr-2" />
+                            Delete
+                        </button>
+                    </div>
+                </div>
+                <div class="border-b border-gray-200 dark:border-gray-700 px-6">
+                    <nav class="-mb-px flex space-x-6" aria-label="Tabs">
+                        <button @click="activeTab = 'documents'" :class="['tab-button', activeTab === 'documents' ? 'active' : 'inactive']">Documents</button>
+                        <button @click="activeTab = 'query'" :class="['tab-button', activeTab === 'query' ? 'active' : 'inactive']">Query</button>
+                        <button @click="activeTab = 'graph'" :class="['tab-button', activeTab === 'graph' ? 'active' : 'inactive']">Graph</button>
+                    </nav>
+                </div>
+                <div v-show="activeTab === 'documents'" class="p-6 flex-grow overflow-y-auto space-y-8">
+                    <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
+                        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="metadata-option" class="block text-sm font-medium">Metadata Handling</label>
+                                <select id="metadata-option" v-model="metadataOption" class="input-field mt-1">
+                                    <option value="none">None</option>
+                                    <option value="manual">Manual Entry</option>
+                                    <option value="auto-generate">Auto-generate for each file</option>
+                                    <option value="rewrite-chunk">Rewrite full content with metadata for each chunk</option>
+                                </select>
+                                <p class="text-xs text-gray-500 mt-1">Choose how to handle metadata for uploaded files.</p>
+                            </div>
+                            <div class="relative flex items-start pt-7">
+                                <div class="flex h-6 items-center">
+                                    <input id="vectorize-with-metadata" v-model="vectorizeWithMetadata" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-600">
+                                </div>
+                                <div class="ml-3 text-sm leading-6">
+                                    <label for="vectorize-with-metadata" class="font-medium text-gray-900 dark:text-gray-100">Vectorize with Metadata</label>
+                                    <p class="text-gray-500 dark:text-gray-400">Include document metadata in the vectorization process for better context.</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop" class="border-2 border-dashed rounded-lg p-6 text-center transition-colors" :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }">
+                            <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv">
+                            <input type="file" ref="folderInputRef" @change="handleFileChange" class="hidden" webkitdirectory directory multiple>
+                            <p class="text-gray-600 dark:text-gray-300">Drag & drop files or folders here</p>
+                            <div class="mt-4 flex justify-center gap-4">
+                                <button type="button" @click="fileInputRef.click()" class="btn btn-secondary">Select File(s)</button>
+                                <button type="button" @click="folderInputRef.click()" class="btn btn-secondary">Select Folder</button>
+                            </div>
+                        </div>
+                        
+                        <div v-if="selectedFilesToUpload.length > 0">
+                            <div v-if="metadataOption === 'manual'" class="mt-4">
+                                <label class="block text-sm font-medium">Manual Metadata Mode</label>
+                                <div class="flex items-center gap-4 mt-1">
+                                    <label class="flex items-center"><input type="radio" v-model="manualMetadataMode" value="per-file" class="radio-input"><span class="ml-2">Per File</span></label>
+                                    <label class="flex items-center"><input type="radio" v-model="manualMetadataMode" value="all" class="radio-input"><span class="ml-2">For All Files</span></label>
+                                </div>
+                            </div>
+
+                            <div v-if="metadataOption === 'manual' && manualMetadataMode === 'all'" class="mt-4">
+                                <h4 class="text-sm font-medium mb-2">Selected Files ({{ selectedFilesToUpload.length }})</h4>
+                                <ul class="list-disc list-inside text-sm space-y-1 max-h-40 overflow-y-auto mb-4 p-2 bg-gray-100 dark:bg-gray-800 rounded-md">
+                                    <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center">
+                                        <span class="truncate">{{ file.name }}</span>
+                                        <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button>
+                                    </li>
+                                </ul>
+                                <label class="block text-sm font-medium">Metadata for all files (Key: Value format)</label>
+                                <textarea v-model="allFilesMetadata" rows="4" class="input-field mt-1 font-mono text-xs" placeholder="title: My Document&#10;subject: AI Research&#10;authors: John Doe, Jane Smith"></textarea>
+                            </div>
+                            
+                            <div v-else-if="metadataOption === 'manual' && manualMetadataMode === 'per-file'" class="space-y-4 mt-4 max-h-96 overflow-y-auto">
+                                <h4 class="text-sm font-medium">Enter Metadata for Each File:</h4>
+                                <div v-for="(file, index) in selectedFilesToUpload" :key="index" class="p-3 border rounded-lg dark:border-gray-600 space-y-3">
+                                    <div class="flex justify-between items-start">
+                                        <p class="font-semibold text-sm truncate">{{ file.name }}</p>
+                                        <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700" title="Remove"><IconXMark class="w-5 h-5" /></button>
+                                    </div>
+                                    <div><label class="text-xs font-medium">Metadata (Key: Value format)</label><textarea v-model="manualMetadata[file.name]" rows="4" class="input-field-sm w-full mt-1 font-mono text-xs" placeholder="title: ..."></textarea></div>
+                                </div>
+                            </div>
+
+                            <div v-else-if="metadataOption !== 'manual'" class="mt-4">
+                                <h4 class="text-sm font-medium mb-2">Selected for Upload ({{ selectedFilesToUpload.length }})</h4>
+                                <ul class="space-y-1 max-h-40 overflow-y-auto">
+                                    <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center bg-gray-100 dark:bg-gray-800 p-2 rounded text-sm"><span class="truncate">{{ file.name }} ({{ (file.size / 1024 / 1024).toFixed(2) }} MB)</span><button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button></li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div v-else-if="metadataOption === 'manual'" class="mt-4 text-center text-sm text-gray-500 italic p-4 border-2 border-dashed rounded-lg dark:border-gray-600">
+                            Select files to enter their metadata manually.
+                        </div>
+                        <div class="flex justify-end items-center mt-4">
+                            <button @click="handleUploadFiles" class="btn btn-primary" :disabled="isAnyTaskRunningForSelectedStore || selectedFilesToUpload.length === 0">
+                                <IconArrowUpTray class="w-5 h-5 mr-2" /> Add {{ selectedFilesToUpload.length }} File(s)
+                            </button>
+                        </div>
+                    </div>
+                    <div v-if="currentUploadTask" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700"> ... </div>
+                    <div>
+                        <h3 class="text-xl font-semibold mb-4">Indexed Documents ({{ filesInSelectedStore.length }})</h3>
+                        <div v-if="!filesLoading && filesInSelectedStore.length > 0 && canReadWrite(currentSelectedStore)" class="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md mb-2">
+                            <div class="flex items-center">
+                                <input type="checkbox" @change="toggleSelectAll" :checked="allFilesSelected" :indeterminate="someFilesSelected" id="select-all-files-checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
+                                <label for="select-all-files-checkbox" class="ml-2 text-sm select-none cursor-pointer">Select All</label>
+                            </div>
+                            <button @click="handleDeleteSelectedFiles" class="btn btn-danger btn-sm" :disabled="selectedFilesToDelete.size === 0 || isLoadingAction === 'delete_selected_files'">
+                                <IconAnimateSpin v-if="isLoadingAction === 'delete_selected_files'" class="w-4 h-4 mr-2 animate-spin" />
+                                <IconTrash v-else class="w-4 h-4 mr-2" />
+                                Delete Selected ({{ selectedFilesToDelete.size }})
+                            </button>
+                        </div>
+                        <div v-if="filesLoading" class="text-center py-10"><p>Loading documents...</p></div>
+                        <div v-else-if="filesInSelectedStore.length === 0" class="text-center py-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No documents indexed.</p></div>
+                        <ul v-else class="divide-y divide-gray-200 dark:divide-gray-700">
+                            <li v-for="file in filesInSelectedStore" :key="file.filename" class="py-3 flex items-center">
+                                <input 
+                                    v-if="canReadWrite(currentSelectedStore)"
+                                    type="checkbox" 
+                                    @change="toggleFileSelection(file.filename)" 
+                                    :checked="selectedFilesToDelete.has(file.filename)" 
+                                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-4 flex-shrink-0"
+                                >
+                                <div class="flex-grow min-w-0">
+                                    <div class="flex items-center gap-2">
+                                        <span 
+                                            class="text-sm font-medium truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors" 
+                                            @click="viewFileContent(file)"
+                                            :class="{'opacity-50 pointer-events-none': loadingFileContent && loadingFileContent !== file.filename}"
+                                        >
+                                            {{ file.filename }}
+                                        </span>
+                                        <IconAnimateSpin v-if="loadingFileContent === file.filename" class="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" />
+                                    </div>
+                                    <details v-if="file.metadata && Object.keys(file.metadata).length > 0" class="mt-2 text-xs">
+                                        <summary class="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">View Metadata</summary>
+                                        <div class="mt-1 p-2 bg-gray-100 dark:bg-gray-700/50 rounded">
+                                            <JsonRenderer :json="file.metadata" />
+                                        </div>
+                                    </details>
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+                <div v-if="activeTab === 'query'" class="p-6 flex-grow overflow-y-auto flex flex-col">
+                    <div class="flex-shrink-0 space-y-4">
+                        <h3 class="text-xl font-semibold">Query Data Store</h3>
+                        <form @submit.prevent="handleQueryStore" class="space-y-4">
+                            <div>
+                                <label for="query-text" class="block text-sm font-medium">Query Text</label>
+                                <textarea id="query-text" v-model="queryText" rows="3" class="input-field mt-1" placeholder="Enter your question..."></textarea>
+                            </div>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div>
+                                    <label for="query-topk" class="block text-sm font-medium">Top K</label>
+                                    <input id="query-topk" v-model.number="queryTopK" type="number" min="1" class="input-field mt-1">
+                                </div>
+                                <div>
+                                    <label for="query-minsim" class="block text-sm font-medium">Min Similarity %</label>
+                                    <input id="query-minsim" v-model.number="queryMinSim" type="number" min="0" max="100" step="0.1" class="input-field mt-1">
+                                </div>
+                                <div class="self-end">
+                                    <button type="submit" class="btn btn-primary w-full" :disabled="isQuerying || !queryText.trim()">
+                                        <IconAnimateSpin v-if="isQuerying" class="w-5 h-5 mr-2 animate-spin" />
+                                        {{ isQuerying ? 'Querying...' : 'Query' }}
                                     </button>
                                 </div>
                             </div>
-                        </div>
+                        </form>
                     </div>
-                </div>
-                <div class="flex justify-end gap-3">
-                    <button type="button" @click="isAddFormVisible=false; selectStore(myDataStores[0]?.id)" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary" :disabled="isLoadingAction === 'add_store'">
-                        <IconAnimateSpin v-if="isLoadingAction === 'add_store'" class="w-5 h-5 mr-2 animate-spin" />
-                        {{ isLoadingAction === 'add_store' ? 'Creating...' : 'Create Data Store' }}
-                    </button>
-                </div>
-            </form>
-        </div>
-        <div v-else-if="!selectedStoreId" class="h-full flex items-center justify-center bg-white dark:bg-gray-800 rounded-lg shadow-sm">
-            <div class="text-center">
-                <IconDatabase class="mx-auto h-12 w-12 text-gray-400" />
-                <h3 class="mt-2 text-xl font-semibold text-gray-900 dark:text-white">Select a Data Store</h3>
-                <p class="mt-1 text-sm text-gray-500">Choose a store from the sidebar or create a new one to begin.</p>
-            </div>
-        </div>
-        <div v-else-if="!currentSelectedStore" class="text-center py-20 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
-            <h3 class="text-xl font-semibold text-gray-700 dark:text-gray-200">Data Store Not Found</h3>
-            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">The selected data store could not be loaded.</p>
-        </div>
-        <div v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-md h-full overflow-hidden flex flex-col">
-            <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start flex-wrap gap-4">
-                <div>
-                    <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ currentSelectedStore.name }}</h2>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ currentSelectedStore.description || 'No description provided.' }}</p>
-                    <div class="flex items-center text-xs text-gray-500 dark:text-gray-400 mt-2">
-                        <span class="mr-1">Owner:</span><UserAvatar :username="currentSelectedStore.owner_username" size-class="h-4 w-4" class="mr-1" /><span>{{ currentSelectedStore.owner_username }}</span>
-                    </div>
-                    <div class="mt-2 text-xs font-mono p-2 bg-gray-100 dark:bg-gray-700/50 rounded-md">
-                        <p><span class="font-semibold">Vectorizer:</span> {{ currentSelectedStore.vectorizer_name }}</p>
-                        <p><span class="font-semibold">Chunking:</span> {{ currentSelectedStore.chunk_size }} / {{ currentSelectedStore.chunk_overlap }}</p>
-                        <details v-if="Object.keys(currentSelectedStore.vectorizer_config).length > 0" class="mt-1"><summary class="cursor-pointer text-gray-500">View Config</summary><JsonRenderer :json="currentSelectedStore.vectorizer_config" class="mt-1 text-xs" /></details>
-                    </div>
-                </div>
-                <div class="flex items-center space-x-3 flex-shrink-0">
-                    <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleShareStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconShare class="w-4 h-4 mr-2" /> Share</button>
-                    <button v-if="canReadWrite(currentSelectedStore)" @click="handleEditStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconPencil class="w-4 h-4 mr-2" /> Edit</button>
-                    <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleDeleteStore(currentSelectedStore)" class="btn btn-danger btn-sm">
-                        <IconAnimateSpin v-if="isLoadingAction === `delete_store_${currentSelectedStore.id}`" class="w-4 h-4 mr-2 animate-spin" />
-                        <IconTrash v-else class="w-4 h-4 mr-2" />
-                        Delete
-                    </button>
-                </div>
-            </div>
-            <div class="border-b border-gray-200 dark:border-gray-700 px-6">
-                <nav class="-mb-px flex space-x-6" aria-label="Tabs">
-                    <button @click="activeTab = 'documents'" :class="['tab-button', activeTab === 'documents' ? 'active' : 'inactive']">Documents</button>
-                    <button @click="activeTab = 'query'" :class="['tab-button', activeTab === 'query' ? 'active' : 'inactive']">Query</button>
-                    <button @click="activeTab = 'graph'" :class="['tab-button', activeTab === 'graph' ? 'active' : 'inactive']">Graph</button>
-                </nav>
-            </div>
-            <div v-show="activeTab === 'documents'" class="p-6 flex-grow overflow-y-auto space-y-8">
-                <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
-                    <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                            <label for="metadata-option" class="block text-sm font-medium">Metadata Handling</label>
-                            <select id="metadata-option" v-model="metadataOption" class="input-field mt-1">
-                                <option value="none">None</option>
-                                <option value="manual">Manual Entry</option>
-                                <option value="auto-generate">Auto-generate for each file</option>
-                                <option value="rewrite-chunk">Rewrite full content with metadata for each chunk</option>
-                            </select>
-                            <p class="text-xs text-gray-500 mt-1">Choose how to handle metadata for uploaded files.</p>
-                        </div>
-                        <div class="relative flex items-start pt-7">
-                            <div class="flex h-6 items-center">
-                                <input id="vectorize-with-metadata" v-model="vectorizeWithMetadata" type="checkbox" class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-600">
-                            </div>
-                            <div class="ml-3 text-sm leading-6">
-                                <label for="vectorize-with-metadata" class="font-medium text-gray-900 dark:text-gray-100">Vectorize with Metadata</label>
-                                <p class="text-gray-500 dark:text-gray-400">Include document metadata in the vectorization process for better context.</p>
+                    <div class="flex-grow min-h-0 mt-6 border-t dark:border-gray-700 pt-6">
+                        <div class="flex justify-between items-center mb-4">
+                            <h4 class="text-lg font-semibold">Results ({{ queryResults.length }})</h4>
+                            <div v-if="queryResults.length > 0" class="flex items-center gap-2">
+                                <input type="text" v-model="searchInChunks" @keyup.enter="handleInChunkSearch" placeholder="Search in results..." class="input-field !py-1.5 !text-sm">
+                                <button @click="handleInChunkSearch" class="btn btn-secondary btn-sm p-2"><IconMagnifyingGlass class="w-4 h-4" /></button>
+                                <template v-if="searchMatches.length > 0">
+                                    <button @click="navigateMatch(-1)" class="btn btn-secondary btn-sm p-2" title="Previous match">‹</button>
+                                    <span class="text-sm text-gray-500 font-mono">{{ currentMatchIndex + 1 }} / {{ searchMatches.length }}</span>
+                                    <button @click="navigateMatch(1)" class="btn btn-secondary btn-sm p-2" title="Next match">›</button>
+                                </template>
                             </div>
                         </div>
-                    </div>
-                    <div @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="handleFileDrop" class="border-2 border-dashed rounded-lg p-6 text-center transition-colors" :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }">
-                        <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv">
-                        <input type="file" ref="folderInputRef" @change="handleFileChange" class="hidden" webkitdirectory directory multiple>
-                        <p class="text-gray-600 dark:text-gray-300">Drag & drop files or folders here</p>
-                        <div class="mt-4 flex justify-center gap-4">
-                            <button type="button" @click="fileInputRef.click()" class="btn btn-secondary">Select File(s)</button>
-                            <button type="button" @click="folderInputRef.click()" class="btn btn-secondary">Select Folder</button>
+                        <div v-if="isQuerying" class="text-center p-6 text-gray-500">
+                            <IconAnimateSpin class="w-8 h-8 mx-auto animate-spin" />
+                            <p class="mt-2">Fetching results...</p>
                         </div>
-                    </div>
-                    
-                    <div v-if="selectedFilesToUpload.length > 0">
-                        <div v-if="metadataOption === 'manual'" class="mt-4">
-                            <label class="block text-sm font-medium">Manual Metadata Mode</label>
-                            <div class="flex items-center gap-4 mt-1">
-                                <label class="flex items-center"><input type="radio" v-model="manualMetadataMode" value="per-file" class="radio-input"><span class="ml-2">Per File</span></label>
-                                <label class="flex items-center"><input type="radio" v-model="manualMetadataMode" value="all" class="radio-input"><span class="ml-2">For All Files</span></label>
-                            </div>
+                        <div v-else-if="queryError" class="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-md">
+                            {{ queryError }}
                         </div>
-
-                        <div v-if="metadataOption === 'manual' && manualMetadataMode === 'all'" class="mt-4">
-                            <h4 class="text-sm font-medium mb-2">Selected Files ({{ selectedFilesToUpload.length }})</h4>
-                            <ul class="list-disc list-inside text-sm space-y-1 max-h-40 overflow-y-auto mb-4 p-2 bg-gray-100 dark:bg-gray-800 rounded-md">
-                                <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center">
-                                    <span class="truncate">{{ file.name }}</span>
-                                    <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button>
-                                </li>
-                            </ul>
-                            <label class="block text-sm font-medium">Metadata for all files (Key: Value format)</label>
-                            <textarea v-model="allFilesMetadata" rows="4" class="input-field mt-1 font-mono text-xs" placeholder="title: My Document&#10;subject: AI Research&#10;authors: John Doe, Jane Smith"></textarea>
+                        <div v-else-if="queryResults.length === 0" class="text-center p-6 text-gray-500">
+                            No results to display. Run a query to see matching text chunks.
                         </div>
-                        
-                        <div v-else-if="metadataOption === 'manual' && manualMetadataMode === 'per-file'" class="space-y-4 mt-4 max-h-96 overflow-y-auto">
-                            <h4 class="text-sm font-medium">Enter Metadata for Each File:</h4>
-                            <div v-for="(file, index) in selectedFilesToUpload" :key="index" class="p-3 border rounded-lg dark:border-gray-600 space-y-3">
-                                <div class="flex justify-between items-start">
-                                    <p class="font-semibold text-sm truncate">{{ file.name }}</p>
-                                    <button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700" title="Remove"><IconXMark class="w-5 h-5" /></button>
+                        <div v-else-if="searchInChunks && searchMatches.length === 0" class="text-center p-6 text-gray-500">
+                            No chunks match your search term.
+                        </div>
+                        <div v-else class="space-y-4 overflow-y-auto custom-scrollbar h-full pb-10">
+                            <div v-for="(chunk, index) in queryResults" :key="index" :id="`chunk-${index}`" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                                <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mb-2">
+                                    <span class="font-mono truncate" :title="chunk.file_path">.../{{ chunk.file_path.split(/[/\\]/).pop() }}</span>
+                                    <span class="font-semibold" :title="`Similarity: ${chunk.similarity_percent}`">{{ chunk.similarity_percent.toFixed(2) }}%</span>
                                 </div>
-                                <div><label class="text-xs font-medium">Metadata (Key: Value format)</label><textarea v-model="manualMetadata[file.name]" rows="4" class="input-field-sm w-full mt-1 font-mono text-xs" placeholder="title: ..."></textarea></div>
+                                <pre class="whitespace-pre-wrap font-sans text-sm" v-html="highlightedChunk(chunk.chunk_text)"></pre>
                             </div>
                         </div>
+                    </div>
+                </div>
+                <div v-if="activeTab === 'graph'" class="p-6 flex-grow overflow-y-auto">
+                    <DataStoreGraphManager :store="currentSelectedStore" :task="currentGraphTask" />
+                </div>
+            </div>
 
-                        <div v-else-if="metadataOption !== 'manual'" class="mt-4">
-                            <h4 class="text-sm font-medium mb-2">Selected for Upload ({{ selectedFilesToUpload.length }})</h4>
-                            <ul class="space-y-1 max-h-40 overflow-y-auto">
-                                <li v-for="(file, index) in selectedFilesToUpload" :key="index" class="flex justify-between items-center bg-gray-100 dark:bg-gray-800 p-2 rounded text-sm"><span class="truncate">{{ file.name }} ({{ (file.size / 1024 / 1024).toFixed(2) }} MB)</span><button @click="removeFileFromSelection(index)" class="text-red-500 hover:text-red-700 ml-2" title="Remove"><IconXMark class="w-4 h-4" /></button></li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div v-else-if="metadataOption === 'manual'" class="mt-4 text-center text-sm text-gray-500 italic p-4 border-2 border-dashed rounded-lg dark:border-gray-600">
-                        Select files to enter their metadata manually.
-                    </div>
-                    <div class="flex justify-end items-center mt-4">
-                        <button @click="handleUploadFiles" class="btn btn-primary" :disabled="isAnyTaskRunningForSelectedStore || selectedFilesToUpload.length === 0">
-                            <IconArrowUpTray class="w-5 h-5 mr-2" /> Add {{ selectedFilesToUpload.length }} File(s)
-                        </button>
-                    </div>
-                </div>
-                <div v-if="currentUploadTask" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-700"> ... </div>
-                <div>
-                    <h3 class="text-xl font-semibold mb-4">Indexed Documents ({{ filesInSelectedStore.length }})</h3>
-                    <div v-if="!filesLoading && filesInSelectedStore.length > 0 && canReadWrite(currentSelectedStore)" class="flex items-center justify-between bg-gray-50 dark:bg-gray-800/50 p-2 rounded-md mb-2">
-                        <div class="flex items-center">
-                            <input type="checkbox" @change="toggleSelectAll" :checked="allFilesSelected" :indeterminate="someFilesSelected" id="select-all-files-checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500">
-                            <label for="select-all-files-checkbox" class="ml-2 text-sm select-none cursor-pointer">Select All</label>
-                        </div>
-                        <button @click="handleDeleteSelectedFiles" class="btn btn-danger btn-sm" :disabled="selectedFilesToDelete.size === 0 || isLoadingAction === 'delete_selected_files'">
-                            <IconAnimateSpin v-if="isLoadingAction === 'delete_selected_files'" class="w-4 h-4 mr-2 animate-spin" />
-                            <IconTrash v-else class="w-4 h-4 mr-2" />
-                            Delete Selected ({{ selectedFilesToDelete.size }})
-                        </button>
-                    </div>
-                    <div v-if="filesLoading" class="text-center py-10"><p>Loading documents...</p></div>
-                    <div v-else-if="filesInSelectedStore.length === 0" class="text-center py-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No documents indexed.</p></div>
-                    <ul v-else class="divide-y divide-gray-200 dark:divide-gray-700">
-                        <li v-for="file in filesInSelectedStore" :key="file.filename" class="py-3 flex items-center">
-                            <input 
-                                v-if="canReadWrite(currentSelectedStore)"
-                                type="checkbox" 
-                                @change="toggleFileSelection(file.filename)" 
-                                :checked="selectedFilesToDelete.has(file.filename)" 
-                                class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-4 flex-shrink-0"
-                            >
-                            <div class="flex-grow min-w-0">
-                                <span class="text-sm font-medium truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400" @click="viewFileContent(file)">{{ file.filename }}</span>
-                                <details v-if="file.metadata && Object.keys(file.metadata).length > 0" class="mt-2 text-xs">
-                                    <summary class="cursor-pointer text-gray-500">View Metadata</summary>
-                                    <div class="mt-1 p-2 bg-gray-100 dark:bg-gray-700/50 rounded">
-                                        <JsonRenderer :json="file.metadata" />
-                                    </div>
-                                </details>
-                            </div>
-                        </li>
-                    </ul>
-                </div>
-            </div>
-            <div v-if="activeTab === 'query'" class="p-6 flex-grow overflow-y-auto flex flex-col">
-                <div class="flex-shrink-0 space-y-4">
-                    <h3 class="text-xl font-semibold">Query Data Store</h3>
-                    <form @submit.prevent="handleQueryStore" class="space-y-4">
-                        <div>
-                            <label for="query-text" class="block text-sm font-medium">Query Text</label>
-                            <textarea id="query-text" v-model="queryText" rows="3" class="input-field mt-1" placeholder="Enter your question..."></textarea>
-                        </div>
-                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                            <div>
-                                <label for="query-topk" class="block text-sm font-medium">Top K</label>
-                                <input id="query-topk" v-model.number="queryTopK" type="number" min="1" class="input-field mt-1">
-                            </div>
-                            <div>
-                                <label for="query-minsim" class="block text-sm font-medium">Min Similarity %</label>
-                                <input id="query-minsim" v-model.number="queryMinSim" type="number" min="0" max="100" step="0.1" class="input-field mt-1">
-                            </div>
-                            <div class="self-end">
-                                <button type="submit" class="btn btn-primary w-full" :disabled="isQuerying || !queryText.trim()">
-                                    <IconAnimateSpin v-if="isQuerying" class="w-5 h-5 mr-2 animate-spin" />
-                                    {{ isQuerying ? 'Querying...' : 'Query' }}
-                                </button>
-                            </div>
-                        </div>
-                    </form>
-                </div>
-                <div class="flex-grow min-h-0 mt-6 border-t dark:border-gray-700 pt-6">
-                    <div class="flex justify-between items-center mb-4">
-                        <h4 class="text-lg font-semibold">Results ({{ queryResults.length }})</h4>
-                        <div v-if="queryResults.length > 0" class="flex items-center gap-2">
-                            <input type="text" v-model="searchInChunks" @keyup.enter="handleInChunkSearch" placeholder="Search in results..." class="input-field !py-1.5 !text-sm">
-                            <button @click="handleInChunkSearch" class="btn btn-secondary btn-sm p-2"><IconMagnifyingGlass class="w-4 h-4" /></button>
-                            <template v-if="searchMatches.length > 0">
-                                <button @click="navigateMatch(-1)" class="btn btn-secondary btn-sm p-2" title="Previous match">‹</button>
-                                <span class="text-sm text-gray-500 font-mono">{{ currentMatchIndex + 1 }} / {{ searchMatches.length }}</span>
-                                <button @click="navigateMatch(1)" class="btn btn-secondary btn-sm p-2" title="Next match">›</button>
-                            </template>
-                        </div>
-                    </div>
-                    <div v-if="isQuerying" class="text-center p-6 text-gray-500">
-                        <IconAnimateSpin class="w-8 h-8 mx-auto animate-spin" />
-                        <p class="mt-2">Fetching results...</p>
-                    </div>
-                    <div v-else-if="queryError" class="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-md">
-                        {{ queryError }}
-                    </div>
-                    <div v-else-if="queryResults.length === 0" class="text-center p-6 text-gray-500">
-                        No results to display. Run a query to see matching text chunks.
-                    </div>
-                    <div v-else-if="searchInChunks && searchMatches.length === 0" class="text-center p-6 text-gray-500">
-                        No chunks match your search term.
-                    </div>
-                    <div v-else class="space-y-4 overflow-y-auto custom-scrollbar h-full pb-10">
-                        <div v-for="(chunk, index) in queryResults" :key="index" :id="`chunk-${index}`" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                            <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mb-2">
-                                <span class="font-mono truncate" :title="chunk.file_path">.../{{ chunk.file_path.split(/[/\\]/).pop() }}</span>
-                                <span class="font-semibold" :title="`Similarity: ${chunk.similarity_percent}`">{{ chunk.similarity_percent.toFixed(2) }}%</span>
-                            </div>
-                            <pre class="whitespace-pre-wrap font-sans text-sm" v-html="highlightedChunk(chunk.chunk_text)"></pre>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div v-if="activeTab === 'graph'" class="p-6 flex-grow overflow-y-auto">
-                <DataStoreGraphManager :store="currentSelectedStore" :task="currentGraphTask" />
+            <!-- Loading Overlay -->
+            <div v-if="loadingFileContent" class="absolute inset-0 z-50 flex flex-col items-center justify-center bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm rounded-lg">
+                <IconAnimateSpin class="w-12 h-12 text-blue-600 dark:text-blue-400 mb-4 animate-spin" />
+                <h3 class="text-xl font-bold text-gray-900 dark:text-white">Loading file content</h3>
+                <p class="text-gray-600 dark:text-gray-300">Please stand by...</p>
             </div>
         </div>
         
