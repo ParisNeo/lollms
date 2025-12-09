@@ -829,7 +829,7 @@ async def wipe_datastore_graph(
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
         with ss:
-            gs = GraphStore(ss)
+            gs = GraphStore(ss, llm_executor_callback=None)
             gs.delete_all_graph_data()
         return {"message": "Graph data has been successfully wiped."}
     except PermissionError as e:
