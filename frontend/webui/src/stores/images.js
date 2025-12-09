@@ -10,7 +10,7 @@ import useEventBus from '../services/eventBus';
 export const useImageStore = defineStore('images', () => {
     const images = ref([]);
     const isLoading = ref(false);
-    const isGenerating = ref(false); // Used for short submission loading state
+    const isGenerating = ref(false); 
     const isEnhancing = ref(false);
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
@@ -27,7 +27,6 @@ export const useImageStore = defineStore('images', () => {
     
     let saveDebounceTimer = null;
 
-    // Watch for user object to become available and initialize state
     watch(() => authStore.user, (newUser) => {
         if (newUser) {
             prompt.value = newUser.image_studio_prompt || '';
@@ -39,7 +38,6 @@ export const useImageStore = defineStore('images', () => {
         }
     }, { immediate: true });
 
-    // Watch for changes to persist them
     watch([prompt, negativePrompt, imageSize, nImages, seed, generationParams], () => {
         if (!authStore.isAuthenticated) return;
         
@@ -54,19 +52,33 @@ export const useImageStore = defineStore('images', () => {
                 image_studio_generation_params: generationParams.value,
             };
             authStore.updateUserPreferences(payload);
-        }, 1500); // Debounce for 1.5 seconds
+        }, 1500); 
     }, { deep: true });
 
     function handleTaskCompletion(task) {
+        // Safe parsing of the result
+        let result = task.result;
+        if (typeof result === 'string') {
+            try {
+                result = JSON.parse(result);
+            } catch (e) {
+                console.error("Failed to parse task result JSON:", e);
+                // If parsing fails but it's an enhancement task, it might just be the text prompt directly?
+                // But normally our backend returns JSON. Proceeding with raw string if parse fails.
+            }
+        }
+
         const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
         const isEditTask = task.name.startsWith('Editing image:');
         const isEnhanceTask = task.name.startsWith('Enhancing prompt:');
 
         if (isEnhanceTask) {
-            if (task.status === 'completed' && task.result) {
-                if (task.result.prompt) prompt.value = task.result.prompt;
-                if (task.result.negative_prompt) negativePrompt.value = task.result.negative_prompt;
-                emit('prompt:enhanced', task.result);
+            if (task.status === 'completed' && result) {
+                // Update state directly
+                if (result.prompt) prompt.value = result.prompt;
+                if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
+                
+                emit('prompt:enhanced', result);
                 uiStore.addNotification('Prompt enhanced successfully!', 'success');
             } else if (task.status === 'failed') {
                 uiStore.addNotification('Prompt enhancement failed.', 'error');
@@ -75,21 +87,12 @@ export const useImageStore = defineStore('images', () => {
             return;
         }
 
-        if ((isImageTask || isEditTask) && task.status === 'completed' && task.result) {
-            let parsedResult;
-            try {
-                // The result from the backend task can be a string or an object.
-                parsedResult = typeof task.result === 'string' ? JSON.parse(task.result) : task.result;
-            } catch (e) {
-                console.error("Failed to parse task result JSON:", e);
-                uiStore.addNotification('Failed to process image generation result.', 'error');
-                return;
-            }
-
-            const newItems = Array.isArray(parsedResult) ? parsedResult : [parsedResult];
+        if ((isImageTask || isEditTask) && task.status === 'completed' && result) {
+            const newItems = Array.isArray(result) ? result : [result];
             
             if (newItems.length > 0 && newItems[0]) {
                 const reversedNewItems = [...newItems].reverse();
+                // Add to the beginning of the list
                 images.value.unshift(...reversedNewItems);
                 uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
             }

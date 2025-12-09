@@ -80,7 +80,7 @@ packaging==25.0
 jsonschema==4.25.1
 ScrapeMaster==0.4.2
 apscheduler==3.11.1
-feedparser==6.0.12
+feedparser==6.0.10
 
 markdown2==2.5.4
 aioredis==2.0.1
