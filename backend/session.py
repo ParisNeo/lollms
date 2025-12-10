@@ -284,9 +284,16 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             last_discussion_id=db_user.last_discussion_id,
             lollms_client_ai_name=ai_name_for_user,
             **effective_llm_params,
-            rag_top_k=db_user.rag_top_k, max_rag_len=db_user.max_rag_len, rag_n_hops=db_user.rag_n_hops,
-            rag_min_sim_percent=db_user.rag_min_sim_percent, rag_use_graph=db_user.rag_use_graph,
-            rag_graph_response_type=db_user.rag_graph_response_type, auto_title=db_user.auto_title,
+            rag_top_k=db_user.rag_top_k, 
+            max_rag_len=db_user.max_rag_len, 
+            rag_n_hops=db_user.rag_n_hops,
+            rag_min_sim_percent=db_user.rag_min_sim_percent, 
+            rag_use_graph=db_user.rag_use_graph,
+            rag_graph_response_type=db_user.rag_graph_response_type, 
+            default_rag_chunk_size=db_user.default_rag_chunk_size,
+            default_rag_chunk_overlap=db_user.default_rag_chunk_overlap,
+            default_rag_metadata_mode=db_user.default_rag_metadata_mode,
+            auto_title=db_user.auto_title,
             user_ui_level=db_user.user_ui_level, chat_active=db_user.chat_active, first_page=db_user.first_page,
             ai_response_language=db_user.ai_response_language,
             force_ai_response_language=db_user.force_ai_response_language,
@@ -317,10 +324,10 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             image_studio_generation_params=db_user.image_studio_generation_params,
             image_generation_enabled=db_user.image_generation_enabled,
             image_annotation_enabled=db_user.image_annotation_enabled,
-            note_generation_enabled=db_user.note_generation_enabled, # NEW: Added missing field
-            preferred_name=db_user.preferred_name, # NEW: Added missing field
-            user_personal_info=db_user.user_personal_info, # NEW: Added missing field
-            share_personal_info_with_llm=db_user.share_personal_info_with_llm # NEW: Added missing field
+            note_generation_enabled=db_user.note_generation_enabled,
+            preferred_name=db_user.preferred_name,
+            user_personal_info=db_user.user_personal_info,
+            share_personal_info_with_llm=db_user.share_personal_info_with_llm
         )
     finally:
         if db_was_created:

@@ -167,10 +167,21 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if not user.is_active:
+    # Check status instead of just is_active
+    if user.status != "active":
+        detail_msg = "Your account is inactive."
+        if user.status == "pending_admin_validation":
+            detail_msg = "Your account is pending administrator approval."
+        elif user.status == "pending_email_confirmation":
+            detail_msg = "Please verify your email address."
+        elif user.status == "inactivated_by_admin":
+            detail_msg = "Your account has been deactivated by an administrator."
+        elif user.status == "blocked_by_lollms":
+            detail_msg = "Your account has been blocked due to policy violations."
+            
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Your account is inactive. Please wait for an administrator to approve it.",
+            detail=detail_msg,
         )
 
     access_token = create_access_token(data={"sub": user.username})
@@ -231,7 +242,7 @@ async def introspect_token(
         return {"active": False}
 
     user = get_user_by_username(db, username=username)
-    if not user or not user.is_active:
+    if not user or user.status != "active": # Check status
         return {"active": False}
 
     return {
@@ -359,13 +370,17 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An account with this email address already exists.")
 
     registration_mode = settings.get("registration_mode", "admin_approval")
+    
+    # Determine Status
     is_active_on_creation = (registration_mode == "direct")
+    user_status = "active" if is_active_on_creation else "pending_admin_validation"
     
     new_user = DBUser(
         username=user_data.username,
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         is_active=is_active_on_creation,
+        status=user_status, # NEW
         is_admin=False,
         lollms_model_name=settings.get("default_lollms_model_name"),
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
@@ -596,13 +611,14 @@ async def create_first_admin(user_data: UserCreateAdmin, db: Session = Depends(g
     if user_data.email and db.query(DBUser).filter(DBUser.email == user_data.email).first():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="An account with this email address already exists.")
 
-    # Ensure the first user is an admin
+    # Ensure the first user is an admin and active
     new_user = DBUser(
         username=user_data.username,
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         is_admin=True,  # Force to be admin
         is_active=True, # Force to be active
+        status="active", # Force to be active status
         lollms_model_name=settings.get("default_lollms_model_name"),
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
         llm_ctx_size=settings.get("default_llm_ctx_size"),

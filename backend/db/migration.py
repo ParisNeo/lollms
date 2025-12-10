@@ -214,7 +214,6 @@ def _bootstrap_lollms_user(connection):
         dummy_password = secrets.token_hex(32)
         hashed_password = get_password_hash(dummy_password[:72])
         
-        # THIS WAS THE SOURCE OF THE INTEGRITY ERROR: Added force_ai_response_language
         connection.execute(
             text("""
                 INSERT INTO users (
@@ -224,7 +223,8 @@ def _bootstrap_lollms_user(connection):
                     show_token_counter, rag_use_graph, tell_llm_os, share_dynamic_info_with_llm,
                     include_memory_date_in_context, message_font_size,
                     image_generation_enabled, image_annotation_enabled,
-                    force_ai_response_language, share_personal_info_with_llm, note_generation_enabled
+                    force_ai_response_language, share_personal_info_with_llm, note_generation_enabled,
+                    default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
@@ -233,7 +233,8 @@ def _bootstrap_lollms_user(connection):
                     :show_token_counter, :rag_use_graph, :tell_llm_os, :share_dynamic_info_with_llm,
                     :include_memory_date_in_context, :message_font_size,
                     :image_generation_enabled, :image_annotation_enabled,
-                    :force_ai_response_language, :share_personal_info_with_llm, :note_generation_enabled
+                    :force_ai_response_language, :share_personal_info_with_llm, :note_generation_enabled,
+                    :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status
                 )
             """),
             {
@@ -257,9 +258,13 @@ def _bootstrap_lollms_user(connection):
                 "message_font_size": 14,
                 "image_generation_enabled": False,
                 "image_annotation_enabled": False,
-                "force_ai_response_language": False, # Added missing required field
+                "force_ai_response_language": False,
                 "share_personal_info_with_llm": False,
-                "note_generation_enabled": False
+                "note_generation_enabled": False,
+                "default_rag_chunk_size": 1024,
+                "default_rag_chunk_overlap": 256,
+                "default_rag_metadata_mode": "none",
+                "status": "active"
             }
         )
         connection.commit()
@@ -519,6 +524,35 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
         
+        if 'status' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN status VARCHAR DEFAULT 'active' NOT NULL"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_status ON users (status)"))
+                
+                # Backfill status based on is_active and activation_token
+                connection.execute(text("UPDATE users SET status = 'active' WHERE is_active = 1"))
+                connection.execute(text("UPDATE users SET status = 'pending_admin_validation' WHERE is_active = 0 AND activation_token IS NOT NULL"))
+                connection.execute(text("UPDATE users SET status = 'inactivated_by_admin' WHERE is_active = 0 AND activation_token IS NULL"))
+                
+                connection.commit()
+            except Exception: connection.rollback()
+
+        # New RAG fields migration
+        new_rag_cols = {
+            "default_rag_chunk_size": "INTEGER DEFAULT 1024",
+            "default_rag_chunk_overlap": "INTEGER DEFAULT 256",
+            "default_rag_metadata_mode": "VARCHAR DEFAULT 'none'"
+        }
+        
+        for col_name, col_sql_def in new_rag_cols.items():
+            if col_name not in user_columns_db:
+                try:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
+                    connection.commit()
+                except Exception as e:
+                    print(f"WARNING: Failed to add column {col_name} to users table: {e}")
+                    connection.rollback()
+
         new_user_cols_defs = {
             "is_active": "BOOLEAN DEFAULT 1 NOT NULL", "created_at": "DATETIME", 
             "last_activity_at": "DATETIME", "activation_token": "VARCHAR",

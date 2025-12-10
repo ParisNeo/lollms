@@ -80,7 +80,13 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
     total_users = db.query(DBUser).count()
     active_24h = db.query(DBUser).filter(DBUser.last_activity_at > now - timedelta(hours=24)).count()
     new_7d = db.query(DBUser).filter(DBUser.created_at > now - timedelta(days=7)).count()
-    pending_approval = db.query(DBUser).filter(DBUser.is_active == False, DBUser.activation_token.isnot(None)).count() if settings.get("registration_mode") == "admin_approval" else 0
+    
+    # Updated logic for pending users based on new status field
+    if settings.get("registration_mode") == "admin_approval":
+        pending_approval = db.query(DBUser).filter(DBUser.status == "pending_admin_validation").count()
+    else:
+        pending_approval = 0
+        
     pending_resets = db.query(DBUser).filter(DBUser.password_reset_token.isnot(None), DBUser.reset_token_expiry > now).count()
     return AdminDashboardStats(total_users=total_users, active_users_24h=active_24h, new_users_7d=new_7d, pending_approval=pending_approval, pending_password_resets=pending_resets)
 
@@ -88,7 +94,8 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
 async def admin_get_all_users(
     filter_online: Optional[bool] = Query(None),
     filter_has_keys: Optional[bool] = Query(None),
-    sort_by: str = Query('username', enum=['username', 'email', 'last_activity_at', 'created_at', 'task_count', 'api_key_count', 'connection_count']),
+    status_filter: Optional[str] = Query(None, description="Filter by user status"),
+    sort_by: str = Query('username', enum=['username', 'email', 'last_activity_at', 'created_at', 'task_count', 'api_key_count', 'connection_count', 'status']),
     sort_order: str = Query('asc', enum=['asc', 'desc']),
     db: Session = Depends(get_db)
 ):
@@ -117,6 +124,9 @@ async def admin_get_all_users(
         else:
             query = query.filter(~exists().where(OpenAIAPIKey.user_id == DBUser.id))
 
+    if status_filter:
+        query = query.filter(DBUser.status == status_filter)
+
     # Sorting logic
     sort_column = getattr(DBUser, sort_by) if hasattr(DBUser, sort_by) else literal_column(sort_by)
     if sort_order == 'desc':
@@ -137,6 +147,7 @@ async def admin_get_all_users(
                 "is_admin": getattr(user, "is_admin", False) or False,
                 "is_moderator": getattr(user, "is_moderator", False) or False,
                 "is_active": user.is_active,
+                "status": user.status, # NEW
                 "created_at": safe_datetime(user.created_at),
                 "last_activity_at": safe_datetime(user.last_activity_at),
                 "is_online": is_online,
@@ -163,7 +174,8 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         email=user_data.email, lollms_model_name=user_data.lollms_model_name,
         safe_store_vectorizer=user_data.safe_store_vectorizer or settings.get("default_safe_store_vectorizer"),
         llm_ctx_size=user_data.llm_ctx_size if user_data.llm_ctx_size is not None else settings.get("default_llm_ctx_size"),
-        is_active=True
+        is_active=True,
+        status="active"
     )
     db.add(new_user)
     db.commit()
@@ -216,6 +228,7 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
         print(f"Warning: Could not read discussion database for user {user.username}: {e}")
 
     return UserStats(tasks_per_day=task_stats, messages_per_day=message_stats)
+
 @user_management_router.put("/users/{user_id}", response_model=UserPublic)
 async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user)):
     user = db.query(DBUser).filter(DBUser.id == user_id).first()
@@ -229,6 +242,13 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
     update_dict = update_data.model_dump(exclude_unset=True)
     if 'is_admin' in update_dict and update_dict['is_admin']:
         update_dict['is_moderator'] = True
+
+    # Sync is_active logic if status changed
+    if 'status' in update_dict:
+        if update_dict['status'] == 'active':
+            update_dict['is_active'] = True
+        else:
+            update_dict['is_active'] = False
 
     for key, value in update_dict.items():
         setattr(user, key, value)
@@ -268,6 +288,7 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="User not found.")
     
     user.is_active = True
+    user.status = "active"
     user.activation_token = user.password_reset_token = user.reset_token_expiry = None
     db.commit()
     db.refresh(user)
@@ -282,6 +303,7 @@ async def admin_deactivate_user(user_id: int, db: Session = Depends(get_db), cur
         raise HTTPException(status_code=403, detail="Cannot deactivate own account.")
     
     user.is_active = False
+    user.status = "inactivated_by_admin"
     db.commit()
     db.refresh(user)
     if user.username in user_sessions:

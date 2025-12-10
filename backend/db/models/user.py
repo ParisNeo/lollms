@@ -29,6 +29,11 @@ class User(Base):
     is_admin = Column(Boolean, default=False)
     is_moderator = Column(Boolean, default=False, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False, index=True)
+    
+    # New Status Field
+    status = Column(String, default="active", nullable=False, index=True) 
+    # Possible values: 'active', 'pending_admin_validation', 'pending_email_confirmation', 'inactivated_by_admin', 'blocked_by_lollms'
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_activity_at = Column(DateTime(timezone=True), nullable=True, index=True)
     activation_token = Column(String, nullable=True, index=True, unique=True)
@@ -114,12 +119,20 @@ class User(Base):
 
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False)
     include_memory_date_in_context = Column(Boolean, default=False, nullable=False)
+    
+    # RAG Settings
     rag_top_k = Column(Integer, nullable=True)
     max_rag_len = Column(Integer, nullable=True)
     rag_n_hops = Column(Integer, nullable=True)
     rag_min_sim_percent = Column(Float, nullable=True)
     rag_use_graph = Column(Boolean, default=False, nullable=True)
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
+    
+    # RAG Default Settings for DataStore Creation
+    default_rag_chunk_size = Column(Integer, default=1024, nullable=True)
+    default_rag_chunk_overlap = Column(Integer, default=256, nullable=True)
+    default_rag_metadata_mode = Column(String, default="none", nullable=True)
+
     auto_title = Column(Boolean, default=False, nullable=False)
     user_ui_level = Column(Integer, default=0, nullable=True)
     chat_active = Column(Boolean, default=True, nullable=False) # Default changed to True
@@ -188,4 +201,3 @@ class Friendship(Base):
     user2 = relationship("User", foreign_keys=[user2_id], backref="received_friend_requests_or_friendships")
     action_user = relationship("User", foreign_keys=[action_user_id])
     __table__args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)
-

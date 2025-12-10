@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, desc
 from lollms_client import LollmsDataManager
 
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, defer
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.service import App as DBApp
@@ -32,6 +32,7 @@ from ascii_colors import trace_exception
 
 system_management_router = APIRouter()
 
+# ... (Previous Pydantic models remain same) ...
 class AdminBroadcastRequest(BaseModel):
     message: str
 
@@ -88,6 +89,7 @@ class LogEntry(BaseModel):
     message: str
 
 def _purge_unused_temp_files_task(task: Task):
+    # ... (same as before) ...
     task.log("Starting purge of unused temporary files older than 24 hours.")
     deleted_count, total_scanned = 0, 0
     retention_period = timedelta(hours=24)
@@ -129,6 +131,7 @@ def _purge_unused_temp_files_task(task: Task):
 
 @system_management_router.get("/system-status", response_model=ExpandedSystemUsageStats)
 async def get_system_status():
+    # ... (Hardware status logic same as before) ...
     ram = psutil.virtual_memory()
     
     disks_info = []
@@ -172,7 +175,6 @@ async def get_system_status():
             used_gb  = mem.used  / (1024 ** 3)
             usage_pct = (mem.used / mem.total) * 100 if mem.total > 0 else 0.0
 
-            # Get Compute Utilization
             gpu_util = 0
             try:
                 util = nvmlDeviceGetUtilizationRates(handle)
@@ -180,7 +182,6 @@ async def get_system_status():
             except Exception:
                 pass
 
-            # Get processes
             procs = []
             try:
                 compute_procs = nvmlDeviceGetComputeRunningProcesses(handle)
@@ -194,7 +195,7 @@ async def get_system_status():
                     except psutil.NoSuchProcess:
                         proc_name = "Unknown/Terminated"
                     
-                    mem_used = p.usedGpuMemory / (1024**2) if p.usedGpuMemory else 0 # MB
+                    mem_used = p.usedGpuMemory / (1024**2) if p.usedGpuMemory else 0 
                     procs.append(GPUProcessInfo(pid=p.pid, name=proc_name, memory_used=mem_used))
             except Exception:
                 pass
@@ -219,9 +220,6 @@ async def get_system_status():
 
 @system_management_router.post("/system/analyze-logs", response_model=TaskInfo, status_code=202)
 async def analyze_logs(current_user: UserAuthDetails = Depends(get_current_admin_user)):
-    """
-    Triggers a task to analyze recent system logs using the LLM.
-    """
     db_task = task_manager.submit_task(
         name="Analyze System Logs",
         target=_analyze_logs_task,
@@ -235,13 +233,24 @@ async def analyze_logs(current_user: UserAuthDetails = Depends(get_current_admin
 async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
     """
     Retrieves aggregated logs from recent tasks.
+    Optimized to fetch fewer tasks and avoid loading unnecessary fields.
     """
-    recent_tasks = db.query(DBTask).order_by(desc(DBTask.updated_at)).limit(50).all()
+    # Only fetch ID, name, logs from last 30 tasks to avoid heavy load
+    # Defer result and error if they are huge text fields
+    recent_tasks = db.query(DBTask)\
+        .options(defer(DBTask.result), defer(DBTask.error))\
+        .order_by(desc(DBTask.updated_at))\
+        .limit(30)\
+        .all()
     
     all_logs = []
+    count = 0
+    
+    # Process latest tasks first
     for t in recent_tasks:
         if t.logs:
-            for l in t.logs:
+            # Reverse logs to get latest first if appending
+            for l in reversed(t.logs): 
                 all_logs.append(LogEntry(
                     task_id=t.id,
                     task_name=t.name,
@@ -249,6 +258,11 @@ async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), curre
                     level=l.get('level', 'INFO'),
                     message=l.get('message', '')
                 ))
+                count += 1
+                if count >= limit:
+                    break
+        if count >= limit:
+            break
     
     # Sort by timestamp descending
     all_logs.sort(key=lambda x: x.timestamp, reverse=True)
@@ -269,21 +283,21 @@ async def kill_process(payload: KillProcessRequest, current_user: UserAuthDetail
 
 @system_management_router.get("/model-usage-stats", response_model=List[ModelUsageStat])
 async def get_model_usage_stats(db: Session = Depends(get_db)):
+    # ... (same as before) ...
     results = db.query(DBUser.lollms_model_name, func.count(DBUser.id)).group_by(DBUser.lollms_model_name).all()
     stats = []
     for model_name, count in results:
         stats.append(ModelUsageStat(model_name=model_name or "Not Set", count=count))
-    
     return sorted(stats, key=lambda x: x.count, reverse=True)
 
 @system_management_router.get("/server-info", response_model=ServerInfo)
 async def get_server_info(request: Request, db: Session = Depends(get_db)):
+    # ... (same as before) ...
     running_apps = db.query(DBApp).filter(DBApp.status == 'running', DBApp.port != None).all()
     active_ports = [AppPortInfo(port=app.port, app_name=app.name, app_id=app.id) for app in running_apps]
 
     allowed_origins = next((m.options.get('allow_origins', []) for m in request.app.user_middleware if "CORSMiddleware" in str(m)), [])
     
-    # Use 'settings' to get the live value from DB if available, fallback to env/default
     host = settings.get("host", SERVER_CONFIG.get("host", "localhost"))
     port = settings.get("port", SERVER_CONFIG.get("port", 9642))
     https = settings.get("https_enabled", SERVER_CONFIG.get("https_enabled", False))
@@ -337,6 +351,7 @@ async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_
 
 @system_management_router.get("/global-generation-stats", response_model=GlobalGenerationStats)
 def get_global_generation_stats(db: Session = Depends(get_db)):
+    # ... (same as before) ...
     all_users = db.query(DBUser).all()
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     
@@ -362,14 +377,12 @@ def get_global_generation_stats(db: Session = Depends(get_db)):
                 trace_exception(e)
                 print(f"Warning: Could not process discussions DB for user {user.username}: {e}")
 
-    # Prepare generations_per_day
     generations_per_day_list = [
         UserActivityStat(date=datetime.strptime(date_str, '%Y-%m-%d').date(), count=count)
         for date_str, count in daily_totals.items()
     ]
     generations_per_day_list.sort(key=lambda x: x.date)
 
-    # Prepare weekday stats
     weekday_data = defaultdict(list)
     for stat in generations_per_day_list:
         weekday_data[stat.date.weekday()].append(stat.count)
@@ -398,9 +411,6 @@ async def create_backup(
     request: BackupRequest,
     current_admin: UserAuthDetails = Depends(get_current_admin_user)
 ):
-    """
-    Initiates a background task to create a full application backup.
-    """
     db_task = task_manager.submit_task(
         name="Create Application Backup",
         target=_create_backup_task,

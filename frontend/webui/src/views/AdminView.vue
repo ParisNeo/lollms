@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/views/AdminView.vue -->
 <script setup>
 import { computed, defineAsyncComponent, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -28,7 +27,11 @@ import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
 import IconFileText from '../assets/icons/IconFileText.vue';
 import IconKey from '../assets/icons/IconKey.vue';
-import IconEye from '../assets/icons/IconEye.vue'; // Icon for moderation
+import IconEye from '../assets/icons/IconEye.vue';
+import IconGpu from '../assets/icons/IconGpu.vue';
+import IconHardDrive from '../assets/icons/IconHardDrive.vue';
+import IconPlayCircle from '../assets/icons/IconPlayCircle.vue'; // For Ops? or use Wrench
+import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -40,12 +43,16 @@ const AdminPanel = defineAsyncComponent(() => import('../components/admin/AdminP
 
 const sections = [
   { type: 'link', id: 'dashboard', name: 'Dashboard', icon: markRaw(IconDashboard) },
-  { type: 'link', id: 'server_settings', name: 'Server Settings', icon: markRaw(IconServer) },
+  { type: 'divider', label: 'System Monitoring' },
+  { type: 'link', id: 'system_load', name: 'System Load', icon: markRaw(IconHardDrive) },
+  { type: 'link', id: 'gpu_load', name: 'GPU Load', icon: markRaw(IconGpu) },
+  { type: 'link', id: 'logs_analysis', name: 'Logs & Analysis', icon: markRaw(IconFileText) },
+  { type: 'link', id: 'operations', name: 'Operations', icon: markRaw(IconWrenchScrewdriver) },
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
-  { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) }, // New Entry
+  { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
-  { type: 'link', id: 'broadcast', name: 'Broadcast', icon: markRaw(IconSend) },
+  { type: 'link', id: 'server_settings', name: 'Server Settings', icon: markRaw(IconServer) },
   { type: 'divider', label: 'Content' },
   { type: 'link', id: 'news_management', name: 'News Articles', icon: markRaw(IconFileText) },
   { type: 'link', id: 'rss_feeds', name: 'RSS Feeds', icon: markRaw(IconGlobeAlt) },

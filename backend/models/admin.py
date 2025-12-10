@@ -219,6 +219,7 @@ class UserForAdminPanel(BaseModel):
     is_admin: bool = False
     is_moderator: bool = False
     is_active: bool = True
+    status: str = "active" # NEW
     created_at: datetime.datetime
     last_activity_at: Optional[datetime.datetime] = None
     

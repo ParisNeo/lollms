@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/components/admin/AdminPanel.vue -->
 <script setup>
 import { computed, defineAsyncComponent } from 'vue';
 
@@ -11,6 +10,11 @@ const props = defineProps({
 });
 
 const Dashboard = defineAsyncComponent(() => import('./Dashboard.vue'));
+const SystemLoad = defineAsyncComponent(() => import('./SystemLoad.vue'));
+const GPULoad = defineAsyncComponent(() => import('./GPULoad.vue'));
+const LogsAndAnalysis = defineAsyncComponent(() => import('./LogsAndAnalysis.vue'));
+const Operations = defineAsyncComponent(() => import('./Operations.vue'));
+
 const UserTable = defineAsyncComponent(() => import('./UserTable.vue'));
 const ServerSettings = defineAsyncComponent(() => import('./ServerSettings.vue'));
 const GlobalSettings = defineAsyncComponent(() => import('./GlobalSettings.vue'));
@@ -29,20 +33,24 @@ const McpsManagement = defineAsyncComponent(() => import('./zoos/McpsManagement.
 const PromptsManagement = defineAsyncComponent(() => import('./zoos/PromptsManagement.vue'));
 const PersonalitiesManagement = defineAsyncComponent(() => import('./zoos/PersonalitiesManagement.vue'));
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
-const BroadcastMessage = defineAsyncComponent(() => import('./BroadcastMessage.vue'));
+// BroadcastMessage is now in Operations, removing if no longer used directly as tab
+// const BroadcastMessage = defineAsyncComponent(() => import('./BroadcastMessage.vue'));
 const BuildersSettings = defineAsyncComponent(() => import('./BuildersSettings.vue'));
 const WelcomeSettings = defineAsyncComponent(() => import('./WelcomeSettings.vue'));
 const RssManagement = defineAsyncComponent(() => import('./RssManagement.vue'));
 const NewsFeedSettings = defineAsyncComponent(() => import('./NewsFeedSettings.vue'));
 const NewsManagement = defineAsyncComponent(() => import('./NewsManagement.vue'));
-const ModerationQueue = defineAsyncComponent(() => import('./ModerationQueue.vue')); // New Import
+const ModerationQueue = defineAsyncComponent(() => import('./ModerationQueue.vue'));
 
 const tabs = [
     { id: 'dashboard', component: Dashboard },
+    { id: 'system_load', component: SystemLoad },
+    { id: 'gpu_load', component: GPULoad },
+    { id: 'logs_analysis', component: LogsAndAnalysis },
+    { id: 'operations', component: Operations },
     { id: 'server_settings', component: ServerSettings },
     { id: 'users', component: UserTable },
     { id: 'tasks', component: TaskManager },
-    { id: 'broadcast', component: BroadcastMessage },
     { id: 'llm_bindings', component: LLMBindingsSettings },
     { id: 'tti_bindings', component: TTIBindingsSettings },
     { id: 'tts_bindings', component: TTSBindingsSettings },
@@ -63,7 +71,7 @@ const tabs = [
     { id: 'rss_feeds', component: RssManagement },
     { id: 'news_feed_settings', component: NewsFeedSettings },
     { id: 'news_management', component: NewsManagement },
-    { id: 'moderation', component: ModerationQueue }, // New Tab
+    { id: 'moderation', component: ModerationQueue },
 ];
 
 const activeComponent = computed(() => {
