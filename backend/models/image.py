@@ -75,3 +75,18 @@ class SaveCanvasRequest(BaseModel):
     width: int
     height: int
     bg_color: str = "#FFFFFF"
+
+# NEW: Timelapse Models
+class TimelapseKeyframe(BaseModel):
+    prompt: str
+    duration: float = 2.0 # Seconds to show this image
+
+class TimelapseRequest(BaseModel):
+    keyframes: List[TimelapseKeyframe]
+    negative_prompt: Optional[str] = ""
+    model: Optional[str] = None
+    width: int = 512
+    height: int = 512
+    fps: int = 24
+    transition_duration: float = 1.0 # Seconds for crossfade
+    seed: Optional[int] = -1

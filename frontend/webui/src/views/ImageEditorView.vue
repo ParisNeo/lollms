@@ -81,9 +81,8 @@
                 <div :style="{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }" class="relative shadow-2xl origin-center transition-transform duration-75 canvas-stack">
                     <canvas ref="imageCanvasRef" class="block bg-white layer-canvas"></canvas>
                     <canvas ref="maskCanvasRef" class="absolute inset-0 opacity-60 layer-canvas" :class="{'pointer-events-none': activeLayer !== 'mask'}"></canvas>
-                    <canvas ref="previewCanvasRef" class="absolute inset-0 pointer-events-none layer-canvas"></canvas> <!-- For shapes preview -->
+                    <canvas ref="previewCanvasRef" class="absolute inset-0 pointer-events-none layer-canvas"></canvas>
                     
-                    <!-- Brush Cursor -->
                     <div v-show="showCursor" class="absolute pointer-events-none rounded-full border border-black/50 bg-white/20 z-50 transform -translate-x-1/2 -translate-y-1/2"
                         :style="{ width: `${brushSize}px`, height: `${brushSize}px`, left: `${cursorX}px`, top: `${cursorY}px` }"></div>
                 </div>
@@ -101,7 +100,7 @@
             <div class="w-80 bg-white dark:bg-gray-800 border-l border-gray-200 dark:border-gray-700 flex flex-col z-20 shadow-xl">
                 <div class="p-4 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex justify-between items-center">
                     <h3 class="font-semibold text-sm">Generation Settings</h3>
-                    <div v-if="isGenerating" class="flex items-center text-xs text-blue-500 animate-pulse">
+                    <div v-if="isProcessingTask" class="flex items-center text-xs text-blue-500 animate-pulse">
                         <IconAnimateSpin class="w-3 h-3 mr-1" /> Busy...
                     </div>
                 </div>
@@ -111,7 +110,7 @@
                         <div>
                             <div class="flex justify-between items-center mb-1">
                                 <label class="text-xs font-bold text-gray-500 uppercase">Prompt</label>
-                                <button @click="enhancePrompt('prompt')" class="text-blue-500 hover:text-blue-600 p-1" title="Enhance Prompt" :disabled="isEnhancing">
+                                <button @click="initiateEnhancement('prompt')" class="text-blue-500 hover:text-blue-600 p-1" title="Enhance Prompt" :disabled="isProcessingTask">
                                     <IconSparkles class="w-4 h-4" :class="{'animate-pulse': isEnhancing}" />
                                 </button>
                             </div>
@@ -120,7 +119,7 @@
                         <div>
                             <div class="flex justify-between items-center mb-1">
                                 <label class="text-xs font-bold text-gray-500 uppercase">Negative Prompt</label>
-                                <button @click="enhancePrompt('negative_prompt')" class="text-red-500 hover:text-red-600 p-1" title="Enhance Negative" :disabled="isEnhancing">
+                                <button @click="initiateEnhancement('negative_prompt')" class="text-red-500 hover:text-red-600 p-1" title="Enhance Negative" :disabled="isProcessingTask">
                                     <IconSparkles class="w-4 h-4" :class="{'animate-pulse': isEnhancing}" />
                                 </button>
                             </div>
@@ -161,8 +160,8 @@
                 </div>
 
                 <div class="p-4 border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                    <button @click="generateEdit" class="btn btn-primary w-full py-3" :disabled="isGenerating">
-                        <template v-if="isGenerating"><IconAnimateSpin class="w-5 h-5 mr-2 animate-spin" /> Processing...</template>
+                    <button @click="generateEdit" class="btn btn-primary w-full py-3" :disabled="isProcessingTask">
+                        <template v-if="isProcessingTask"><IconAnimateSpin class="w-5 h-5 mr-2 animate-spin" /> Processing...</template>
                         <template v-else><IconSparkles class="w-5 h-5 mr-2" /> {{ activeLayer === 'mask' ? 'Inpaint Masked' : 'Generate from Img' }}</template>
                     </button>
                 </div>
@@ -172,7 +171,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, shallowRef } from 'vue';
+import { ref, onMounted, onUnmounted, computed, h } from 'vue';
 import { useRouter } from 'vue-router';
 import { useImageStore } from '../stores/images';
 import { useDataStore } from '../stores/data';
@@ -181,7 +180,6 @@ import { useAuthStore } from '../stores/auth';
 import apiClient from '../services/api';
 import useEventBus from '../services/eventBus';
 
-// Icons
 import IconArrowLeft from '../assets/icons/IconArrowLeft.vue';
 import IconHand from '../assets/icons/IconHand.vue';
 import IconPencil from '../assets/icons/IconPencil.vue';
@@ -195,18 +193,15 @@ import IconMaximize from '../assets/icons/IconMaximize.vue';
 import IconSparkles from '../assets/icons/IconSparkles.vue';
 import IconRefresh from '../assets/icons/IconRefresh.vue';
 import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
-import IconStopCircle from '../assets/icons/IconStopCircle.vue'; // For Circle
-import IconRectangle from '../assets/icons/IconRectangle.vue'; // Need to ensure exists or use generic
-import IconMinusCircle from '../assets/icons/IconMinusCircle.vue'; // For Line? Or use SVG
 
-// Inline SVG Components for tools without existing icons
-const IconLine = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 19L19 5"/></svg>' };
-const IconCircle = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg>' };
-const IconRect = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>' };
-const IconFill = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 11L12 17L5 11"/><path d="M12 17V3"/></svg>' }; // Placeholder bucket
-const IconWand = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 4V2"/><path d="M15 16V14"/><path d="M8 9h2"/><path d="M20 9h2"/><path d="M17.8 11.8L19 13"/><path d="M10.6 5.2L12 6.6"/><path d="M11.6 12.2l-8.4 8.6"/></svg>' }; // Placeholder wand
-const IconPipette = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 4l6 6-11 11-6 1L4 16 15 5z"/><path d="M14 4l-4 4"/></svg>' };
-const IconEraser = { template: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 20Z"/><path d="M11 11L20 20"/></svg>' };
+// --- Safe Functional Components for Icons ---
+const IconLine = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M5 19L19 5' })]) };
+const IconCircle = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('circle', { cx: '12', cy: '12', r: '9' })]) };
+const IconRect = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('rect', { x: '3', y: '3', width: '18', height: '18', rx: '2' })]) };
+const IconFill = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M19 11L12 17L5 11' }), h('path', { d: 'M12 17V3' })]) };
+const IconWand = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M15 4V2' }), h('path', { d: 'M15 16V14' }), h('path', { d: 'M8 9h2' }), h('path', { d: 'M20 9h2' }), h('path', { d: 'M17.8 11.8L19 13' }), h('path', { d: 'M10.6 5.2L12 6.6' }), h('path', { d: 'M11.6 12.2l-8.4 8.6' })]) };
+const IconPipette = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M14 4l6 6-11 11-6 1L4 16 15 5z' }), h('path', { d: 'M14 4l-4 4' })]) };
+const IconEraser = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M20 20H7L3 16C2 15 2 13 3 12L13 2L22 11L20 20Z' }), h('path', { d: 'M11 11L20 20' })]) };
 
 const props = defineProps({ id: { type: String, default: null } });
 const router = useRouter();
@@ -216,7 +211,8 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const { on, off } = useEventBus();
 
-// Canvas Refs
+const isComponentMounted = ref(false);
+
 const containerRef = ref(null);
 const imageCanvasRef = ref(null);
 const maskCanvasRef = ref(null);
@@ -225,8 +221,7 @@ const ctxImage = ref(null);
 const ctxMask = ref(null);
 const ctxPreview = ref(null);
 
-// State
-const activeLayer = ref('image'); // 'image' or 'mask'
+const activeLayer = ref('image');
 const tool = ref('brush');
 const color = ref('#000000');
 const brushSize = ref(40);
@@ -241,18 +236,20 @@ const strength = ref(0.75);
 const cfgScale = ref(7.5);
 const seed = ref(-1);
 const selectedModel = ref('');
-const isGenerating = ref(false);
+const isProcessingTask = ref(false);
 const isEnhancing = ref(false);
+const activeTaskId = ref(null); 
+const enhancementInstructions = ref('');
+const enhancementMode = ref('description');
 
 const isDragging = ref(false);
 const lastX = ref(0);
 const lastY = ref(0);
 const cursorX = ref(0);
 const cursorY = ref(0);
-const startX = ref(0); // For shapes
-const startY = ref(0); // For shapes
+const startX = ref(0);
+const startY = ref(0);
 
-// History
 const history = ref([]);
 const historyIndex = ref(-1);
 
@@ -273,15 +270,72 @@ const showCursor = computed(() => ['brush', 'eraser', 'circle'].includes(tool.va
 
 function setTool(t) { tool.value = t; }
 
-// --- Event Listeners for Prompt Enhancement ---
+// --- Event Listeners ---
 function onPromptEnhanced(data) {
+    if (!isComponentMounted.value) return;
+    // Always update if we receive the event, assuming it's the latest enhancement
     if (data.prompt) prompt.value = data.prompt;
     if (data.negative_prompt) negativePrompt.value = data.negative_prompt;
-    isEnhancing.value = false;
+    
+    if (isEnhancing.value) {
+        isEnhancing.value = false;
+        isProcessingTask.value = false;
+        activeTaskId.value = null;
+        uiStore.addNotification("Prompt enhanced.", "success");
+    }
 }
 
+function onImageGenerated(newImage) {
+    if (!isComponentMounted.value) return;
+    
+    if (isProcessingTask.value && !isEnhancing.value) {
+        if (newImage && newImage.id) {
+            loadImage(newImage.id).then(() => {
+                if(isComponentMounted.value) uiStore.addNotification("Result loaded into editor.", "success");
+            });
+            isProcessingTask.value = false;
+            activeTaskId.value = null;
+            if (activeLayer.value === 'mask') clearMask();
+        }
+    }
+}
+
+function onTaskCompleted(task) {
+    if (!isComponentMounted.value) return;
+    
+    // Check if this is the task we initiated
+    if (activeTaskId.value && task.id === activeTaskId.value) {
+        // Handle prompt enhancement fallback if event missed
+        if (task.name.startsWith("Enhancing prompt") && task.status === 'completed' && task.result) {
+             let res = task.result;
+             if (typeof res === 'string') {
+                 try { res = JSON.parse(res); } catch(e){}
+             }
+             if (res && (res.prompt || res.negative_prompt)) {
+                 if (res.prompt) prompt.value = res.prompt;
+                 if (res.negative_prompt) negativePrompt.value = res.negative_prompt;
+                 uiStore.addNotification("Prompt enhanced.", "success");
+             }
+        }
+        
+        if (task.status === 'failed') {
+             uiStore.addNotification(`Task failed: ${task.error || 'Unknown error'}`, 'error');
+        }
+        
+        // Always reset loading state on completion of tracked task
+        isProcessingTask.value = false;
+        isEnhancing.value = false;
+        activeTaskId.value = null;
+    }
+}
+
+let currentObjectUrl = null;
+
 onMounted(async () => {
+    isComponentMounted.value = true;
     on('prompt:enhanced', onPromptEnhanced);
+    on('image:generated', onImageGenerated);
+    on('task:completed', onTaskCompleted);
     
     if (imageCanvasRef.value) ctxImage.value = imageCanvasRef.value.getContext('2d', { willReadFrequently: true });
     if (maskCanvasRef.value) ctxMask.value = maskCanvasRef.value.getContext('2d', { willReadFrequently: true });
@@ -299,9 +353,13 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+    isComponentMounted.value = false;
     off('prompt:enhanced', onPromptEnhanced);
+    off('image:generated', onImageGenerated);
+    off('task:completed', onTaskCompleted);
     window.removeEventListener('keydown', handleKeydown);
     window.removeEventListener('resize', fitToScreen);
+    if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
 });
 
 function initializeBlankCanvas(width = 1024, height = 1024) {
@@ -313,16 +371,24 @@ function initializeBlankCanvas(width = 1024, height = 1024) {
 }
 
 async function loadImage(imageId) {
+    if (!isComponentMounted.value) return;
     try {
         const response = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
-        const url = URL.createObjectURL(response.data);
+        
+        if (!isComponentMounted.value) return; 
+
+        if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+        currentObjectUrl = URL.createObjectURL(response.data);
+
         const img = new Image();
         await new Promise((resolve, reject) => {
             img.onload = resolve;
             img.onerror = reject;
-            img.src = url;
+            img.src = currentObjectUrl;
         });
         
+        if (!isComponentMounted.value) return;
+
         resizeCanvases(img.naturalWidth, img.naturalHeight);
         ctxImage.value.drawImage(img, 0, 0);
         
@@ -332,12 +398,12 @@ async function loadImage(imageId) {
             negativePrompt.value = details.negative_prompt || '';
         }
         
-        URL.revokeObjectURL(url);
         saveState();
         fitToScreen();
     } catch (e) {
+        if (!isComponentMounted.value) return;
         console.error("Load failed", e);
-        uiStore.addNotification("Failed to load image.", "error");
+        uiStore.addNotification("Failed to load image. It may have been deleted or access denied.", "error");
         router.push('/image-studio');
     }
 }
@@ -357,7 +423,7 @@ function getPointerPos(e) {
 }
 
 function startAction(e) {
-    if (e.button !== 0) return; // Left click only
+    if (e.button !== 0) return; 
     isDragging.value = true;
     const { x, y } = getPointerPos(e);
     lastX.value = e.clientX; 
@@ -383,7 +449,6 @@ function startAction(e) {
         return;
     }
     
-    // For drawing tools, start the path
     if (['brush', 'eraser'].includes(tool.value)) {
         const ctx = activeLayer.value === 'image' ? ctxImage.value : ctxMask.value;
         ctx.beginPath();
@@ -440,9 +505,6 @@ function configureCtx(ctx) {
     } else {
         ctx.globalCompositeOperation = 'source-over';
         ctx.globalAlpha = opacity.value;
-        // For mask layer, we usually want white to indicate "masked/edit here" for visualization in editor?
-        // Actually, backend usually expects white pixels = edit. 
-        // If editing mask, user sees white. 
         ctx.fillStyle = activeLayer.value === 'mask' ? `rgba(255,255,255,${opacity.value})` : color.value;
         ctx.strokeStyle = activeLayer.value === 'mask' ? `rgba(255,255,255,${opacity.value})` : color.value;
     }
@@ -453,9 +515,6 @@ function draw(x, y) {
     configureCtx(ctx);
     ctx.lineTo(x, y);
     ctx.stroke();
-    // For smooth continuous drawing, we don't clear path until mouseup logic (simplified here)
-    // Actually standard canvas painting usually requires beginPath per stroke or managing points.
-    // Simple implementation:
     ctx.beginPath();
     ctx.moveTo(x, y);
 }
@@ -479,17 +538,13 @@ function drawPreviewShape(x, y) {
         ctx.arc(startX.value, startY.value, radius, 0, 2 * Math.PI);
     }
     
-    // Preview uses stroke for line/circle outline, fill for rect/circle body?
-    // Let's stick to stroke + fill based on standard paint tools behavior logic
     ctx.stroke();
     if (tool.value !== 'line') ctx.fill();
 }
 
 function commitShape(x, y) {
-    // Clear preview
     ctxPreview.value.clearRect(0, 0, previewCanvasRef.value.width, previewCanvasRef.value.height);
     
-    // Draw to active layer
     const ctx = getActiveCtx();
     configureCtx(ctx);
     ctx.beginPath();
@@ -508,19 +563,16 @@ function commitShape(x, y) {
         ctx.fill();
         ctx.stroke();
     }
-    ctx.globalAlpha = 1.0; // Reset
+    ctx.globalAlpha = 1.0; 
     ctx.globalCompositeOperation = 'source-over';
 }
 
 function pickColor(x, y) {
-    // Pick from image canvas always? Or active? Usually image.
     const p = ctxImage.value.getImageData(x, y, 1, 1).data;
     const hex = "#" + ("000000" + ((p[0] << 16) | (p[1] << 8) | p[2]).toString(16)).slice(-6);
     color.value = hex;
 }
 
-// --- Flood Fill & Magic Wand ---
-// Simple stack-based flood fill implementation
 function floodFill(x, y) {
     const ctx = getActiveCtx();
     const w = ctx.canvas.width;
@@ -533,7 +585,6 @@ function floodFill(x, y) {
     
     const targetR = data[targetIdx], targetG = data[targetIdx+1], targetB = data[targetIdx+2], targetA = data[targetIdx+3];
     
-    // Parse current fill color
     let fillR, fillG, fillB;
     const hex = color.value.replace('#', '');
     fillR = parseInt(hex.substring(0, 2), 16);
@@ -541,12 +592,11 @@ function floodFill(x, y) {
     fillB = parseInt(hex.substring(4, 6), 16);
     const fillA = Math.round(opacity.value * 255);
 
-    // If active layer is mask, we usually fill with white (255,255,255, alpha) for editing
     if (activeLayer.value === 'mask') {
         fillR=255; fillG=255; fillB=255;
     }
 
-    if (matches(targetR, targetG, targetB, targetA, fillR, fillG, fillB, fillA, 0)) return; // Already same color
+    if (matches(targetR, targetG, targetB, targetA, fillR, fillG, fillB, fillA, 0)) return;
 
     const stack = [[x, y]];
     const tol = tolerance.value;
@@ -558,7 +608,6 @@ function floodFill(x, y) {
         if (cx < 0 || cy < 0 || cx >= w || cy >= h) continue;
         if (!matches(data[idx], data[idx+1], data[idx+2], data[idx+3], targetR, targetG, targetB, targetA, tol)) continue;
 
-        // Fill
         data[idx] = fillR;
         data[idx+1] = fillG;
         data[idx+2] = fillB;
@@ -570,7 +619,6 @@ function floodFill(x, y) {
 }
 
 function magicWand(x, y) {
-    // Selects from IMAGE, draws on MASK
     const srcCtx = ctxImage.value;
     const destCtx = ctxMask.value;
     const w = srcCtx.canvas.width;
@@ -585,7 +633,7 @@ function magicWand(x, y) {
     const tol = tolerance.value;
     
     const stack = [[x,y]];
-    const visited = new Uint8Array(w*h); // Track visited to avoid loops
+    const visited = new Uint8Array(w*h);
     
     while(stack.length) {
         const [cx, cy] = stack.pop();
@@ -595,11 +643,10 @@ function magicWand(x, y) {
         
         const idx = i * 4;
         if (matches(srcData[idx], srcData[idx+1], srcData[idx+2], srcData[idx+3], tr, tg, tb, ta, tol)) {
-            // Mark on mask
             destData[idx] = 255; 
             destData[idx+1] = 255;
             destData[idx+2] = 255;
-            destData[idx+3] = 255; // Full opacity mask
+            destData[idx+3] = 255; 
             
             if(cx+1<w) stack.push([cx+1,cy]);
             if(cx-1>=0) stack.push([cx-1,cy]);
@@ -614,7 +661,6 @@ function matches(r,g,b,a, r2,g2,b2,a2, tol) {
     return Math.abs(r-r2) <= tol && Math.abs(g-g2) <= tol && Math.abs(b-b2) <= tol && Math.abs(a-a2) <= tol;
 }
 
-// --- State Mgmt ---
 function saveState() {
     if (historyIndex.value < history.value.length - 1) {
         history.value = history.value.slice(0, historyIndex.value + 1);
@@ -641,13 +687,12 @@ function clearActiveLayer() {
     saveState();
 }
 
-// --- API Actions ---
 async function generateEdit() {
-    isGenerating.value = true;
+    if (!isComponentMounted.value) return;
+    isProcessingTask.value = true;
     try {
         const base64Image = imageCanvasRef.value.toDataURL('image/png').split(',')[1];
         
-        // Prepare Mask: Black bg, White mask
         const temp = document.createElement('canvas');
         temp.width = maskCanvasRef.value.width; temp.height = maskCanvasRef.value.height;
         const tCtx = temp.getContext('2d');
@@ -655,7 +700,7 @@ async function generateEdit() {
         tCtx.drawImage(maskCanvasRef.value, 0, 0);
         const base64Mask = temp.toDataURL('image/png').split(',')[1];
 
-        await imageStore.editImage({
+        const task = await imageStore.editImage({
             base_image_b64: base64Image,
             mask: base64Mask,
             prompt: prompt.value,
@@ -667,29 +712,70 @@ async function generateEdit() {
             width: imageCanvasRef.value.width,
             height: imageCanvasRef.value.height
         });
+        
+        if (task && task.id) {
+            activeTaskId.value = task.id;
+        }
+        
     } catch (e) {
-        uiStore.addNotification("Generation failed", "error");
-    } finally {
-        isGenerating.value = false;
+        if (isComponentMounted.value) {
+            uiStore.addNotification("Generation failed", "error");
+            isProcessingTask.value = false;
+        }
     }
 }
 
-async function enhancePrompt(target) {
+// Redirect method for enhancePrompt button click (calls openEnhanceModal)
+function initiateEnhancement(target) {
+    uiStore.openModal('enhancePrompt', {
+        instructions: enhancementInstructions.value,
+        mode: enhancementMode.value,
+        onConfirm: ({ instructions, mode }) => {
+            enhancementInstructions.value = instructions;
+            enhancementMode.value = mode;
+            handleEnhance(target, { instructions, mode });
+        }
+    });
+}
+
+async function handleEnhance(target, options = {}) {
+    if (!isComponentMounted.value) return;
     isEnhancing.value = true;
-    await imageStore.enhanceImagePrompt({ 
+    isProcessingTask.value = true;
+    
+    // Prepare image context if in mask mode
+    let imageContext = null;
+    try {
+        const base64Image = imageCanvasRef.value.toDataURL('image/png').split(',')[1];
+        imageContext = [base64Image];
+    } catch(e) {}
+
+    const payload = { 
         prompt: prompt.value, 
         negative_prompt: negativePrompt.value,
         target, 
-        model: authStore.user?.lollms_model_name 
-    });
+        model: authStore.user?.lollms_model_name,
+        instructions: options.instructions || '',
+        mode: options.mode || 'description',
+        image_b64s: imageContext
+    };
+
+    try {
+        const task = await imageStore.enhanceImagePrompt(payload);
+        if (task && task.id) {
+            activeTaskId.value = task.id;
+        }
+    } catch (e) {
+        if(isComponentMounted.value) {
+            isProcessingTask.value = false;
+            isEnhancing.value = false;
+        }
+    }
 }
 
 function goBack() { router.push('/image-studio'); }
 function saveCanvas() {
-    // Composite: Draw Mask onto Image for preview or just save Image?
-    // User expects to save the visible result.
-    // If masking was used for inpainting, the result will come from backend.
-    // If user painted on Image layer, they want to save that.
+    if (!isComponentMounted.value) return;
     const base64Image = imageCanvasRef.value.toDataURL('image/png').split(',')[1];
     imageStore.saveCanvasAsNewImage({
         base_image_b64: base64Image,
@@ -700,7 +786,6 @@ function saveCanvas() {
     });
 }
 
-// Helpers
 function fitToScreen() {
     if(!containerRef.value || !imageCanvasRef.value) return;
     const cw = containerRef.value.clientWidth, ch = containerRef.value.clientHeight;

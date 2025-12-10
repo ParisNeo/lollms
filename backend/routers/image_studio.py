@@ -20,7 +20,7 @@ from backend.models import UserAuthDetails, TaskInfo
 from backend.models.image import (
     UserImagePublic, ImageGenerationRequest, MoveImageToDiscussionRequest, 
     ImageEditRequest, ImagePromptEnhancementRequest, ImagePromptEnhancementResponse,
-    SaveCanvasRequest
+    SaveCanvasRequest, TimelapseRequest
 )
 from backend.session import (
     get_current_active_user, get_user_data_root, 
@@ -31,7 +31,12 @@ from backend.config import IMAGES_DIR_NAME
 from backend.discussion import get_user_discussion
 from backend.task_manager import task_manager
 from backend.tasks.utils import _to_task_info
-from backend.tasks.image_generation_tasks import _image_studio_generate_task, _image_studio_edit_task, _image_studio_enhance_prompt_task
+from backend.tasks.image_generation_tasks import (
+    _image_studio_generate_task, 
+    _image_studio_edit_task, 
+    _image_studio_enhance_prompt_task,
+    _generate_timelapse_task
+)
 
 image_studio_router = APIRouter(
     prefix="/api/image-studio",
@@ -52,13 +57,17 @@ async def get_image_file(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # Allow fetching by ID (database lookup) OR by filename (direct path check if ID format is filename)
     image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
-    if not image_record:
-        raise HTTPException(status_code=404, detail="Image not found.")
     
-    file_path = get_user_images_path(current_user.username) / image_record.filename
+    filename = image_record.filename if image_record else image_id
+    
+    # Sanitize to ensure user stays within their dir
+    filename = secure_filename(filename)
+    
+    file_path = get_user_images_path(current_user.username) / filename
     if not file_path.is_file():
-        raise HTTPException(status_code=404, detail="Image file not found on disk.")
+        raise HTTPException(status_code=404, detail="File not found on disk.")
         
     return FileResponse(str(file_path))
 
@@ -235,6 +244,24 @@ async def enhance_image_prompt(
         target=_image_studio_enhance_prompt_task,
         args=(current_user.username, request.model_dump()),
         description="AI is enhancing your prompt...",
+        owner_username=current_user.username
+    )
+    return db_task
+
+@image_studio_router.post("/timelapse", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+async def generate_timelapse(
+    request: TimelapseRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    model_full_name = request.model or current_user.tti_binding_model_name
+    if not model_full_name or '/' not in model_full_name:
+        raise HTTPException(status_code=400, detail="A valid TTI model must be selected for timelapse generation.")
+
+    db_task = task_manager.submit_task(
+        name=f"Generating Timelapse ({len(request.keyframes)} frames)",
+        target=_generate_timelapse_task,
+        args=(current_user.username, request.model_dump()),
+        description="Generating storyboard images and compiling video...",
         owner_username=current_user.username
     )
     return db_task

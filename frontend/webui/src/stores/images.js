@@ -1,6 +1,6 @@
 // [UPDATE] frontend/webui/src/stores/images.js
 import { defineStore } from 'pinia';
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, watch } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useTasksStore } from './tasks';
@@ -27,6 +27,7 @@ export const useImageStore = defineStore('images', () => {
     
     let saveDebounceTimer = null;
 
+    // Watch for user object to become available and initialize state
     watch(() => authStore.user, (newUser) => {
         if (newUser) {
             prompt.value = newUser.image_studio_prompt || '';
@@ -38,6 +39,7 @@ export const useImageStore = defineStore('images', () => {
         }
     }, { immediate: true });
 
+    // Watch for changes to persist them
     watch([prompt, negativePrompt, imageSize, nImages, seed, generationParams], () => {
         if (!authStore.isAuthenticated) return;
         
@@ -62,9 +64,7 @@ export const useImageStore = defineStore('images', () => {
             try {
                 result = JSON.parse(result);
             } catch (e) {
-                console.error("Failed to parse task result JSON:", e);
-                // If parsing fails but it's an enhancement task, it might just be the text prompt directly?
-                // But normally our backend returns JSON. Proceeding with raw string if parse fails.
+                // If parsing fails, use raw string (some tasks might return plain text)
             }
         }
 
@@ -78,6 +78,7 @@ export const useImageStore = defineStore('images', () => {
                 if (result.prompt) prompt.value = result.prompt;
                 if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
                 
+                // Emit event for components to react (e.g. Editor)
                 emit('prompt:enhanced', result);
                 uiStore.addNotification('Prompt enhanced successfully!', 'success');
             } else if (task.status === 'failed') {
@@ -94,6 +95,10 @@ export const useImageStore = defineStore('images', () => {
                 const reversedNewItems = [...newItems].reverse();
                 // Add to the beginning of the list
                 images.value.unshift(...reversedNewItems);
+                
+                // Emit event so Editor can catch the new image
+                emit('image:generated', reversedNewItems[0]); 
+                
                 uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
             }
         } else if ((isImageTask || isEditTask) && task.status === 'failed') {
@@ -101,13 +106,8 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
-    onMounted(() => {
-        on('task:completed', handleTaskCompletion);
-    });
-
-    onUnmounted(() => {
-        off('task:completed', handleTaskCompletion);
-    });
+    // REGISTER LISTENERS IMMEDIATELY (Fixes the issue where they weren't attached)
+    on('task:completed', handleTaskCompletion);
 
     async function fetchImages() {
         isLoading.value = true;
@@ -127,7 +127,7 @@ export const useImageStore = defineStore('images', () => {
         try {
             const response = await apiClient.post('/api/image-studio/generate', payload);
             tasksStore.addTask(response.data);
-            uiStore.addNotification(`Image generation started for ${payload.n} image(s). Check task manager for progress.`, 'info');
+            uiStore.addNotification(`Image generation started for ${payload.n} image(s).`, 'info');
             return response.data;
         } finally {
             isGenerating.value = false;
@@ -139,8 +139,8 @@ export const useImageStore = defineStore('images', () => {
         try {
             const response = await apiClient.post('/api/image-studio/edit', payload);
             tasksStore.addTask(response.data);
-            uiStore.addNotification('Image edit task started. Check task manager for progress.', 'info');
-            return response.data;
+            uiStore.addNotification('Image edit task started...', 'info');
+            return response.data; // Returns task info
         } finally {
             isGenerating.value = false;
         }
@@ -225,14 +225,12 @@ export const useImageStore = defineStore('images', () => {
         isLoading,
         isGenerating,
         isEnhancing,
-        // Persistent state
         prompt,
         negativePrompt,
         imageSize,
         nImages,
         seed,
         generationParams,
-        // Actions
         fetchImages,
         generateImage,
         editImage,

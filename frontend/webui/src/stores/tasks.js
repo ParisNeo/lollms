@@ -33,7 +33,8 @@ export const useTasksStore = defineStore('tasks', () => {
             (t.status === 'running' || t.status === 'pending') &&
             (
                 (t.name.startsWith('Generating') && t.name.includes('image(s)')) ||
-                t.name.startsWith('Editing image:')
+                t.name.startsWith('Editing image:') ||
+                t.name.startsWith('Generating Timelapse')
             )
         );
     });
@@ -62,18 +63,18 @@ export const useTasksStore = defineStore('tasks', () => {
 
     function addTask(taskData) {
         const index = tasks.value.findIndex(t => t.id === taskData.id);
-        const oldTask = index !== -1 ? { ...tasks.value[index] } : null;
-
+        
         if (index !== -1) {
             tasks.value[index] = { ...tasks.value[index], ...taskData };
         } else {
             tasks.value.unshift(taskData);
         }
 
-        const wasActive = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending');
-        const isNowFinished = ['completed', 'failed', 'cancelled'].includes(taskData.status);
+        const isFinished = ['completed', 'failed', 'cancelled'].includes(taskData.status);
 
-        if (wasActive && isNowFinished) {
+        // Always emit completion for finished tasks so subscribers (like ImageStore) 
+        // can handle the result, even if the 'running' state was missed.
+        if (isFinished) {
             emit('task:completed', taskData);
         }
     }
@@ -83,8 +84,6 @@ export const useTasksStore = defineStore('tasks', () => {
         const currentUser = authStore.user;
         if (!currentUser) return;
 
-        // If username is null, it's a global clear for admins.
-        // If it matches the current user, it's a personal clear.
         if (data.username === null || data.username === currentUser.username) {
             tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
         }
@@ -94,10 +93,10 @@ export const useTasksStore = defineStore('tasks', () => {
     async function cancelTask(taskId) {
         try {
             const response = await apiClient.post(`/api/tasks/${taskId}/cancel`);
-            addTask(response.data); // Update the task with the 'cancelled' state from the backend
+            addTask(response.data);
             uiStore.addNotification('Task cancellation processed.', 'info');
         } catch (error) {
-            // Error is handled by global interceptor
+            // Error handled globally
         }
     }
 
@@ -105,9 +104,9 @@ export const useTasksStore = defineStore('tasks', () => {
         try {
             const response = await apiClient.post('/api/tasks/cancel-all');
             uiStore.addNotification(response.data.message || 'All active tasks cancelled.', 'success');
-            await fetchTasks(); // Refresh list to show updated statuses
+            await fetchTasks();
         } catch (error) {
-            // Error is handled by global interceptor
+            // Error handled globally
         }
     }
 
@@ -118,22 +117,19 @@ export const useTasksStore = defineStore('tasks', () => {
             const response = await apiClient.post('/api/tasks/clear-completed');
             uiStore.addNotification(response.data.message || 'Completed tasks cleared.', 'success');
             
-            // Perform local update for immediate UI feedback
             const authStore = useAuthStore();
             if (authStore.isAdmin) {
-                // Admin clears all completed tasks
                 tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
             } else {
-                // Regular user clears only their own completed tasks
                 const username = authStore.user?.username;
                 tasks.value = tasks.value.filter(task => {
                     const isCompleted = ['completed', 'failed', 'cancelled'].includes(task.status);
-                    if (!isCompleted) return true; // Keep active tasks
+                    if (!isCompleted) return true;
                     return task.owner_username !== username;
                 });
             }
         } catch (error) {
-            // Error is handled by global interceptor
+            // Error handled globally
         } finally {
             isClearingTasks.value = false;
         }
@@ -148,7 +144,7 @@ export const useTasksStore = defineStore('tasks', () => {
             const authStore = useAuthStore();
             const currentFilter = authStore.isAdmin ? 'all' : 'me';
             fetchTasks(currentFilter);
-        }, 5000); // Poll every 5 seconds
+        }, 5000);
     }
 
     function stopPolling() {

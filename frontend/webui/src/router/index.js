@@ -1,8 +1,6 @@
+// [UPDATE] frontend/webui/src/router/index.js
 import { createRouter, createWebHistory } from 'vue-router'
 import HomeView from '../views/HomeView.vue'
-import LoginView from '../components/modals/LoginModal.vue' // Keep existing if used, or adjust
-// Note: Since HomeView handles sub-views like Chat and Feed via state, we keep routes simple.
-// However, we should check if explicit routes are needed for direct linking.
 
 const routes = [
   {
@@ -51,7 +49,7 @@ const routes = [
     component: () => import('../views/ResetPasswordView.vue')
   },
   {
-    path: '/app/:appId', // For SSO client apps
+    path: '/app/:appId',
     name: 'SsoLogin',
     component: () => import('../views/SsoLoginView.vue')
   },
@@ -71,11 +69,15 @@ const routes = [
     component: () => import('../views/ImageEditorView.vue'),
     props: true
   },
-  // Add direct route for messages if desired, though HomeView handles it too via state
+  {
+    path: '/image-studio/timelapse',
+    name: 'Timelapse',
+    component: () => import('../views/TimelapseView.vue')
+  },
   {
     path: '/messages',
     name: 'Messages',
-    component: () => import('../views/MessagesView.vue') // Or redirect to Home with state
+    component: () => import('../views/MessagesView.vue')
   }
 ]
 

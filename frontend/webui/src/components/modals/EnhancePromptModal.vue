@@ -1,56 +1,69 @@
 <template>
-  <GenericModal modal-name="enhancePrompt" title="Enhance Prompt" max-width-class="max-w-lg">
-    <template #body>
-      <div class="space-y-4">
-        <div>
-          <label for="enhancement-instructions" class="block text-sm font-medium">Instructions</label>
-          <textarea id="enhancement-instructions" v-model="instructions" rows="3" class="input-field mt-1" placeholder="Optional: Guide the AI... e.g., 'make it more cinematic' or 'change the car to red'"></textarea>
-        </div>
-        <div>
-          <label for="enhancement-mode" class="block text-sm font-medium">Enhancement Mode</label>
-          <select id="enhancement-mode" v-model="mode" class="input-field mt-1">
-            <option value="description">Full Description</option>
-            <option value="update">Update Instructions</option>
-          </select>
-          <p class="text-xs text-gray-500 mt-1">
-            <b>Full Description:</b> Re-writes the prompt with more detail.<br>
-            <b>Update Instructions:</b> Treats your prompt as instructions to change an image.
-          </p>
-        </div>
-      </div>
-    </template>
-    <template #footer>
-      <button @click="uiStore.closeModal('enhancePrompt')" type="button" class="btn btn-secondary">Cancel</button>
-      <button @click="handleConfirm" type="button" class="btn btn-primary">Enhance</button>
-    </template>
-  </GenericModal>
+    <GenericModal modal-name="enhancePrompt" title="Enhance Prompt" max-width-class="max-w-lg">
+        <template #body>
+            <div class="space-y-4">
+                <p class="text-sm text-gray-600 dark:text-gray-300">
+                    Configure how the AI should enhance your prompt.
+                </p>
+                
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Instructions (Optional)</label>
+                    <textarea 
+                        v-model="localInstructions" 
+                        rows="3" 
+                        class="input-field w-full text-sm" 
+                        placeholder="e.g. 'Make it more cinematic', 'Add cyberpunk elements', 'Focus on lighting'"
+                    ></textarea>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Mode</label>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" v-model="localMode" value="description" class="text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm">Description (Enhance details)</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="radio" v-model="localMode" value="update" class="text-blue-600 focus:ring-blue-500">
+                            <span class="text-sm">Update (Apply instructions)</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template #footer>
+            <button @click="uiStore.closeModal('enhancePrompt')" class="btn btn-secondary">Cancel</button>
+            <button @click="handleConfirm" class="btn btn-primary">Enhance</button>
+        </template>
+    </GenericModal>
 </template>
 
 <script setup>
 import { ref, watch, computed } from 'vue';
-import GenericModal from './GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
+import GenericModal from './GenericModal.vue';
 
 const uiStore = useUiStore();
-const modalProps = computed(() => uiStore.modalData('enhancePrompt'));
+const props = computed(() => uiStore.modalData('enhancePrompt'));
 
-const instructions = ref('');
-const mode = ref('description');
+const localInstructions = ref('');
+const localMode = ref('description');
 
-watch(modalProps, (props) => {
-  if (props) {
-    instructions.value = props.instructions || '';
-    mode.value = props.mode || 'description';
-  }
+// Sync with props when modal opens
+watch(props, (newProps) => {
+    if (newProps) {
+        localInstructions.value = newProps.instructions || '';
+        localMode.value = newProps.mode || 'description';
+    }
 }, { immediate: true });
 
 function handleConfirm() {
-  if (modalProps.value?.onConfirm) {
-    modalProps.value.onConfirm({
-      instructions: instructions.value,
-      mode: mode.value
-    });
-  }
-  uiStore.closeModal('enhancePrompt');
+    if (props.value?.onConfirm) {
+        props.value.onConfirm({
+            instructions: localInstructions.value,
+            mode: localMode.value
+        });
+    }
+    uiStore.closeModal('enhancePrompt');
 }
 </script>

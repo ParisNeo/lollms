@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/components/ui/AuthenticatedImage.vue -->
 <template>
   <div class="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-700">
     <div v-if="isLoading" class="w-full h-full animate-pulse bg-gray-300 dark:bg-gray-600"></div>
@@ -48,7 +47,8 @@ async function fetchImage() {
     objectUrl = URL.createObjectURL(response.data);
     imageUrl.value = objectUrl;
   } catch (e) {
-    console.error(`Failed to load authenticated image from ${props.src}`, e);
+    // console.error(`Failed to load authenticated image from ${props.src}`, e);
+    // Suppress console error for 404/401 to keep logs clean, just show UI error
     error.value = true;
   } finally {
     isLoading.value = false;

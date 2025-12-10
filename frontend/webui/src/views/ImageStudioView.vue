@@ -310,6 +310,15 @@ watch(selectedModelDetails, (details) => {
     }
 }, { immediate: true, deep: true });
 
+// --- Auto-Refresh Watcher ---
+watch(imageGenerationTasksCount, (newCount, oldCount) => {
+    if (oldCount > 0 && newCount === 0) {
+        setTimeout(() => {
+            imageStore.fetchImages();
+        }, 1000);
+    }
+});
+
 onMounted(() => {
     uiStore.setPageTitle({ title: 'Image Studio', icon: markRaw(IconPhoto) });
     imageStore.fetchImages();

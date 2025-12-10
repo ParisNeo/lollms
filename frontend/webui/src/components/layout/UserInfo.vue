@@ -19,7 +19,7 @@ import IconChevronUp from '../../assets/icons/IconChevronUp.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
-
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue'; // Placeholder for timelapse if needed, using generic
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -216,6 +216,10 @@ const vOnClickOutside = {
                             <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item flex items-center gap-3">
                                 <IconPhoto class="h-5 w-5 text-gray-500" />
                                 <span>Image Studio</span>
+                            </router-link>
+                            <router-link v-if="isTtiConfigured" to="/image-studio/timelapse" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <svg class="h-5 w-5 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>
+                                <span>Timelapse</span>
                             </router-link>
                             <router-link to="/datastores" @click="closeMenu" class="menu-item flex items-center gap-3">
                                 <IconDatabase class="h-5 w-5 text-gray-500" />
