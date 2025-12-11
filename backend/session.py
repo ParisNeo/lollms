@@ -2,30 +2,29 @@
 import json
 import traceback
 import datetime
+import threading
 from pathlib import Path
 from typing import Dict, Optional, Any, cast
 
 from fastapi import HTTPException, Depends, status
-from sqlalchemy.orm import Session, joinedload, object_session, Session as sa_Session
+from sqlalchemy.orm import Session, joinedload, object_session
 from werkzeug.utils import secure_filename
-from jose import jwt, JWTError
 from ascii_colors import trace_exception, ASCIIColors
 
-from backend.db import get_db, session as db_session_module
-from backend.db.models.service import MCP as DBMCP, App as DBApp
+from backend.db import get_db
 from backend.db.models.user import User as DBUser
+from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
-from backend.db.models.service import MCP as DBMCP
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
 from lollms_client import LollmsClient
 from backend.models.user import UserAuthDetails
 from backend.models.auth import TokenData
-from backend.security import oauth2_scheme, SECRET_KEY, ALGORITHM, decode_main_access_token
+from backend.security import oauth2_scheme, decode_main_access_token
 from backend.config import (
     APP_DATA_DIR,
     SAFE_STORE_DEFAULTS,
-    USERS_DIR_NAME,  # Import USERS_DIR_NAME
+    USERS_DIR_NAME,
     TEMP_UPLOADS_DIR_NAME,
     DISCUSSION_ASSETS_DIR_NAME,
     DM_ASSETS_DIR_NAME,
@@ -41,26 +40,24 @@ try:
 except ImportError:
     safe_store = None
 
+# Global In-Memory Session Cache
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
+# Locks to prevent race conditions during concurrent requests
+_session_init_lock = threading.Lock()
+_client_build_locks: Dict[str, threading.Lock] = {}
+_client_build_locks_lock = threading.Lock()
 
 # helper function
 def ensure_bool(value, default=False):
     """
     Ensures a value is a boolean.  Attempts to parse strings as booleans.
-
-    Args:
-        value: The value to convert.
-        default: The default boolean value to return if parsing fails.
-
-    Returns:
-        A boolean value.
     """
     if isinstance(value, bool):
-        return value  # Already a boolean, no conversion needed
+        return value
     elif isinstance(value, str):
         try:
-            return value.lower() in ("true", "yes", "1")  # Case-insensitive check
+            return value.lower() in ("true", "yes", "1")
         except:
             return default
     else:
@@ -108,7 +105,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     db = object_session(db_user)
     db_was_created = False
     if not db:
-        print(f"WARNING: db_user object for '{username}' was detached. Getting a new session.")
+        # print(f"WARNING: db_user object for '{username}' was detached. Getting a new session.")
         db = next(get_db())
         db_user = db.merge(db_user)
         db_was_created = True
@@ -116,7 +113,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     try:
         # Enforce Expert UI for admins
         if db_user.is_admin and db_user.user_ui_level != 4:
-            print(f"INFO: Correcting UI level for admin user '{db_user.username}' to Expert (4).")
+            # print(f"INFO: Correcting UI level for admin user '{db_user.username}' to Expert (4).")
             db_user.user_ui_level = 4
             try:
                 db.commit()
@@ -125,62 +122,32 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 print(f"ERROR: Could not persist corrected UI level for admin '{db_user.username}'. Error: {e}")
                 db.rollback()
 
-        # --- Handle force_once for TTI model ---
-        force_tti_mode = settings.get("force_tti_model_mode", "disabled")
-        force_tti_name = settings.get("force_tti_model_name")
-        tti_model_forced = (force_tti_mode == "force_always" and force_tti_name)
-
-        if tti_model_forced:
-            db_user.tti_binding_model_name = force_tti_name
-        elif force_tti_mode == "force_once" and force_tti_name and db_user.tti_binding_model_name != force_tti_name:
-            print(f"INFO: Forcing TTI model for user '{db_user.username}' to '{force_tti_name}'.")
-            db_user.tti_binding_model_name = force_tti_name
-            try:
-                db.commit()
-                db.refresh(db_user)
-            except Exception as e:
-                print(f"ERROR: Could not persist forced TTI model for user '{db_user.username}'. Error: {e}")
-                db.rollback()
-
-        # --- Handle force_once for ITI model ---
-        force_iti_mode = settings.get("force_iti_model_mode", "disabled")
-        force_iti_name = settings.get("force_iti_model_name")
-        iti_model_forced = (force_iti_mode == "force_always" and force_iti_name)
-
-        if iti_model_forced:
-            db_user.iti_binding_model_name = force_iti_name
-        elif force_iti_mode == "force_once" and force_iti_name and db_user.iti_binding_model_name != force_iti_name:
-            print(f"INFO: Forcing ITI model for user '{db_user.username}' to '{force_iti_name}'.")
-            db_user.iti_binding_model_name = force_iti_name
-            try:
-                db.commit()
-                db.refresh(db_user)
-            except Exception as e:
-                print(f"ERROR: Could not persist forced ITI model for user '{db_user.username}'. Error: {e}")
-                db.rollback()
-        
-        # Initialize session if needed
+        # Initialize session if needed (THREAD-SAFE)
         if username not in user_sessions:
-            print(f"INFO: Re-initializing session for {username} on first request after server start.")
-            session_llm_params = {
-                "ctx_size": db_user.llm_ctx_size, "temperature": db_user.llm_temperature,
-                "top_k": db_user.llm_top_k, "top_p": db_user.llm_top_p,
-                "repeat_penalty": db_user.llm_repeat_penalty, "repeat_last_n": db_user.llm_repeat_last_n,
-                "put_thoughts_in_context": db_user.put_thoughts_in_context
-            }
-            user_sessions[username] = {
-                "safe_store_instances": {}, "discussions": {},
-                "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
-                "lollms_model_name": db_user.lollms_model_name,
-                "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
-                "active_personality_id": db_user.active_personality_id,
-            }
+            with _session_init_lock:
+                if username not in user_sessions: # Double check inside lock
+                    print(f"INFO: Re-initializing session for {username} on first request after server start.")
+                    session_llm_params = {
+                        "ctx_size": db_user.llm_ctx_size, "temperature": db_user.llm_temperature,
+                        "top_k": db_user.llm_top_k, "top_p": db_user.llm_top_p,
+                        "repeat_penalty": db_user.llm_repeat_penalty, "repeat_last_n": db_user.llm_repeat_last_n,
+                        "put_thoughts_in_context": db_user.put_thoughts_in_context
+                    }
+                    user_sessions[username] = {
+                        "safe_store_instances": {}, "discussions": {},
+                        "active_vectorizer": db_user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer"),
+                        "lollms_model_name": db_user.lollms_model_name,
+                        "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
+                        "active_personality_id": db_user.active_personality_id,
+                    }
 
         user_model_full = db_user.lollms_model_name
         session = user_sessions[username]
+        
+        # Sync model name if changed in DB
         if session.get("lollms_model_name") != user_model_full:
             session["lollms_model_name"] = user_model_full
-            print(f"INFO: Synced session model name for '{username}' to '{user_model_full}'.")
+            # print(f"INFO: Synced session model name for '{username}' to '{user_model_full}'.")
 
         llm_settings_overridden = False
         effective_llm_params = {
@@ -191,7 +158,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "llm_repeat_penalty": db_user.llm_repeat_penalty,
             "llm_repeat_last_n": db_user.llm_repeat_last_n,
             "put_thoughts_in_context": db_user.put_thoughts_in_context,
-            # Reasoning params - merged later with alias if needed
             "reasoning_activation": db_user.reasoning_activation,
             "reasoning_effort": db_user.reasoning_effort,
             "reasoning_summary": db_user.reasoning_summary
@@ -212,11 +178,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 
                 alias_info = binding.model_aliases.get(model_name)
                 
-                # Check for lock
                 if alias_info and alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
                     ctx_size_to_enforce = alias_info['ctx_size']
                 
-                # Check for general overrides
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
                     param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n", "reasoning_activation": "reasoning_activation", "reasoning_effort": "reasoning_effort", "reasoning_summary": "reasoning_summary"}
@@ -226,34 +190,26 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                             if alias_key == 'ctx_size':
                                 ctx_size_to_enforce = alias_info['ctx_size']
 
-        # Apply the enforcement
         if ctx_size_to_enforce is not None:
             effective_llm_params["llm_ctx_size"] = ctx_size_to_enforce
-            
-            # 1. Update DB if different
             if db_user.llm_ctx_size != ctx_size_to_enforce:
-                print(f"INFO: Enforcing locked context size {ctx_size_to_enforce} for user '{username}'.")
                 db_user.llm_ctx_size = ctx_size_to_enforce
                 try:
                     db.commit()
                     db.refresh(db_user)
                 except Exception as e:
-                    print(f"ERROR: Could not permanently update user context size. Error: {e}")
                     db.rollback()
             
-            # 2. Update Session if different (Critical Fix)
-            # We must ensure the session params also reflect the lock, otherwise the Client builder might use stale session data
             session_params = user_sessions[username].get("llm_params", {})
             if session_params.get("ctx_size") != ctx_size_to_enforce:
                 session_params["ctx_size"] = ctx_size_to_enforce
                 user_sessions[username]["llm_params"] = session_params
-                # Invalidate client cache to force rebuild with new size
                 user_sessions[username]["lollms_clients_cache"] = {}
-                print(f"INFO: Updated session params and invalidated client cache for '{username}' due to context size lock.")
 
-        
         lc = get_user_lollms_client(username)
         ai_name_for_user = getattr(lc, "ai_name", "assistant")
+        
+        # Helper bools
         is_api_service_enabled = ensure_bool(settings.get("openai_api_service_enabled", False), False)
         is_api_require_key = ensure_bool(settings.get("openai_api_require_key", True), True)
         is_ollama_service_enabled = ensure_bool(settings.get("ollama_service_enabled", False), False)
@@ -262,7 +218,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         allow_user_chunking_config = ensure_bool(settings.get("allow_user_chunking_config", True), True)
         default_chunk_size = settings.get("default_chunk_size", 2048)
         default_chunk_overlap = settings.get("default_chunk_overlap", 256)
-
 
         return UserAuthDetails(
             id=db_user.id, username=username, is_admin=db_user.is_admin, is_moderator=(db_user.is_admin or db_user.is_moderator), is_active=db_user.is_active,
@@ -305,8 +260,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             ollama_require_key=is_ollama_require_key,
             include_memory_date_in_context=db_user.include_memory_date_in_context,
             llm_settings_overridden=llm_settings_overridden,
-            tti_model_forced=tti_model_forced,
-            iti_model_forced=iti_model_forced,
+            tti_model_forced=False,
+            iti_model_forced=False,
             latex_builder_enabled=latex_builder_enabled,
             coding_style_constraints=db_user.coding_style_constraints,
             programming_language_preferences=db_user.programming_language_preferences,
@@ -357,7 +312,6 @@ def load_mcps(username):
                 session["access_token"] = create_access_token(data={"sub": user_db.username})
                 access_token = session.get("access_token")
             else:
-                # Generate a temporary token if no session exists (for background tasks)
                 access_token = create_access_token(data={"sub": user_db.username})
             
             personal_mcps = [mcp for mcp in user_db.personal_mcps if mcp.active]
@@ -407,7 +361,7 @@ def reload_lollms_client_mcp(username: str):
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
-        print(f"INFO: No active session for '{username}' in get_user_lollms_client. Building temporary client.")
+        # print(f"INFO: No active session for '{username}' in get_user_lollms_client. Building temporary client.")
         return build_lollms_client_from_params(username, binding_alias_override)
 
     clients_cache = session.setdefault("lollms_clients_cache", {})
@@ -415,14 +369,30 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
     # Determine cache key: 'default' for user's main model, or the specific override alias
     cache_key = binding_alias_override or "default"
 
+    # Fast path check before locking
     if cache_key in clients_cache:
         # print(f"DEBUG: Returning cached client for user '{username}' with key '{cache_key}'.")
         return clients_cache[cache_key]
     
-    print(f"INFO: LollmsClient not in cache for user '{username}' with key '{cache_key}'. Building new client.")
-    client = build_lollms_client_from_params(username, binding_alias_override)
-    clients_cache[cache_key] = client
-    return client
+    # --- THREAD LOCKING START ---
+    # Ensure a lock exists for this specific user+key combination
+    lock_key = f"{username}_{cache_key}"
+    
+    with _client_build_locks_lock:
+        if lock_key not in _client_build_locks:
+            _client_build_locks[lock_key] = threading.Lock()
+        lock = _client_build_locks[lock_key]
+
+    with lock:
+        # Double-check inside lock in case another thread finished building while we waited
+        if cache_key in clients_cache:
+            return clients_cache[cache_key]
+
+        print(f"INFO: LollmsClient not in cache for user '{username}' with key '{cache_key}'. Building new client.")
+        client = build_lollms_client_from_params(username, binding_alias_override)
+        clients_cache[cache_key] = client
+        return client
+    # --- THREAD LOCKING END ---
 
 
 def build_lollms_client_from_params(
@@ -446,8 +416,6 @@ def build_lollms_client_from_params(
 ) -> LollmsClient:
     session = user_sessions.get(username)
     
-    # NEW: If no session, create a temporary one for this call.
-    # This is for background tasks that need a client but don't have a user session.
     is_temp_session = False
     if not session:
         is_temp_session = True
@@ -456,7 +424,7 @@ def build_lollms_client_from_params(
             "discussions": {},
             "llm_params": {},
         }
-        print(f"INFO: No active session for '{username}'. Creating temporary client context.")
+        # print(f"INFO: No active session for '{username}'. Creating temporary client context.")
 
     db = next(get_db())
     try:
@@ -532,7 +500,6 @@ def build_lollms_client_from_params(
                 "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
                 "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
                 "put_thoughts_in_context": user_db.put_thoughts_in_context,
-                # NEW: Add reasoning parameters here
                 "reasoning_activation": user_db.reasoning_activation,
                 "reasoning_effort": user_db.reasoning_effort,
                 "reasoning_summary": user_db.reasoning_summary
@@ -796,9 +763,7 @@ def get_safe_store_instance(
     
     if datastore_id not in session.get("safe_store_instances", {}):
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
-        ASCIIColors.info(f"Recovering vectorizer:{datastore_record.vectorizer_name}")
-        ASCIIColors.info(f"Configuration:{datastore_record.vectorizer_config}")
-        ASCIIColors.info(f"Name:{datastore_record.name}")
+        # ASCIIColors.info(f"Recovering vectorizer:{datastore_record.vectorizer_name}")
         try:
             ss_instance = safe_store.SafeStore(
                 name=datastore_record.name,

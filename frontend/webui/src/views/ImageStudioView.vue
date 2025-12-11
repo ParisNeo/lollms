@@ -1,8 +1,8 @@
 <template>
     <Teleport to="#global-header-actions-target">
         <div class="flex items-center gap-2">
-            <button @click="handleGenerateOrApply" class="btn btn-primary" :disabled="isGenerating || enhancingTarget">
-                <IconAnimateSpin v-if="isGenerating || enhancingTarget" class="w-5 h-5 mr-2 animate-spin" />
+            <button @click="handleGenerateOrApply" class="btn btn-primary" :disabled="isGenerating || isAnyEnhancing">
+                <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2 animate-spin" />
                 {{ isSelectionMode ? 'Apply Edit' : 'Generate' }}
             </button>
         </div>
@@ -27,22 +27,32 @@
                         <div>
                             <div class="flex justify-between items-center mb-1">
                                 <label for="prompt" class="text-sm font-semibold text-gray-700 dark:text-gray-200">Prompt</label>
-                                <button @click="openEnhanceModal('prompt')" class="text-blue-600 dark:text-blue-400 hover:text-blue-700 p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Enhance prompt with AI" :disabled="enhancingTarget">
+                                <button @click="openEnhanceModal('prompt')" class="text-blue-600 dark:text-blue-400 hover:text-blue-700 p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Enhance prompt with AI" :disabled="isAnyEnhancing">
                                     <IconSparkles class="w-4 h-4" />
                                 </button>
                             </div>
-                            <textarea id="prompt" v-model="prompt" rows="4" class="input-field w-full resize-none shadow-sm" placeholder="Describe your image..."></textarea>
+                            <div class="relative">
+                                <textarea id="prompt" v-model="prompt" rows="4" class="input-field w-full resize-none shadow-sm" :class="{'opacity-50 pointer-events-none': isEnhancingPrompt}" :disabled="isEnhancingPrompt" placeholder="Describe your image..."></textarea>
+                                <div v-if="isEnhancingPrompt" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-white/20 dark:bg-black/20 backdrop-blur-sm rounded">
+                                    <IconAnimateSpin class="w-6 h-6 text-blue-500 animate-spin" />
+                                </div>
+                            </div>
                         </div>
                         <div>
                              <div class="flex justify-between items-center mb-1">
                                 <label for="negative-prompt" class="text-sm font-semibold text-gray-700 dark:text-gray-200">Negative Prompt</label>
-                                <button @click="openEnhanceModal('negative_prompt')" class="text-red-600 dark:text-red-400 hover:text-red-700 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" title="Enhance negative prompt with AI" :disabled="enhancingTarget">
+                                <button @click="openEnhanceModal('negative_prompt')" class="text-red-600 dark:text-red-400 hover:text-red-700 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" title="Enhance negative prompt with AI" :disabled="isAnyEnhancing">
                                     <IconSparkles class="w-4 h-4" />
                                 </button>
                             </div>
-                            <textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field w-full resize-none shadow-sm" placeholder="Things to avoid..."></textarea>
+                            <div class="relative">
+                                <textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field w-full resize-none shadow-sm" :class="{'opacity-50 pointer-events-none': isEnhancingNegative}" :disabled="isEnhancingNegative" placeholder="Things to avoid..."></textarea>
+                                <div v-if="isEnhancingNegative" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-white/20 dark:bg-black/20 backdrop-blur-sm rounded">
+                                    <IconAnimateSpin class="w-6 h-6 text-red-500 animate-spin" />
+                                </div>
+                            </div>
                         </div>
-                        <button @click="openEnhanceModal('both')" class="btn btn-secondary w-full text-xs py-1.5" :disabled="enhancingTarget">
+                        <button @click="openEnhanceModal('both')" class="btn btn-secondary w-full text-xs py-1.5" :disabled="isAnyEnhancing">
                             <IconSparkles class="w-3 h-3 mr-1.5" /> Enhance All
                         </button>
                     </div>
@@ -250,7 +260,7 @@ const tasksStore = useTasksStore();
 const router = useRouter();
 
 const { 
-    images, isLoading, isGenerating, isEnhancing,
+    images, isLoading, isGenerating,
     prompt, negativePrompt, imageSize, nImages, seed, generationParams 
 } = storeToRefs(imageStore);
 const { user } = storeToRefs(authStore);
@@ -258,7 +268,12 @@ const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksSto
 const { currentModelVisionSupport } = storeToRefs(discussionsStore);
 
 const isConfigVisible = ref(true);
-const enhancingTarget = computed(() => isEnhancing.value);
+
+// --- Local state for task monitoring ---
+const isEnhancingPrompt = ref(false);
+const isEnhancingNegative = ref(false);
+const isAnyEnhancing = computed(() => isEnhancingPrompt.value || isEnhancingNegative.value);
+
 const enhancementInstructions = ref('');
 const enhancementMode = ref('description');
 
@@ -377,6 +392,10 @@ async function handleEnhance(type, options = {}) {
         return;
     }
     
+    // Set local loading state
+    if (type === 'prompt' || type === 'both') isEnhancingPrompt.value = true;
+    if (type === 'negative_prompt' || type === 'both') isEnhancingNegative.value = true;
+
     const payload = { 
         prompt: prompt.value, 
         negative_prompt: negativePrompt.value, 
@@ -409,7 +428,72 @@ async function handleEnhance(type, options = {}) {
         }
     }
     
-    await imageStore.enhanceImagePrompt(payload);
+    try {
+        uiStore.addNotification('Prompt enhancement started...', 'info');
+        // Dispatch action
+        const task = await imageStore.enhanceImagePrompt(payload);
+        if (task && task.id) {
+            monitorEnhancementTask(task.id, type);
+        } else {
+            // Task creation failed or invalid response
+            resetEnhancingFlags(type);
+        }
+    } catch (e) {
+        console.error("Enhancement failed to start:", e);
+        resetEnhancingFlags(type);
+    }
+}
+
+function monitorEnhancementTask(taskId, type) {
+    console.log(`Monitoring task ${taskId} for ${type}`);
+    const unwatch = watch(
+        () => tasksStore.tasks.find(t => t.id === taskId),
+        (updatedTask) => {
+            if (!updatedTask) {
+                 console.log(`Task ${taskId} not found in store yet.`);
+                 return;
+            }
+            console.log(`Task ${taskId} status: ${updatedTask.status}`);
+
+            if (updatedTask.status === 'completed') {
+                console.log("Task completed. Result:", updatedTask.result);
+                // Success! Update local fields
+                let result = updatedTask.result;
+                if (typeof result === 'string') {
+                    try { result = JSON.parse(result); } catch (e) {}
+                }
+
+                if (result) {
+                    if (result.prompt) imageStore.prompt = result.prompt;
+                    if (result.negative_prompt) imageStore.negativePrompt = result.negative_prompt;
+                    uiStore.addNotification('Prompt enhanced successfully!', 'success');
+                }
+                
+                resetEnhancingFlags(type);
+                unwatch();
+            } else if (['failed', 'cancelled'].includes(updatedTask.status)) {
+                // Failure
+                uiStore.addNotification('Enhancement task failed.', 'error');
+                resetEnhancingFlags(type);
+                unwatch();
+            }
+        },
+        { deep: true, immediate: true }
+    );
+    
+    // Safety timeout - Stop watching after 2 minutes if no completion
+    setTimeout(() => {
+        if (isEnhancingPrompt.value || isEnhancingNegative.value) {
+            console.warn("Task monitoring timed out.");
+            resetEnhancingFlags(type);
+            unwatch();
+        }
+    }, 120000); 
+}
+
+function resetEnhancingFlags(type) {
+    if (type === 'prompt' || type === 'both') isEnhancingPrompt.value = false;
+    if (type === 'negative_prompt' || type === 'both') isEnhancingNegative.value = false;
 }
 
 function openEnhanceModal(target) {

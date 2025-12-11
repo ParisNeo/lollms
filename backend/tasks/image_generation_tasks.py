@@ -391,18 +391,27 @@ def _image_studio_enhance_prompt_task(task: Task, username: str, request_data: d
         task.set_progress(80)
 
         json_match = raw_response[raw_response.find('{'):raw_response.rfind('}') + 1]
+        response_data = {}
+        
         if not json_match:
             if request.mode == 'description' and request.target == 'prompt':
                  task.log("AI did not return valid JSON. Treating response as prompt.", "WARNING")
                  response_data = {'prompt': raw_response.strip()}
             else:
+                 task.log(f"AI Response was: {raw_response}", "ERROR")
                  raise Exception("AI did not return a valid JSON object.")
         else:
             try:
                 enhanced_data = json.loads(json_match)
-                response_data = {}
                 if 'prompt' in enhanced_data: response_data['prompt'] = enhanced_data.get('prompt')
                 if 'negative_prompt' in enhanced_data: response_data['negative_prompt'] = enhanced_data.get('negative_prompt')
+                
+                # Log generated prompts to the task log for user visibility
+                if 'prompt' in response_data:
+                    task.log(f"Enhanced Prompt: {response_data['prompt']}")
+                if 'negative_prompt' in response_data:
+                    task.log(f"Enhanced Negative Prompt: {response_data['negative_prompt']}")
+                    
             except json.JSONDecodeError:
                  raise Exception("Failed to decode AI response as JSON.")
 

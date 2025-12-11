@@ -436,7 +436,7 @@ async def update_tti_model_alias(binding_id: int, payload: TtiModelAliasUpdate, 
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    binding.model_aliases[payload.original_model_name] = payload.alias
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     
     db.commit()
@@ -590,7 +590,7 @@ async def update_tts_model_alias(binding_id: int, payload: TtsModelAliasUpdate, 
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    binding.model_aliases[payload.original_model_name] = payload.alias
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     
     db.commit()
@@ -745,7 +745,7 @@ async def update_stt_model_alias(binding_id: int, payload: SttModelAliasUpdate, 
     if binding.model_aliases is None:
         binding.model_aliases = {}
     
-    binding.model_aliases[payload.original_model_name] = payload.alias
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     
     db.commit()

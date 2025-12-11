@@ -1,4 +1,3 @@
-// [UPDATE] frontend/webui/src/stores/images.js
 import { defineStore } from 'pinia';
 import { ref, watch } from 'vue';
 import apiClient from '../services/api';
@@ -11,11 +10,12 @@ export const useImageStore = defineStore('images', () => {
     const images = ref([]);
     const isLoading = ref(false);
     const isGenerating = ref(false); 
-    const isEnhancing = ref(false);
+    // Removed global isEnhancing flags to handle them locally in the view for better control
+    
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
     const authStore = useAuthStore();
-    const { on, off, emit } = useEventBus();
+    const { on, emit } = useEventBus();
 
     // --- State for Image Studio ---
     const prompt = ref('');
@@ -64,41 +64,21 @@ export const useImageStore = defineStore('images', () => {
             try {
                 result = JSON.parse(result);
             } catch (e) {
-                // If parsing fails, use raw string (some tasks might return plain text)
+                // If parsing fails, use raw string
             }
         }
 
         const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
         const isEditTask = task.name.startsWith('Editing image:');
-        const isEnhanceTask = task.name.startsWith('Enhancing prompt:');
-
-        if (isEnhanceTask) {
-            if (task.status === 'completed' && result) {
-                // Update state directly
-                if (result.prompt) prompt.value = result.prompt;
-                if (result.negative_prompt) negativePrompt.value = result.negative_prompt;
-                
-                // Emit event for components to react (e.g. Editor)
-                emit('prompt:enhanced', result);
-                uiStore.addNotification('Prompt enhanced successfully!', 'success');
-            } else if (task.status === 'failed') {
-                uiStore.addNotification('Prompt enhancement failed.', 'error');
-            }
-            isEnhancing.value = false;
-            return;
-        }
+        
+        // Note: Enhancement task handling is now done locally in the View
 
         if ((isImageTask || isEditTask) && task.status === 'completed' && result) {
             const newItems = Array.isArray(result) ? result : [result];
-            
             if (newItems.length > 0 && newItems[0]) {
                 const reversedNewItems = [...newItems].reverse();
-                // Add to the beginning of the list
                 images.value.unshift(...reversedNewItems);
-                
-                // Emit event so Editor can catch the new image
                 emit('image:generated', reversedNewItems[0]); 
-                
                 uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
             }
         } else if ((isImageTask || isEditTask) && task.status === 'failed') {
@@ -106,7 +86,7 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
-    // REGISTER LISTENERS IMMEDIATELY (Fixes the issue where they weren't attached)
+    // Register Listener
     on('task:completed', handleTaskCompletion);
 
     async function fetchImages() {
@@ -140,7 +120,7 @@ export const useImageStore = defineStore('images', () => {
             const response = await apiClient.post('/api/image-studio/edit', payload);
             tasksStore.addTask(response.data);
             uiStore.addNotification('Image edit task started...', 'info');
-            return response.data; // Returns task info
+            return response.data;
         } finally {
             isGenerating.value = false;
         }
@@ -207,16 +187,15 @@ export const useImageStore = defineStore('images', () => {
     }
 
     async function enhanceImagePrompt(payload) {
-        isEnhancing.value = true;
+        // Just send request and return task, view handles the rest
         try {
             const response = await apiClient.post('/api/image-studio/enhance-prompt', payload);
-            tasksStore.addTask(response.data);
-            uiStore.addNotification('Prompt enhancement started...', 'info');
-            return response.data;
+            const task = response.data;
+            tasksStore.addTask(task);
+            return task;
         } catch (error) {
-            isEnhancing.value = false;
-            // Handled globally
-            return null;
+            console.error("Enhancement request failed", error);
+            throw error;
         }
     }
 
@@ -224,7 +203,6 @@ export const useImageStore = defineStore('images', () => {
         images,
         isLoading,
         isGenerating,
-        isEnhancing,
         prompt,
         negativePrompt,
         imageSize,
