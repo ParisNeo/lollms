@@ -46,6 +46,9 @@ class BindingCommandRequest(BaseModel):
     command_name: str
     parameters: Dict[str, Any] = {}
 
+class ZooInstallRequest(BaseModel):
+    index: int
+
 def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
     """Casts config values to their correct types based on binding description."""
     if binding_type == "llm":
@@ -94,6 +97,57 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
 
     return processed_config
 
+def _get_binding_instance(binding_type: str, binding_name: str, config: Dict[str, Any]):
+    """Helper to instantiate a LollmsClient for a specific binding without loading models if possible."""
+    # Ensure model_name is None to avoid heavy loading if the binding supports lazy loading
+    safe_config = config.copy() if config else {}
+    safe_config['model_name'] = None
+    
+    if binding_type == "llm":
+        return LollmsClient(llm_binding_name=binding_name, llm_binding_config=safe_config, load_llm=True).llm
+    elif binding_type == "tti":
+        return LollmsClient(tti_binding_name=binding_name, tti_binding_config=safe_config, load_tti=True, load_llm=False).tti
+    elif binding_type == "tts":
+        return LollmsClient(tts_binding_name=binding_name, tts_binding_config=safe_config, load_tts=True, load_llm=False).tts
+    elif binding_type == "stt":
+        return LollmsClient(stt_binding_name=binding_name, stt_binding_config=safe_config, load_stt=True, load_llm=False).stt
+    return None
+
+def _install_from_zoo_task(task: Task, binding_type: str, binding_name: str, config: Dict[str, Any], index: int):
+    task.log(f"Starting model installation from zoo for {binding_name}...")
+    task.set_progress(0)
+    
+    try:
+        service = _get_binding_instance(binding_type, binding_name, config)
+        if not service:
+            raise Exception(f"Could not initialize binding service for {binding_type}")
+            
+        if not hasattr(service, 'download_from_zoo'):
+             raise Exception("Binding does not support 'download_from_zoo' method.")
+
+        def progress_callback(data):
+            if isinstance(data, dict):
+                 msg = data.get('status', 'Downloading...')
+                 task.log(msg)
+                 if 'percentage' in data:
+                     task.set_progress(data['percentage'])
+                 elif 'total_size' in data and 'downloaded_size' in data and data['total_size'] > 0:
+                     p = int((data['downloaded_size'] / data['total_size']) * 100)
+                     task.set_progress(p)
+
+        result = service.download_from_zoo(index, progress_callback=progress_callback)
+        if isinstance(result, dict) and result.get('status') == False:
+             raise Exception(result.get('message', 'Installation failed.'))
+             
+        task.log("Installation completed successfully.")
+        task.set_progress(100)
+        return {"message": "Model installed."}
+
+    except Exception as e:
+        task.log(f"Installation failed: {e}", "ERROR")
+        trace_exception(e)
+        raise e
+
 def _execute_binding_command_task(task: Task, binding_type: str, binding_data: Dict, command_name: str, parameters: Dict[str, Any], username: str):
     task.log(f"Starting execution of command '{command_name}' for {binding_type.upper()} binding '{binding_data['alias']}'...")
     task.set_progress(10)
@@ -105,15 +159,15 @@ def _execute_binding_command_task(task: Task, binding_type: str, binding_data: D
             lc = get_user_lollms_client(username, binding_data['alias'])
             service = lc.llm
         elif binding_type == "tti":
-            client_params = { "tti_binding_name": binding_data['name'], "tti_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] } }
+            client_params = { "tti_binding_name": binding_data['name'], "tti_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_tti": True }
             lc = LollmsClient(**client_params)
             service = lc.tti
         elif binding_type == "tts":
-            client_params = { "tts_binding_name": binding_data['name'], "tts_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] } }
+            client_params = { "tts_binding_name": binding_data['name'], "tts_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_tts": True }
             lc = LollmsClient(**client_params)
             service = lc.tts
         elif binding_type == "stt":
-            client_params = { "stt_binding_name": binding_data['name'], "stt_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] } }
+            client_params = { "stt_binding_name": binding_data['name'], "stt_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_stt": True }
             lc = LollmsClient(**client_params)
             service = lc.stt
         else:
@@ -160,7 +214,7 @@ def _generate_model_icon_task(task: Task, username: str, prompt: str):
     task.set_progress(10)
     
     try:
-        lc = get_user_lollms_client(username)
+        lc = build_lollms_client_from_params(username=username, load_llm=False, load_tti=True)
         if not lc.tti:
             raise Exception("Text-to-Image service is not configured for this user.")
 
@@ -304,6 +358,34 @@ async def execute_llm_binding_command(binding_id: int, payload: BindingCommandRe
     )
     return task
 
+@bindings_management_router.get("/bindings/{binding_id}/zoo", response_model=List[Dict])
+async def get_llm_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    try:
+        service = _get_binding_instance("llm", binding.name, binding.config)
+        if service and hasattr(service, 'get_zoo'):
+            return service.get_zoo()
+        return []
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch zoo: {e}")
+
+@bindings_management_router.post("/bindings/{binding_id}/zoo/install", response_model=TaskInfo, status_code=202)
+async def install_llm_from_zoo(binding_id: int, payload: ZooInstallRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+
+    task = task_manager.submit_task(
+        name=f"Install LLM from Zoo",
+        target=_install_from_zoo_task,
+        args=("llm", binding.name, binding.config, payload.index),
+        description=f"Installing model at index {payload.index} for binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
+
 @bindings_management_router.get("/tti-bindings/available_types", response_model=List[Dict])
 async def get_available_tti_binding_types():
     try:
@@ -403,6 +485,34 @@ async def execute_tti_binding_command(binding_id: int, payload: BindingCommandRe
     )
     return task
 
+@bindings_management_router.get("/tti-bindings/{binding_id}/zoo", response_model=List[Dict])
+async def get_tti_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    try:
+        service = _get_binding_instance("tti", binding.name, binding.config)
+        if service and hasattr(service, 'get_zoo'):
+            return service.get_zoo()
+        return []
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch zoo: {e}")
+
+@bindings_management_router.post("/tti-bindings/{binding_id}/zoo/install", response_model=TaskInfo, status_code=202)
+async def install_tti_from_zoo(binding_id: int, payload: ZooInstallRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+
+    task = task_manager.submit_task(
+        name=f"Install TTI Model from Zoo",
+        target=_install_from_zoo_task,
+        args=("tti", binding.name, binding.config, payload.index),
+        description=f"Installing model at index {payload.index} for binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
+
 @bindings_management_router.get("/tti-bindings/{binding_id}/models", response_model=List[BindingModel])
 async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db)):
     binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
@@ -410,7 +520,7 @@ async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="TTI Binding not found.")
     
     try:
-        client_params = { "tti_binding_name": binding.name, "tti_binding_config": { **binding.config, "model_name": binding.default_model_name } }
+        client_params = { "tti_binding_name": binding.name, "tti_binding_config": { **binding.config, "model_name": binding.default_model_name }, "load_llm": False, "load_tti": True }
         lc = LollmsClient(**client_params)
         if not lc.tti:
             raise Exception("Could not build a tti instance from the configuration. make sure you have set all configuration parameters correctly")
@@ -556,6 +666,34 @@ async def execute_tts_binding_command(binding_id: int, payload: BindingCommandRe
     )
     return task
 
+@bindings_management_router.get("/tts-bindings/{binding_id}/zoo", response_model=List[Dict])
+async def get_tts_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    try:
+        service = _get_binding_instance("tts", binding.name, binding.config)
+        if service and hasattr(service, 'get_zoo'):
+            return service.get_zoo()
+        return []
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch zoo: {e}")
+
+@bindings_management_router.post("/tts-bindings/{binding_id}/zoo/install", response_model=TaskInfo, status_code=202)
+async def install_tts_from_zoo(binding_id: int, payload: ZooInstallRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+
+    task = task_manager.submit_task(
+        name=f"Install TTS Model from Zoo",
+        target=_install_from_zoo_task,
+        args=("tts", binding.name, binding.config, payload.index),
+        description=f"Installing model at index {payload.index} for binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
+
 @bindings_management_router.get("/tts-bindings/{binding_id}/models", response_model=List[BindingModel])
 async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db)):
     binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
@@ -563,7 +701,7 @@ async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="TTS Binding not found.")
     
     try:
-        client_params = { "tts_binding_name": binding.name, "tts_binding_config": { **binding.config, "model_name": binding.default_model_name } }
+        client_params = { "tts_binding_name": binding.name, "tts_binding_config": { **binding.config, "model_name": binding.default_model_name }, "load_llm": False, "load_tts": True }
         lc = LollmsClient(**client_params)
         if not lc.tts:
             raise Exception("Could not build a tts instance from the configuration.")
@@ -711,6 +849,34 @@ async def execute_stt_binding_command(binding_id: int, payload: BindingCommandRe
     )
     return task
 
+@bindings_management_router.get("/stt-bindings/{binding_id}/zoo", response_model=List[Dict])
+async def get_stt_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+    
+    try:
+        service = _get_binding_instance("stt", binding.name, binding.config)
+        if service and hasattr(service, 'get_zoo'):
+            return service.get_zoo()
+        return []
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch zoo: {e}")
+
+@bindings_management_router.post("/stt-bindings/{binding_id}/zoo/install", response_model=TaskInfo, status_code=202)
+async def install_stt_from_zoo(binding_id: int, payload: ZooInstallRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
+
+    task = task_manager.submit_task(
+        name=f"Install STT Model from Zoo",
+        target=_install_from_zoo_task,
+        args=("stt", binding.name, binding.config, payload.index),
+        description=f"Installing model at index {payload.index} for binding {binding.alias}",
+        owner_username=current_user.username
+    )
+    return task
+
 @bindings_management_router.get("/stt-bindings/{binding_id}/models", response_model=List[BindingModel])
 async def get_stt_binding_models(binding_id: int, db: Session = Depends(get_db)):
     binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
@@ -718,7 +884,7 @@ async def get_stt_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="STT Binding not found.")
     
     try:
-        client_params = { "stt_binding_name": binding.name, "stt_binding_config": { **binding.config, "model_name": binding.default_model_name } }
+        client_params = { "stt_binding_name": binding.name, "stt_binding_config": { **binding.config, "model_name": binding.default_model_name }, "load_llm": False, "load_stt": True }
         lc = LollmsClient(**client_params)
         if not lc.stt:
             raise Exception("Could not build an STT instance from the configuration.")

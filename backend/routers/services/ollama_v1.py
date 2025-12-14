@@ -29,7 +29,7 @@ from backend.routers.services.openai_v1 import (
     ChatCompletionResponseChoice, ChatCompletionResponse, DeltaMessage,
     ChatCompletionResponseStreamChoice, ChatCompletionStreamResponse,
     preprocess_messages, find_model_by_alias, resolve_model_name,
-    handle_tools_injection, parse_tool_calls_from_text # Added imports
+    handle_tools_injection, parse_tool_calls_from_text
 )
 
 ollama_v1_router = APIRouter(prefix="/ollama/v1")
@@ -134,13 +134,25 @@ async def list_models(
 
                     alias_data = model_aliases.get(model_id)
 
-                    if model_display_mode == 'aliased' and not alias_data:
-                        continue
+                    internal_id = f"{binding.alias}/{model_id}"
 
-                    id_to_send = f"{binding.alias}/{model_id}"
-                    name_to_send = id_to_send
-                    if model_display_mode != 'original' and alias_data and alias_data.get('title'):
-                        name_to_send = alias_data.get('title')
+                    id_to_send = internal_id
+                    name_to_send = internal_id
+                    
+                    if model_display_mode == 'aliased':
+                        if not alias_data:
+                            continue
+                        # In aliased mode, use the alias title as the ID
+                        if alias_data.get('title'):
+                            id_to_send = alias_data.get('title')
+                            name_to_send = alias_data.get('title')
+                            
+                    elif model_display_mode == 'mixed':
+                        if alias_data and alias_data.get('title'):
+                            id_to_send = alias_data.get('title')
+                            name_to_send = alias_data.get('title')
+                    
+                    # For original mode, we keep internal_id
 
                     all_models.append({
                         "id": id_to_send,

@@ -566,13 +566,15 @@ async def list_models(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    ASCIIColors.info(f"---------------> {user.username} is listing the models")
+    ASCIIColors.info(f"------------ Open AI V1 --------------")
+    ASCIIColors.info(f" {user.username} is listing the models")
     all_models = []
     active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
     model_display_mode = settings.get("model_display_mode", "mixed")
 
     for binding in active_bindings:
         try:
+            ASCIIColors.bg_bright_blue(f">{binding.alias}")
             lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
             models = lc.list_models()
             
@@ -591,13 +593,25 @@ async def list_models(
 
                     alias_data = model_aliases.get(model_id)
 
-                    if model_display_mode == 'aliased' and not alias_data:
-                        continue
+                    internal_id = f"{binding.alias}/{model_id}"
 
-                    id_to_send = f"{binding.alias}/{model_id}"
-                    name_to_send = id_to_send
-                    if model_display_mode != 'original' and alias_data and alias_data.get('title'):
-                        name_to_send = alias_data.get('title')
+                    id_to_send = internal_id
+                    name_to_send = internal_id
+                    
+                    if model_display_mode == 'aliased':
+                        if not alias_data:
+                            continue
+                        # In aliased mode, use the alias title as the ID
+                        if alias_data.get('title'):
+                            id_to_send = alias_data.get('title')
+                            name_to_send = alias_data.get('title')
+                            
+                    elif model_display_mode == 'mixed':
+                        if alias_data and alias_data.get('title'):
+                            id_to_send = alias_data.get('title')
+                            name_to_send = alias_data.get('title')
+                    
+                    # For original mode, we keep internal_id
 
                     all_models.append({
                         "id": id_to_send,
@@ -614,6 +628,7 @@ async def list_models(
         raise HTTPException(status_code=404, detail="No models found from any active bindings.")
     
     unique_models = {m["id"]: m for m in all_models}
+    ASCIIColors.info(f"------------ DONE --------------")
     return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
 
 
@@ -622,6 +637,8 @@ async def list_personalities(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
+    ASCIIColors.info(f"------------ Open AI V1 --------------")
+    ASCIIColors.info(f"Personalities listing (lollms custom)")
     personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(
         or_(
             DBPersonality.is_public == True,
@@ -636,6 +653,7 @@ async def list_personalities(
         p_info.owner_username = owner_username
         response_data.append(p_info)
         
+    ASCIIColors.info(f"------------ DONE --------------")
     return PersonalityListResponse(data=response_data)
 
 @openai_v1_router.post("/chat/completions")
@@ -644,6 +662,7 @@ async def chat_completions(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
+    ASCIIColors.info(f"------------ Open AI V1 --------------")
     ASCIIColors.bold(f"Received Chat Completion Request. Model: {request.model}, Stream: {request.stream}")
 
     binding_alias, model_name = resolve_model_name(db, request.model)
@@ -813,6 +832,7 @@ async def chat_completions(
                 ASCIIColors.error(f"Stream Generator Crash: {e}")
                 yield "data: [DONE]\n\n"
 
+        ASCIIColors.info(f"------------ DONE --------------")
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
     else:
@@ -853,6 +873,7 @@ async def chat_completions(
 
             prompt_tokens = lc.count_tokens(str(openai_messages))
             completion_tokens = lc.count_tokens(result_content)
+            ASCIIColors.info(f"------------ DONE --------------")
             
             return ChatCompletionResponse(
                 id=f"chatcmpl-{uuid.uuid4().hex}",
@@ -1082,6 +1103,19 @@ async def get_model_context_size(
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
     
+    # 1. Check alias configuration first for context size override
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
+    if binding:
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try: model_aliases = json.loads(model_aliases)
+            except: model_aliases = {}
+        
+        alias_info = model_aliases.get(model_name)
+        # If alias exists and has a context size set, use it preferentially
+        if alias_info and 'ctx_size' in alias_info and alias_info['ctx_size']:
+             return ContextSizeResponse(context_size=int(alias_info['ctx_size']))
+
     try:
         lc = build_lollms_client_from_params(
             username=user.username,

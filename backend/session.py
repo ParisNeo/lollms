@@ -433,31 +433,31 @@ def build_lollms_client_from_params(
              raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
 
         # Validate selected models against active bindings before building client
-        if user_db.lollms_model_name and '/' in user_db.lollms_model_name:
+        if load_llm and user_db.lollms_model_name and '/' in user_db.lollms_model_name:
             binding_alias_check, _ = user_db.lollms_model_name.split('/', 1)
             is_active = db.query(DBLLMBinding.id).filter(DBLLMBinding.alias == binding_alias_check, DBLLMBinding.is_active == True).first()
             if not is_active:
                 user_db.lollms_model_name = None
 
-        if user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name:
+        if load_tti and user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name:
             binding_alias_check, _ = user_db.tti_binding_model_name.split('/', 1)
             is_active = db.query(DBTTIBinding.id).filter(DBTTIBinding.alias == binding_alias_check, DBTTIBinding.is_active == True).first()
             if not is_active:
                 user_db.tti_binding_model_name = None
 
-        if user_db.iti_binding_model_name and '/' in user_db.iti_binding_model_name:
+        if load_tti and user_db.iti_binding_model_name and '/' in user_db.iti_binding_model_name:
             binding_alias_check, _ = user_db.iti_binding_model_name.split('/', 1)
             is_active = db.query(DBTTIBinding.id).filter(DBTTIBinding.alias == binding_alias_check, DBTTIBinding.is_active == True).first()
             if not is_active:
                 user_db.iti_binding_model_name = None
 
-        if user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name:
+        if load_tts and user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name:
             binding_alias_check, _ = user_db.tts_binding_model_name.split('/', 1)
             is_active = db.query(DBTTSBinding.id).filter(DBTTSBinding.alias == binding_alias_check, DBTTSBinding.is_active == True).first()
             if not is_active:
                 user_db.tts_binding_model_name = None
                 
-        if user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name:
+        if load_stt and user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name:
             binding_alias_check, _ = user_db.stt_binding_model_name.split('/', 1)
             is_active = db.query(DBSTTBinding.id).filter(DBSTTBinding.alias == binding_alias_check, DBSTTBinding.is_active == True).first()
             if not is_active:
@@ -475,229 +475,233 @@ def build_lollms_client_from_params(
         # Determine the model name from session or DB
         user_model_full = session.get("lollms_model_name") or user_db.lollms_model_name
 
-        if user_model_full:
-            target_binding_alias = binding_alias
-            if not target_binding_alias and '/' in user_model_full:
-                target_binding_alias = user_model_full.split('/', 1)[0]
+        if load_llm:
+            if user_model_full:
+                target_binding_alias = binding_alias
+                if not target_binding_alias and '/' in user_model_full:
+                    target_binding_alias = user_model_full.split('/', 1)[0]
 
-            if target_binding_alias:
-                binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
+                if target_binding_alias:
+                    binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
 
-        if not binding_to_use:
-            binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
-        
-        if binding_to_use:            
-            final_alias = binding_to_use.alias
-            model_name_for_binding = model_name
-            if not model_name_for_binding:
-                selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
-                model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
-
-            llm_init_params = { **binding_to_use.config }
+            if not binding_to_use:
+                binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
             
-            user_saved_params = {
-                "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
-                "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
-                "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
-                "put_thoughts_in_context": user_db.put_thoughts_in_context,
-                "reasoning_activation": user_db.reasoning_activation,
-                "reasoning_effort": user_db.reasoning_effort,
-                "reasoning_summary": user_db.reasoning_summary
-            }
-            user_session_params = session.get("llm_params", {})
-            
-            final_user_params = {**{k:v for k,v in user_saved_params.items() if v is not None}, **user_session_params}
-            if llm_params:
-                final_user_params.update(llm_params)
+            if binding_to_use:            
+                final_alias = binding_to_use.alias
+                model_name_for_binding = model_name
+                if not model_name_for_binding:
+                    selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
+                    model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
 
-            model_aliases = binding_to_use.model_aliases or {}
-            if isinstance(model_aliases,str):
-                try:
-                    model_aliases = json.loads(model_aliases)
-                except Exception as e:
-                    trace_exception(e)
-                    model_aliases= {}
-            alias_info = model_aliases.get(model_name_for_binding)
+                llm_init_params = { **binding_to_use.config }
+                
+                user_saved_params = {
+                    "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
+                    "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
+                    "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
+                    "put_thoughts_in_context": user_db.put_thoughts_in_context,
+                    "reasoning_activation": user_db.reasoning_activation,
+                    "reasoning_effort": user_db.reasoning_effort,
+                    "reasoning_summary": user_db.reasoning_summary
+                }
+                user_session_params = session.get("llm_params", {})
+                
+                final_user_params = {**{k:v for k,v in user_saved_params.items() if v is not None}, **user_session_params}
+                if llm_params:
+                    final_user_params.update(llm_params)
 
-            if alias_info:
-                override_allowed = alias_info.get('allow_parameters_override', True)
-                alias_params = {k: v for k, v in alias_info.items() if v is not None}
+                model_aliases = binding_to_use.model_aliases or {}
+                if isinstance(model_aliases,str):
+                    try:
+                        model_aliases = json.loads(model_aliases)
+                    except Exception as e:
+                        trace_exception(e)
+                        model_aliases= {}
+                alias_info = model_aliases.get(model_name_for_binding)
 
-                if override_allowed:
-                    llm_init_params.update({**alias_params, **final_user_params})
+                if alias_info:
+                    override_allowed = alias_info.get('allow_parameters_override', True)
+                    alias_params = {k: v for k, v in alias_info.items() if v is not None}
+
+                    if override_allowed:
+                        llm_init_params.update({**alias_params, **final_user_params})
+                    else:
+                        llm_init_params.update(final_user_params)
+                        llm_init_params.update(alias_params)
+                    
+                    if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
+                        llm_init_params["ctx_size"] = alias_info['ctx_size']
                 else:
                     llm_init_params.update(final_user_params)
-                    llm_init_params.update(alias_params)
-                
-                if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
-                    llm_init_params["ctx_size"] = alias_info['ctx_size']
-            else:
-                llm_init_params.update(final_user_params)
 
-            llm_init_params["model_name"] = model_name_for_binding
-            client_init_params["llm_binding_name"] = binding_to_use.name
-            client_init_params["llm_binding_config"] = llm_init_params    
+                llm_init_params["model_name"] = model_name_for_binding
+                client_init_params["llm_binding_name"] = binding_to_use.name
+                client_init_params["llm_binding_config"] = llm_init_params    
         
         # --- TTI Binding Integration ---
-        force_tti_mode = settings.get("force_tti_model_mode", "disabled")
-        force_tti_name = settings.get("force_tti_model_name")
-        effective_tti_model_full = None
+        if load_tti:
+            force_tti_mode = settings.get("force_tti_model_mode", "disabled")
+            force_tti_name = settings.get("force_tti_model_name")
+            effective_tti_model_full = None
 
-        if force_tti_mode == "force_always" and force_tti_name:
-            effective_tti_model_full = force_tti_name
-        elif tti_binding_alias:
-            effective_tti_model_full = f"{tti_binding_alias}/{tti_model_name or ''}"
-        elif user_db.tti_binding_model_name:
-            effective_tti_model_full = user_db.tti_binding_model_name
-        
-        selected_tti_binding = None
-        selected_tti_model_name = None
-
-        if effective_tti_model_full:
-            if '/' in effective_tti_model_full:
-                effective_tti_binding_alias, effective_tti_model_name_part = effective_tti_model_full.split('/', 1)
-                selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == effective_tti_binding_alias, DBTTIBinding.is_active == True).first()
-                if selected_tti_binding:
-                    selected_tti_model_name = effective_tti_model_name_part
-
-            if not selected_tti_binding:
-                selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
-                if selected_tti_binding:
-                    selected_tti_model_name = selected_tti_binding.default_model_name
-        
-        if selected_tti_binding:
-            tti_binding_config = selected_tti_binding.config.copy() if selected_tti_binding.config else {}
+            if force_tti_mode == "force_always" and force_tti_name:
+                effective_tti_model_full = force_tti_name
+            elif tti_binding_alias:
+                effective_tti_model_full = f"{tti_binding_alias}/{tti_model_name or ''}"
+            elif user_db.tti_binding_model_name:
+                effective_tti_model_full = user_db.tti_binding_model_name
             
-            tti_model_aliases = selected_tti_binding.model_aliases or {}
-            tti_alias_info = tti_model_aliases.get(selected_tti_model_name)
+            selected_tti_binding = None
+            selected_tti_model_name = None
+
+            if effective_tti_model_full:
+                if '/' in effective_tti_model_full:
+                    effective_tti_binding_alias, effective_tti_model_name_part = effective_tti_model_full.split('/', 1)
+                    selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == effective_tti_binding_alias, DBTTIBinding.is_active == True).first()
+                    if selected_tti_binding:
+                        selected_tti_model_name = effective_tti_model_name_part
+
+                if not selected_tti_binding:
+                    selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+                    if selected_tti_binding:
+                        selected_tti_model_name = selected_tti_binding.default_model_name
             
-            if tti_alias_info:
-                for key, value in tti_alias_info.items():
-                    if key not in ['title', 'description', 'icon'] and value is not None:
-                        tti_binding_config[key] = value
-                        
-            allow_tti_override = (tti_alias_info or {}).get('allow_parameters_override', True)
-            if allow_tti_override:
-                user_tti_configs = user_db.tti_models_config or {}
-                model_user_config = user_tti_configs.get(user_db.tti_binding_model_name)
-                if model_user_config:
-                    for key, value in model_user_config.items():
-                        if value is not None:
+            if selected_tti_binding:
+                tti_binding_config = selected_tti_binding.config.copy() if selected_tti_binding.config else {}
+                
+                tti_model_aliases = selected_tti_binding.model_aliases or {}
+                tti_alias_info = tti_model_aliases.get(selected_tti_model_name)
+                
+                if tti_alias_info:
+                    for key, value in tti_alias_info.items():
+                        if key not in ['title', 'description', 'icon'] and value is not None:
                             tti_binding_config[key] = value
-
-            if tti_params:
-                tti_binding_config.update(tti_params)
                             
-            if selected_tti_model_name:
-                tti_binding_config['model_name'] = selected_tti_model_name                
-                tti_binding_config["models_path"]= str(Path(settings.get("data_dir","data"))/"tti_models"/selected_tti_binding.name)
-            client_init_params["tti_binding_name"] = selected_tti_binding.name
-            client_init_params["tti_binding_config"] = tti_binding_config
+                allow_tti_override = (tti_alias_info or {}).get('allow_parameters_override', True)
+                if allow_tti_override:
+                    user_tti_configs = user_db.tti_models_config or {}
+                    model_user_config = user_tti_configs.get(user_db.tti_binding_model_name)
+                    if model_user_config:
+                        for key, value in model_user_config.items():
+                            if value is not None:
+                                tti_binding_config[key] = value
+
+                if tti_params:
+                    tti_binding_config.update(tti_params)
+                                
+                if selected_tti_model_name:
+                    tti_binding_config['model_name'] = selected_tti_model_name                
+                    tti_binding_config["models_path"]= str(Path(settings.get("data_dir","data"))/"tti_models"/selected_tti_binding.name)
+                client_init_params["tti_binding_name"] = selected_tti_binding.name
+                client_init_params["tti_binding_config"] = tti_binding_config
         
         # --- TTS Binding Integration ---
-        selected_tts_binding = None
-        selected_tts_model_name = tts_model_name
-        
-        user_tts_model_full = user_db.tts_binding_model_name
-        if tts_binding_alias:
-            user_tts_model_full = f"{tts_binding_alias}/{tts_model_name or ''}"
-        
-        if user_tts_model_full:
-            if '/' in user_tts_model_full:
-                tts_binding_alias_local, tts_model_name_local = user_tts_model_full.split('/', 1)
-                selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias_local, DBTTSBinding.is_active == True).first()
-                if not selected_tts_model_name:
-                    selected_tts_model_name = tts_model_name_local
-
-            if not selected_tts_binding:
-                selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
-                if selected_tts_binding and not selected_tts_model_name:
-                    selected_tts_model_name = selected_tts_binding.default_model_name
-
-        if selected_tts_binding:
-            tts_binding_config = selected_tts_binding.config.copy() if selected_tts_binding.config else {}
+        if load_tts:
+            selected_tts_binding = None
+            selected_tts_model_name = tts_model_name
             
-            tts_model_aliases = selected_tts_binding.model_aliases or {}
-            tts_alias_info = tts_model_aliases.get(selected_tts_model_name)
+            user_tts_model_full = user_db.tts_binding_model_name
+            if tts_binding_alias:
+                user_tts_model_full = f"{tts_binding_alias}/{tts_model_name or ''}"
             
-            if tts_alias_info:
-                for key, value in tts_alias_info.items():
-                    if key not in ['title', 'description', 'icon'] and value is not None:
-                        tts_binding_config[key] = value
-                        
-            allow_tts_override = (tts_alias_info or {}).get('allow_parameters_override', True)
-            if allow_tts_override:
-                user_tts_configs = user_db.tts_models_config or {}
-                model_user_config = user_tts_configs.get(user_db.tts_binding_model_name)
-                if model_user_config:
-                    for key, value in model_user_config.items():
-                        if value is not None:
-                            tts_binding_config[key] = value
+            if user_tts_model_full:
+                if '/' in user_tts_model_full:
+                    tts_binding_alias_local, tts_model_name_local = user_tts_model_full.split('/', 1)
+                    selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias_local, DBTTSBinding.is_active == True).first()
+                    if not selected_tts_model_name:
+                        selected_tts_model_name = tts_model_name_local
 
-            if tts_params:
-                tts_binding_config.update(tts_params)
-                            
-            if selected_tts_model_name:
-                tts_binding_config['model_name'] = selected_tts_model_name
+                if not selected_tts_binding:
+                    selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
+                    if selected_tts_binding and not selected_tts_model_name:
+                        selected_tts_model_name = selected_tts_binding.default_model_name
+
+            if selected_tts_binding:
+                tts_binding_config = selected_tts_binding.config.copy() if selected_tts_binding.config else {}
                 
-            client_init_params["tts_binding_name"] = selected_tts_binding.name
-            client_init_params["tts_binding_config"] = tts_binding_config
+                tts_model_aliases = selected_tts_binding.model_aliases or {}
+                tts_alias_info = tts_model_aliases.get(selected_tts_model_name)
+                
+                if tts_alias_info:
+                    for key, value in tts_alias_info.items():
+                        if key not in ['title', 'description', 'icon'] and value is not None:
+                            tts_binding_config[key] = value
+                            
+                allow_tts_override = (tts_alias_info or {}).get('allow_parameters_override', True)
+                if allow_tts_override:
+                    user_tts_configs = user_db.tts_models_config or {}
+                    model_user_config = user_tts_configs.get(user_db.tts_binding_model_name)
+                    if model_user_config:
+                        for key, value in model_user_config.items():
+                            if value is not None:
+                                tts_binding_config[key] = value
+
+                if tts_params:
+                    tts_binding_config.update(tts_params)
+                                
+                if selected_tts_model_name:
+                    tts_binding_config['model_name'] = selected_tts_model_name
+                    
+                client_init_params["tts_binding_name"] = selected_tts_binding.name
+                client_init_params["tts_binding_config"] = tts_binding_config
             
         # --- STT Binding Integration ---
-        selected_stt_binding = None
-        selected_stt_model_name = stt_model_name
-        
-        user_stt_model_full = user_db.stt_binding_model_name
-        if stt_binding_alias:
-            user_stt_model_full = f"{stt_binding_alias}/{stt_model_name or ''}"
-
-        if user_stt_model_full:
-            if '/' in user_stt_model_full:
-                stt_binding_alias_local, stt_model_name_local = user_stt_model_full.split('/', 1)
-                selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.alias == stt_binding_alias_local, DBSTTBinding.is_active == True).first()
-                if not selected_stt_model_name:
-                    selected_stt_model_name = stt_model_name_local
-
-            if not selected_stt_binding:
-                selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
-                if selected_stt_binding and not selected_stt_model_name:
-                    selected_stt_model_name = selected_stt_binding.default_model_name
-
-        if selected_stt_binding:
-            stt_binding_config = selected_stt_binding.config.copy() if selected_stt_binding.config else {}
+        if load_stt:
+            selected_stt_binding = None
+            selected_stt_model_name = stt_model_name
             
-            stt_model_aliases = selected_stt_binding.model_aliases or {}
-            stt_alias_info = stt_model_aliases.get(selected_stt_model_name)
-            
-            if stt_alias_info:
-                for key, value in stt_alias_info.items():
-                    if key not in ['title', 'description', 'icon'] and value is not None:
-                        stt_binding_config[key] = value
-                        
-            allow_stt_override = (stt_alias_info or {}).get('allow_parameters_override', True)
-            if allow_stt_override:
-                user_stt_configs = user_db.stt_models_config or {}
-                model_user_config = user_stt_configs.get(user_db.stt_binding_model_name)
-                if model_user_config:
-                    for key, value in model_user_config.items():
-                        if value is not None:
-                            stt_binding_config[key] = value
+            user_stt_model_full = user_db.stt_binding_model_name
+            if stt_binding_alias:
+                user_stt_model_full = f"{stt_binding_alias}/{stt_model_name or ''}"
 
-            if stt_params:
-                stt_binding_config.update(stt_params)
-                            
-            if selected_stt_model_name:
-                stt_binding_config['model_name'] = selected_stt_model_name
+            if user_stt_model_full:
+                if '/' in user_stt_model_full:
+                    stt_binding_alias_local, stt_model_name_local = user_stt_model_full.split('/', 1)
+                    selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.alias == stt_binding_alias_local, DBSTTBinding.is_active == True).first()
+                    if not selected_stt_model_name:
+                        selected_stt_model_name = stt_model_name_local
+
+                if not selected_stt_binding:
+                    selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
+                    if selected_stt_binding and not selected_stt_model_name:
+                        selected_stt_model_name = selected_stt_binding.default_model_name
+
+            if selected_stt_binding:
+                stt_binding_config = selected_stt_binding.config.copy() if selected_stt_binding.config else {}
                 
-            client_init_params["stt_binding_name"] = selected_stt_binding.name
-            client_init_params["stt_binding_config"] = stt_binding_config
+                stt_model_aliases = selected_stt_binding.model_aliases or {}
+                stt_alias_info = stt_model_aliases.get(selected_stt_model_name)
+                
+                if stt_alias_info:
+                    for key, value in stt_alias_info.items():
+                        if key not in ['title', 'description', 'icon'] and value is not None:
+                            stt_binding_config[key] = value
+                            
+                allow_stt_override = (stt_alias_info or {}).get('allow_parameters_override', True)
+                if allow_stt_override:
+                    user_stt_configs = user_db.stt_models_config or {}
+                    model_user_config = user_stt_configs.get(user_db.stt_binding_model_name)
+                    if model_user_config:
+                        for key, value in model_user_config.items():
+                            if value is not None:
+                                stt_binding_config[key] = value
+
+                if stt_params:
+                    stt_binding_config.update(stt_params)
+                                
+                if selected_stt_model_name:
+                    stt_binding_config['model_name'] = selected_stt_model_name
+                    
+                client_init_params["stt_binding_name"] = selected_stt_binding.name
+                client_init_params["stt_binding_config"] = stt_binding_config
         # --- END STT Binding Integration ---
         
         if 'servers_infos' not in session:
             session['servers_infos'] = load_mcps(username)
         servers_infos = session['servers_infos']
         
-        if servers_infos:
+        if load_llm and servers_infos:
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 

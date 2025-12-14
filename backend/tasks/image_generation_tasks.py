@@ -41,7 +41,9 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         lc = build_lollms_client_from_params(
             username=username,
             tti_binding_alias=None,
-            tti_model_name=None
+            tti_model_name=None,
+            load_llm=False,
+            load_tti=True
         )
         if not lc.tti:
             raise Exception("No active TTI (Text-to-Image) binding found or configured.")
@@ -142,7 +144,9 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
         lc = build_lollms_client_from_params(
             username=username,
             tti_binding_alias=tti_binding_alias,
-            tti_model_name=tti_model_name
+            tti_model_name=tti_model_name,
+            load_llm=False,
+            load_tti=True
         )
         if not lc.tti:
             raise Exception(f"TTI binding '{tti_binding_alias}' is not available.")
@@ -241,7 +245,9 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             username=username,
             tti_binding_alias=tti_binding_alias,
             tti_model_name=tti_model_name,
-            tti_params=runtime_params
+            tti_params=runtime_params,
+            load_llm=False,
+            load_tti=True
         )
 
         if not lc.tti:
@@ -456,7 +462,9 @@ def _generate_timelapse_task(task: Task, username: str, request_data: dict):
         lc = build_lollms_client_from_params(
             username=username,
             tti_binding_alias=tti_binding_alias,
-            tti_model_name=tti_model_name
+            tti_model_name=tti_model_name,
+            load_llm=False,
+            load_tti=True
         )
         if not lc.tti:
             raise Exception("TTI binding not available.")

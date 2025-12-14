@@ -1,10 +1,10 @@
 # backend/routers/ui.py
 import random
+import mimetypes
 from pathlib import Path
-from fastapi import FastAPI, Request, APIRouter, Depends, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
-from sqlalchemy.orm import Session, joinedload
-import json
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
+from sqlalchemy.orm import Session
 
 from backend.db import get_db
 from backend.db.models.fun_fact import FunFact, FunFactCategory
@@ -98,15 +98,38 @@ def add_ui_routes(app):
             return FileResponse(str(logo_path))
         raise HTTPException(status_code=404, detail="Custom logo not found.")
 
-    @app.get("/{full_path:path}", response_class=FileResponse, include_in_schema=False)
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_vue_app(full_path: str):
+        # Resolve the full path relative to the static directory
         path = STATIC_DIR / full_path
-        if path.exists() and not path.is_dir():
-            return FileResponse(path)
         
+        try:
+            # Security check: Ensure we don't break out of STATIC_DIR
+            # Note: .resolve() handles symlinks and '..' segments
+            resolved_path = path.resolve()
+            resolved_static = STATIC_DIR.resolve()
+            
+            if not str(resolved_path).startswith(str(resolved_static)):
+                # Access denied or path traversal attempt -> serve index
+                return FileResponse(STATIC_DIR / "index.html")
+
+            if resolved_path.exists() and resolved_path.is_file():
+                # Correctly set content-type for JS files if needed
+                media_type, _ = mimetypes.guess_type(resolved_path)
+                if resolved_path.suffix == '.js':
+                    media_type = 'application/javascript'
+                elif resolved_path.suffix == '.css':
+                    media_type = 'text/css'
+                
+                return FileResponse(resolved_path, media_type=media_type)
+        except Exception:
+            # On any error (filesystem permission, etc.), fallback to index
+            pass
+        
+        # Fallback for SPA routing
         index_path = STATIC_DIR / "index.html"
         if index_path.exists():
             return FileResponse(index_path)
         
-        # Fallback for SPA routing
-        return FileResponse(STATIC_DIR / "index.html")
+        # If even index.html is missing, returns 404 naturally or handling
+        raise HTTPException(status_code=404, detail="UI not found. Please build the frontend.")

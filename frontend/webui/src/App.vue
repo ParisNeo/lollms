@@ -15,70 +15,69 @@ import logoDefault from './assets/logo.png';
 import Sidebar from './components/layout/Sidebar.vue';
 import GlobalHeader from './components/layout/GlobalHeader.vue';
 import AudioPlayer from './components/chat/AudioPlayer.vue';
-
-// Import all modals
-import LoginModal from './components/modals/LoginModal.vue';
-import RegisterModal from './components/modals/RegisterModal.vue';
-import ForgotPasswordModal from './components/modals/ForgotPasswordModal.vue';
-import PasswordResetLinkModal from './components/modals/PasswordResetLinkModal.vue';
-import RenameDiscussionModal from './components/modals/RenameDiscussionModal.vue';
-import PersonalityEditorModal from './components/modals/PersonalityEditorModal.vue';
-import AdminUserEditModal from './components/modals/AdminUserEditModal.vue';
-import ForceSettingsModal from './components/modals/ForceSettingsModal.vue';
-import ConfirmationModal from './components/ui/ConfirmationModal.vue';
-import ImageViewerModal from './components/modals/ImageViewerModal.vue';
-import ArtefactEditorModal from './components/modals/ArtefactEditorModal.vue';
-import ArtefactViewerModal from './components/modals/ArtefactViewerModal.vue';
-import SourceViewerModal from './components/modals/SourceViewerModal.vue';
-import AllSourcesSearchModal from './components/modals/AllSourcesSearchModal.vue';
-import MemoryEditorModal from './components/modals/MemoryEditorModal.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
-import ShareDataStoreModal from './components/modals/ShareDataStoreModal.vue';
-import EditDataStoreModal from './components/modals/EditDataStoreModal.vue';
-import ExportModal from './components/modals/ExportModal.vue';
-import ImportModal from './components/modals/ImportModal.vue';
-import InteractiveOutputModal from './components/modals/InteractiveOutputModal.vue';
-import ShareDiscussionModal from './components/modals/ShareDiscussionModal.vue';
-import ResetPasswordModal from './components/modals/ResetPasswordModal.vue';
-import EmailAllUsersModal from './components/modals/EmailAllUsersModal.vue';
-import EmailListModal from './components/modals/EmailListModal.vue';
-import EmailUserModal from './components/modals/EmailUserModal.vue';
-import InsertImageModal from './components/modals/InsertImageModal.vue';
-import NewApiKeyModal from './components/modals/NewApiKeyModal.vue'; 
-import WhatsNextModal from './components/modals/WhatsNextModal.vue';
-import AppInstallModal from './components/modals/AppInstallModal.vue';
-import AppDetailsModal from './components/modals/AppDetailsModal.vue';
-import AppConfigModal from './components/modals/AppConfigModal.vue';
-import AppEnvConfigModal from './components/modals/AppEnvConfigModal.vue';
-import AppLogModal from './components/modals/AppLogModal.vue';
-import CreateFirstAdminModal from './components/modals/CreateFirstAdminModal.vue';
-import GeneratePersonalityModal from './components/modals/GeneratePersonalityModal.vue';
-import TasksManagerModal from './components/modals/TasksManagerModal.vue';
-import EnhancePersonalityPromptModal from './components/modals/EnhancePersonalityPromptModal.vue';
-import ContextToArtefactModal from './components/modals/ContextToArtefactModal.vue';
-import ContextViewModal from './components/modals/ContextViewModal.vue';
-import DataZonePromptManagementModal from './components/modals/DataZonePromptManagementModal.vue';
-import FillPlaceholdersModal from './components/modals/FillPlaceholdersModal.vue';
-import ServiceRegistrationModal from './components/modals/ServiceRegistrationModal.vue';
-import GeneratePromptModal from './components/modals/GeneratePromptModal.vue';
-import ManageModelsModal from './components/modals/ManageModelsModal.vue';
-import ModelCardModal from './components/modals/ModelCardModal.vue';
-import DiscussionTreeModal from './components/modals/DiscussionTreeModal.vue';
-import EditPromptModal from './components/modals/EditPromptModal.vue';
-import FunFactCategoryModal from './components/modals/FunFactCategoryModal.vue';
-import FunFactModal from './components/modals/FunFactModal.vue';
-import GenerateFunFactsModal from './components/modals/GenerateFunFactsModal.vue';
-import SharePersonalityModal from './components/modals/SharePersonalityModal.vue';
-import DiscussionGroupModal from './components/modals/DiscussionGroupModal.vue';
-import MoveDiscussionModal from './components/modals/MoveDiscussionModal.vue';
-import EnhancePromptModal from './components/modals/EnhancePromptModal.vue';
-import CameraCaptureModal from './components/modals/CameraCaptureModal.vue';
-import ImageEditorSettingsModal from './components/modals/ImageEditorSettingsModal.vue';
-import NoteEditorModal from './components/modals/NoteEditorModal.vue';
-import NoteGroupModal from './components/modals/NoteGroupModal.vue';
-import SystemLogModal from './components/modals/SystemLogModal.vue'; // New Import
 
-// New Component for Chat Sidebar
+// Define Async Components for Modals
+const LoginModal = defineAsyncComponent(() => import('./components/modals/LoginModal.vue'));
+const RegisterModal = defineAsyncComponent(() => import('./components/modals/RegisterModal.vue'));
+const ForgotPasswordModal = defineAsyncComponent(() => import('./components/modals/ForgotPasswordModal.vue'));
+const PasswordResetLinkModal = defineAsyncComponent(() => import('./components/modals/PasswordResetLinkModal.vue'));
+const RenameDiscussionModal = defineAsyncComponent(() => import('./components/modals/RenameDiscussionModal.vue'));
+const PersonalityEditorModal = defineAsyncComponent(() => import('./components/modals/PersonalityEditorModal.vue'));
+const AdminUserEditModal = defineAsyncComponent(() => import('./components/modals/AdminUserEditModal.vue'));
+const ForceSettingsModal = defineAsyncComponent(() => import('./components/modals/ForceSettingsModal.vue'));
+const ConfirmationModal = defineAsyncComponent(() => import('./components/ui/ConfirmationModal.vue'));
+const ImageViewerModal = defineAsyncComponent(() => import('./components/modals/ImageViewerModal.vue'));
+const ArtefactEditorModal = defineAsyncComponent(() => import('./components/modals/ArtefactEditorModal.vue'));
+const ArtefactViewerModal = defineAsyncComponent(() => import('./components/modals/ArtefactViewerModal.vue'));
+const SourceViewerModal = defineAsyncComponent(() => import('./components/modals/SourceViewerModal.vue'));
+const AllSourcesSearchModal = defineAsyncComponent(() => import('./components/modals/AllSourcesSearchModal.vue'));
+const MemoryEditorModal = defineAsyncComponent(() => import('./components/modals/MemoryEditorModal.vue'));
+const ShareDataStoreModal = defineAsyncComponent(() => import('./components/modals/ShareDataStoreModal.vue'));
+const EditDataStoreModal = defineAsyncComponent(() => import('./components/modals/EditDataStoreModal.vue'));
+const ExportModal = defineAsyncComponent(() => import('./components/modals/ExportModal.vue'));
+const ImportModal = defineAsyncComponent(() => import('./components/modals/ImportModal.vue'));
+const InteractiveOutputModal = defineAsyncComponent(() => import('./components/modals/InteractiveOutputModal.vue'));
+const ShareDiscussionModal = defineAsyncComponent(() => import('./components/modals/ShareDiscussionModal.vue'));
+const ResetPasswordModal = defineAsyncComponent(() => import('./components/modals/ResetPasswordModal.vue'));
+const EmailAllUsersModal = defineAsyncComponent(() => import('./components/modals/EmailAllUsersModal.vue'));
+const EmailListModal = defineAsyncComponent(() => import('./components/modals/EmailListModal.vue'));
+const EmailUserModal = defineAsyncComponent(() => import('./components/modals/EmailUserModal.vue'));
+const InsertImageModal = defineAsyncComponent(() => import('./components/modals/InsertImageModal.vue'));
+const NewApiKeyModal = defineAsyncComponent(() => import('./components/modals/NewApiKeyModal.vue')); 
+const WhatsNextModal = defineAsyncComponent(() => import('./components/modals/WhatsNextModal.vue'));
+const AppInstallModal = defineAsyncComponent(() => import('./components/modals/AppInstallModal.vue'));
+const AppDetailsModal = defineAsyncComponent(() => import('./components/modals/AppDetailsModal.vue'));
+const AppConfigModal = defineAsyncComponent(() => import('./components/modals/AppConfigModal.vue'));
+const AppEnvConfigModal = defineAsyncComponent(() => import('./components/modals/AppEnvConfigModal.vue'));
+const AppLogModal = defineAsyncComponent(() => import('./components/modals/AppLogModal.vue'));
+const CreateFirstAdminModal = defineAsyncComponent(() => import('./components/modals/CreateFirstAdminModal.vue'));
+const GeneratePersonalityModal = defineAsyncComponent(() => import('./components/modals/GeneratePersonalityModal.vue'));
+const TasksManagerModal = defineAsyncComponent(() => import('./components/modals/TasksManagerModal.vue'));
+const EnhancePersonalityPromptModal = defineAsyncComponent(() => import('./components/modals/EnhancePersonalityPromptModal.vue'));
+const ContextToArtefactModal = defineAsyncComponent(() => import('./components/modals/ContextToArtefactModal.vue'));
+const ContextViewModal = defineAsyncComponent(() => import('./components/modals/ContextViewModal.vue'));
+const DataZonePromptManagementModal = defineAsyncComponent(() => import('./components/modals/DataZonePromptManagementModal.vue'));
+const FillPlaceholdersModal = defineAsyncComponent(() => import('./components/modals/FillPlaceholdersModal.vue'));
+const ServiceRegistrationModal = defineAsyncComponent(() => import('./components/modals/ServiceRegistrationModal.vue'));
+const GeneratePromptModal = defineAsyncComponent(() => import('./components/modals/GeneratePromptModal.vue'));
+const ManageModelsModal = defineAsyncComponent(() => import('./components/modals/ManageModelsModal.vue'));
+const ModelCardModal = defineAsyncComponent(() => import('./components/modals/ModelCardModal.vue'));
+const DiscussionTreeModal = defineAsyncComponent(() => import('./components/modals/DiscussionTreeModal.vue'));
+const EditPromptModal = defineAsyncComponent(() => import('./components/modals/EditPromptModal.vue'));
+const FunFactCategoryModal = defineAsyncComponent(() => import('./components/modals/FunFactCategoryModal.vue'));
+const FunFactModal = defineAsyncComponent(() => import('./components/modals/FunFactModal.vue'));
+const GenerateFunFactsModal = defineAsyncComponent(() => import('./components/modals/GenerateFunFactsModal.vue'));
+const SharePersonalityModal = defineAsyncComponent(() => import('./components/modals/SharePersonalityModal.vue'));
+const DiscussionGroupModal = defineAsyncComponent(() => import('./components/modals/DiscussionGroupModal.vue'));
+const MoveDiscussionModal = defineAsyncComponent(() => import('./components/modals/MoveDiscussionModal.vue'));
+const EnhancePromptModal = defineAsyncComponent(() => import('./components/modals/EnhancePromptModal.vue'));
+const CameraCaptureModal = defineAsyncComponent(() => import('./components/modals/CameraCaptureModal.vue'));
+const ImageEditorSettingsModal = defineAsyncComponent(() => import('./components/modals/ImageEditorSettingsModal.vue'));
+const NoteEditorModal = defineAsyncComponent(() => import('./components/modals/NoteEditorModal.vue'));
+const NoteGroupModal = defineAsyncComponent(() => import('./components/modals/NoteGroupModal.vue'));
+const SystemLogModal = defineAsyncComponent(() => import('./components/modals/SystemLogModal.vue'));
+
 const ChatSidebar = defineAsyncComponent(() => import('./components/chat/ChatSidebar.vue'));
 
 const authStore = useAuthStore();
@@ -247,7 +246,7 @@ watch(message_font_size, (newSize) => {
     <SourceViewerModal v-if="activeModal === 'sourceViewer'" />
     <AllSourcesSearchModal v-if="activeModal === 'allSourcesSearch'" />
     <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
-    <NotificationPanel />
+    
     <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
     <EditDataStoreModal v-if="activeModal === 'editDataStore'" />
     <ExportModal v-if="activeModal === 'export'" />

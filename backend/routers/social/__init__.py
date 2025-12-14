@@ -49,6 +49,46 @@ def get_post_public(db: Session, post: DBPost, current_user_id: int) -> PostPubl
         
     return post_public
 
+def get_posts_public_batched(db: Session, posts: List[DBPost], current_user_id: int) -> List[PostPublic]:
+    """
+    Optimized helper to convert a list of DBPosts to PostPublic objects,
+    fetching like counts and user like status in bulk to avoid N+1 queries.
+    """
+    if not posts:
+        return []
+    
+    post_ids = [p.id for p in posts]
+    
+    # Batch fetch likes count
+    like_counts_rows = db.query(
+        DBPostLike.post_id,
+        func.count(DBPostLike.user_id)
+    ).filter(DBPostLike.post_id.in_(post_ids)).group_by(DBPostLike.post_id).all()
+    
+    like_counts = {r[0]: r[1] for r in like_counts_rows}
+    
+    # Batch fetch user likes
+    user_likes_rows = db.query(DBPostLike.post_id).filter(
+        DBPostLike.post_id.in_(post_ids),
+        DBPostLike.user_id == current_user_id
+    ).all()
+    user_likes = set(r[0] for r in user_likes_rows)
+    
+    results = []
+    for post in posts:
+        post_public = PostPublic.model_validate(post)
+        post_public.like_count = like_counts.get(post.id, 0)
+        post_public.has_liked = post.id in user_likes
+        
+        # Filter comments based on moderation status
+        if post.comments:
+            valid_comments = [c for c in post.comments if c.moderation_status != 'flagged']
+            post_public.comments = [CommentPublic.model_validate(c) for c in valid_comments]
+            
+        results.append(post_public)
+        
+    return results
+
 # --- Follow/Unfollow Endpoints ---
 
 @social_router.post("/users/{target_user_id}/follow", status_code=status.HTTP_204_NO_CONTENT)
@@ -282,7 +322,8 @@ def get_user_posts(
         query = query.filter(or_(*visibility_conditions))
 
     posts = query.order_by(DBPost.created_at.desc()).all()
-    return [get_post_public(db, p, current_user.id) for p in posts]
+    # Optimized batch fetching
+    return get_posts_public_batched(db, posts, current_user.id)
 
 
 @social_router.post("/posts/{post_id}/like", status_code=201)
@@ -362,11 +403,9 @@ def get_main_feed(
             DBPost.moderation_status != 'flagged'
         ).order_by(DBPost.created_at.desc()).limit(50).all()
         
-        response = []
-        for post in results:
-            response.append(get_post_public(db, post, current_user.id))
-        
-        return response
+        # Optimized batch fetching
+        return get_posts_public_batched(db, results, current_user.id)
+
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail="An error occurred while fetching the feed.")

@@ -17,7 +17,8 @@ const connectedUsers = computed(() => adminStore.connectedUsers);
 const allUsers = computed(() => adminStore.allUsers);
 const isLoadingConnected = computed(() => adminStore.isLoadingConnectedUsers);
 
-const broadcastMessage = ref('');
+// Renamed local ref to avoid any naming conflict with the store action (though scope rules should allow it)
+const broadcastMsg = ref('');
 const isBroadcasting = ref(false);
 
 const liveUsersList = computed(() => {
@@ -71,12 +72,12 @@ async function handlePurge() {
 }
 
 async function handleBroadcast() {
-    if (!broadcastMessage.value.trim()) return;
+    if (!broadcastMsg.value.trim()) return;
     isBroadcasting.value = true;
     try {
-        await adminStore.broadcastMessage(broadcastMessage.value);
+        await adminStore.broadcastMessage(broadcastMsg.value);
         uiStore.addNotification('Broadcast sent successfully.', 'success');
-        broadcastMessage.value = '';
+        broadcastMsg.value = '';
     } finally {
         isBroadcasting.value = false;
     }
@@ -134,7 +135,7 @@ function dmUser(user) {
             </h4>
             <div class="flex gap-2">
                 <input 
-                    v-model="broadcastMessage" 
+                    v-model="broadcastMsg" 
                     type="text" 
                     class="input-field flex-grow" 
                     placeholder="Type a message to send to all connected users..."
@@ -142,7 +143,7 @@ function dmUser(user) {
                 >
                 <button 
                     @click="handleBroadcast" 
-                    :disabled="!broadcastMessage || isBroadcasting" 
+                    :disabled="!broadcastMsg || isBroadcasting" 
                     class="btn btn-primary px-6"
                 >
                     Send

@@ -131,7 +131,7 @@ async function handleInstall() {
                             placeholder="e.g., 9601"
                         />
                         <button @click="verifyPort" type="button" class="btn btn-secondary w-28" :disabled="isVerifyingPort">
-                            <IconAnimateSpin v-if="isVerifyingPort" class="w-5 h-5" />
+                            <IconAnimateSpin v-if="isVerifyingPort" class="w-5 h-5 animate-spin" />
                             <span v-else>Verify</span>
                         </button>
                     </div>
@@ -178,6 +178,7 @@ async function handleInstall() {
             <div class="flex justify-end gap-3">
                 <button @click="uiStore.closeModal('appInstall')" type="button" class="btn btn-secondary">Cancel</button>
                 <button @click="handleInstall" type="button" class="btn btn-primary" :disabled="isLoading || portStatus !== 'available'">
+                    <IconAnimateSpin v-if="isLoading" class="w-5 h-5 mr-2 animate-spin" />
                     {{ isLoading ? 'Installing...' : 'Confirm & Install' }}
                 </button>
             </div>

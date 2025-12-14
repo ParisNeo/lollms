@@ -6,21 +6,20 @@
     <title>LoLLMs</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
     
-    <!-- External libraries that are easier to manage via CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <!-- External libraries -->
     
     <!-- KaTeX for Math Rendering -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" crossorigin="anonymous">
+    <!-- Defer loading of heavy scripts -->
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js" crossorigin="anonymous"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
     
-    <!-- Pyodide for Python execution -->
-    <script src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
+    <!-- Pyodide for Python execution (Heavy - Deferred) -->
+    <script defer src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
 
     <!-- The main application script, a module handled by Vite -->
-  <script type="module" crossorigin src="/assets/index-CSHNcS4T.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-By5TC5O-.css">
+  <script type="module" crossorigin src="/ui_assets/index-Dja0BxAz.js"></script>
+  <link rel="stylesheet" crossorigin href="/ui_assets/index-reP8XwhP.css">
 </head>
 <body>
     <!-- The Vue application will mount here -->

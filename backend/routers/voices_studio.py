@@ -1,3 +1,4 @@
+# [UPDATE] backend/routers/voices_studio.py
 # backend/routers/voices_studio.py
 import shutil
 import uuid
@@ -16,7 +17,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.voice import UserVoice as DBUserVoice
 from backend.models import UserAuthDetails
 from backend.models.voice import UserVoicePublic, UserVoiceCreate, UserVoiceUpdate, TestTTSRequest, ApplyEffectsRequest
-from backend.session import get_current_active_user, get_user_data_root, get_user_lollms_client
+from backend.session import get_current_active_user, get_user_data_root, build_lollms_client_from_params
 from ascii_colors import trace_exception
 
 try:
@@ -280,7 +281,7 @@ async def test_voice(
     if not voice_file_path.exists():
          raise HTTPException(status_code=404, detail="Voice file not found on disk.")
          
-    lc = get_user_lollms_client(current_user.username)
+    lc = build_lollms_client_from_params(username=current_user.username, load_llm=False, load_tts=True)
     if not lc.tts:
         raise HTTPException(status_code=400, detail="TTS service is not configured for your account.")
 

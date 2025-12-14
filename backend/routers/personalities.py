@@ -1,3 +1,4 @@
+# [UPDATE] backend/routers/personalities.py
 # backend/routers/personalities.py
 import traceback
 import json
@@ -29,7 +30,8 @@ from backend.session import (
     get_current_active_user,
     get_current_db_user_from_token,
     user_sessions,
-    get_user_lollms_client
+    get_user_lollms_client,
+    build_lollms_client_from_params
 )
 from backend.task_manager import task_manager, Task
 from backend.settings import settings
@@ -159,7 +161,7 @@ def _generate_icon_task(task: Task, username: str, prompt: str):
     task.set_progress(10)
     
     try:
-        lc = get_user_lollms_client(username)
+        lc = build_lollms_client_from_params(username=username, load_llm=False, load_tti=True)
         if not lc.tti:
             raise Exception("Text-to-Image service is not configured for this user.")
 

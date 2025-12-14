@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue';
+import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../../stores/admin';
 import { useUiStore } from '../../../stores/ui';
@@ -8,6 +8,11 @@ import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconTerminal from '../../../assets/icons/ui/IconTerminal.vue';
 import GenericModal from '../../modals/GenericModal.vue';
+import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
+import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
+
+const BindingModelsManager = defineAsyncComponent(() => import('./BindingModelsManager.vue'));
+const BindingZoo = defineAsyncComponent(() => import('./BindingZoo.vue'));
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -18,9 +23,9 @@ const isFormVisible = ref(false);
 const editingBinding = ref(null);
 const isLoadingForm = ref(false);
 const isKeyVisible = ref({});
-const commandParams = ref({}); // To store parameters for commands in form
+const commandParams = ref({});
+const activeTab = ref('settings');
 
-// Modal state for commands
 const isCommandsModalVisible = ref(false);
 const activeBindingForCommands = ref(null);
 const activeBindingCommands = ref([]);
@@ -33,7 +38,7 @@ const getInitialFormState = () => ({
     alias: '',
     name: '',
     config: {},
-    default_model_name: '', // Ensure this key exists for consistency
+    default_model_name: '',
     is_active: true
 });
 
@@ -46,7 +51,6 @@ const selectedBindingType = computed(() => {
     return availableBindingTypes.value.find(b => b.binding_name === form.value.name);
 });
 
-// Create a comprehensive list of parameters from both the description and the saved config
 const allFormParameters = computed(() => {
     if (!selectedBindingType.value) return [];
     
@@ -85,7 +89,7 @@ watch(() => form.value.name, (newName, oldName) => {
 const modelDisplayMode = computed({
   get() {
     if (!Array.isArray(globalSettings.value)) {
-        return 'mixed'; // Return default if store is not ready
+        return 'mixed';
     }
     const setting = globalSettings.value.find(s => s.key === 'model_display_mode');
     return setting ? setting.value : 'mixed';
@@ -107,6 +111,7 @@ function showAddForm() {
     isKeyVisible.value = {};
     commandParams.value = {};
     isFormVisible.value = true;
+    activeTab.value = 'settings';
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -118,7 +123,6 @@ function showEditForm(binding) {
     }
     isKeyVisible.value = {};
     
-    // Initialize command params for the edit form section
     const bindingType = availableBindingTypes.value.find(b => b.binding_name === binding.name);
     if(bindingType && bindingType.commands){
         const params = {};
@@ -136,6 +140,7 @@ function showEditForm(binding) {
     }
 
     isFormVisible.value = true;
+    activeTab.value = 'settings';
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -162,7 +167,6 @@ async function handleSubmit() {
 
     isLoadingForm.value = true;
     try {
-        // Construct a clean payload that matches the backend Pydantic model
         const payload = {
             alias: form.value.alias,
             name: form.value.name,
@@ -178,7 +182,6 @@ async function handleSubmit() {
         }
         hideForm();
     } catch (error) {
-        // Error is now primarily handled in the store, but we catch to stop loading indicator
         console.error("Submit failed:", error.message);
     } finally {
         isLoadingForm.value = false;
@@ -200,10 +203,6 @@ async function toggleBindingActive(binding) {
     await adminStore.updateBinding(binding.id, { is_active: !binding.is_active });
 }
 
-function manageModels(binding) {
-    uiStore.openModal('manageModels', { binding, bindingType: 'llm' });
-}
-
 function getBindingTitle(name) {
     const bindingType = availableBindingTypes.value.find(b => b.binding_name === name);
     return bindingType ? bindingType.title : name;
@@ -223,7 +222,6 @@ async function executeCommand(cmd, bindingId, params) {
     }
 }
 
-// ----- Commands Modal Logic -----
 function showCommands(binding) {
     activeBindingForCommands.value = binding;
     const bindingType = availableBindingTypes.value.find(b => b.binding_name === binding.name);
@@ -259,103 +257,129 @@ async function executeModalCommand() {
 <template>
     <div class="space-y-8">
         <div v-if="isFormVisible" class="bg-white dark:bg-gray-800 shadow-md rounded-lg p-6">
-            <h3 class="text-xl font-semibold mb-4">{{ isEditMode ? 'Edit Binding' : 'Add New Binding' }}</h3>
-            <form @submit.prevent="handleSubmit" class="space-y-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label for="alias" class="block text-sm font-medium">Alias <span class="text-red-500">*</span></label>
-                        <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required placeholder="e.g., local_ollama" autocomplete="off">
-                        <p class="text-xs text-gray-500 mt-1">A unique, short name for this configuration.</p>
-                    </div>
-                    <div>
-                        <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
-                        <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
-                            <option disabled value="">Select a type</option>
-                            <option v-for="type in availableBindingTypes" :key="type.binding_name" :value="type.binding_name">{{ type.title }}</option>
-                        </select>
-                    </div>
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-semibold">{{ isEditMode ? 'Edit Binding: ' + form.alias : 'Add New Binding' }}</h3>
+                <div v-if="isEditMode" class="flex gap-2 text-sm font-medium">
+                    <button @click="activeTab = 'settings'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'settings', 'text-gray-500 hover:text-gray-700': activeTab !== 'settings'}" class="px-3 py-2">Settings</button>
+                    <button @click="activeTab = 'zoo'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'zoo', 'text-gray-500 hover:text-gray-700': activeTab !== 'zoo'}" class="px-3 py-2">Models Zoo</button>
+                    <button @click="activeTab = 'models'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'models', 'text-gray-500 hover:text-gray-700': activeTab !== 'models'}" class="px-3 py-2">Installed Models</button>
                 </div>
+            </div>
 
-                <div v-if="selectedBindingType" class="space-y-6 border-t dark:border-gray-700 pt-6">
-                    <p class="text-sm text-gray-600 dark:text-gray-400">{{ selectedBindingType.description }}</p>
-                    <div v-for="param in allFormParameters" :key="param.name" class="space-y-1">
-                        <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">
-                            {{ param.name.replace(/_/g, ' ') }}
-                            <span v-if="param.mandatory" class="text-red-500">*</span>
-                        </label>
-                        
-                        <select v-if="param.options && param.options.length > 0" :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field">
-                            <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
-                        </select>
+            <div v-if="activeTab === 'settings'">
+                <form @submit.prevent="handleSubmit" class="space-y-6">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label for="alias" class="block text-sm font-medium">Alias <span class="text-red-500">*</span></label>
+                            <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required placeholder="e.g., local_ollama" autocomplete="off">
+                            <p class="text-xs text-gray-500 mt-1">A unique, short name for this configuration.</p>
+                        </div>
+                        <div>
+                            <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
+                            <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
+                                <option disabled value="">Select a type</option>
+                                <option v-for="type in availableBindingTypes" :key="type.binding_name" :value="type.binding_name">{{ type.title }}</option>
+                            </select>
+                        </div>
+                    </div>
 
-                        <div v-else-if="['str', 'int', 'float'].includes(param.type)">
-                            <div class="relative">
-                                <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'" 
-                                    :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field"
-                                    :required="param.mandatory" :placeholder="param.description" autocomplete="off">
-                                <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" :title="isKeyVisible[param.name] ? 'Hide' : 'Show'">
-                                    <IconEyeOff v-if="isKeyVisible[param.name]" class="w-5 h-5" />
-                                    <IconEye v-else class="w-5 h-5" />
+                    <div v-if="selectedBindingType" class="space-y-6 border-t dark:border-gray-700 pt-6">
+                        <p class="text-sm text-gray-600 dark:text-gray-400">{{ selectedBindingType.description }}</p>
+                        <div v-for="param in allFormParameters" :key="param.name" class="space-y-1">
+                            <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">
+                                {{ param.name.replace(/_/g, ' ') }}
+                                <span v-if="param.mandatory" class="text-red-500">*</span>
+                            </label>
+                            
+                            <select v-if="param.options && param.options.length > 0" :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field">
+                                <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
+                            </select>
+
+                            <div v-else-if="['str', 'int', 'float'].includes(param.type)">
+                                <div class="relative">
+                                    <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'" 
+                                        :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field"
+                                        :required="param.mandatory" :placeholder="param.description" autocomplete="off">
+                                    <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500 hover:text-gray-700 dark:hover:text-gray-300" :title="isKeyVisible[param.name] ? 'Hide' : 'Show'">
+                                        <IconEyeOff v-if="isKeyVisible[param.name]" class="w-5 h-5" />
+                                        <IconEye v-else class="w-5 h-5" />
+                                    </button>
+                                </div>
+                            </div>
+                            <div v-else-if="param.type === 'bool'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                                <span class="flex-grow flex flex-col pr-4"><span class="text-sm text-gray-500 dark:text-gray-400">{{ param.description }}</span></span>
+                                <button @click="form.config[param.name] = !form.config[param.name]" type="button" :class="[form.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                    <span :class="[form.config[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
+                            <p class="text-xs text-gray-500 mt-1">{{ param.description }}</p>
                         </div>
-                        <div v-else-if="param.type === 'bool'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                            <span class="flex-grow flex flex-col pr-4"><span class="text-sm text-gray-500 dark:text-gray-400">{{ param.description }}</span></span>
-                            <button @click="form.config[param.name] = !form.config[param.name]" type="button" :class="[form.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
-                                <span :class="[form.config[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
-                            </button>
-                        </div>
-                        <p class="text-xs text-gray-500 mt-1">{{ param.description }}</p>
                     </div>
-                </div>
 
-                <!-- Binding Commands Section (Inside Form) -->
-                <div v-if="isEditMode && selectedBindingType && selectedBindingType.commands && selectedBindingType.commands.length > 0" class="mt-6 border-t dark:border-gray-700 pt-6">
-                    <h4 class="text-lg font-semibold mb-4">Binding Commands</h4>
-                    <div class="grid grid-cols-1 gap-4">
-                        <div v-for="cmd in selectedBindingType.commands" :key="cmd.name" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
-                            <div class="flex justify-between items-start mb-3">
-                                <div>
-                                    <h5 class="font-bold text-md">{{ cmd.title || cmd.name }}</h5>
-                                    <p class="text-sm text-gray-600 dark:text-gray-400">{{ cmd.description }}</p>
-                                </div>
-                            </div>
-                            
-                            <div v-if="cmd.parameters && cmd.parameters.length > 0" class="space-y-3 mb-4">
-                                <div v-for="p in cmd.parameters" :key="p.name">
-                                    <label class="block text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">{{ p.name }}</label>
-                                    <input v-if="p.type !== 'bool'" type="text" v-model="commandParams[cmd.name][p.name]" class="input-field text-sm" :placeholder="p.default">
-                                    <div v-else class="flex items-center gap-2">
-                                        <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
-                                            <span :class="[commandParams[cmd.name][p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
-                                        </button>
-                                        <span class="text-sm">{{ p.description }}</span>
+                    <div v-if="isEditMode && selectedBindingType && selectedBindingType.commands && selectedBindingType.commands.length > 0" class="mt-6 border-t dark:border-gray-700 pt-6">
+                        <h4 class="text-lg font-semibold mb-4">Binding Commands</h4>
+                        <div class="grid grid-cols-1 gap-4">
+                            <div v-for="cmd in selectedBindingType.commands" :key="cmd.name" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
+                                <div class="flex justify-between items-start mb-3">
+                                    <div>
+                                        <h5 class="font-bold text-md">{{ cmd.title || cmd.name }}</h5>
+                                        <p class="text-sm text-gray-600 dark:text-gray-400">{{ cmd.description }}</p>
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <div class="flex justify-end">
-                                <button type="button" @click="executeCommand(cmd, editingBinding.id, commandParams[cmd.name])" class="btn btn-primary btn-sm">Execute</button>
+                                
+                                <div v-if="cmd.parameters && cmd.parameters.length > 0" class="space-y-3 mb-4">
+                                    <div v-for="p in cmd.parameters" :key="p.name">
+                                        <label class="block text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">{{ p.name }}</label>
+                                        <input v-if="p.type !== 'bool'" type="text" v-model="commandParams[cmd.name][p.name]" class="input-field text-sm" :placeholder="p.default">
+                                        <div v-else class="flex items-center gap-2">
+                                            <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                                <span :class="[commandParams[cmd.name][p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                            </button>
+                                            <span class="text-sm">{{ p.description }}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="flex justify-end">
+                                    <button type="button" @click="executeCommand(cmd, editingBinding.id, commandParams[cmd.name])" class="btn btn-primary btn-sm">Execute</button>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
-                
-                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                    <span class="flex-grow flex flex-col"><span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span><span class="text-sm text-gray-500 dark:text-gray-400">If disabled, users cannot see or use models from this binding.</span></span>
-                    <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
-                        <span :class="[form.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
-                    </button>
-                </div>
+                    
+                    <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
+                        <span class="flex-grow flex flex-col"><span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span><span class="text-sm text-gray-500 dark:text-gray-400">If disabled, users cannot see or use models from this binding.</span></span>
+                        <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <span :class="[form.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
 
-                <div class="flex justify-end gap-3">
-                    <button type="button" @click="hideForm" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary" :disabled="isLoadingForm">{{ isLoadingForm ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Add Binding') }}</button>
+                    <div class="flex justify-end gap-3">
+                        <button type="button" @click="hideForm" class="btn btn-secondary">Close</button>
+                        <button type="submit" class="btn btn-primary" :disabled="isLoadingForm">
+                            <IconAnimateSpin v-if="isLoadingForm" class="w-5 h-5 mr-2" />
+                            {{ isLoadingForm ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Add Binding') }}
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <div v-else-if="activeTab === 'zoo'">
+                <BindingZoo :binding="editingBinding" binding-type="llm" />
+                <div class="flex justify-end gap-3 mt-4">
+                     <button type="button" @click="hideForm" class="btn btn-secondary">Close</button>
                 </div>
-            </form>
+            </div>
+
+            <div v-else-if="activeTab === 'models'">
+                <BindingModelsManager :binding="editingBinding" binding-type="llm" />
+                <div class="flex justify-end gap-3 mt-4">
+                     <button type="button" @click="hideForm" class="btn btn-secondary">Close</button>
+                </div>
+            </div>
         </div>
 
-        <div>
+        <div v-else>
             <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
                 <h2 class="text-2xl font-bold">LLM Bindings</h2>
                 <div class="flex items-center gap-4">
@@ -367,62 +391,56 @@ async function executeModalCommand() {
                             <option value="original">Original Names Only</option>
                         </select>
                     </div>
-                    <button @click="showAddForm" class="btn btn-primary self-end" v-if="!isFormVisible">+ Add New Binding</button>
+                    <button @click="showAddForm" class="btn btn-primary self-end">+ Add New Binding</button>
                 </div>
             </div>
 
             <div v-if="isLoadingBindings" class="text-center p-6">Loading bindings...</div>
-            <div v-else-if="bindings.length === 0 && !isFormVisible" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <div v-else-if="bindings.length === 0" class="text-center p-6 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
                 <p>No LLM bindings configured yet.</p>
                 <button @click="showAddForm" class="mt-2 text-blue-600 hover:underline">Add your first one</button>
             </div>
-            <div v-else class="space-y-4">
-                <div v-for="binding in bindings" :key="binding.id" class="bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md flex flex-col gap-4">
+            <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                <div v-for="binding in bindings" :key="binding.id" @click="showEditForm(binding)" class="bg-white dark:bg-gray-800 p-5 rounded-lg shadow-md hover:shadow-lg transition-shadow cursor-pointer flex flex-col gap-4 border border-transparent hover:border-blue-500 group relative">
+                    <div class="absolute top-4 right-4 z-10" @click.stop>
+                         <button @click="toggleBindingActive(binding)" type="button" :class="[binding.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']" :title="binding.is_active ? 'Deactivate' : 'Activate'">
+                            <span :class="[binding.is_active ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
+                    
                     <div class="flex-grow">
-                        <div class="flex justify-between items-center">
-                            <div class="flex items-center gap-3">
+                         <div class="flex items-center gap-3 mb-2">
+                             <IconCpuChip class="w-8 h-8 text-blue-500" />
+                             <div>
                                 <h4 class="font-bold text-lg text-gray-900 dark:text-white">{{ binding.alias }}</h4>
-                                <button @click.stop="toggleBindingActive(binding)" type="button" :class="[binding.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']" :title="binding.is_active ? 'Deactivate' : 'Activate'">
-                                    <span :class="[binding.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                                </button>
-                            </div>
-                            <div class="flex gap-3">
-                                <button @click="showEditForm(binding)" class="text-sm font-medium text-blue-600 hover:underline">Edit</button>
-                                <button @click="handleDelete(binding)" class="text-sm font-medium text-red-600 hover:underline">Delete</button>
-                            </div>
-                        </div>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">{{ getBindingTitle(binding.name) }}</p>
-                        <div class="mt-2 text-xs space-y-1 text-gray-600 dark:text-gray-300">
-                            <template v-for="(value, key) in binding.config" :key="key">
-                                 <p v-if="value && key !== 'model_name'">
-                                    <span class="font-semibold capitalize">{{ key.replace(/_/g, ' ') }}:</span> 
-                                    <span v-if="key.includes('key') || key.includes('token')">********</span>
-                                    <span v-else>{{ value }}</span>
-                                 </p>
-                            </template>
-                            <p v-if="binding.default_model_name"><span class="font-semibold">Default Model:</span> {{ binding.default_model_name }}</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">{{ getBindingTitle(binding.name) }}</p>
+                             </div>
+                         </div>
+                        
+                        <div class="mt-3 text-sm text-gray-600 dark:text-gray-300">
+                             <p v-if="binding.default_model_name" class="mb-1"><span class="font-semibold">Default:</span> {{ binding.default_model_name }}</p>
+                             <p class="text-xs text-gray-400 truncate">{{ binding.config ? Object.keys(binding.config).filter(k=>!k.includes('key')).join(', ') : '' }}</p>
                         </div>
                     </div>
-                    <div class="border-t dark:border-gray-700 pt-3 flex justify-end gap-2">
-                        <button v-if="availableBindingTypes.find(b => b.binding_name === binding.name)?.commands?.length" @click="showCommands(binding)" class="btn btn-secondary btn-sm flex items-center gap-2" title="Execute Commands">
-                            <IconTerminal class="w-4 h-4" /> Commands
-                        </button>
-                        <button @click="manageModels(binding)" class="btn btn-secondary btn-sm flex items-center gap-2">
-                            <IconCpuChip class="w-4 h-4" /> Manage Models
-                        </button>
+                    
+                     <div class="border-t dark:border-gray-700 pt-3 flex justify-between items-center text-xs text-gray-500">
+                        <span>Click to edit</span>
+                        <button @click.stop="handleDelete(binding)" class="text-red-500 hover:underline p-1">Delete</button>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Commands Modal -->
+        <!-- Commands Modal (Kept for quick access from list? No, user said edit view) -->
+         <!-- Keeping GenericModal for consistency if needed by child components -->
         <GenericModal :visible="isCommandsModalVisible" title="Binding Commands" @close="isCommandsModalVisible = false">
-            <div class="space-y-4">
+             <!-- ... existing modal content ... -->
+             <!-- Reuse existing logic if needed, but primary interaction is now via Edit View -->
+             <div class="space-y-4">
                 <div v-if="!activeBindingCommands.length" class="text-center text-gray-500">
                     No commands available for this binding.
                 </div>
                 <div v-else class="flex gap-4">
-                    <!-- Left: Command List -->
                     <div class="w-1/3 border-r dark:border-gray-700 pr-4 space-y-2">
                         <button 
                             v-for="cmd in activeBindingCommands" 
@@ -434,7 +452,6 @@ async function executeModalCommand() {
                         </button>
                     </div>
                     
-                    <!-- Right: Command Details & Execution -->
                     <div class="w-2/3 pl-2">
                         <div v-if="selectedCommand">
                             <h4 class="font-bold text-lg mb-2">{{ selectedCommand.title || selectedCommand.name }}</h4>

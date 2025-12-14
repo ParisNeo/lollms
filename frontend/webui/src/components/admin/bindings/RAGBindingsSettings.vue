@@ -6,6 +6,7 @@ import { useUiStore } from '../../../stores/ui';
 import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
+import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -179,7 +180,10 @@ function manageModels(binding) {
                 </div>
                 <div class="flex justify-end gap-3">
                     <button type="button" @click="hideForm" class="btn btn-secondary">Cancel</button>
-                    <button type="submit" class="btn btn-primary" :disabled="isLoadingForm">{{ isLoadingForm ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Create Binding') }}</button>
+                    <button type="submit" class="btn btn-primary" :disabled="isLoadingForm">
+                        <IconAnimateSpin v-if="isLoadingForm" class="w-5 h-5 mr-2" />
+                        {{ isLoadingForm ? 'Saving...' : (isEditMode ? 'Save Changes' : 'Create Binding') }}
+                    </button>
                 </div>
             </form>
         </div>

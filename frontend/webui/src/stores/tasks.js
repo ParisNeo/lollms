@@ -1,4 +1,3 @@
-// [UPDATE] frontend/webui/src/stores/tasks.js
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
@@ -8,13 +7,12 @@ import useEventBus from '../services/eventBus';
 
 export const useTasksStore = defineStore('tasks', () => {
     const uiStore = useUiStore();
-    const { emit } = useEventBus();
+    const { on, off, emit } = useEventBus();
 
     // --- STATE ---
     const tasks = ref([]);
     const isLoadingTasks = ref(false);
     const isClearingTasks = ref(false);
-    let pollInterval = null;
 
     // --- COMPUTED ---
     const activeTasksCount = computed(() => {
@@ -55,7 +53,7 @@ export const useTasksStore = defineStore('tasks', () => {
             tasks.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to fetch tasks:", error);
-            tasks.value = []; // Ensure it's an array on failure
+            tasks.value = [];
         } finally {
             isLoadingTasks.value = false;
         }
@@ -79,16 +77,31 @@ export const useTasksStore = defineStore('tasks', () => {
         }
     }
     
+    // --- WebSocket Event Handlers ---
+    function handleTaskUpdate(data) {
+        addTask(data);
+    }
+
+    function handleTaskEnd(data) {
+        addTask(data);
+        if (data.status === 'failed') {
+             uiStore.addNotification(`Task '${data.name}' failed: ${data.error || 'Unknown error'}`, 'error');
+        } else if (data.status === 'completed') {
+             // Optional: Add success notification if desired, but might be spammy for frequent tasks
+             // uiStore.addNotification(`Task '${data.name}' completed.`, 'success');
+        }
+    }
+
     function handleTasksCleared(data) {
         const authStore = useAuthStore();
         const currentUser = authStore.user;
         if (!currentUser) return;
 
+        // If username is null (admin cleared all) or matches current user
         if (data.username === null || data.username === currentUser.username) {
             tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
         }
     }
-
 
     async function cancelTask(taskId) {
         try {
@@ -104,7 +117,10 @@ export const useTasksStore = defineStore('tasks', () => {
         try {
             const response = await apiClient.post('/api/tasks/cancel-all');
             uiStore.addNotification(response.data.message || 'All active tasks cancelled.', 'success');
-            await fetchTasks();
+            // Refresh logic handled via WS updates usually, but fetch once to be sure
+            const authStore = useAuthStore();
+            const filter = authStore.isAdmin ? 'all' : 'me';
+            await fetchTasks(filter);
         } catch (error) {
             // Error handled globally
         }
@@ -117,6 +133,7 @@ export const useTasksStore = defineStore('tasks', () => {
             const response = await apiClient.post('/api/tasks/clear-completed');
             uiStore.addNotification(response.data.message || 'Completed tasks cleared.', 'success');
             
+            // Optimistic update (backup to WS event)
             const authStore = useAuthStore();
             if (authStore.isAdmin) {
                 tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
@@ -135,30 +152,33 @@ export const useTasksStore = defineStore('tasks', () => {
         }
     }
 
-    function startPolling() {
-        if (pollInterval) return;
+    function startListening() {
         const authStore = useAuthStore();
         const filter = authStore.isAdmin ? 'all' : 'me';
+        // Initial fetch to populate state
         fetchTasks(filter);
-        pollInterval = setInterval(() => {
-            const authStore = useAuthStore();
-            const currentFilter = authStore.isAdmin ? 'all' : 'me';
-            fetchTasks(currentFilter);
-        }, 5000);
+
+        // Subscribe to WebSocket events
+        on('task_update', handleTaskUpdate);
+        on('task_end', handleTaskEnd);
+        on('tasks_cleared', handleTasksCleared);
     }
 
-    function stopPolling() {
-        if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
-        }
+    function stopListening() {
+        off('task_update', handleTaskUpdate);
+        off('task_end', handleTaskEnd);
+        off('tasks_cleared', handleTasksCleared);
     }
     
+    // Alias for backward compatibility if components use startPolling
+    const startPolling = startListening;
+    const stopPolling = stopListening;
+
     function $reset() {
         tasks.value = [];
         isLoadingTasks.value = false;
         isClearingTasks.value = false;
-        stopPolling();
+        stopListening();
     }
 
     return {
@@ -177,6 +197,8 @@ export const useTasksStore = defineStore('tasks', () => {
         handleTasksCleared,
         startPolling,
         stopPolling,
+        startListening,
+        stopListening,
         $reset
     };
 });

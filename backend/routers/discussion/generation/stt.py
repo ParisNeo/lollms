@@ -1,9 +1,9 @@
-# [CREATE] backend/routers/discussion/generation/stt.py
+# [UPDATE] backend/routers/discussion/generation/stt.py
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
-from backend.session import get_current_active_user, get_user_lollms_client
+from backend.session import get_current_active_user, build_lollms_client_from_params
 from backend.models import UserAuthDetails
 
 def build_stt_router(router: APIRouter):
@@ -16,7 +16,7 @@ def build_stt_router(router: APIRouter):
         Transcribes audio to text using the user's configured STT binding.
         """
         try:
-            lc = get_user_lollms_client(current_user.username)
+            lc = build_lollms_client_from_params(username=current_user.username, load_llm=False, load_stt=True)
             if not lc.stt:
                 raise HTTPException(status_code=400, detail="Speech-to-Text (STT) is not configured for this user.")
 

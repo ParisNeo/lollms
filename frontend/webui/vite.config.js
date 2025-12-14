@@ -37,6 +37,7 @@ export default defineConfig({
     // and create a 'dist' folder there.
     // The final output will be in `frontend/dist/`.
     outDir: resolve(__dirname, '../dist'),
+    assetsDir: 'ui_assets', // Changed from 'assets' to prevent conflict with backend /assets route
     // This ensures that the output directory is cleared before each build.
     emptyOutDir: true,
   },

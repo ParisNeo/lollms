@@ -158,7 +158,7 @@ def get_group_feed(
     current_user: DBUser = Depends(get_current_db_user_from_token),
     db: Session = Depends(get_db)
 ):
-    from backend.routers.social import get_post_public
+    from backend.routers.social import get_posts_public_batched
     
     group = db.query(DBGroup).filter(DBGroup.id == group_id).first()
     if not group or current_user not in group.members:
@@ -173,4 +173,4 @@ def get_group_feed(
         DBPost.moderation_status != 'flagged'
     ).order_by(DBPost.created_at.desc()).all()
 
-    return [get_post_public(db, post, current_user.id) for post in posts_db]
+    return get_posts_public_batched(db, posts_db, current_user.id)

@@ -332,7 +332,7 @@ async def get_user_conversations(
                 last_message_at=last_msg.sent_at if last_msg else g.created_at
             ))
 
-    # 2. Fetch Legacy 1-on-1 DMs
+    # 2. Fetch Legacy 1-on-1 DMs with window function for speed
     subquery = db.query(
         DBDirectMessage.id,
         func.row_number().over(
@@ -352,14 +352,31 @@ async def get_user_conversations(
     ).options(joinedload(DBDirectMessage.sender), joinedload(DBDirectMessage.receiver)).order_by(desc(DBDirectMessage.sent_at)).all()
 
     dms = []
+    partner_ids = []
+    
+    # Collect partners to batch query unread counts
     for msg in latest_dms:
         partner = msg.sender if msg.receiver_id == current_user.id else msg.receiver
-        unread = db.query(DBDirectMessage).filter(
-            DBDirectMessage.sender_id == partner.id,
+        partner_ids.append(partner.id)
+
+    # Batch fetch unread counts
+    if partner_ids:
+        unread_counts_rows = db.query(
+            DBDirectMessage.sender_id,
+            func.count(DBDirectMessage.id)
+        ).filter(
+            DBDirectMessage.sender_id.in_(partner_ids),
             DBDirectMessage.receiver_id == current_user.id,
             DBDirectMessage.read_at == None,
             DBDirectMessage.conversation_id == None
-        ).count()
+        ).group_by(DBDirectMessage.sender_id).all()
+        unread_counts = {r[0]: r[1] for r in unread_counts_rows}
+    else:
+        unread_counts = {}
+
+    for msg in latest_dms:
+        partner = msg.sender if msg.receiver_id == current_user.id else msg.receiver
+        unread = unread_counts.get(partner.id, 0)
         
         dms.append(ConversationPublic(
             id=partner.id,

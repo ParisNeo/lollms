@@ -18,6 +18,7 @@ FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, inspect, desc
 
@@ -195,7 +196,9 @@ def scheduled_email_proposal_job():
 
 
 def run_one_time_startup_tasks(lock: Lock):
-    # ... (content remains same as previous full file content) ...
+    """
+    Acquires a lock to ensure these tasks run only once across multiple workers.
+    """
     acquired = lock.acquire(block=False)
     if not acquired:
         return
@@ -510,6 +513,10 @@ app = FastAPI(
     on_startup=[startup_event],
     on_shutdown=[shutdown_event]
 )
+
+# Enable Gzip Compression for large responses (Discussion lists, message history)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+
 app.include_router(email_marketing_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
@@ -660,9 +667,9 @@ if __name__ == "__main__":
     
     workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
     
-    if os.name == 'nt' and workers > 1 and "LOLLMS_WORKERS" not in os.environ:
-        ASCIIColors.yellow("Multiple workers are not fully stable on Windows.")
-        workers = 1
+    # if os.name == 'nt' and workers > 1 and "LOLLMS_WORKERS" not in os.environ:
+    #     ASCIIColors.yellow("Multiple workers are not fully stable on Windows.")
+    #     workers = 1
 
     ssl_params = {}
     if settings.get("https_enabled"):

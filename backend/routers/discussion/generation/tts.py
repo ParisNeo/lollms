@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from pathlib import Path
 
 from backend.db import get_db
-from backend.session import get_current_active_user, get_user_lollms_client, get_user_data_root
+from backend.session import get_current_active_user, build_lollms_client_from_params, get_user_data_root
 from backend.models import UserAuthDetails
 from backend.db.models.user import User as DBUser
 from backend.db.models.voice import UserVoice as DBUserVoice
@@ -29,7 +29,7 @@ def build_tts_router(router: APIRouter):
         It prioritizes the user's active custom voice if one is set.
         """
         try:
-            lc = get_user_lollms_client(current_user.username)
+            lc = build_lollms_client_from_params(username=current_user.username, load_llm=False, load_tts=True)
             if not lc.tts:
                 raise HTTPException(status_code=400, detail="Text-to-Speech (TTS) is not configured for this user.")
             

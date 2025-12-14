@@ -100,7 +100,7 @@ async function handleUpdate() {
     >
         <template #body>
             <div v-if="isLoading" class="flex justify-center items-center p-8">
-                <IconAnimateSpin class="w-8 h-8 text-gray-500" />
+                <IconAnimateSpin class="w-8 h-8 text-gray-500 animate-spin" />
                 <span class="ml-3 text-gray-500">Loading configuration...</span>
             </div>
             <form v-else-if="app" @submit.prevent="handleUpdate" class="space-y-6">
@@ -164,7 +164,10 @@ async function handleUpdate() {
         <template #footer>
             <div class="flex justify-end gap-3">
                 <button @click="uiStore.closeModal('appConfig')" type="button" class="btn btn-secondary">Cancel</button>
-                <button @click="handleUpdate" type="button" class="btn btn-primary" :disabled="isLoading || isAppRunning">{{ isLoading ? 'Saving...' : 'Save Changes' }}</button>
+                <button @click="handleUpdate" type="button" class="btn btn-primary" :disabled="isLoading || isAppRunning">
+                    <IconAnimateSpin v-if="isLoading" class="w-5 h-5 mr-2 animate-spin" />
+                    {{ isLoading ? 'Saving...' : 'Save Changes' }}
+                </button>
             </div>
         </template>
     </GenericModal>
