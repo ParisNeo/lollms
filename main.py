@@ -515,7 +515,7 @@ app = FastAPI(
 )
 
 # Enable Gzip Compression for large responses (Discussion lists, message history)
-app.add_middleware(GZipMiddleware, minimum_size=1000)
+# app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.include_router(email_marketing_router)
 app.include_router(auth_router)

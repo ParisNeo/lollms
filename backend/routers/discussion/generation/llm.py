@@ -447,7 +447,11 @@ def build_llm_generation_router(router: APIRouter):
                 if item is None: break
                 yield item
 
-        return StreamingResponse(stream_generator(), media_type="application/x-ndjson")    
+        return StreamingResponse(
+            stream_generator(), 
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+        )    
     
     
     @router.post("/{discussion_id}/stop_generation", status_code=200)
