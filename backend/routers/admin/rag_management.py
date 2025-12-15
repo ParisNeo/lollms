@@ -24,7 +24,13 @@ async def get_available_rag_binding_types():
     if not safe_store:
         raise HTTPException(status_code=501, detail="SafeStore (RAG) functionality is not available.")
     try:
-        return safe_store.SafeStore.list_available_vectorizers()
+        types = safe_store.SafeStore.list_available_vectorizers()
+        # Filter out 'model' parameter from input_parameters if present
+        # This prevents the 'model' field from appearing in the binding settings form
+        for t in types:
+            if 'input_parameters' in t:
+                t['input_parameters'] = [p for p in t['input_parameters'] if p['name'] != 'model']
+        return types
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=str(e))

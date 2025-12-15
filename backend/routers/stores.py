@@ -930,6 +930,10 @@ async def list_available_vectorizers(db: Session = Depends(get_db)):
         raise HTTPException(status_code=501, detail="SafeStore not available.")
     
     try:
+        # [UPDATE] Ensure safe_store is initialized/ready by calling list_available_vectorizers first.
+        # This helps in some environments where plugins might not be loaded yet.
+        _ = safe_store.SafeStore.list_available_vectorizers()
+        
         # Get Display Mode
         mode_setting = settings.get("rag_model_display_mode", "mixed") # 'original', 'aliased', 'mixed'
         
@@ -1198,10 +1202,10 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreEdit, current_
              id=ds_db_obj.id, name=ds_db_obj.name, description=ds_db_obj.description,
              owner_username=ds_db_obj.owner.username, permission_level=permission_level,
              created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at,
-             vectorizer_name=ds_db.vectorizer_name,
-             vectorizer_config=ds_db.vectorizer_config or {},
-             chunk_size=ds_db.chunk_size,
-             chunk_overlap=ds_db.chunk_overlap
+             vectorizer_name=ds_db_obj.vectorizer_name,
+             vectorizer_config=ds_db_obj.vectorizer_config or {},
+             chunk_size=ds_db_obj.chunk_size,
+             chunk_overlap=ds_db_obj.chunk_overlap
         )
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error updating datastore: {e}")
