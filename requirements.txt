@@ -15,7 +15,7 @@ python-multipart==0.0.20
 bcrypt==4.0.1
 
 # --- LoLLMs Client Library and Common Backends ---
-lollms-client==1.7.11
+lollms-client==1.7.12
 ascii_colors==0.11.6
 pipmaster==1.0.8
 
@@ -41,7 +41,7 @@ Pillow==11.3.0
 # - pypdf, python-docx, beautifulsoup4, lxml (for document parsing)
 # - cryptography (for encryption)
 # - filelock (core concurrency mechanism for safe_store)
-safe_store==3.3.2
+safe_store==3.3.3
 wcwidth==0.2.14
 # If you prefer to install safe_store features individually:
 # safe_store

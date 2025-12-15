@@ -38,6 +38,10 @@ async def create_rag_binding(binding_data: RAGBindingCreate, db: Session = Depen
     if db.query(DBRAGBinding).filter(DBRAGBinding.alias == binding_data.alias).first():
         raise HTTPException(status_code=400, detail="A RAG binding with this alias already exists.")
     
+    # Ensure 'model' is not stored in the binding config, as it should be selected per datastore
+    if binding_data.config and "model" in binding_data.config:
+        del binding_data.config["model"]
+
     new_binding = DBRAGBinding(**binding_data.model_dump())
     try:
         db.add(new_binding)
@@ -63,6 +67,12 @@ async def update_rag_binding(binding_id: int, update_data: RAGBindingUpdate, db:
             raise HTTPException(status_code=400, detail="A RAG binding with the new alias already exists.")
 
     update_dict = update_data.model_dump(exclude_unset=True)
+    
+    # Ensure 'model' is not stored in the binding config
+    if 'config' in update_dict and update_dict['config']:
+        if 'model' in update_dict['config']:
+            del update_dict['config']['model']
+
     for key, value in update_dict.items():
         setattr(binding_to_update, key, value)
     
@@ -99,10 +109,16 @@ async def get_rag_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="RAG Binding not found.")
     
     try:
+        config = binding.config or {}
+        # Clean model from config just in case, though it shouldn't be there
+        if 'model' in config:
+            config = config.copy()
+            del config['model']
+
         # CORRECTED: Use keyword arguments for the call
         raw_models = safe_store.SafeStore.list_models(
             vectorizer_name=binding.name, 
-            vectorizer_config=binding.config or {}
+            vectorizer_config=config
         )
         
         models_list = [item if isinstance(item, str) else item.get("model_name") for item in raw_models if (isinstance(item, str) or item.get("model_name"))]
@@ -154,10 +170,8 @@ async def get_models_for_vectorizer_type(vectorizer_type: str, db: Session = Dep
     if not safe_store:
         raise HTTPException(status_code=501, detail="SafeStore (RAG) functionality is not available.")
     try:
-        binding = db.query(DBRAGBinding).filter(DBRAGBinding.name == vectorizer_type, DBRAGBinding.is_active == True).first()
-        config = binding.config if binding else {}
-
-        # CORRECTED: Use keyword arguments for the call
+        # Note: This endpoint might be deprecated in favor of binding-based model listing
+        # It relies on generic vectorizer instantiation
         models = safe_store.SafeStore.list_models(
             vectorizer_name=vectorizer_type
         )

@@ -769,12 +769,26 @@ def get_safe_store_instance(
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
         # ASCIIColors.info(f"Recovering vectorizer:{datastore_record.vectorizer_name}")
         try:
+            # FIX: Ensure 'model' key exists if 'model_name' is present, required for some vectorizers like ollama
+            vectorizer_config = datastore_record.vectorizer_config or {}
+            if isinstance(vectorizer_config, str):
+                try:
+                    vectorizer_config = json.loads(vectorizer_config)
+                except Exception:
+                    vectorizer_config = {}
+            
+            # Make a copy to avoid mutating the DB object if it's attached, though here it's likely fine.
+            # safe_store modifies config passed to it sometimes? better be safe.
+            v_config = vectorizer_config.copy()
+            if 'model_name' in v_config and 'model' not in v_config:
+                v_config['model'] = v_config['model_name']
+
             ss_instance = safe_store.SafeStore(
                 name=datastore_record.name,
                 description=datastore_record.description,
                 db_path=ss_db_path,
                 vectorizer_name=datastore_record.vectorizer_name,
-                vectorizer_config=datastore_record.vectorizer_config or {},
+                vectorizer_config=v_config,
                 chunk_size=datastore_record.chunk_size,
                 chunk_overlap=datastore_record.chunk_overlap,
                 expand_before=10,

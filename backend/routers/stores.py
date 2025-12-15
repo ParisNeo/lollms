@@ -949,10 +949,15 @@ async def list_available_vectorizers(db: Session = Depends(get_db)):
                 if not isinstance(binding_config, dict):
                     binding_config = {}
 
+                # Cleanup model from config for listing so we don't enforce it prematurely
+                clean_config = binding_config.copy()
+                if 'model' in clean_config:
+                    del clean_config['model']
+
                 # Fetch raw models from safe_store
                 raw_models_list = safe_store.SafeStore.list_models(
                     vectorizer_name=binding.name,
-                    vectorizer_config=binding_config
+                    vectorizer_config=clean_config
                 )
                 
                 # Normalize raw model names and ensure uniqueness
@@ -1026,7 +1031,7 @@ async def list_available_vectorizers(db: Session = Depends(get_db)):
                     "id": binding.id,
                     "alias": binding.alias, # The binding name shown to user
                     "vectorizer_name": binding.name, # The raw type (ollama, etc)
-                    "vectorizer_config": binding_config,
+                    "vectorizer_config": clean_config, # Return the clean config without 'model'
                     "models": processed_models
                 })
 
@@ -1059,9 +1064,15 @@ async def get_rag_binding_models_public(binding_id: int, db: Session = Depends(g
         raise HTTPException(status_code=404, detail="RAG Binding not found.")
     
     try:
+        config = binding.config or {}
+        # Clean model from config just in case, though it shouldn't be there
+        if 'model' in config:
+            config = config.copy()
+            del config['model']
+            
         raw_models = safe_store.SafeStore.list_models(
             vectorizer_name=binding.name, 
-            vectorizer_config=binding.config or {}
+            vectorizer_config=config
         )
         
         models_list = [item if isinstance(item, str) else item.get("model_name") for item in raw_models if (isinstance(item, str) or item.get("model_name"))]
