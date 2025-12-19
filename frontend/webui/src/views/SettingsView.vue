@@ -12,9 +12,9 @@ import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconKey from '../assets/icons/IconKey.vue';
-import IconTool from '../assets/icons/IconTool.vue';
 import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
 import IconMcp from '../assets/icons/IconMcp.vue';
+import IconFingerPrint from '../assets/icons/IconFingerPrint.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -22,6 +22,7 @@ const router = useRouter();
 // Define components for async loading
 const AccountSettings = defineAsyncComponent(() => import('../components/settings/AccountSettings.vue'));
 const GeneralSettings = defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue'));
+const UserContextSettings = defineAsyncComponent(() => import('../components/settings/UserContextSettings.vue'));
 const LLMSettings = defineAsyncComponent(() => import('../components/settings/LLMSettings.vue'));
 const RAGSettings = defineAsyncComponent(() => import('../components/settings/RAGSettings.vue'));
 const TTISettings = defineAsyncComponent(() => import('../components/settings/TTISettings.vue'));
@@ -36,6 +37,7 @@ const AppsSettings = defineAsyncComponent(() => import('../components/settings/A
 const sections = [
     { id: 'account', name: 'Account', icon: markRaw(IconUserCircle), component: AccountSettings },
     { id: 'general', name: 'General', icon: markRaw(IconCog), component: GeneralSettings },
+    { id: 'context', name: 'User Context', icon: markRaw(IconFingerPrint), component: UserContextSettings }, // Added new section
     { type: 'divider' },
     { id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle), component: PersonalitiesSettings },
     { id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles), component: PromptsSettings },

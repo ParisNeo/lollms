@@ -1,9 +1,9 @@
 // [UPDATE] frontend/webui/src/stores/composables/useDiscussionGeneration.js
 import apiClient from '../../services/api';
-import { processSingleMessage } from './discussionProcessor'; // IMPORT the shared function
+import { processSingleMessage } from './discussionProcessor';
 
 export function useDiscussionGeneration(state, stores, getActions) {
-    const { discussions, currentDiscussionId, messages, generationInProgress, activePersonality, promptLoadedArtefacts, _clearActiveAiTask, generationState } = state;
+    const { discussions, currentDiscussionId, messages, generationInProgress, activePersonality, promptLoadedArtefacts, _clearActiveAiTask, generationState, currentModelVisionSupport } = state;
     const { uiStore, authStore, dataStore } = stores;
 
     let activeGenerationAbortController = null;
@@ -13,23 +13,44 @@ export function useDiscussionGeneration(state, stores, getActions) {
             uiStore.addNotification('A generation is already in progress.', 'warning');
             return;
         }
-        if (!currentDiscussionId.value) {
-            await getActions().createNewDiscussion();
-        }
-        if (!state.activeDiscussion.value) return;
-
-        const selectedModelId = authStore.user?.lollms_model_name;
-        const selectedModel = dataStore.availableLollmsModels.find(m => m.id === selectedModelId);
-        const hasVision = selectedModel?.alias?.has_vision ?? true;
-        let imagesToSend = payload.image_server_paths || [];
         
-        if (!hasVision && imagesToSend.length > 0) {
-            uiStore.addNotification(`The selected model '${selectedModel.name}' does not support vision. Images will be ignored.`, 'warning', 6000);
+        // Ensure user info is loaded
+        if (!authStore.user) {
+            console.error("No authenticated user found in store.");
+            uiStore.addNotification('Session error. Please try logging in again.', 'error');
+            return;
+        }
+
+        if (!currentDiscussionId.value) {
+            try {
+                // Ensure we wait for the creation to finish and populate the ID
+                await getActions().createNewDiscussion();
+            } catch (err) {
+                console.error("Auto-creation of discussion failed:", err);
+                uiStore.addNotification('Failed to create a new discussion.', 'error');
+                return;
+            }
+        }
+        
+        // Final sanity check for ID and object
+        if (!currentDiscussionId.value || !state.activeDiscussion.value) {
+            console.error("No active discussion found to send message to.");
+            uiStore.addNotification('Failed to identify active conversation.', 'error');
+            return;
+        }
+
+        // Vision Support Enforcement:
+        // Filter out images if the current model doesn't support them.
+        let imagesToSend = payload.image_server_paths || [];
+        if (!currentModelVisionSupport.value && imagesToSend.length > 0) {
+            uiStore.addNotification('Active model does not support images. Sending text only.', 'warning');
             imagesToSend = [];
         }
 
         generationInProgress.value = true;
+        // Granular state updates for better UI feedback
         generationState.value = { status: 'starting', details: 'Waiting for first token...' };
+        
         promptLoadedArtefacts.value.clear();
         activeGenerationAbortController = new AbortController();
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
@@ -62,15 +83,15 @@ export function useDiscussionGeneration(state, stores, getActions) {
         const processStreamData = (data) => {
             if (!messageToUpdate) return;
             
-            // First, handle state updates based on type
             switch (data.type) {
                 case 'chunk':
                     if (generationState.value.status !== 'streaming') {
-                        generationState.value = { status: 'streaming', details: 'Receiving response...' };
+                        generationState.value = { status: 'streaming', details: 'Generating response...' };
                     }
+                    messageToUpdate.content += data.content;
                     break;
                 case 'step_start':
-                    generationState.value = { status: 'thinking', details: data.content || 'Thinking...' };
+                    generationState.value = { status: 'thinking', details: data.content || 'AI Thinking...' };
                     break;
                 case 'tool_call':
                     let details = 'Using tool...';
@@ -82,7 +103,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
                 case 'new_title_start':
                     state.titleGenerationInProgressId.value = currentDiscussionId.value;
-                    generationState.value = { status: 'generating_title', details: 'Generating title...' };
+                    generationState.value = { status: 'generating_title', details: 'Generating discussion title...' };
                     break;
                 case 'new_title_end':
                     state.titleGenerationInProgressId.value = null;
@@ -90,41 +111,17 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         state.discussions.value[currentDiscussionId.value].title = data.new_title;
                     }
                     if (generationInProgress.value) {
-                        generationState.value = { status: 'thinking', details: 'Continuing generation...' };
+                        generationState.value = { status: 'streaming', details: 'Continuing generation...' };
                     }
                     break;
                 case 'step_end':
                     if (generationInProgress.value) { 
-                        generationState.value = { status: 'thinking', details: 'Continuing generation...' };
+                        generationState.value = { status: 'streaming', details: 'Continuing generation...' };
                     }
-                    break;
-            }
-
-            // Then, handle data processing for the message object
-            switch (data.type) {
-                case 'chunk':
-                    messageToUpdate.content += data.content;
                     break;
                 case 'sources':
                     if (!messageToUpdate.sources) messageToUpdate.sources = [];
                     messageToUpdate.sources = data.content;
-                    // Fallthrough to events
-                case 'step_start':
-                case 'step_end':
-                case 'info':
-                case 'observation':
-                case 'thought':
-                case 'reasoning':
-                case 'tool_call':
-                case 'scratchpad':
-                case 'exception':
-                case 'error':
-                    if (!messageToUpdate.events) messageToUpdate.events = [];
-                    messageToUpdate.events.push(data);
-                    break;
-                case 'new_title_start':
-                case 'new_title_end':
-                    // Already handled state, nothing to do for message object here
                     break;
                 case 'finalize': {
                     const finalData = data.data;
@@ -139,17 +136,29 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     break;
                 }
+                default:
+                    if (['thought', 'reasoning', 'scratchpad', 'info', 'observation', 'exception', 'error'].includes(data.type)) {
+                        if (!messageToUpdate.events) messageToUpdate.events = [];
+                        messageToUpdate.events.push(data);
+                    }
             }
         };
         
         try {
-            const response = await fetch(`/api/discussions/${currentDiscussionId.value}/chat`, {
+            // Determine full URL to ensure compatibility with dev proxy and specific baseURL settings
+            const baseUrl = apiClient.defaults.baseURL || '';
+            const fetchUrl = `${baseUrl.replace(/\/$/, '')}/api/discussions/${currentDiscussionId.value}/chat`;
+
+            const response = await fetch(fetchUrl, {
                 method: 'POST', body: formData,
                 headers: { 'Authorization': `Bearer ${authStore.token}` },
                 signal: activeGenerationAbortController.signal,
             });
 
-            if (!response.ok || !response.body) throw new Error(`HTTP error ${response.status}`);
+            if (!response.ok || !response.body) {
+                const errorText = await response.text().catch(() => "No error details available.");
+                throw new Error(`HTTP error ${response.status}: ${errorText}`);
+            }
             
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
@@ -164,7 +173,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
                     const line = buffer.slice(0, newlineIndex).trim();
                     buffer = buffer.slice(newlineIndex + 1);
-
                     if (line) {
                         try {
                             const data = JSON.parse(line);
@@ -173,27 +181,31 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                 }
             }
-            if (buffer.trim()) {
-                try {
-                    const data = JSON.parse(buffer.trim());
-                    processStreamData(data);
-                } catch(e) {
-                    console.error("Error parsing final buffered line:", buffer.trim(), e);
-                }
-            }
 
         } catch (error) {
             if (error.name !== 'AbortError') {
+                console.error("Chat fetch failed:", error);
                 uiStore.addNotification('An error occurred during generation.', 'error');
+                
+                // Cleanup temp messages on failure
                 const aiMessageIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
                 if (aiMessageIndex > -1) messages.value.splice(aiMessageIndex, 1);
+                
+                if (!payload.is_resend) {
+                    const userMessageIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
+                    if (userMessageIndex > -1) messages.value.splice(userMessageIndex, 1);
+                }
             }
         } finally {
             if (messageToUpdate) messageToUpdate.isStreaming = false;
             generationInProgress.value = false;
             generationState.value = { status: 'idle', details: '' };
             activeGenerationAbortController = null;
-            await getActions().fetchContextStatus(currentDiscussionId.value);
+            
+            // CRITICAL FIX: Ensure persistence and UI sync by refreshing data zones after generation
+            if (currentDiscussionId.value) {
+                await getActions().refreshDataZones(currentDiscussionId.value);
+            }
             await getActions().loadDiscussions();
         }
     }
@@ -211,6 +223,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 await apiClient.post(`/api/discussions/${currentDiscussionId.value}/stop_generation`); 
             } catch(e) { console.warn("Backend stop signal failed.", e); }
             await getActions().refreshActiveDiscussionMessages();
+            await getActions().refreshDataZones(currentDiscussionId.value);
         }
         uiStore.addNotification('Generation stopped.', 'info');
     }

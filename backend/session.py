@@ -30,7 +30,8 @@ from backend.config import (
     DM_ASSETS_DIR_NAME,
     DATASTORES_DIR_NAME,
     VOICES_DIR_NAME,
-    IMAGES_DIR_NAME
+    IMAGES_DIR_NAME,
+    NOTEBOOK_ASSETS_DIR_NAME
 )
 from backend.settings import settings
 from backend.security import create_access_token
@@ -844,3 +845,8 @@ def get_user_datastore_root_path(username: str) -> Path:
 def get_datastore_db_path(owner_username: str, datastore_id: str) -> Path:
     safe_datastore_id = secure_filename(datastore_id)
     return get_user_datastore_root_path(owner_username) / f"{safe_datastore_id}.db"
+
+def get_user_notebook_assets_path(username: str, notebook_id: str) -> Path:
+    path = get_user_data_root(username) / NOTEBOOK_ASSETS_DIR_NAME / secure_filename(notebook_id)
+    path.mkdir(parents=True, exist_ok=True)
+    return path

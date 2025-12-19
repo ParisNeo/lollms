@@ -14,6 +14,7 @@ import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconServer from '../../assets/icons/IconServer.vue'; // For Notebooks
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -27,7 +28,6 @@ const activityTimeout = ref(null);
 const sidebarRef = ref(null);
 
 function goToFeed() {
-    console.log("Feed button clicked in Sidebar.");
     uiStore.setMainView('feed');
 }
 
@@ -35,7 +35,6 @@ const resetActivityTimer = () => {
     clearTimeout(activityTimeout.value);
     if (isSidebarOpen.value) {
         activityTimeout.value = setTimeout(() => {
-            // Do not auto-close on mobile where it's an overlay
             if (window.innerWidth > 768) {
                 uiStore.closeSidebar();
             }
@@ -57,7 +56,7 @@ onMounted(() => {
         sidebarElement.addEventListener('mousemove', resetActivityTimer);
         sidebarElement.addEventListener('mousedown', resetActivityTimer);
     }
-    resetActivityTimer(); // Initial timer start
+    resetActivityTimer();
 });
 
 onUnmounted(() => {
@@ -108,9 +107,18 @@ onUnmounted(() => {
           <IconHome class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </button>
 
+        <!-- Notebook Studio Link -->
+        <router-link 
+          to="/notebooks" 
+          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          title="Notebook Studio"
+        >
+          <IconServer class="w-5 h-5 text-slate-500 dark:text-gray-400" />
+        </router-link>
+
         <router-link
           to="/news"
-          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors"
+          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="News"
         >
             <IconFileText class="w-5 h-5 text-slate-500 dark:text-gray-400" />

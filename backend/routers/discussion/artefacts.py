@@ -513,7 +513,6 @@ def build_artefacts_router(router: APIRouter):
 
     @router.post("/{discussion_id}/artefacts/import_url", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
     async def import_artefact_from_url(
-
         discussion_id: str,
         request: UrlImportRequest,
         current_user: UserAuthDetails = Depends(get_current_active_user),
@@ -523,8 +522,8 @@ def build_artefacts_router(router: APIRouter):
         task = task_manager.submit_task(
             name=f"Importing artefact from URL: {request.url}",
             target=_import_artefact_from_url_task,
-            args=(owner_username, discussion_id, request.url),
-            description=f"Scraping content from URL and saving as artefact.",
+            args=(owner_username, discussion_id, request.url, request.depth, request.process_with_ai),
+            description=f"Scraping content (depth {request.depth}) and saving as artefact.",
             owner_username=current_user.username
         )
         return task

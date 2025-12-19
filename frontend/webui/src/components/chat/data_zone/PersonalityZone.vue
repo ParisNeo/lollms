@@ -9,13 +9,11 @@ const personalityDataZone = computed(() => activeDiscussion.value?.personality_d
 </script>
 
 <template>
-    <div class="flex-1 flex flex-col min-h-0 p-2">
-        <div class="flex-grow min-h-0 border dark:border-gray-700 rounded-md overflow-hidden">
-            <CodeMirrorEditor
-                v-model="personalityDataZone"
-                class="h-full"
-                :read-only="true"
-            />
-        </div>
+    <div class="h-full flex flex-col border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+        <CodeMirrorEditor
+            v-model="personalityDataZone"
+            class="h-full"
+            :read-only="true"
+        />
     </div>
 </template>

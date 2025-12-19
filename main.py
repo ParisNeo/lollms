@@ -76,7 +76,8 @@ from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
 from backend.routers.notes import notes_router 
-from backend.routers.public import public_router # NEW: Public Router
+from backend.routers.notebooks import router as notebooks_router # IMPORTED
+from backend.routers.public import public_router
 
 from backend.routers.admin.email_marketing import router as email_marketing_router 
 from backend.db.models.email_marketing import EmailProposal, EmailTopic 
@@ -89,7 +90,6 @@ from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
 from backend.routers.news import news_router
-from backend.routers.public import public_router
 from backend.zoo_cache import load_cache
 
 import uvicorn
@@ -106,9 +106,6 @@ rss_scheduler = None
 startup_lock = Lock() 
 
 def scheduled_rss_job():
-    """
-    Wrapper function to submit the RSS scraping task to the task manager.
-    """
     active_tasks = task_manager.get_all_tasks()
     if any(t.name == "Scheduled RSS Feed Scraping" and t.status in ['running', 'pending'] for t in active_tasks):
         print("INFO: Scheduled RSS scraping skipped as a similar task is already running.")
@@ -130,9 +127,6 @@ def scheduled_news_cleanup_job():
     )
 
 def check_and_run_scheduled_posts():
-    """
-    Checks the current time against the configured schedule and triggers a post if needed.
-    """
     db = db_session_module.SessionLocal()
     try:
         settings.load_from_db(db)
@@ -144,7 +138,6 @@ def check_and_run_scheduled_posts():
         if not schedule:
             return
 
-        # Check last posted time
         last_posted_str = settings.get("ai_bot_last_posted_at")
         last_posted = None
         if last_posted_str:
@@ -155,16 +148,12 @@ def check_and_run_scheduled_posts():
         now = datetime.datetime.now()
         current_time_str = now.strftime("%H:%M")
         
-        # Check if we should post now
         should_post = False
         
         for time_slot in schedule:
-            # Check if current time matches slot (with some tolerance, e.g. same minute)
             if current_time_str == time_slot:
-                # Check if we ALREADY posted for this slot today
                 if last_posted:
                     time_diff = now - last_posted
-                    # If we posted less than 59 minutes ago, assume we hit this slot already
                     if time_diff.total_seconds() < 3540: 
                         continue
                 
@@ -176,7 +165,7 @@ def check_and_run_scheduled_posts():
             task_manager.submit_task(
                 name="AI Bot Scheduled Post",
                 target=_generate_feed_post_task,
-                args=(True,), # Force=True ignores internal interval checks inside the task
+                args=(True,), 
                 description=f"Scheduled post for {current_time_str}",
                 owner_username=None
             )
@@ -196,9 +185,6 @@ def scheduled_email_proposal_job():
 
 
 def run_one_time_startup_tasks(lock: Lock):
-    """
-    Acquires a lock to ensure these tasks run only once across multiple workers.
-    """
     acquired = lock.acquire(block=False)
     if not acquired:
         return
@@ -207,7 +193,6 @@ def run_one_time_startup_tasks(lock: Lock):
     try:
         print("--- Running One-Time Startup Tasks ---")
         
-        # --- Database Migration and Bootstrapping (run by one worker) ---
         engine = db_session_module.engine
         Base.metadata.create_all(bind=engine)
         print(f"INFO: Database tables checked/created using metadata at URL: {APP_DB_URL}")
@@ -221,7 +206,6 @@ def run_one_time_startup_tasks(lock: Lock):
                 trace_exception(e_migrate)
                 raise
         check_and_update_db_version(db_session_module.SessionLocal)
-        # --- End Database Migration ---
         
         print("\n--- Running Automated Discussion Migration ---")
         db_session = None
@@ -280,8 +264,8 @@ def run_one_time_startup_tasks(lock: Lock):
         try:
             db_for_defaults = next(get_db())
             
-            admin_username = INITIAL_ADMIN_USER_CONFIG.get("username")
-            admin_password = INITIAL_ADMIN_USER_CONFIG.get("password")
+            admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
+            admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
             if admin_username and admin_password and not db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first():
                 new_admin = DBUser(username=admin_username, hashed_password=hash_password(admin_password), is_admin=True)
                 db_for_defaults.add(new_admin)
@@ -412,7 +396,6 @@ def run_one_time_startup_tasks(lock: Lock):
         finally:
             if db_for_sync: db_for_sync.close()
 
-        # --- NEW: Clear stale WebSocket connections from DB ---
         db_for_ws_cleanup: Optional[Session] = None
         try:
             db_for_ws_cleanup = next(get_db())
@@ -426,7 +409,6 @@ def run_one_time_startup_tasks(lock: Lock):
             if db_for_ws_cleanup: db_for_ws_cleanup.rollback()
         finally:
             if db_for_ws_cleanup: db_for_ws_cleanup.close()
-        # --- END NEW ---
 
         load_cache()
         task_manager.init_app(db_session_module.SessionLocal)
@@ -444,9 +426,6 @@ def run_one_time_startup_tasks(lock: Lock):
         ASCIIColors.green(f"Worker {os.getpid()} released startup lock.")
 
 async def startup_event():
-    """
-    This event runs for EACH worker process created by Uvicorn.
-    """
     global broadcast_listener_task, rss_scheduler, startup_lock
     
     init_database(APP_DB_URL)
@@ -477,7 +456,6 @@ async def startup_event():
 
             print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
         
-        # Check for scheduled posts every minute
         rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1)
         print(f"INFO: Bot Auto-Posting schedule checker active.")
 
@@ -513,9 +491,6 @@ app = FastAPI(
     on_startup=[startup_event],
     on_shutdown=[shutdown_event]
 )
-
-# Enable Gzip Compression for large responses (Discussion lists, message history)
-# app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.include_router(email_marketing_router)
 app.include_router(auth_router)
@@ -558,6 +533,7 @@ app.include_router(discussion_groups_router)
 app.include_router(voices_studio_router)
 app.include_router(image_studio_router)
 app.include_router(notes_router)
+app.include_router(notebooks_router) # REGISTERED
 app.include_router(public_router)
 
 
@@ -667,10 +643,6 @@ if __name__ == "__main__":
     
     workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
     
-    # if os.name == 'nt' and workers > 1 and "LOLLMS_WORKERS" not in os.environ:
-    #     ASCIIColors.yellow("Multiple workers are not fully stable on Windows.")
-    #     workers = 1
-
     ssl_params = {}
     if settings.get("https_enabled"):
         certfile = settings.get("ssl_certfile")
@@ -689,14 +661,10 @@ if __name__ == "__main__":
     protocol = "https" if ssl_params else "http"
 
     if host_setting == "0.0.0.0":
-        import psutil
-        import socket
         from backend.utils import get_accessible_host
-
         accessible_host = get_accessible_host()
         if accessible_host != 'localhost':
             ASCIIColors.magenta(f"Recommended public access URL: {protocol}://{accessible_host}:{port_setting}/")
-
         ASCIIColors.magenta(f"Or access locally at: {protocol}://localhost:{port_setting}/")
     else:
         ASCIIColors.magenta(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")

@@ -1,769 +1,453 @@
 <!-- [UPDATE] frontend/webui/src/components/chat/ChatInput.vue -->
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { useRouter } from 'vue-router';
+import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
-import apiClient from '../../services/api';
 import { storeToRefs } from 'pinia';
-import useEventBus from '../../services/eventBus';
+import apiClient from '../../services/api';
 
-// UI Components
-import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
+import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 
-// Icon Components
-import IconToken from '../../assets/icons/IconToken.vue';
-import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
-import IconPhoto from '../../assets/icons/IconPhoto.vue';
-import IconMcp from '../../assets/icons/IconMcp.vue';
-import IconDatabase from '../../assets/icons/IconDatabase.vue';
+// Icons
+import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconSend from '../../assets/icons/IconSend.vue';
-import IconChevronDown from '../../assets/icons/IconChevronDown.vue';
-import IconRefresh from '../../assets/icons/IconRefresh.vue';
-import IconTicket from '../../assets/icons/IconTicket.vue';
-import IconLollms from '../../assets/icons/IconLollms.vue';
-import IconServer from '../../assets/icons/IconServer.vue';
-import IconUser from '../../assets/icons/IconUser.vue';
-import IconDataZone from '../../assets/icons/IconDataZone.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
-import IconThinking from '../../assets/icons/IconThinking.vue';
-import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconMcp from '../../assets/icons/IconMcp.vue';
+import IconDatabase from '../../assets/icons/IconDatabase.vue';
+import IconTicket from '../../assets/icons/IconTicket.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconLollms from '../../assets/icons/IconLollms.vue';
+import IconUser from '../../assets/icons/IconUser.vue';
+import IconToken from '../../assets/icons/IconToken.vue';
+import IconCircle from '../../assets/icons/IconCircle.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
+import IconWeb from '../../assets/icons/ui/IconWeb.vue';
+import IconServer from '../../assets/icons/IconServer.vue';
 
-
-// CodeMirror imports
-import { markdown } from '@codemirror/lang-markdown';
-import { indentUnit } from '@codemirror/language';
-import { oneDark } from '@codemirror/theme-one-dark';
-import { EditorView, keymap } from '@codemirror/view';
-import { EditorState } from '@codemirror/state';
-import { defaultKeymap, indentWithTab } from '@codemirror/commands';
-
-// Store initialization
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
-const router = useRouter();
-const { on, off } = useEventBus();
-const { dataZonesTokensFromContext, currentModelVisionSupport, generationState } = storeToRefs(discussionsStore);
-const { lollmsPrompts, systemPromptsByZooCategory, userPromptsByCategory } = storeToRefs(promptsStore);
 
-// Component state
+// Defensive computed properties to prevent crashes on re-mounts
+const dStoreRefs = storeToRefs(discussionsStore);
+const activeDiscussionArtefacts = computed(() => dStoreRefs.activeDiscussionArtefacts?.value || []);
+const activeDiscussion = computed(() => dStoreRefs.activeDiscussion?.value || null);
+const generationInProgress = computed(() => dStoreRefs.generationInProgress?.value || false);
+const generationState = computed(() => dStoreRefs.generationState?.value || { status: 'idle', details: '' });
+const activeDiscussionContextStatus = computed(() => dStoreRefs.activeDiscussionContextStatus?.value || null);
+const dataZonesTokensFromContext = computed(() => dStoreRefs.dataZonesTokensFromContext?.value || 0);
+const currentModelVisionSupport = computed(() => dStoreRefs.currentModelVisionSupport?.value ?? true);
+
+const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
+const { lollmsPrompts, userPromptsByCategory } = storeToRefs(promptsStore);
+
 const messageText = ref('');
-const uploadedImages = ref([]);
 const isUploading = ref(false);
+const fileInput = ref(null);
 const imageInput = ref(null);
-const codeMirrorView = ref(null);
-const isAdvancedMode = ref(false);
-const cursorPositionToSet = ref(null);
-const isRefreshingMcps = ref(false);
-const isRefreshingRags = ref(false);
-const inputTokenCount = ref(0);
-const isTokenizingInput = ref(false);
-let tokenizeInputDebounceTimer = null;
-
-// STT State
 const isRecording = ref(false);
-const isTranscribing = ref(false);
-const mediaRecorder = ref(null);
-const audioChunks = ref([]);
-
-// UI state
 const userPromptSearchTerm = ref('');
-const zooPromptSearchTerm = ref('');
-const showImagePreview = ref(true);
-const textareaRef = ref(null);
-const imageErrors = ref(new Set());
+const inputTokenCount = ref(0);
+let tokenizeInputDebounceTimer = null;
+const isDraggingOver = ref(false);
 
-// Core computed properties
 const user = computed(() => authStore.user);
-const generationInProgress = computed(() => discussionsStore.generationInProgress);
-const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
-const availableRagStores = computed(() => dataStore.availableRagStores);
-const availableMcpTools = computed(() => dataStore.availableMcpToolsForSelector);
-const contextStatus = computed(() => discussionsStore.activeDiscussionContextStatus);
-const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 
-// Filtered prompts
-const filteredLollmsPrompts = computed(() => {
-    if (!Array.isArray(lollmsPrompts.value)) return [];
-    const term = userPromptSearchTerm.value.toLowerCase();
-    return term ? lollmsPrompts.value.filter(p => p.name.toLowerCase().includes(term)) : lollmsPrompts.value;
-});
-
-const filteredUserPromptsByCategory = computed(() => {
-    const term = userPromptSearchTerm.value.toLowerCase();
-    const source = userPromptsByCategory.value;
-    if (!source || typeof source !== 'object') return {};
-    if (!term) return source;
-    
-    const filtered = {};
-    for (const category in source) {
-        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
-        if (filteredPrompts.length > 0) filtered[category] = filteredPrompts;
-    }
-    return filtered;
-});
-
-const filteredSystemPromptsByZooCategory = computed(() => {
-    const term = zooPromptSearchTerm.value.toLowerCase();
-    const source = systemPromptsByZooCategory.value;
-    if (!source || typeof source !== 'object') return {};
-    if (!term) return source;
-    
-    const filtered = {};
-    for (const category in source) {
-        const filteredPrompts = source[category].filter(p => p.name.toLowerCase().includes(term));
-        if (filteredPrompts.length > 0) filtered[category] = filteredPrompts;
-    }
-    return filtered;
-});
-
-// UI state computed
-const isSendDisabled = computed(() => generationInProgress.value || (messageText.value.trim() === '' && uploadedImages.value.length === 0));
-const hasActiveTools = computed(() => mcpToolSelection.value.length > 0 || ragStoreSelection.value.length > 0);
+// Granular Feedback Logic
 const inputPlaceholder = computed(() => {
     if (isRecording.value) return "Recording... Click to stop.";
-    if (isTranscribing.value) return "Transcribing...";
-    if (generationInProgress.value) return "Please wait for generation to complete...";
-    return isAdvancedMode.value ? "Type your message... (Ctrl+Enter to send)" : "Type your message... (Shift+Enter for advanced editor)";
+    
+    // Check specific AI states
+    if (generationInProgress.value) {
+        return generationState.value.details || "AI is thinking...";
+    }
+    
+    return "Type a message... (Shift+Enter for new line)";
 });
-const showContextBar = computed(() => user.value?.show_token_counter && user.value?.user_ui_level >= 2 && contextStatus.value);
 
-// Context calculations
-const maxTokens = computed(() => contextStatus.value?.max_tokens || 1);
-const systemPromptTokens = computed(() => contextStatus.value?.zones?.system_context?.breakdown?.system_prompt?.tokens || 0);
-const dataZonesTokens = computed(() => dataZonesTokensFromContext.value);
-const historyTextTokens = computed(() => contextStatus.value?.zones?.message_history?.breakdown?.text_tokens || 0);
-const historyImageTokens = computed(() => contextStatus.value?.zones?.message_history?.breakdown?.image_tokens || 0);
-const totalCurrentTokens = computed(() => systemPromptTokens.value + dataZonesTokens.value + historyTextTokens.value + historyImageTokens.value + inputTokenCount.value);
+const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
+const discussionImages = computed(() => activeDiscussion.value?.discussion_images || []);
+const discussionActiveImages = computed(() => activeDiscussion.value?.active_discussion_images || []);
+
+const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
+
+// --- Context Bar Logic ---
+const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
+const maxTokens = computed(() => activeDiscussionContextStatus.value?.max_tokens || 1);
+
+const totalCurrentTokens = computed(() => {
+    const breakdown = activeDiscussionContextStatus.value?.zones?.system_context?.breakdown || {};
+    const historyBreakdown = activeDiscussionContextStatus.value?.zones?.message_history?.breakdown || {};
+    const sys = breakdown.system_prompt?.tokens || 0;
+    const history = (historyBreakdown.text_tokens || 0) + (historyBreakdown.image_tokens || 0);
+    return sys + dataZonesTokensFromContext.value + history + inputTokenCount.value;
+});
 
 const getPercentage = (tokens) => maxTokens.value > 0 ? (tokens / maxTokens.value) * 100 : 0;
 
 const contextParts = computed(() => {
+    const breakdown = activeDiscussionContextStatus.value?.zones?.system_context?.breakdown || {};
+    const historyBreakdown = activeDiscussionContextStatus.value?.zones?.message_history?.breakdown || {};
     const parts = [];
-    if (systemPromptTokens.value > 0) parts.push({ label: 'S', value: systemPromptTokens.value, title: 'System Prompt', colorClass: 'bg-blue-100 dark:bg-blue-900/50' });
-    if (dataZonesTokens.value > 0) parts.push({ label: 'D', value: dataZonesTokens.value, title: 'Data Zones', colorClass: 'bg-yellow-100 dark:bg-yellow-900/50' });
-    if (historyTextTokens.value > 0) parts.push({ label: 'H', value: historyTextTokens.value, title: 'History (Text)', colorClass: 'bg-green-100 dark:bg-green-900/50' });
-    if (historyImageTokens.value > 0) parts.push({ label: 'I', value: historyImageTokens.value, title: 'History (Images)', colorClass: 'bg-teal-100 dark:bg-teal-900/50' });
-    if (inputTokenCount.value > 0 || parts.length === 0) parts.push({ label: 'U', value: inputTokenCount.value, title: 'User Input', colorClass: 'bg-purple-100 dark:bg-purple-900/50' });
+    if (breakdown.system_prompt?.tokens > 0) parts.push({ label: 'S', value: breakdown.system_prompt.tokens, title: 'System Prompt', colorClass: 'bg-blue-500' });
+    if (dataZonesTokensFromContext.value > 0) parts.push({ label: 'D', value: dataZonesTokensFromContext.value, title: 'Data Zones', colorClass: 'bg-yellow-500' });
+    if (historyBreakdown.text_tokens > 0) parts.push({ label: 'H', value: historyBreakdown.text_tokens, title: 'History (Text)', colorClass: 'bg-green-500' });
+    if (historyBreakdown.image_tokens > 0) parts.push({ label: 'I', value: historyBreakdown.image_tokens, title: 'History (Images)', colorClass: 'bg-teal-500' });
+    if (inputTokenCount.value > 0) parts.push({ label: 'U', value: inputTokenCount.value, title: 'User Input', colorClass: 'bg-purple-500' });
     return parts;
 });
 
-const systemPromptPercentage = computed(() => getPercentage(systemPromptTokens.value));
-const dataZonesPercentage = computed(() => getPercentage(dataZonesTokens.value));
-const historyTextPercentage = computed(() => getPercentage(historyTextTokens.value));
-const historyImagePercentage = computed(() => getPercentage(historyImageTokens.value));
-const inputTokensPercentage = computed(() => getPercentage(inputTokenCount.value));
 const totalPercentage = computed(() => getPercentage(totalCurrentTokens.value));
-
 const progressBorderColorClass = computed(() => {
-    const percentage = totalPercentage.value;
-    return percentage >= 90 ? 'border-red-500 dark:border-red-400' : percentage >= 75 ? 'border-yellow-500 dark:border-yellow-400' : 'border-gray-300 dark:border-gray-600';
+    if (totalPercentage.value >= 100) return 'border-red-600 dark:border-red-500';
+    if (totalPercentage.value >= 90) return 'border-red-400 dark:border-red-400';
+    if (totalPercentage.value >= 75) return 'border-yellow-500 dark:border-yellow-400';
+    return 'border-gray-200 dark:border-gray-700';
 });
 
-const showContextWarning = computed(() => totalPercentage.value > 90);
-const contextWarningMessage = computed(() => {
-    return totalPercentage.value > 100 ? "Context limit exceeded! The model may not see all of your message." : 
-           totalPercentage.value > 90 ? "You are approaching the context limit. Consider shortening your message or data zones." : "";
-});
-
-// Tool selections
+// --- RAG & MCP Selection Logic ---
 const ragStoreSelection = computed({
     get: () => activeDiscussion.value?.rag_datastore_ids || [],
-    set(newIds) { if (activeDiscussion.value) discussionsStore.updateDiscussionRagStores({ discussionId: activeDiscussion.value.id, ragDatastoreIds: newIds }) }
+    set: (newIds) => { if (activeDiscussion.value) discussionsStore.updateDiscussionRagStores({ discussionId: activeDiscussion.value.id, ragDatastoreIds: newIds }); }
 });
 
 const mcpToolSelection = computed({
     get: () => activeDiscussion.value?.active_tools || [],
-    set(newIds) { if (activeDiscussion.value) discussionsStore.updateDiscussionMcps({ discussionId: activeDiscussion.value.id, mcp_tool_ids: newIds }) }
+    set: (newIds) => { if (activeDiscussion.value) discussionsStore.updateDiscussionMcps({ discussionId: activeDiscussion.value.id, mcp_tool_ids: newIds }); }
 });
 
-// Advanced editor extensions
-const advancedEditorExtensions = computed(() => {
-    const customKeymap = keymap.of([
-        { key: 'Mod-Enter', run: () => { messageText.value = codeMirrorView.value.state.doc.toString(); handleSendMessage(); return true; }}, 
-        indentWithTab 
-    ]);
-    const extensions = [EditorView.lineWrapping, EditorState.tabSize.of(2), indentUnit.of("  "), customKeymap, keymap.of(defaultKeymap), markdown()];
-    if (uiStore.currentTheme === 'dark') extensions.push(oneDark);
-    return extensions;
-});
-
-// Utility functions
-function autoResizeTextarea() {
-    if (!textareaRef.value) return;
-    textareaRef.value.style.height = 'auto';
-    textareaRef.value.style.height = Math.min(textareaRef.value.scrollHeight, 120) + 'px';
+function toggleRagStore(storeId) {
+    const current = new Set(ragStoreSelection.value);
+    if (current.has(storeId)) current.delete(storeId);
+    else current.add(storeId);
+    ragStoreSelection.value = Array.from(current);
 }
 
-function focusInput() {
-    nextTick(() => {
-        if (isAdvancedMode.value && codeMirrorView.value) codeMirrorView.value.focus();
-        else if (textareaRef.value) textareaRef.value.focus();
+function toggleMcpTool(toolId) {
+    const current = new Set(mcpToolSelection.value);
+    if (current.has(toolId)) current.delete(toolId);
+    else current.add(toolId);
+    mcpToolSelection.value = Array.from(current);
+}
+
+// --- Image & File Handling ---
+const isImageActive = (index) => {
+    if (!discussionActiveImages.value || discussionActiveImages.value.length <= index) return true;
+    return discussionActiveImages.value[index];
+};
+
+function openAttachedImageViewer(startIndex) {
+    uiStore.openImageViewer({
+        imageList: discussionImages.value.map((img, idx) => ({ 
+            src: 'data:image/png;base64,' + img, 
+            prompt: `Attached image ${idx + 1}` 
+        })),
+        startIndex
     });
 }
 
-// Core functions
-function showContext() {
-    if (activeDiscussion.value) uiStore.openModal('contextViewer');
-}
-
-// Token counting
-async function fetchTokenCount(text) {
-    if (isTokenizingInput.value) return;
-    isTokenizingInput.value = true;
-    try {
-        const response = await apiClient.post('/api/discussions/tokenize', { text });
-        inputTokenCount.value = response.data.tokens;
-    } catch (error) {
-        console.error("Tokenization failed:", error);
-        inputTokenCount.value = 0;
-    } finally {
-        isTokenizingInput.value = false;
-    }
-}
-
-// Refresh functions
-async function refreshMcps() { 
-    isRefreshingMcps.value = true; 
-    try { await dataStore.refreshMcps(); } finally { isRefreshingMcps.value = false; } 
-}
-
-async function refreshRags() { 
-    isRefreshingRags.value = true; 
-    try { await dataStore.refreshRags(); } finally { isRefreshingRags.value = false; } 
-}
-
-// Prompt handling
-function handlePromptSelection(promptContent) {
-    const hasPlaceholders = /@<.*?>@/g.test(promptContent);
-    if (hasPlaceholders) {
-        uiStore.openModal('fillPlaceholders', {
-            promptTemplate: promptContent,
-            onConfirm: (filledPrompt) => {
-                messageText.value = filledPrompt;
-                if(isAdvancedMode.value && codeMirrorView.value) {
-                    codeMirrorView.value.dispatch({
-                        changes: { from: 0, to: codeMirrorView.value.state.doc.length, insert: filledPrompt }
-                    });
-                }
-                focusInput();
-            }
-        });
+async function toggleArtefactLoad(file) {
+    if (!activeDiscussion.value) return;
+    if (file.is_loaded) {
+        await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version });
     } else {
-        messageText.value = promptContent;
-        if(isAdvancedMode.value && codeMirrorView.value) {
-            codeMirrorView.value.dispatch({
-                changes: { from: 0, to: codeMirrorView.value.state.doc.length, insert: promptContent }
-            });
-            codeMirrorView.value.focus();
-        } else {
-            focusInput();
+        await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version });
+    }
+}
+
+async function removeArtefact(file) {
+    if (!activeDiscussion.value) return;
+    const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' });
+    if (confirmed.confirmed) {
+        await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title });
+    }
+}
+
+function triggerFileUpload() { fileInput.value?.click(); }
+function triggerImageUpload() { imageInput.value?.click(); }
+
+async function handleFileUpload(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
+    if (activeDiscussion.value) {
+        isUploading.value = true;
+        try {
+            await Promise.all(files.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true })));
+        } finally {
+            isUploading.value = false;
+            event.target.value = '';
         }
     }
 }
 
-function manageMyPrompts() {
-    router.push({ path: '/settings', query: { tab: 'prompts' } });
-}
-
-// Message handling
-async function handleSendMessage() {
-    if (isSendDisabled.value) return;
-    try {
-        await discussionsStore.sendMessage({
-            prompt: messageText.value,
-            image_server_paths: uploadedImages.value.map(img => img.server_path),
-            localImageUrls: uploadedImages.value.map(img => img.local_url),
-        });
-        messageText.value = '';
-        uploadedImages.value.forEach(img => URL.revokeObjectURL(img.local_url));
-        uploadedImages.value = [];
-        inputTokenCount.value = 0;
-        imageErrors.value.clear();
-        if (textareaRef.value) autoResizeTextarea();
-    } catch (error) { 
-        console.error(error)
-        uiStore.addNotification('There was an error sending your message.', 'error'); 
-    }
-}
-
-async function switchToAdvancedMode(event) {
-    if (event?.target) cursorPositionToSet.value = event.target.selectionStart;
-    isAdvancedMode.value = true;
-    await nextTick();
-}
-
-function handleEditorReady(payload) {
-    codeMirrorView.value = payload.view;
-    if (cursorPositionToSet.value !== null) {
-        const pos = Math.min(cursorPositionToSet.value, payload.view.state.doc.length);
-        payload.view.dispatch({ selection: { anchor: pos, head: pos } });
-        cursorPositionToSet.value = null;
-    }
-    payload.view.focus();
-}
-
-// Image handling
-function triggerImageUpload() { imageInput.value.click(); }
-
-async function uploadFiles(files) {
-    if (files.length === 0) return;
-    if (uploadedImages.value.length + files.length > 5) { 
-        uiStore.addNotification('You can upload a maximum of 5 images.', 'warning'); 
-        return; 
-    }
-    
-    const maxSize = 10 * 1024 * 1024; // 10MB
-    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
-    const validFiles = [];
-    
-    for (const file of files) {
-        if (!allowedTypes.includes(file.type)) {
-            uiStore.addNotification(`File ${file.name} is not a supported image format.`, 'warning');
-            continue;
+async function handleImageUpload(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+    if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
+    if (activeDiscussion.value) {
+        isUploading.value = true;
+        try {
+            await Promise.all(files.map(file => discussionsStore.uploadDiscussionImage(file)));
+        } finally {
+            isUploading.value = false;
+            event.target.value = '';
         }
-        if (file.size > maxSize) {
-            uiStore.addNotification(`File ${file.name} is too large (max 10MB).`, 'warning');
-            continue;
-        }
-        validFiles.push(file);
     }
-    
-    if (validFiles.length === 0) return;
-    
-    isUploading.value = true;
-    const formData = new FormData();
-    validFiles.forEach(file => formData.append('files', file));
-    
-    try {
-        const response = await apiClient.post('/api/upload/chat_image', formData);
-        const newImages = [];
-        
-        response.data.forEach(imgInfo => {
-            if (imgInfo.server_path && imgInfo.filename) {
-                const originalFile = validFiles.find(f => f.name === imgInfo.filename);
-                if(originalFile) {
-                    newImages.push({ 
-                        server_path: imgInfo.server_path, 
-                        local_url: URL.createObjectURL(originalFile), 
-                        file: originalFile 
-                    });
-                } else {
-                    console.warn(`Original file not found for ${imgInfo.filename}`);
-                }
-            } else {
-                console.warn('Invalid image info received:', imgInfo);
-            }
-        });
-        
-        uploadedImages.value = [...uploadedImages.value, ...newImages];
-        
-        const failedCount = validFiles.length - newImages.length;
-        if (failedCount > 0) {
-            uiStore.addNotification(`${newImages.length} images uploaded successfully, ${failedCount} failed.`, 'warning');
-        } else {
-            uiStore.addNotification(`${newImages.length} image(s) uploaded successfully.`, 'success');
-        }
-        
-    } catch (error) { 
-        console.error('Image upload error:', error);
-        uiStore.addNotification(`Image upload failed: ${error.message}`, 'error'); 
-    } finally { 
-        isUploading.value = false; 
-    }
-}
-
-async function handleImageSelection(event) { 
-    await uploadFiles(Array.from(event.target.files)); 
-    event.target.value = ''; 
 }
 
 async function handlePaste(event) {
-    if (!currentModelVisionSupport.value) return;
     const items = (event.clipboardData || window.clipboardData).items;
-    if (!items) return;
     const imageFiles = [];
-    for (const item of items) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
-            const file = item.getAsFile();
-            if (file) {
-                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
-                imageFiles.push(new File([file], `pasted_image_${Date.now()}.${extension}`, { type: file.type }));
-            }
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf("image") !== -1) {
+            const blob = items[i].getAsFile();
+            if (blob) imageFiles.push(blob);
         }
     }
-    if (imageFiles.length > 0) { 
-        event.preventDefault(); 
-        await uploadFiles(imageFiles); 
+    if (imageFiles.length > 0) {
+        event.preventDefault();
+        if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
+        isUploading.value = true;
+        try {
+            await Promise.all(imageFiles.map(file => discussionsStore.uploadDiscussionImage(file)));
+        } finally {
+            isUploading.value = false;
+        }
     }
 }
 
-function removeImage(index) { 
-    const image = uploadedImages.value[index];
-    if (image?.local_url) URL.revokeObjectURL(image.local_url);
-    uploadedImages.value.splice(index, 1);
-    imageErrors.value.delete(index);
-    // Reindex error set
-    const newErrors = new Set();
-    imageErrors.value.forEach(errorIndex => {
-        if (errorIndex > index) newErrors.add(errorIndex - 1);
-        else if (errorIndex < index) newErrors.add(errorIndex);
-    });
-    imageErrors.value = newErrors;
+async function handleAddFromUrl() {
+    if (!activeDiscussion.value) {
+        uiStore.addNotification('Please start a discussion first.', 'warning');
+        return;
+    }
+    uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id });
 }
 
-function handleImageError(index, event) {
-    console.error('Image failed to load:', uploadedImages.value[index]);
-    imageErrors.value.add(index);
-    imageErrors.value = new Set(imageErrors.value);
+function handlePromptSelection(content) {
+    messageText.value += (messageText.value ? '\n' : '') + content;
+}
+
+const filteredUserPromptsByCategory = computed(() => {
+    if (!userPromptSearchTerm.value) return userPromptsByCategory.value;
+    const term = userPromptSearchTerm.value.toLowerCase();
+    const result = {};
+    for (const [cat, prompts] of Object.entries(userPromptsByCategory.value)) {
+        const filtered = prompts.filter(p => p.name.toLowerCase().includes(term));
+        if (filtered.length > 0) result[cat] = filtered;
+    }
+    return result;
+});
+
+let mediaRecorder = null;
+let audioChunks = [];
+
+async function toggleRecording() {
+    if (isRecording.value) {
+        mediaRecorder?.stop();
+        isRecording.value = false;
+    } else {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const text = await discussionsStore.transcribeAudio(audioBlob);
+                if (text) messageText.value += (messageText.value ? ' ' : '') + text;
+                stream.getTracks().forEach(track => track.stop());
+            };
+            mediaRecorder.start();
+            isRecording.value = true;
+        } catch (err) {
+            uiStore.addNotification('Microphone access denied.', 'error');
+        }
+    }
+}
+
+// --- Sending ---
+async function handleSendMessage() {
+    if (generationInProgress.value) return;
+    const text = messageText.value.trim();
+    if (!text && attachedFiles.value.length === 0 && discussionImages.value.length === 0) return;
+    try {
+        await discussionsStore.sendMessage({ prompt: text, image_server_paths: [], localImageUrls: [] });
+        messageText.value = '';
+        inputTokenCount.value = 0;
+    } catch(err) {
+        console.error("SendMessage failed:", err);
+        uiStore.addNotification('Failed to send message.', 'error');
+    }
 }
 
 function handleKeyDown(event) {
-    if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    if (event.key === 'Enter' && !event.shiftKey) {
         event.preventDefault();
         handleSendMessage();
-    } else if (event.key === 'Enter' && event.shiftKey) {
-        event.preventDefault();
-        switchToAdvancedMode(event);
     }
 }
 
-// --- STT Logic ---
-async function startRecording() {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        uiStore.addNotification('Your browser does not support audio recording.', 'error');
-        return;
-    }
+async function fetchInputTokenCount(text) {
+    if (!text.trim()) { inputTokenCount.value = 0; return; }
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder.value = new MediaRecorder(stream);
-        audioChunks.value = [];
-        mediaRecorder.value.ondataavailable = event => {
-            audioChunks.value.push(event.data);
-        };
-        mediaRecorder.value.onstop = async () => {
-            isTranscribing.value = true;
-            const audioBlob = new Blob(audioChunks.value, { type: 'audio/wav' });
-            const transcribedText = await discussionsStore.transcribeAudio(audioBlob);
-            if (transcribedText) {
-                const currentVal = messageText.value;
-                const separator = currentVal.trim() && !currentVal.endsWith(' ') ? ' ' : '';
-                messageText.value = currentVal + separator + transcribedText;
-                focusInput();
-            }
-            isTranscribing.value = false;
-        };
-        mediaRecorder.value.start();
-        isRecording.value = true;
-    } catch (err) {
-        uiStore.addNotification('Microphone access was denied. Please allow microphone permissions in your browser settings.', 'error');
-        console.error('Microphone error:', err);
-    }
+        const response = await apiClient.post('/api/discussions/tokenize', { text });
+        inputTokenCount.value = response.data.tokens;
+    } catch (error) {}
 }
 
-function stopRecording() {
-    if (mediaRecorder.value && isRecording.value) {
-        mediaRecorder.value.stop();
-        isRecording.value = false;
-    }
-}
-
-function toggleRecording() {
-    if (isRecording.value) {
-        stopRecording();
-    } else {
-        startRecording();
-    }
-}
-
-function handleDroppedFiles(files) {
-    if (!generationInProgress.value) {
-        uploadFiles(files);
-    }
-}
-
-// Watchers
-watch(messageText, (newValue) => {
+watch(messageText, (newText) => {
     clearTimeout(tokenizeInputDebounceTimer);
-    if (!newValue.trim()) {
-        inputTokenCount.value = 0;
-    } else if (showContextBar.value) {
-        tokenizeInputDebounceTimer = setTimeout(() => fetchTokenCount(newValue), 500);
-    }
-    if (!isAdvancedMode.value) nextTick(() => autoResizeTextarea());
+    if (!newText.trim()) { inputTokenCount.value = 0; }
+    else if (showContextBar.value) { tokenizeInputDebounceTimer = setTimeout(() => fetchInputTokenCount(newText), 500); }
 });
 
-watch(activeDiscussion, () => {
-    clearTimeout(tokenizeInputDebounceTimer);
-    inputTokenCount.value = 0;
-    isAdvancedMode.value = false;
-}, { immediate: true });
-
-// Lifecycle
 onMounted(() => {
     promptsStore.fetchPrompts();
-    on('files-dropped-in-chat', handleDroppedFiles);
-});
-
-onUnmounted(() => {
-    clearTimeout(tokenizeInputDebounceTimer);
-    uploadedImages.value.forEach(img => { if (img.local_url) URL.revokeObjectURL(img.local_url); });
-    if (mediaRecorder.value && isRecording.value) {
-        mediaRecorder.value.stop();
-    }
-    off('files-dropped-in-chat', handleDroppedFiles);
+    if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
+    if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
 });
 </script>
 
 <template>
-    <div class="flex-shrink-0 bg-white/80 dark:bg-gray-800/80 backdrop-blur-sm p-2 sm:p-4 border-t dark:border-gray-700" @paste="handlePaste">
-        <div class="w-full max-w-4xl mx-auto">
-            <!-- Context Bar -->
-            <div v-if="showContextBar" class="px-1 pb-2 relative group">
-                <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 font-mono">
-                    <div class="flex items-center gap-1.5 flex-shrink-0">
-                        <IconToken class="w-4 h-4 flex-shrink-0" />
-                        <button @click="showContext" class="cursor-pointer hover:underline flex-shrink-0" title="View full context breakdown">Context:</button>
-                    </div>
-                    <div class="flex-grow w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2 relative overflow-hidden border transition-colors duration-300" :class="progressBorderColorClass">
-                        <div class="progress-segment bg-blue-500" :style="{ width: `${systemPromptPercentage}%` }" :title="`System Prompt: ${systemPromptTokens.toLocaleString()} tokens`"></div>
-                        <div class="progress-segment bg-yellow-500" :style="{ left: `${systemPromptPercentage}%`, width: `${dataZonesPercentage}%` }" :title="`Data Zones: ${dataZonesTokens.toLocaleString()} tokens`"></div>
-                        <div class="progress-segment bg-green-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage}%`, width: `${historyTextPercentage}%` }" :title="`History (Text): ${historyTextTokens.toLocaleString()} tokens`"></div>
-                        <div class="progress-segment bg-teal-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage}%`, width: `${historyImagePercentage}%` }" :title="`History (Images): ${historyImageTokens.toLocaleString()} tokens`"></div>
-                        <div class="progress-segment bg-purple-500" :style="{ left: `${systemPromptPercentage + dataZonesPercentage + historyTextPercentage + historyImagePercentage}%`, width: `${inputTokensPercentage}%` }" :title="`Current Input: ${inputTokenCount.toLocaleString()} tokens`"></div>
-                    </div>
-                    <span class="flex-shrink-0 pl-2">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
+    <div class="flex-shrink-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur border-t dark:border-gray-700 shadow-lg relative"
+         @dragover.prevent="isDraggingOver = true" @dragleave="isDraggingOver = false" @drop.prevent="isDraggingOver = false">
+        
+        <!-- Drop Overlay -->
+        <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/10 border-4 border-dashed border-blue-500 rounded-lg z-50 flex items-center justify-center m-4 pointer-events-none transition-all">
+            <p class="text-2xl font-black text-blue-600 uppercase tracking-tighter">Drop files to chat</p>
+        </div>
+
+        <!-- Vision Warning -->
+        <div v-if="!currentModelVisionSupport && discussionImages.length > 0" class="px-4 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-[10px] text-yellow-700 dark:text-yellow-300 flex items-center gap-2">
+            <IconInfo class="w-3.5 h-3.5 flex-shrink-0" />
+            <p>Model lacks vision support. Images will be ignored.</p>
+        </div>
+
+        <!-- Context Bar -->
+        <div v-if="showContextBar" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700">
+             <div class="max-w-4xl mx-auto flex items-center gap-3">
+                <div class="flex items-center gap-1 text-gray-500"><IconToken class="w-3.5 h-3.5" /><span class="text-[10px] font-black uppercase tracking-tight">Context</span></div>
+                <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 bg-gray-200 dark:bg-gray-700', progressBorderColorClass]">
+                    <div v-for="part in contextParts" :key="part.label" :class="[part.colorClass, 'h-full transition-all duration-500 ease-out']" :style="{ width: `${getPercentage(part.value)}%` }" :title="`${part.title}: ${part.value} tokens`"></div>
                 </div>
-                <p v-if="showContextWarning" class="mt-1.5 text-xs text-center" :class="totalPercentage > 100 ? 'text-red-600 dark:text-red-400' : 'text-yellow-600 dark:text-yellow-400'">{{ contextWarningMessage }}</p>
-                <div class="absolute bottom-full left-0 mb-2 w-auto p-2 bg-white dark:bg-gray-900 border dark:border-gray-600 rounded-lg shadow-lg text-xs opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-10">
-                    <h4 class="font-bold mb-1 whitespace-nowrap">Context Breakdown</h4>
-                    <div class="flex flex-wrap gap-1">
-                        <template v-for="part in contextParts">
-                            <span :title="`${part.title}: ${part.value.toLocaleString()} tokens`" class="px-1.5 py-0.5 rounded" :class="part.colorClass">{{ part.label }}: {{ part.value.toLocaleString() }}</span>
-                        </template>
+                <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap"><span>{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span></div>
+            </div>
+        </div>
+
+        <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
+            <!-- Active Tools Badges -->
+            <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="flex flex-wrap gap-2 animate-in fade-in slide-in-from-bottom-1">
+                <span v-if="ragStoreSelection.length > 0" class="tool-badge bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 border border-green-200 dark:border-green-800">
+                    <IconDatabase class="w-3 h-3" /> {{ ragStoreSelection.length }} RAG ACTIVE
+                </span>
+                <span v-if="mcpToolSelection.length > 0" class="tool-badge bg-purple-50 text-purple-700 dark:bg-purple-900/20 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
+                    <IconMcp class="w-3 h-3" /> {{ mcpToolSelection.length }} TOOLS ACTIVE
+                </span>
+            </div>
+
+            <!-- Attached Previews -->
+            <div v-if="discussionImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
+                <div v-for="(img_b64, index) in discussionImages" :key="`in-img-${index}`" 
+                     @click="openAttachedImageViewer(index)"
+                     class="relative w-16 h-16 group rounded-lg overflow-hidden border-2 transition-all shadow-sm cursor-pointer"
+                     :class="[isImageActive(index) ? (currentModelVisionSupport ? 'border-blue-500' : 'border-yellow-400') : 'border-gray-300 grayscale opacity-60']">
+                    <AuthenticatedImage :src="'data:image/png;base64,' + img_b64" class="w-full h-full object-cover" />
+                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
+                        <button @click.stop="discussionsStore.toggleDiscussionImage(index)" class="text-white hover:text-blue-300 p-0.5" :title="isImageActive(index) ? 'Disable' : 'Enable'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button>
+                        <button @click.stop="discussionsStore.deleteDiscussionImage(index)" class="text-white hover:text-red-400 p-0.5" title="Remove"><IconXMark class="w-4 h-4" /></button>
                     </div>
+                </div>
+
+                <div v-for="file in attachedFiles" :key="file.title" 
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-all duration-200 shadow-sm"
+                     :class="file.is_loaded ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800' : 'bg-gray-50 border-gray-200 text-gray-400 opacity-60'">
+                    <button @click="toggleArtefactLoad(file)" :title="file.is_loaded ? 'Unload' : 'Load'"><IconCheckCircle v-if="file.is_loaded" class="w-4 h-4 text-blue-600"/><IconCircle v-else class="w-4 h-4" /></button>
+                    <span class="truncate max-w-[150px] font-medium" :title="file.title">{{ file.title }}</span>
+                    <button @click="removeArtefact(file)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Remove"><IconXMark class="w-3.5 h-3.5" /></button>
                 </div>
             </div>
-            
-            <!-- Image Preview -->
-            <div v-if="uploadedImages.length > 0 || isUploading" class="mb-2 p-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md">
-                <div class="flex flex-wrap gap-2">
-                    <div v-for="(image, index) in uploadedImages" :key="`img-${image.server_path}-${index}`" class="relative w-14 h-14 sm:w-16 sm:h-16">
-                        <img v-if="!imageErrors.has(index)" :src="image.local_url" @error="handleImageError(index, $event)" @load="console.log('Image loaded:', image.server_path)" class="w-full h-full object-cover rounded-md" alt="Image preview" />
-                        <div v-else class="w-full h-full bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center">
-                            <span class="text-xs text-gray-500">Failed</span>
-                        </div>
-                        <button @click="removeImage(index)" class="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs font-bold leading-none">×</button>
-                    </div>
-                    <div v-if="isUploading" class="w-14 h-14 sm:w-16 sm:h-16 bg-gray-200 dark:bg-gray-700 rounded-md flex items-center justify-center">
-                        <IconAnimateSpin class="h-6 w-6 text-gray-500 animate-spin" />
-                    </div>
-                </div>
-            </div>
+
+            <!-- Input Controls -->
+            <div class="flex items-end gap-2 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm">
                 
-            <input type="file" ref="imageInput" @change="handleImageSelection" multiple accept="image/*" class="hidden">
-            
-            <!-- Generation Progress -->
-            <div v-if="generationInProgress" class="flex flex-row items-center justify-between p-2 h-[60px]">
-                <div class="flex items-center space-x-3">
-                    <IconAnimateSpin v-if="['starting', 'streaming'].includes(generationState.status)" class="h-6 w-6 text-blue-500 animate-spin" />
-                    <IconThinking v-else-if="generationState.status === 'thinking'" class="h-6 w-6 text-purple-500" />
-                    <IconSparkles v-else-if="generationState.status === 'generating_title'" class="h-6 w-6 text-yellow-500" />
-                    <div class="flex flex-col">
-                        <p class="text-sm font-semibold text-gray-700 dark:text-gray-200">{{ generationState.details }}</p>
-                    </div>
-                </div>
-                <button @click="discussionsStore.stopGeneration" class="btn btn-danger !py-1 !px-3">Stop Generation</button>
-            </div>
-            
-            <!-- Main Interface -->
-            <div v-else>
-                <!-- SINGLE-LINE MODE -->
-                <div v-if="!isAdvancedMode" class="flex items-start gap-2">
-                    <!-- Action Buttons -->
-                    <div class="flex flex-shrink-0 gap-1 sm:gap-2 pt-1.5">
-                        <button v-if="currentModelVisionSupport" @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images">
-                            <IconPhoto class="w-5 h-5"/>
-                        </button>
-                        
-                        <div v-if="user.user_ui_level >= 3">
-                            <MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary">
-                                <template #button="{ toggle, selected, activeClass, inactiveClass }">
-                                    <button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select MCP Tools">
-                                        <IconMcp class="w-5 h-5"/>
-                                        <span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span>
-                                    </button>
-                                </template>
-                                <template #footer>
-                                    <div class="p-2">
-                                        <button @click="refreshMcps" :disabled="isRefreshingMcps" class="w-full btn btn-secondary text-sm !justify-center">
-                                            <IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingMcps}"/>
-                                            <span>{{ isRefreshingMcps ? 'Refreshing...' : 'Refresh Tools' }}</span>
-                                        </button>
-                                    </div>
-                                </template>
-                            </MultiSelectMenu>
-                        </div>
-                        
-                        <div v-if="user.user_ui_level >= 1">
-                            <MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary">
-                                <template #button="{ toggle, selected, activeClass, inactiveClass }">
-                                    <button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select RAG Store">
-                                        <IconDatabase class="w-5 h-5" />
-                                        <span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span>
-                                    </button>
-                                </template>
-                                <template #footer>
-                                    <div class="p-2">
-                                        <button @click="refreshRags" :disabled="isRefreshingRags" class="w-full btn btn-secondary text-sm !justify-center">
-                                            <IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isRefreshingRags}"/>
-                                            <span>{{ isRefreshingRags ? 'Refreshing...' : 'Refresh Stores' }}</span>
-                                        </button>
-                                    </div>
-                                </template>
-                            </MultiSelectMenu>
-                        </div>
-                        
-                        <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn btn-secondary chat-action-button">
-                            <DropdownSubmenu v-if="filteredLollmsPrompts.length > 0" title="Default" icon="lollms" collection="ui">
-                                <button v-for="p in filteredLollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                    <span class="truncate">{{ p.name }}</span>
-                                </button>
-                            </DropdownSubmenu>
-                            <DropdownSubmenu v-if="Object.keys(userPromptsByCategory).length > 0" title="User" icon="user" collection="ui">
-                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
-                                    <input type="text" v-model="userPromptSearchTerm" @click.stop placeholder="Search user prompts..." class="input-field w-full text-sm">
+                <div class="pb-1 pl-1">
+                    <DropdownMenu icon="plus" collection="" title="Add" buttonClass="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative">
+                         <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
+                        <button @click="triggerFileUpload" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Add File</span></button>
+                        <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>
+                        <button @click="handleAddFromUrl" class="menu-item"><IconWeb class="w-4 h-4 mr-3 text-cyan-500" /> <span>Scrape URL</span></button>
+                        <div class="menu-divider"></div>
+                        <DropdownSubmenu title="RAG Context" icon="database">
+                             <div class="p-1 max-h-64 overflow-y-auto min-w-[200px]">
+                                <div v-if="availableRagStores.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No stores available.</div>
+                                <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="menu-item flex justify-between items-center group/item"><span class="truncate pr-4" :class="{'font-bold text-green-600': ragStoreSelection.includes(store.id)}">{{ store.name }}</span><IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 flex-shrink-0" /></button>
+                             </div>
+                        </DropdownSubmenu>
+                        <DropdownSubmenu title="MCP Tools" icon="server">
+                            <div class="p-1 max-h-72 overflow-y-auto min-w-[220px]">
+                                <div v-if="availableMcpToolsForSelector.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No tools available.</div>
+                                <div v-for="group in availableMcpToolsForSelector" :key="group.label" class="mb-2">
+                                    <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ group.label }}</div>
+                                    <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="menu-item flex justify-between items-center pl-5"><span class="truncate pr-4 text-xs" :class="{'font-bold text-purple-600': mcpToolSelection.includes(tool.id)}">{{ tool.name }}</span><IconCheckCircle v-if="mcpToolSelection.includes(tool.id)" class="w-4 h-4 text-purple-500 flex-shrink-0" /></button>
                                 </div>
-                                <div class="max-h-60 overflow-y-auto">
-                                    <div v-for="(prompts, category) in filteredUserPromptsByCategory" :key="category">
-                                        <h3 class="category-header">{{ category }}</h3>
-                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                            <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                            <IconTicket v-else class="h-5 w-5 mr-2 flex-shrink-0 text-gray-400" />
-                                            <span class="truncate">{{ p.name }}</span>
-                                        </button>
+                            </div>
+                        </DropdownSubmenu>
+                        <DropdownSubmenu title="Prompts" icon="ticket">
+                             <div class="p-1 max-h-72 overflow-y-auto min-w-[200px]">
+                                <DropdownSubmenu title="Standard" icon="lollms" class="w-full"><button v-for="p in lollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-xs">{{ p.name }}</button></DropdownSubmenu>
+                                <DropdownSubmenu title="Personal" icon="user" class="w-full">
+                                    <div class="px-2 py-1 sticky top-0 bg-white dark:bg-gray-800 z-10"><input v-model="userPromptSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
+                                    <div v-for="(prompts, cat) in filteredUserPromptsByCategory" :key="cat">
+                                        <div class="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase">{{ cat }}</div>
+                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-xs pl-5">{{ p.name }}</button>
                                     </div>
-                                    <div v-if="Object.keys(filteredUserPromptsByCategory).length === 0" class="px-3 py-2 text-sm text-gray-500 italic">No matching prompts.</div>
-                                </div>
-                            </DropdownSubmenu>
-                            <DropdownSubmenu v-if="Object.keys(systemPromptsByZooCategory).length > 0" title="Zoo" icon="server" collection="ui">
-                                <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10">
-                                    <input type="text" v-model="zooPromptSearchTerm" @click.stop placeholder="Search zoo..." class="input-field w-full text-sm">
-                                </div>
-                                <div class="max-h-60 overflow-y-auto">
-                                    <div v-for="(prompts, category) in filteredSystemPromptsByZooCategory" :key="category">
-                                        <h3 class="category-header">{{ category }}</h3>
-                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-sm">
-                                            <img v-if="p.icon" :src="p.icon" class="h-5 w-5 rounded-md object-cover mr-2 flex-shrink-0" alt="Icon">
-                                            <span class="truncate">{{ p.name }}</span>
-                                        </button>
-                                    </div>
-                                    <div v-if="Object.keys(filteredSystemPromptsByZooCategory).length === 0" class="px-3 py-2 text-sm text-gray-500 italic">No matching prompts.</div>
-                                </div>
-                            </DropdownSubmenu>
-                            <div class="my-1 border-t dark:border-gray-600"></div>
-                            <button @click="manageMyPrompts" class="menu-item text-sm font-medium text-blue-600 dark:text-blue-400">Manage My Prompts...</button>
-                        </DropdownMenu>
-                    </div>
-                    
-                    <div class="flex-1 min-w-0">
-                        <textarea ref="textareaRef" v-model="messageText" @keydown="handleKeyDown" :placeholder="inputPlaceholder" rows="1" class="simple-chat-input"></textarea>
-                    </div>
-    
-                    <div class="flex-shrink-0 pt-1.5 flex items-center gap-2">
-                        <button v-if="isSttConfigured" @click="toggleRecording" :disabled="isTranscribing" class="btn btn-secondary chat-action-button" :class="{'!bg-red-500 text-white animate-pulse': isRecording}" :title="isRecording ? 'Stop Recording' : (isTranscribing ? 'Transcribing...' : 'Record Voice')">
-                            <IconAnimateSpin v-if="isTranscribing" class="w-5 h-5" />
-                            <IconStopCircle v-else-if="isRecording" class="w-5 h-5"/>
-                            <IconMicrophone v-else class="w-5 h-5"/>
-                        </button>
-                        <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary chat-action-button" title="Send Message (Enter)">
-                            <IconSend class="w-5 h-5"/>
-                        </button>
-                    </div>
+                                </DropdownSubmenu>
+                             </div>
+                        </DropdownSubmenu>
+                    </DropdownMenu>
+                    <input type="file" ref="fileInput" @change="handleFileUpload" multiple class="hidden">
+                    <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
                 </div>
 
-                <!-- MULTI-LINE (ADVANCED) MODE -->
-                <div v-else class="advanced-input-wrapper">
-                    <!-- Toolbar -->
-                    <div class="advanced-input-toolbar">
-                        <!-- Left Actions -->
-                        <div class="flex items-center gap-1 sm:gap-2">
-                            <button v-if="currentModelVisionSupport" @click="triggerImageUpload" :disabled="isUploading" class="btn btn-secondary chat-action-button disabled:opacity-50" title="Upload Images">
-                                <IconPhoto class="w-5 h-5"/>
-                            </button>
-                            <div v-if="user.user_ui_level >= 3">
-                                <MultiSelectMenu v-model="mcpToolSelection" :items="availableMcpTools" placeholder="MCP Tools" activeClass="!bg-purple-600 !text-white" inactiveClass="btn-secondary">
-                                     <template #button="{ toggle, selected, activeClass, inactiveClass }">
-                                        <button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select MCP Tools">
-                                            <IconMcp class="w-5 h-5"/>
-                                            <span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-purple-800 rounded-full">{{ selected.length }}</span>
-                                        </button>
-                                    </template>
-                                </MultiSelectMenu>
-                            </div>
-                            <div v-if="user.user_ui_level >= 1">
-                                <MultiSelectMenu v-model="ragStoreSelection" :items="availableRagStores" placeholder="RAG Stores" activeClass="!bg-green-600 !text-white" inactiveClass="btn-secondary">
-                                    <template #button="{ toggle, selected, activeClass, inactiveClass }">
-                                        <button type="button" @click="toggle" :class="[selected.length > 0 ? activeClass : inactiveClass]" class="relative btn chat-action-button" title="Select RAG Store">
-                                            <IconDatabase class="w-5 h-5" />
-                                            <span v-if="selected.length > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-green-800 rounded-full">{{ selected.length }}</span>
-                                        </button>
-                                    </template>
-                                </MultiSelectMenu>
-                            </div>
-                            <DropdownMenu title="Prompts" icon="ticket" collection="ui" button-class="btn btn-secondary chat-action-button" />
-                        </div>
+                <div class="flex-grow min-w-0">
+                    <textarea v-model="messageText" @keydown="handleKeyDown" @paste="handlePaste" rows="1" class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-64 overflow-y-auto text-sm leading-relaxed" :placeholder="inputPlaceholder" :disabled="generationInProgress"></textarea>
+                </div>
 
-                        <!-- Right Actions -->
-                        <div class="flex items-center gap-1 sm:gap-2">
-                             <button v-if="isSttConfigured" @click="toggleRecording" :disabled="isTranscribing" class="btn btn-secondary chat-action-button" :class="{'!bg-red-500 text-white animate-pulse': isRecording}" :title="isRecording ? 'Stop Recording' : (isTranscribing ? 'Transcribing...' : 'Record Voice')">
-                                <IconAnimateSpin v-if="isTranscribing" class="w-5 h-5" />
-                                <IconStopCircle v-else-if="isRecording" class="w-5 h-5"/>
-                                <IconMicrophone v-else class="w-5 h-5"/>
-                            </button>
-                            <button @click="isAdvancedMode = false" class="btn btn-secondary !py-1 !px-3 flex items-center" title="Switch to Simple Input">
-                                <IconChevronDown class="w-5 h-5 mr-1" />
-                                <span>Simple</span>
-                            </button>
-                            <button @click="handleSendMessage" :disabled="isSendDisabled" class="btn btn-primary !py-1 !px-3 flex items-center" title="Send Message (Ctrl+Enter)">
-                                <IconSend class="w-5 h-5 mr-1"/>
-                                <span>Send</span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- CodeMirror Editor -->
-                    <div class="flex-1 flex flex-col min-h-0">
-                        <CodeMirrorEditor 
-                            class="flex-grow min-h-0 !border-0" 
-                            v-model="messageText" 
-                            :placeholder="inputPlaceholder" 
-                            :style="{ maxHeight: '200px' }" 
-                            :autofocus="true" 
-                            :extensions="advancedEditorExtensions" 
-                            @ready="handleEditorReady"
-                        />
-                    </div>
+                <div class="flex items-center gap-1 pb-1 pr-1">
+                    <button v-if="isSttConfigured" @click="toggleRecording" class="w-9 h-9 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-800 rounded-xl" :class="{'text-red-500 animate-pulse bg-red-50 dark:bg-red-900/20': isRecording, 'text-gray-500': !isRecording}"><IconMicrophone class="w-5.5 h-5.5" /></button>
+                    <button @click="handleSendMessage" class="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-xl shadow-sm transition-all active:scale-95">
+                         <IconAnimateSpin v-if="generationInProgress" class="w-5 h-5 animate-spin" />
+                         <IconSend v-else class="w-5 h-5" />
+                    </button>
                 </div>
             </div>
+            
+            <p v-if="totalPercentage > 100" class="text-[10px] text-center text-red-500 font-black animate-pulse">CONTEXT LIMIT REACHED. PREVIOUS TURNS MAY BE LOST.</p>
         </div>
     </div>
 </template>
+
 <style scoped>
-.advanced-input-wrapper {
-    @apply border border-gray-300 dark:border-gray-600 rounded-lg flex flex-col overflow-hidden shadow-sm;
-}
-.advanced-input-toolbar {
-    @apply flex items-center justify-between gap-2 p-1 bg-gray-100 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-600;
-}
+.tool-badge { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black border shadow-sm transition-all; }
+.menu-item { @apply flex items-center w-full px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left; }
+.menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
+textarea { scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent; }
 </style>

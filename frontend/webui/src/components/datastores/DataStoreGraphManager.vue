@@ -6,10 +6,14 @@ import { useAuthStore } from '../../stores/auth';
 import { useTasksStore } from '../../stores/tasks';
 import { storeToRefs } from 'pinia';
 import InteractiveGraphViewer from './InteractiveGraphViewer.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconSave from '../../assets/icons/IconSave.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconPlay from '../../assets/icons/IconPlayCircle.vue';
 
 const props = defineProps({
     store: {
@@ -69,6 +73,10 @@ const isQuerying = ref(false);
 
 const selectedNode = ref(null);
 const selectedEdge = ref(null);
+
+const ontologyLanguage = ref('json');
+const presets = ref([]);
+const selectedPreset = ref(null);
 
 watch(selectedFullModel, (newVal) => {
     if (newVal) {
@@ -258,6 +266,13 @@ async function onOntologyFileSelected(event) {
     try {
         const textContent = await dataStore.extractTextFromFile(file);
         generationParams.value.ontology = textContent;
+        // Simple heuristic for language detection
+        if (file.name.endsWith('.json')) ontologyLanguage.value = 'json';
+        else if (file.name.endsWith('.yaml') || file.name.endsWith('.yml')) ontologyLanguage.value = 'yaml';
+        else if (file.name.endsWith('.xml') || file.name.endsWith('.owl') || file.name.endsWith('.rdf')) ontologyLanguage.value = 'xml';
+        else if (file.name.endsWith('.ttl')) ontologyLanguage.value = 'python'; // Approx for turtle
+        else ontologyLanguage.value = 'markdown';
+        
         uiStore.addNotification('Ontology file imported successfully.', 'success');
     } catch (error) {
         console.error("Ontology import failed:", error);
@@ -274,8 +289,56 @@ function fitGraph() {
     }
 }
 
+function loadPresets() {
+    const defaults = [
+        { name: 'Default (JSON)', language: 'json', content: defaultOntology },
+        { name: 'Simple (YAML)', language: 'yaml', content: "entities:\n  - Person\n  - Place\nrelationships:\n  - visited" },
+        { name: 'OWL/RDF (Turtle)', language: 'python', content: "@prefix : <http://example.org/> .\n:Person a :Class .\n:knows a :ObjectProperty ." },
+        { name: 'Free Text (Markdown)', language: 'markdown', content: "Define Entities:\n- Person\n- Location\n\nDefine Relations:\n- Person lives in Location" }
+    ];
+    try {
+        const stored = JSON.parse(localStorage.getItem('lollms_graph_presets') || '[]');
+        presets.value = [...defaults, ...stored];
+    } catch (e) {
+        presets.value = defaults;
+    }
+}
+
+function applyPreset() {
+    if(selectedPreset.value) {
+        generationParams.value.ontology = selectedPreset.value.content;
+        ontologyLanguage.value = selectedPreset.value.language || 'json';
+    }
+}
+
+async function savePreset() {
+    // Simple prompt for now
+    // Ideally use a modal
+    const name = prompt("Enter a name for this ontology preset:");
+    if(name) {
+        const newPreset = {
+            name,
+            language: ontologyLanguage.value,
+            content: generationParams.value.ontology
+        };
+        try {
+            const stored = JSON.parse(localStorage.getItem('lollms_graph_presets') || '[]');
+            stored.push(newPreset);
+            localStorage.setItem('lollms_graph_presets', JSON.stringify(stored));
+            loadPresets();
+            // Select the newly created preset
+            selectedPreset.value = presets.value[presets.value.length - 1];
+            uiStore.addNotification("Preset saved", "success");
+        } catch(e) {
+            console.error(e);
+            uiStore.addNotification("Failed to save preset", "error");
+        }
+    }
+}
+
 onMounted(() => {
     fetchGraph();
+    loadPresets();
     if (user.value?.lollms_model_name) {
         selectedFullModel.value = user.value.lollms_model_name;
     }
@@ -364,13 +427,13 @@ watch(() => props.task, (newTask, oldTask) => {
                     Graph Actions
                 </h3>
                 
-                <div class="flex gap-2">
+                <div class="flex gap-2" v-if="graphStats.nodes > 0">
                      <button @click="openAddNodeModal" :disabled="!!task" class="btn btn-secondary btn-sm flex-1">Add Node</button>
                      <button @click="openAddEdgeModal" :disabled="!!task" class="btn btn-secondary btn-sm flex-1">Add Edge</button>
                      <button @click="fitGraph" class="btn btn-ghost btn-sm px-2" title="Fit Graph"><IconMaximize class="w-4 h-4"/></button>
                 </div>
                 
-                <hr class="dark:border-gray-700">
+                <hr class="dark:border-gray-700" v-if="graphStats.nodes > 0">
                 
                 <div class="space-y-2">
                      <div>
@@ -386,13 +449,39 @@ watch(() => props.task, (newTask, oldTask) => {
                     <div>
                         <div class="flex justify-between items-center mb-1">
                             <label class="block text-xs font-bold uppercase tracking-wider text-gray-500">Ontology Schema</label>
-                            <button type="button" @click="handleImportOntology" class="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1">
-                                <IconArrowUpTray class="w-3 h-3" />
-                                Import
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <button type="button" @click="handleImportOntology" class="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1" title="Import File">
+                                    <IconArrowUpTray class="w-3 h-3" />
+                                </button>
+                                <button type="button" @click="savePreset" class="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1" title="Save as Preset">
+                                    <IconSave class="w-3 h-3" />
+                                </button>
+                            </div>
                         </div>
-                        <textarea v-model="generationParams.ontology" rows="6" class="input-field font-mono text-xs leading-relaxed" placeholder="Define entities and relationships..."></textarea>
-                        <input type="file" ref="ontologyFileInput" @change="onOntologyFileSelected" class="hidden" accept=".owl,.rdf,.ttl,.jsonld,.pdf,.docx,.txt,.md,.json">
+                        
+                        <!-- Presets and Language -->
+                        <div class="flex gap-2 mb-2">
+                            <select v-model="selectedPreset" @change="applyPreset" class="input-field text-xs py-1">
+                                <option :value="null" disabled>Load Preset...</option>
+                                <option v-for="(p, i) in presets" :key="i" :value="p">{{ p.name }}</option>
+                            </select>
+                            <select v-model="ontologyLanguage" class="input-field text-xs py-1 w-24">
+                                <option value="json">JSON</option>
+                                <option value="yaml">YAML</option>
+                                <option value="xml">XML</option>
+                                <option value="markdown">MD</option>
+                                <option value="python">Code</option>
+                            </select>
+                        </div>
+
+                        <div class="h-48 border rounded-md overflow-hidden border-gray-300 dark:border-gray-600">
+                            <CodeMirrorEditor 
+                                v-model="generationParams.ontology" 
+                                :language="ontologyLanguage" 
+                                class="h-full w-full text-xs" 
+                            />
+                        </div>
+                        <input type="file" ref="ontologyFileInput" @change="onOntologyFileSelected" class="hidden" accept=".owl,.rdf,.ttl,.jsonld,.pdf,.docx,.txt,.md,.json,.yaml,.yml,.xml">
                         <p class="text-[10px] text-gray-400 mt-1">Defines the structure for the LLM to extract knowledge.</p>
                     </div>
                 </div>
@@ -414,7 +503,7 @@ watch(() => props.task, (newTask, oldTask) => {
             </div>
             
             <!-- Query Section -->
-            <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
+            <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700" v-if="graphStats.nodes > 0">
                 <h3 class="text-base font-semibold flex items-center gap-2">
                     <span class="w-1 h-4 bg-green-500 rounded-full"></span>
                     Query Graph
@@ -440,8 +529,29 @@ watch(() => props.task, (newTask, oldTask) => {
         </div>
 
         <!-- Graph Viewer Column -->
-        <div class="flex-grow h-[500px] lg:h-full lg:min-h-0 bg-white dark:bg-gray-900 rounded-lg shadow-inner border dark:border-gray-700 p-1">
+        <div class="flex-grow h-[500px] lg:h-full lg:min-h-0 bg-white dark:bg-gray-900 rounded-lg shadow-inner border dark:border-gray-700 p-1 relative">
+            
+            <!-- Empty State Overlay -->
+            <div v-if="graphStats.nodes === 0 && !isLoadingGraph" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 dark:bg-gray-900/80 z-10 p-6 text-center">
+                <div class="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg border dark:border-gray-700 max-w-md">
+                    <div class="w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600 dark:text-blue-400">
+                        <IconRefresh class="w-8 h-8" />
+                    </div>
+                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">No Graph Built</h3>
+                    <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">
+                        This Data Store doesn't have a knowledge graph yet. Select a model and ontology schema on the left, then click "Generate Graph" to build one from your documents.
+                    </p>
+                    <button @click="handleGenerateGraph" :disabled="!!task || !selectedFullModel" class="btn btn-primary w-full flex items-center justify-center gap-2">
+                        <IconPlay class="w-5 h-5" />
+                        Generate Graph
+                    </button>
+                    <p v-if="!selectedFullModel" class="text-xs text-red-500 mt-2">Please select an LLM Model first.</p>
+                </div>
+            </div>
+
+            <!-- Viewer is only rendered if not empty to prevent blank canvas issues if desired, but here overlay handles visual blocking -->
             <InteractiveGraphViewer 
+                v-if="graphStats.nodes > 0 || isLoadingGraph"
                 ref="graphViewer"
                 :nodes="graphData.nodes" 
                 :edges="graphData.edges" 

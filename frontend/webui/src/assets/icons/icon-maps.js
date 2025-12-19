@@ -57,6 +57,7 @@ import IconVuejs from './languages/IconVuejs.vue';
 import IconXml from './languages/IconXml.vue';
 import IconYaml from './languages/IconYaml.vue';
 import IconTicket from './IconTicket.vue';
+import IconPlus from './IconPlus.vue';
 
 // Manually map names to imported components
 export const uiIconMap = {
@@ -90,7 +91,8 @@ export const uiIconMap = {
     'upload': IconArrowUpTray,
     'folder': IconFolder,
     'wrap-text': IconWrapText,
-    'menu': IconMenu
+    'menu': IconMenu,
+    'plus':IconPlus
 };
 
 export const languageIconMap = {

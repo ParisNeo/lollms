@@ -168,7 +168,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
         promptLoadedArtefacts, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
-        activeDiscussionParticipants, generationState, imageGenerationSystemPrompt
+        activeDiscussionParticipants, generationState, imageGenerationSystemPrompt,
+        currentModelVisionSupport // FIX: Added missing dependency
     };
     const composableStores = { uiStore, authStore, dataStore, tasksStore };
 

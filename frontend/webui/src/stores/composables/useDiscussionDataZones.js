@@ -35,31 +35,36 @@ export function useDiscussionDataZones(state, stores, getActions) {
     }
 
     async function fetchDataZones(discussionId) {
-        const discussion = discussions.value[discussionId];
-        if (!discussion) return;
+        if (!discussionId) return;
         try {
             const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);
             const data = response.data;
 
+            // Ensure we update the discussion object in the map for reactivity
             if (discussions.value[discussionId]) {
-                discussions.value[discussionId] = { ...discussions.value[discussionId], ...data };
+                discussions.value[discussionId] = { 
+                    ...discussions.value[discussionId], 
+                    ...data 
+                };
+            } else {
+                // If it's a shared discussion not in the 'discussions' map, check 'sharedWithMe'
+                const sharedIdx = sharedWithMe.value.findIndex(d => d.id === discussionId);
+                if (sharedIdx !== -1) {
+                    sharedWithMe.value[sharedIdx] = {
+                        ...sharedWithMe.value[sharedIdx],
+                        ...data
+                    };
+                }
             }
 
         } catch (error) {
+            console.error("Failed to fetch data zones:", error);
             uiStore.addNotification('Could not load discussion data zones.', 'error');
-            discussion.discussion_data_zone = '';
-            discussion.personality_data_zone = '';
-            discussion.memory = '';
-            discussion.discussion_images = [];
-            discussion.active_discussion_images = [];
         }
     }
 
     async function updateDataZone({ discussionId, content }) {
-        if (!discussions.value[discussionId]) return;
-        if (content === null || content === undefined) {
-            content = ''; 
-        }
+        if (!discussionId) return;
         try {
             await apiClient.put(`/api/discussions/${discussionId}/data_zone`, { content });
             if (discussions.value[discussionId]) {
@@ -88,7 +93,6 @@ export function useDiscussionDataZones(state, stores, getActions) {
             uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId].type}) is already running for this discussion.`, 'warning');
             return;
         }
-        if (!discussions.value[discussionId]) return;
 
         const formData = new FormData();
         if (prompt) formData.append('prompt', prompt);
@@ -101,7 +105,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
             uiStore.closeModal('summaryPromptModal');
             if (activeAiTasks.value[discussionId]) activeAiTasks.value[discussionId].taskId = task.id;
             tasksStore.addTask(task);
-            uiStore.addNotification(`Content processing started. Check Task Manager for progress.`, 'info', { duration: 10000 });
+            uiStore.addNotification(`Content processing started.`, 'info');
         } catch (error) {
              _clearActiveAiTask(discussionId);
         }
@@ -112,7 +116,6 @@ export function useDiscussionDataZones(state, stores, getActions) {
             uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId].type}) is already running.`, 'warning');
             return;
         }
-        if (!discussions.value[discussionId]) return;
         
         const finalPrompt = state.imageGenerationSystemPrompt.value
             ? `${state.imageGenerationSystemPrompt.value}, ${prompt}`
@@ -131,7 +134,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
             const task = response.data;
             if (activeAiTasks.value[discussionId]) activeAiTasks.value[discussionId].taskId = task.id;
             tasksStore.addTask(task);
-            uiStore.addNotification(`Image generation started. Check Task Manager for progress.`, 'info', { duration: 7000 });
+            uiStore.addNotification(`Image generation started.`, 'info');
         } catch (error) {
             _clearActiveAiTask(discussionId);
         }
@@ -142,7 +145,6 @@ export function useDiscussionDataZones(state, stores, getActions) {
             uiStore.addNotification(`An AI task (${activeAiTasks.value[discussionId].type}) is already running.`, 'warning');
             return;
         }
-        if (!discussions.value[discussionId]) return;
         
         activeAiTasks.value[discussionId] = { type: 'memorize', taskId: null };
 
@@ -161,19 +163,12 @@ export function useDiscussionDataZones(state, stores, getActions) {
         if (zone === 'discussion') {
             const discussion = discussions.value[discussion_id];
             if (discussion) {
-                const updatedDiscussion = {
+                discussions.value[discussion_id] = {
                     ...discussion,
-                    discussion_data_zone: new_content
+                    discussion_data_zone: new_content,
+                    discussion_images: discussion_images !== undefined ? discussion_images : discussion.discussion_images,
+                    active_discussion_images: active_discussion_images !== undefined ? active_discussion_images : discussion.active_discussion_images
                 };
-
-                if (discussion_images !== undefined) {
-                    updatedDiscussion.discussion_images = discussion_images;
-                }
-                if (active_discussion_images !== undefined) {
-                    updatedDiscussion.active_discussion_images = active_discussion_images;
-                }
-                
-                discussions.value[discussion_id] = updatedDiscussion;
                 
                 uiStore.addNotification('Data zone has been updated by AI.', 'success');
                 
@@ -200,7 +195,6 @@ export function useDiscussionDataZones(state, stores, getActions) {
     async function handleDiscussionImagesUpdated({ discussion_id, discussion_images, active_discussion_images }) {
         const discussion = discussions.value[discussion_id];
         if (discussion) {
-            // Force reactivity
             discussions.value[discussion_id] = {
                 ...discussion,
                 discussion_images: discussion_images,
@@ -227,26 +221,15 @@ export function useDiscussionDataZones(state, stores, getActions) {
     }
 
     async function refreshDataZones(discussionId) {
-        const discussion = discussions.value[discussionId];
-        if (!discussion) return;
-
+        if (!discussionId) return;
         try {
-            const [zonesDataResponse, contextStatusResponse, artefactsResponse] = await Promise.all([
-                apiClient.get(`/api/discussions/${discussionId}/data_zones`),
-                apiClient.get(`/api/discussions/${discussionId}/context_status`),
-                apiClient.get(`/api/discussions/${discussionId}/artefacts`)
+            await Promise.all([
+                fetchDataZones(discussionId),
+                fetchContextStatus(discussionId),
+                getActions().fetchArtefacts(discussionId)
             ]);
-
-            if (discussions.value[discussionId]) {
-                Object.assign(discussions.value[discussionId], zonesDataResponse.data);
-            }
-            
-            activeDiscussionContextStatus.value = contextStatusResponse.data;
-            state.activeDiscussionArtefacts.value = artefactsResponse.data.sort((a, b) => a.title.localeCompare(b.title));
-            
         } catch (error) {
             console.error("Failed to refresh data zones:", error);
-            uiStore.addNotification('Failed to refresh data zones.', 'error');
         }
     }
     
@@ -262,7 +245,6 @@ export function useDiscussionDataZones(state, stores, getActions) {
             if (state.discussions.value[discussionId]) {
                 state.discussions.value[discussionId].rag_datastore_ids = updatedDiscussionInfo.rag_datastore_ids;
             }
-            
             getActions().fetchContextStatus(discussionId);
         } catch (error) {
             console.error("Failed to update RAG stores:", error);
@@ -276,28 +258,21 @@ export function useDiscussionDataZones(state, stores, getActions) {
     async function uploadAndEmbedFilesToDataZone(discussionId, files, extractImages = true) {
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
-        const extractImagesValue = extractImages ? '1' : '0';
-        formData.append('extract_images', extractImagesValue);
+        formData.append('extract_images', extractImages ? '1' : '0');
 
-        console.log(`[DEBUG] DiscussionZone Drop: Sending extract_images = ${extractImagesValue}`);
-        
         try {
             const response = await apiClient.post(`/api/files/extract_and_embed/${discussionId}`, formData);
             const data = response.data;
             
-            // Update discussion state from response
             if (state.discussions.value[discussionId]) {
                 state.discussions.value[discussionId].discussion_data_zone = data.text_content;
                 state.discussions.value[discussionId].discussion_images = data.discussion_images || [];
                 state.discussions.value[discussionId].active_discussion_images = data.active_discussion_images || [];
             }
             
-            // Refresh context status to update progress bar
             await getActions().fetchContextStatus(discussionId);
-            
-            stores.uiStore.addNotification(`${files.length} file(s) processed and content added to data zone.`, 'success');
+            stores.uiStore.addNotification(`${files.length} file(s) added to context.`, 'success');
         } catch (error) {
-            // Error is handled globally by api client interceptor
             console.error("File embedding failed", error);
         }
     }

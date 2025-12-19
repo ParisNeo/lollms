@@ -236,8 +236,12 @@ class ArtefactUpdate(BaseModel):
 
 class MessageExportPayload(BaseModel):
     format: str
+
 class UrlImportRequest(BaseModel):
     url: str
+    depth: int = 0
+    process_with_ai: bool = False
+
 class ArtefactAndDataZoneUpdateResponse(BaseModel):
     discussion_data_zone: str
     artefacts: List[ArtefactInfo]

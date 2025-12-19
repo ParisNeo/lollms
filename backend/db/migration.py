@@ -21,6 +21,7 @@ from backend.db.models.connections import WebSocketConnection
 from backend.db.models.image import UserImage
 from backend.db.models.dm import Conversation, ConversationMember, DirectMessage
 from backend.db.models.note import Note, NoteGroup
+from backend.db.models.notebook import Notebook
 from ascii_colors import ASCIIColors, trace_exception
 
 
@@ -1012,6 +1013,15 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         Note.__table__.create(connection)
         connection.commit()
 
+    if not inspector.has_table("notebooks"):
+        try:
+            Notebook.__table__.create(connection)
+            connection.commit()
+            print("INFO: Created 'notebooks' table.")
+        except Exception as e:
+            connection.rollback()
+            print(f"ERROR: Failed to create notebooks table: {e}")
+
     connection.commit()
 
 
@@ -1026,7 +1036,7 @@ def check_and_update_db_version(SessionLocal):
         elif version_record.version != CURRENT_DB_VERSION: 
             version_record.version = CURRENT_DB_VERSION 
             session.commit()
-    except Exception as e_ver:
+    except Exception:
         session.rollback()
     finally:
         session.close()

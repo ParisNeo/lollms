@@ -77,6 +77,7 @@ const ImageEditorSettingsModal = defineAsyncComponent(() => import('./components
 const NoteEditorModal = defineAsyncComponent(() => import('./components/modals/NoteEditorModal.vue'));
 const NoteGroupModal = defineAsyncComponent(() => import('./components/modals/NoteGroupModal.vue'));
 const SystemLogModal = defineAsyncComponent(() => import('./components/modals/SystemLogModal.vue'));
+const ScrapeUrlModal = defineAsyncComponent(() => import('./components/modals/ScrapeUrlModal.vue')); // ADDED
 
 const ChatSidebar = defineAsyncComponent(() => import('./components/chat/ChatSidebar.vue'));
 
@@ -265,6 +266,7 @@ watch(message_font_size, (newSize) => {
     <AppConfigModal v-if="activeModal === 'appConfig'" />
     <AppEnvConfigModal v-if="activeModal === 'appEnvConfig'" />
     <AppLogModal v-if="activeModal === 'appLog'" />
+    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
@@ -290,6 +292,7 @@ watch(message_font_size, (newSize) => {
     <NoteEditorModal v-if="activeModal === 'noteEditor'" />
     <NoteGroupModal v-if="activeModal === 'noteGroup'" />
     <SystemLogModal v-if="activeModal === 'systemLog'" />
+    <ScrapeUrlModal v-if="activeModal === 'scrapeUrl'" /> <!-- REGISTERED -->
     
     <!-- Always rendered panels -->
     <NotificationPanel />

@@ -1,4 +1,4 @@
-# [UPDATE] backend/task_manager.py
+# backend/task_manager.py
 import uuid
 import datetime
 import threading
@@ -13,7 +13,6 @@ from backend.db.base import TaskStatus
 from backend.ws_manager import manager
 from backend.models.task import TaskInfo
 from backend.db.models.user import User as DBUser
-from backend.db.models.discussion import SharedDiscussionLink
 from backend.tasks.utils import _to_task_info
 
 def _serialize_task(db_task: DBTask) -> Optional[dict]:
@@ -41,6 +40,8 @@ def _serialize_task(db_task: DBTask) -> Optional[dict]:
         "total_files": db_task.total_files,
         "owner_username": db_task.owner.username if db_task.owner else "System"
     }
+    
+    # Serialize datetime objects to ISO strings
     for key in ['created_at', 'started_at', 'completed_at', 'updated_at']:
         if task_info[key] and isinstance(task_info[key], datetime.datetime):
             task_info[key] = task_info[key].isoformat()

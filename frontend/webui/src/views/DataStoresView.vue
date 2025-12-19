@@ -105,6 +105,7 @@ const selectedVectorizerDetails = computed(() => {
     const bindingAlias = parts[0];
     const modelValue = parts.slice(1).join('/');
     
+    // Find binding
     const foundBinding = vectorizerOptions.value.find(group => group.alias === bindingAlias);
     
     if (foundBinding) {

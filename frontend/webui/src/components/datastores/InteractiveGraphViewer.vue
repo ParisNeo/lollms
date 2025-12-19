@@ -60,7 +60,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
-import { Network } from 'vis-network/esnext';
+import { Network } from 'vis-network';
 import { useUiStore } from '../../stores/ui';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
@@ -208,7 +208,7 @@ function initializeOrUpdateGraph() {
     const data = {
         nodes: props.nodes.map(n => {
             const nodeType = n.label;
-            const nodeLabel = String(n.properties?.identifying_value || n.properties?.name || n.properties?.label || n.label);
+            const nodeLabel = String(n.properties?.identifying_value || n.properties?.name || n.properties?.label || n.label || n.id);
             const color = getNodeColor(nodeType, isDark);
             
             return {
@@ -227,13 +227,19 @@ function initializeOrUpdateGraph() {
                 _raw: n 
             }
         }),
-        edges: props.edges.map(e => ({ 
-            id: e.id,
-            from: String(e.source),
-            to: String(e.target),
-            label: e.label,
-            properties: e.properties
-        }))
+        edges: props.edges.map(e => {
+            // Robustly find source/target keys from potential backend variations
+            const source = e.source ?? e.source_id ?? e.from ?? e.start ?? e.start_node_id;
+            const target = e.target ?? e.target_id ?? e.to ?? e.end ?? e.end_node_id;
+            
+            return { 
+                id: e.id,
+                from: String(source),
+                to: String(target),
+                label: e.label || e.type || '',
+                properties: e.properties
+            };
+        }).filter(e => e.from && e.to && e.from !== 'undefined' && e.to !== 'undefined')
     };
     
     const options = getOptions(uiStore.currentTheme);

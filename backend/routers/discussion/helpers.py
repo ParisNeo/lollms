@@ -1,4 +1,3 @@
-# backend/routers/discussion/helpers.py
 from typing import Tuple, Optional
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
@@ -6,7 +5,8 @@ from lollms_client import LollmsDiscussion
 
 from backend.db.models.user import User as DBUser
 from backend.db.models.discussion import SharedDiscussionLink as DBSharedDiscussionLink
-from backend.models import UserAuthDetails
+from backend.db.models.notebook import Notebook as DBNotebook
+from backend.models.user import UserAuthDetails
 from backend.discussion import get_user_discussion
 
 async def get_discussion_and_owner_for_request(
@@ -16,16 +16,22 @@ async def get_discussion_and_owner_for_request(
     required_permission: str = 'view'
 ) -> Tuple[LollmsDiscussion, str, str, Optional[DBUser]]:
     """
-    Retrieves a discussion object, its owner's username, permission level, and owner's DB object.
-    Handles both owned and shared discussions.
+    Retrieves a discussion object. Handles owned chats, notebooks, and shared discussions.
     """
-    # 1. Check if the current user owns the discussion.
+    # 1. Check owned chat
     discussion_obj = get_user_discussion(current_user.username, discussion_id)
     if discussion_obj:
         owner_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
         return discussion_obj, current_user.username, 'owner', owner_db
 
-    # 2. If not found locally, check if it's shared with the current user.
+    # 2. Check if it's a Notebook (Allow access to its shadow discussion)
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == discussion_id, DBNotebook.owner_user_id == current_user.id).first()
+    if notebook:
+        discussion_obj = get_user_discussion(current_user.username, discussion_id, create_if_missing=True)
+        owner_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
+        return discussion_obj, current_user.username, 'owner', owner_db
+
+    # 3. Check shared discussions
     shared_link = db.query(DBSharedDiscussionLink).options(
         joinedload(DBSharedDiscussionLink.owner)
     ).filter(
@@ -36,7 +42,6 @@ async def get_discussion_and_owner_for_request(
     if not shared_link:
         raise HTTPException(status_code=404, detail="Discussion not found or you don't have access.")
 
-    # 3. Check permissions.
     permission_hierarchy = {"view": ["view", "interact"], "interact": ["interact"]}
     user_permission = shared_link.permission_level
     if required_permission != 'owner' and user_permission not in permission_hierarchy.get(required_permission, []):
@@ -45,6 +50,6 @@ async def get_discussion_and_owner_for_request(
     owner_username = shared_link.owner.username
     shared_discussion_obj = get_user_discussion(owner_username, discussion_id)
     if not shared_discussion_obj:
-        raise HTTPException(status_code=404, detail="The shared discussion seems to have been deleted by its owner.")
+        raise HTTPException(status_code=404, detail="The shared discussion was deleted.")
     
     return shared_discussion_obj, owner_username, user_permission, shared_link.owner

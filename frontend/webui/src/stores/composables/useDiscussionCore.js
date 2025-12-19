@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/composables/useDiscussionCore.js
+// [UPDATE] frontend/webui/src/stores/composables/useDiscussionCore.js
 import apiClient from '../../services/api';
 import { processMessages } from './discussionProcessor';
 
@@ -51,7 +51,6 @@ export function useDiscussionCore(state, stores, getActions) {
         if (discussionId) {
             localStorage.setItem('lollms_last_discussion_id', discussionId);
             
-            // Automatically select the group of the discussion
             if (discussions.value[discussionId]) {
                 currentGroupId.value = discussions.value[discussionId].group_id;
             }
@@ -67,10 +66,15 @@ export function useDiscussionCore(state, stores, getActions) {
             await fetchParticipants(discussionId);
 
             try {
-                const response = await apiClient.get(`/api/discussions/${discussionId}`, { params: { branch_id: branchId } });
-                messages.value = processMessages(response.data);
-                await getActions().fetchContextStatus(discussionId);
-                await getActions().fetchArtefacts(discussionId);
+                // Parallel fetch for faster loading
+                const [msgResponse] = await Promise.all([
+                    apiClient.get(`/api/discussions/${discussionId}`, { params: { branch_id: branchId } }),
+                    getActions().fetchDataZones(discussionId), // CRITICAL FIX: Load text zones content
+                    getActions().fetchContextStatus(discussionId),
+                    getActions().fetchArtefacts(discussionId)
+                ]);
+                
+                messages.value = processMessages(msgResponse.data);
             } catch (error) {
                 uiStore.addNotification('Could not load the selected discussion.', 'error');
                 messages.value = [];
@@ -97,6 +101,7 @@ export function useDiscussionCore(state, stores, getActions) {
         } catch (error) {
             console.error("Failed to create new discussion:", error);
             uiStore.addNotification('Could not create a new discussion.', 'error');
+            throw error;
         }
     }
 
@@ -129,9 +134,7 @@ export function useDiscussionCore(state, stores, getActions) {
             discussions.value[cloned.id] = cloned;
             await selectDiscussion(cloned.id);
             uiStore.addNotification('Discussion cloned successfully.', 'success');
-        } catch(e) {
-            // Error handled by global interceptor
-        }
+        } catch(e) {}
     }
 
     async function createDiscussionFromMessage({ discussionId, messageId }) {
@@ -146,7 +149,6 @@ export function useDiscussionCore(state, stores, getActions) {
             await getActions().selectDiscussion(newDiscussion.id, null, true);
             uiStore.addNotification('New discussion created successfully.', 'success');
         } catch (error) {
-            // Error is handled by global interceptor, which is sufficient.
             console.error("Failed to create discussion from message:", error);
         }
     }
@@ -171,7 +173,7 @@ export function useDiscussionCore(state, stores, getActions) {
         const discussion = discussions.value[discussionId];
         if (!discussion) return;
         const isCurrentlyStarred = discussion.is_starred;
-        discussion.is_starred = !isCurrentlyStarred; // Optimistic update
+        discussion.is_starred = !isCurrentlyStarred;
         try {
             if (isCurrentlyStarred) {
                 await apiClient.delete(`/api/discussions/${discussionId}/star`);
@@ -179,7 +181,7 @@ export function useDiscussionCore(state, stores, getActions) {
                 await apiClient.post(`/api/discussions/${discussionId}/star`);
             }
         } catch (error) {
-            discussion.is_starred = isCurrentlyStarred; // Revert on failure
+            discussion.is_starred = isCurrentlyStarred;
             console.error("Failed to toggle star:", error);
         }
     }
@@ -187,28 +189,24 @@ export function useDiscussionCore(state, stores, getActions) {
     async function renameDiscussion({ discussionId, newTitle }) {
         if (!discussions.value[discussionId]) return;
         const originalTitle = discussions.value[discussionId].title;
-        discussions.value[discussionId].title = newTitle; // Optimistic update
+        discussions.value[discussionId].title = newTitle;
         try {
             await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
             uiStore.addNotification('Discussion renamed.', 'success');
         } catch (error) {
-            discussions.value[discussionId].title = originalTitle; // Revert
+            discussions.value[discussionId].title = originalTitle;
         }
     }
 
     async function updateDiscussionMcps({ discussionId, mcp_tool_ids }) {
         const discussion = discussions.value[discussionId];
         if (!discussion) return;
-
         const originalTools = discussion.active_tools;
-        discussion.active_tools = mcp_tool_ids; // Optimistic update
-
+        discussion.active_tools = mcp_tool_ids;
         try {
             await apiClient.put(`/api/discussions/${discussionId}/tools`, { tools: mcp_tool_ids });
-            // No need to do anything else, optimistic update is sufficient.
         } catch (error) {
-            discussion.active_tools = originalTools; // Revert on failure
-            console.error("Failed to update discussion tools:", error);
+            discussion.active_tools = originalTools;
             uiStore.addNotification('Failed to update discussion tools.', 'error');
         }
     }

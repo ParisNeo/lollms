@@ -27,6 +27,7 @@ import IconFolder from '../../assets/icons/IconFolder.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue'; 
 import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 
 const store = useDiscussionsStore();
 const notesStore = useNotesStore();
@@ -51,13 +52,11 @@ const isStarredVisible = ref(false);
 const isRootDragOver = ref(false);
 
 onMounted(() => {
-    // Fetch notes when component mounts, if not already fetched
     if (notesStore.notes.length === 0) {
         notesStore.fetchNotes();
     }
 });
 
-// Filter shared discussions based on search term
 const filteredSharedDiscussions = computed(() => {
     if (!searchTerm.value) return sharedWithMe.value;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
@@ -66,7 +65,6 @@ const filteredSharedDiscussions = computed(() => {
     );
 });
 
-// The tree structure now comes directly from the store, but we need to filter it
 const filteredDiscussionTree = computed(() => {
     if (!searchTerm.value) return discussionGroupsTree.value;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
@@ -98,7 +96,6 @@ function handleNewGroup() {
     if (activeTab.value === 'chat') {
         uiStore.openModal('discussionGroup', { parentGroup: null });
     } else {
-        // Note Group Modal
         uiStore.openModal('noteGroup', { parentGroup: null });
     }
 }
@@ -120,7 +117,6 @@ async function handleRootDrop(event) {
                 if(discussion && discussion.group_id !== null) await store.moveDiscussionToGroup(id, null);
             }
         } else {
-            // Handle Note Drag Drop to Root (ungroup)
             if (type === 'noteGroup') {
                  const group = notesStore.groups.find(g => g.id === id);
                  if (group && group.parent_id !== null) await notesStore.updateGroup(id, group.name, null);
@@ -136,7 +132,6 @@ function handleNewItem() {
     if (activeTab.value === 'chat') {
         store.createNewDiscussion(store.currentGroupId); 
     } else {
-        // New Note
         notesStore.createNote({ title: 'New Note', content: '', group_id: notesStore.activeGroupId });
     }
 }
@@ -179,7 +174,6 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </button>
             </div>
 
-            <!-- TABS -->
             <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg">
                 <button 
                     @click="activeTab = 'chat'" 
@@ -207,6 +201,10 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <button v-if="user && user.user_ui_level >= 2" @click="goToFeed" class="btn-icon-flat" title="Go to Feed">
                         <IconHome class="h-4 w-4" />
                     </button>
+                    <!-- Link to Notebook Studio -->
+                    <router-link to="/notebooks" class="btn-icon-flat" title="Notebook Studio">
+                        <IconBookOpen class="h-4 w-4" />
+                    </router-link>
                     <router-link to="/news" class="btn-icon-flat" title="News">
                         <IconFileText class="h-4 w-4" />
                     </router-link>
@@ -246,14 +244,12 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
         </div>
         
         <div ref="scrollComponent" class="flex-grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
-            <!-- CHAT TAB CONTENT -->
             <template v-if="activeTab === 'chat'">
                 <div v-if="isLoadingDiscussions" class="space-y-2 animate-pulse">
                     <div v-for="i in 8" :key="'skel-' + i" class="loading-skeleton-flat"></div>
                 </div>
                 
                 <div v-else class="space-y-3">
-                    <!-- Shared With Me -->
                     <div v-if="filteredSharedDiscussions.length > 0">
                         <button @click="isSharedVisible = !isSharedVisible" class="section-header-flat">
                             <div class="flex items-center space-x-2">
@@ -269,7 +265,6 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         </div>
                     </div>
 
-                    <!-- Starred Section -->
                     <div v-if="filteredDiscussionTree.starred && filteredDiscussionTree.starred.length > 0">
                         <button @click="isStarredVisible = !isStarredVisible" class="section-header-flat">
                             <div class="flex items-center space-x-2">
@@ -285,14 +280,12 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         </div>
                     </div>
 
-                    <!-- Groups Section -->
                     <DiscussionGroupItem 
                         v-for="group in filteredDiscussionTree.groups" 
                         :key="group.id" 
                         :group="group" 
                     />
 
-                    <!-- Ungrouped Section -->
                     <div v-if="filteredDiscussionTree.ungrouped && filteredDiscussionTree.ungrouped.length > 0">
                         <button @click="handleSelectUngrouped" class="section-header-flat mt-4" :class="{'bg-blue-50 dark:bg-blue-900/20': store.currentGroupId === null && !store.currentDiscussionId}">
                             <div class="flex items-center space-x-2">
@@ -319,7 +312,6 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </div>
             </template>
 
-            <!-- NOTES TAB CONTENT -->
             <template v-else>
                 <NoteList :search-term="searchTerm" />
             </template>

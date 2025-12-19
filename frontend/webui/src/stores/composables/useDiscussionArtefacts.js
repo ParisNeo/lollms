@@ -1,3 +1,4 @@
+// frontend/webui/src/stores/composables/useDiscussionArtefacts.js
 import apiClient from '../../services/api';
 
 export function useDiscussionArtefacts(composableState, stores, getActions) {
@@ -42,25 +43,31 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-async function addArtefact({ discussionId, file, extractImages }) {
+    async function addArtefact({ discussionId, file, extractImages }) {
+        if (!discussionId) {
+            console.error("No discussionId provided for addArtefact");
+            return;
+        }
         const formData = new FormData();
         formData.append('file', file);
-        const extractImagesValue = extractImages ? '1' : '0';
-        formData.append('extract_images', extractImagesValue);
-        console.log(`[DEBUG] ArtefactZone Drop: Sending extract_images = ${extractImagesValue}`);
+        formData.append('extract_images', extractImages ? 'true' : 'false');
 
         try {
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
             });
-            // Handle the new, richer response object
-            activeDiscussionArtefacts.value.push(response.data.new_artefact_info);
-            if (activeDiscussion.value) { // Always update from the response
-                activeDiscussion.value.discussion_images = response.data.discussion_images;
-                activeDiscussion.value.active_discussion_images = response.data.active_discussion_images;
+            
+            // If the upload was for the currently active discussion/notebook, update the list
+            if (currentDiscussionId.value === discussionId || !currentDiscussionId.value) {
+                // If it's a notebook or the active chat, we refetch to ensure we have the full synced list
+                await fetchArtefacts(discussionId);
             }
+            
+            return response.data;
         } catch (error) {
-            // Error is handled by global interceptor
+            console.error("Failed to add artefact:", error);
+            uiStore.addNotification(`Failed to upload ${file.name}`, 'error');
+            throw error;
         }
     }
 
@@ -102,12 +109,16 @@ async function addArtefact({ discussionId, file, extractImages }) {
         uiStore.addNotification(`Context saved as artefact '${title}'`, 'success');
     }
 
-    async function importArtefactFromUrl(discussionId, url) {
-        const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/import_url`, { url });
+    async function importArtefactFromUrl(discussionId, url, depth = 0, processWithAi = false) {
+        const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/import_url`, { 
+            url, 
+            depth, 
+            process_with_ai: processWithAi 
+        });
         const task = response.data;
         activeAiTasks.value[discussionId] = { taskId: task.id, type: 'import_url' };
         tasksStore.addTask(task);
-        uiStore.addNotification(`Importing from URL started. Check task manager for progress.`, 'info');
+        uiStore.addNotification(`Importing from URL started (Depth: ${depth}).`, 'info');
     }
     
     async function loadAllArtefactsToDataZone(discussionId) {

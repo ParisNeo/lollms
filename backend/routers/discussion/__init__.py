@@ -26,7 +26,7 @@ from backend.discussion_manager import get_user_discussion_manager
 from backend.models import (UserAuthDetails, DiscussionBranchSwitchRequest,
                             DiscussionInfo, DiscussionTitleUpdate, MessageOutput,
                             UserPublic, DiscussionToolsUpdate)
-from backend.models.discussion import DiscussionGroupUpdatePayload
+from backend.models.discussion import DiscussionGroupUpdatePayload, DiscussionCreate
 from backend.db.models.discussion_group import DiscussionGroup as DBDiscussionGroup
 from backend.session import (get_current_active_user,
                              get_user_discussion_assets_path,
@@ -248,12 +248,19 @@ def build_discussions_router():
         return messages_output
 
     @router.post("", response_model=DiscussionInfo, status_code=201)
-    async def create_new_discussion(current_user: UserAuthDetails = Depends(get_current_active_user)) -> DiscussionInfo:
+    async def create_new_discussion(
+        payload: Optional[DiscussionCreate] = None,
+        current_user: UserAuthDetails = Depends(get_current_active_user)
+    ) -> DiscussionInfo:
         username = current_user.username
         discussion_id = str(uuid.uuid4())
         discussion_obj = get_user_discussion(username, discussion_id, create_if_missing=True)
         if not discussion_obj:
             raise HTTPException(status_code=500, detail="Failed to create new discussion.")
+
+        if payload and payload.group_id:
+            discussion_obj.set_metadata_item('group_id', payload.group_id)
+            discussion_obj.commit()
 
         metadata = discussion_obj.metadata or {}
         return DiscussionInfo(
