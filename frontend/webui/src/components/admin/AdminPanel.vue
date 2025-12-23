@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/admin/AdminPanel.vue -->
 <script setup>
 import { computed, defineAsyncComponent } from 'vue';
 
@@ -33,14 +34,14 @@ const McpsManagement = defineAsyncComponent(() => import('./zoos/McpsManagement.
 const PromptsManagement = defineAsyncComponent(() => import('./zoos/PromptsManagement.vue'));
 const PersonalitiesManagement = defineAsyncComponent(() => import('./zoos/PersonalitiesManagement.vue'));
 const TaskManager = defineAsyncComponent(() => import('./TaskManager.vue'));
-// BroadcastMessage is now in Operations, removing if no longer used directly as tab
-// const BroadcastMessage = defineAsyncComponent(() => import('./BroadcastMessage.vue'));
 const BuildersSettings = defineAsyncComponent(() => import('./BuildersSettings.vue'));
 const WelcomeSettings = defineAsyncComponent(() => import('./WelcomeSettings.vue'));
 const RssManagement = defineAsyncComponent(() => import('./RssManagement.vue'));
 const NewsFeedSettings = defineAsyncComponent(() => import('./NewsFeedSettings.vue'));
 const NewsManagement = defineAsyncComponent(() => import('./NewsManagement.vue'));
 const ModerationQueue = defineAsyncComponent(() => import('./ModerationQueue.vue'));
+// NEW Component
+const ServicesManagement = defineAsyncComponent(() => import('./ServicesManagement.vue'));
 
 const tabs = [
     { id: 'dashboard', component: Dashboard },
@@ -72,6 +73,7 @@ const tabs = [
     { id: 'news_feed_settings', component: NewsFeedSettings },
     { id: 'news_management', component: NewsManagement },
     { id: 'moderation', component: ModerationQueue },
+    { id: 'services_mgmt', component: ServicesManagement }, // REGISTERED
 ];
 
 const activeComponent = computed(() => {

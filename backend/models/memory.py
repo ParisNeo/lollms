@@ -1,27 +1,25 @@
-import datetime
-from typing import Optional, List
-from pydantic import BaseModel, constr
+from pydantic import BaseModel
+from typing import List, Optional
+from datetime import datetime
 
 class MemoryBase(BaseModel):
-    title: constr(min_length=1)
+    title: str
     content: str
 
 class MemoryCreate(MemoryBase):
     pass
 
 class MemoryUpdate(BaseModel):
-    title: Optional[constr(min_length=1)] = None
+    title: Optional[str] = None
     content: Optional[str] = None
 
 class MemoryPublic(MemoryBase):
     id: str
-    created_at: datetime.datetime
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
-class MemoryExport(MemoryBase):
-    created_at: str
-
 class MemoriesImport(BaseModel):
-    memories: List[MemoryExport]
+    memories: List[MemoryCreate]

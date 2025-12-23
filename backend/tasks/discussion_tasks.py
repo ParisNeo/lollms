@@ -1,15 +1,18 @@
 # backend/tasks/discussion_tasks.py
 import shutil
+import json
+import re
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from ascii_colors import trace_exception
+from ascii_colors import trace_exception, ASCIIColors
 
 from backend.db.models.user import User as DBUser, UserMessageGrade, UserStarredDiscussion
 from backend.db.models.memory import UserMemory
 from backend.discussion import get_user_discussion, get_user_discussion_manager
 from backend.session import get_user_discussion_assets_path, get_user_lollms_client
 from backend.task_manager import Task
+from backend.ws_manager import manager
 
 def _process_data_zone_task(task: Task, username: str, discussion_id: str, contextual_prompt: Optional[str]):
     task.log("Starting data zone processing task...")
@@ -58,12 +61,6 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
 
     discussion_images_b64 = [img_info['data'] for img_info in all_images_info if img_info.get('active', True)]
     lc = get_user_lollms_client(username)
-    task.log(f"Processing:")
-    task.log(f"content: {discussion.discussion_data_zone[:1000] if discussion.discussion_data_zone else 'No text'}")
-    task.log(f"prompt: {prompt_to_use[:1000] if prompt_to_use else 'generic summary'}")
-    task.log(f"Nb images: {len(discussion_images_b64) if discussion_images_b64 else 0}")
-    task.log(f"Context size: {lc.llm.default_ctx_size}")
-    
     
     summary = lc.long_context_processing(
         text_to_process = discussion.discussion_data_zone,
@@ -73,8 +70,8 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
         context_fill_percentage = 1,
         overlap_tokens= 0,
         expected_generation_tokens = int(lc.llm.default_ctx_size/6),
-        max_scratchpad_tokens = int(lc.llm.default_ctx_size/4),  # NEW: Hard limit for scratchpad
-        scratchpad_compression_threshold = int(60*lc.llm.default_ctx_size/64),  # NEW: When to compress
+        max_scratchpad_tokens = int(lc.llm.default_ctx_size/4),
+        scratchpad_compression_threshold = int(60*lc.llm.default_ctx_size/64),
         streaming_callback=summary_callback
     )
     
@@ -94,7 +91,6 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
     all_images_info = discussion.get_discussion_images()
     task.set_progress(100)
     task.set_description("Processing complete and saved.")
-    task.log("Processing complete, saved, and artefacts unloaded.")
     
     return {
         "discussion_id": discussion_id, 
@@ -106,40 +102,121 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
 
 def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
     task.log("Starting long-term memory memorization task...")
-    with task.db_session_factory() as db:
-        db_user = db.query(DBUser).filter(DBUser.username == username).first()
-        if not db_user:
-            raise Exception("User not found.")
-        
-        discussion = get_user_discussion(username, discussion_id)
-        if not discussion:
-            raise ValueError("Discussion not found.")
-        
-        task.set_progress(20)
-        memory_dict = discussion.memorize()
-        discussion.commit()
-        task.set_progress(80)
+    try:
+        with task.db_session_factory() as db:
+            db_user = db.query(DBUser).filter(DBUser.username == username).first()
+            if not db_user:
+                raise Exception("User not found.")
+            
+            discussion = get_user_discussion(username, discussion_id)
+            if not discussion:
+                raise ValueError("Discussion not found.")
+            
+            # Explicitly load messages
+            task.set_progress(10)
+            task.log("Loading discussion history...")
+            if hasattr(discussion, 'load_messages'):
+                discussion.load_messages()
+            messages = discussion.messages
+            if not messages:
+                task.log("No messages in discussion to memorize.", "WARNING")
+                return {"discussion_id": discussion_id, "zone": "memory"}
 
-        if memory_dict and memory_dict.get("title") and memory_dict.get("content"):
-            new_memory = UserMemory(
-                title=memory_dict["title"],
-                content=memory_dict["content"],
-                owner_user_id=db_user.id
+            # Format conversation for LLM
+            conversation_text = ""
+            for msg in messages:
+                sender = msg.sender or "Unknown"
+                content = msg.content or ""
+                conversation_text += f"{sender}: {content}\n\n"
+
+            task.set_progress(30)
+            task.log("Analyzing conversation for important facts...")
+            
+            lc = get_user_lollms_client(username)
+            
+            system_prompt = """You are a Memory Assistant. Your goal is to extract important, long-term information about the user from the provided conversation.
+Identify key facts such as names, preferences, relationships, specific work details, or important events.
+Ignore casual conversation, greetings, or temporary context.
+
+Output ONLY a JSON object with a "memories" key containing a list of objects, each having a "title" and "content".
+Example:
+{
+  "memories": [
+    {"title": "User's Profession", "content": "User is a senior software engineer working on Python projects."},
+    {"title": "Project Deadline", "content": "The nebula project deadline is set for December 25th."}
+  ]
+}
+If no important information is found, return {"memories": []}.
+DO NOT output markdown code blocks. Output raw JSON only.
+"""
+            # Truncate conversation if too long (simple heuristic)
+            max_chars = 12000 
+            if len(conversation_text) > max_chars:
+                conversation_text = conversation_text[-max_chars:]
+
+            response_text = lc.generate_text(
+                conversation_text, 
+                system_prompt=system_prompt,
+                max_new_tokens=1024,
+                temperature=0.1 # Low temp for factual extraction
             )
-            db.add(new_memory)
+            
+            task.set_progress(70)
+            task.log("Parsing extracted memories...")
+            
+            # Clean response (remove markdown code blocks if any)
+            response_text = response_text.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            
             try:
-                db.commit()
-                task.log(f"New memory '{memory_dict['title']}' saved to database.")
-            except Exception as e:
-                trace_exception(e)
-                db.rollback()
-                raise Exception(f"Database error while saving memory: {e}")
-        else:
-            task.log("No new memory was extracted from the discussion.", "INFO")
+                data = json.loads(response_text)
+                extracted_memories = data.get("memories", [])
+            except json.JSONDecodeError:
+                task.log(f"Failed to parse JSON from LLM response. Raw: {response_text[:100]}...", "ERROR")
+                extracted_memories = []
+
+            count = 0
+            if extracted_memories:
+                for mem in extracted_memories:
+                    title = mem.get("title")
+                    content = mem.get("content")
+                    if title and content:
+                        new_memory = UserMemory(
+                            title=title,
+                            content=content,
+                            owner_user_id=db_user.id
+                        )
+                        db.add(new_memory)
+                        count += 1
+                        task.log(f"Extracted: {title}")
+                
+                if count > 0:
+                    db.commit()
+                    task.log(f"Successfully saved {count} new memories.")
+                    
+                    # Push notification manually to ensure immediate UI update via WS
+                    manager.send_personal_message_sync({
+                        "type": "data_zone_processed",
+                        "data": {"discussion_id": discussion_id, "zone": "memory"}
+                    }, db_user.id)
+                else:
+                    task.log("No valid memory objects found in response.", "INFO")
+            else:
+                task.log("No important memories found in this conversation.", "INFO")
     
-    task.set_progress(100)
-    task.log("Memorization task finished.")
-    return {"discussion_id": discussion_id, "zone": "memory"}
+        task.set_progress(100)
+        task.log("Memorization task finished.")
+        return {"discussion_id": discussion_id, "zone": "memory"}
+
+    except Exception as e:
+        task.log(f"Memorization failed: {str(e)}", "ERROR")
+        trace_exception(e)
+        raise e
 
 
 def _prune_empty_discussions_task(task: Task, username: str):

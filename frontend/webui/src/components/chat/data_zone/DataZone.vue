@@ -1,6 +1,8 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useUiStore } from '../../../stores/ui';
+import { useDiscussionsStore } from '../../../stores/discussions';
 import DiscussionZone from './DiscussionZone.vue';
 import PersonalityZone from './PersonalityZone.vue';
 import MemoryZone from './MemoryZone.vue';
@@ -13,13 +15,16 @@ import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 
 const uiStore = useUiStore();
+const discussionsStore = useDiscussionsStore();
+const { liveDataZoneTokens } = storeToRefs(discussionsStore);
+
 const dataZoneWidth = ref(450);
 const isResizing = ref(false);
 
 const isDataZoneExpanded = computed(() => uiStore.isDataZoneExpanded);
 
 const collapsed = ref({
-    discussion: false,
+    discussion: true, // Collapsed by default
     personality: true,
     memory: true
 });
@@ -88,6 +93,7 @@ onMounted(() => {
                                 <IconDataZone class="w-4 h-4" />
                             </div>
                             <span class="text-sm font-bold text-gray-700 dark:text-gray-200">Discussion Zone</span>
+                             <span class="text-xs text-gray-400 font-mono" v-if="liveDataZoneTokens.discussion > 0">({{ liveDataZoneTokens.discussion }} tok)</span>
                         </div>
                         <IconChevronDown class="w-4 h-4 text-gray-400 transition-transform duration-300" :class="{'rotate-180': !collapsed.discussion}" />
                     </button>
@@ -105,6 +111,7 @@ onMounted(() => {
                                 <IconSparkles class="w-4 h-4" />
                             </div>
                             <span class="text-sm font-bold text-gray-700 dark:text-gray-200">AI Personality</span>
+                            <span class="text-xs text-gray-400 font-mono" v-if="liveDataZoneTokens.personality > 0">({{ liveDataZoneTokens.personality }} tok)</span>
                         </div>
                         <IconChevronDown class="w-4 h-4 text-gray-400 transition-transform duration-300" :class="{'rotate-180': !collapsed.personality}" />
                     </button>
@@ -122,6 +129,7 @@ onMounted(() => {
                                 <IconThinking class="w-4 h-4" />
                             </div>
                             <span class="text-sm font-bold text-gray-700 dark:text-gray-200">Long-Term Memory</span>
+                            <span class="text-xs text-gray-400 font-mono" v-if="liveDataZoneTokens.memory > 0">({{ liveDataZoneTokens.memory }} tok)</span>
                         </div>
                         <IconChevronDown class="w-4 h-4 text-gray-400 transition-transform duration-300" :class="{'rotate-180': !collapsed.memory}" />
                     </button>

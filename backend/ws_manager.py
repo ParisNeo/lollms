@@ -200,6 +200,39 @@ class ConnectionManager:
             if db: db.close()
     
     def broadcast_sync(self, message_data: dict):
+        """
+        Sends a broadcast message.
+        Optimized to send immediately to local connections via the event loop,
+        while also persisting to DB for other workers (and history/robustness).
+        Tags the message with PID to prevent local double-sending.
+        """
+        if not isinstance(message_data, dict):
+            return
+        
+        # Tag with PID
+        message_data["_pid"] = os.getpid()
+
+        # 1. Immediate Local Delivery (Fast Path)
+        if self._loop and self._loop.is_running():
+            async def local_dispatch():
+                try:
+                    msg_type = message_data.get("type")
+                    if msg_type == "personal":
+                        uid = message_data.get("user_id")
+                        if uid is not None:
+                            await self.send_personal_message(message_data.get("data"), uid)
+                    elif msg_type == "admins":
+                        await self.broadcast_to_admins(message_data.get("data"))
+                    else:
+                        # Standard broadcast
+                        await self.broadcast(message_data)
+                except Exception as e:
+                    print(f"Error in local broadcast dispatch: {e}")
+
+            # Schedule on the main event loop
+            asyncio.run_coroutine_threadsafe(local_dispatch(), self._loop)
+
+        # 2. Persist to DB (Slow Path / Cross-Worker)
         self._put_on_db_queue(message_data)
 
     def send_personal_message_sync(self, message_data: dict, user_id: int):
@@ -216,6 +249,19 @@ manager = ConnectionManager()
 async def listen_for_broadcasts():
     print(f"INFO: Worker {os.getpid()} starting DB broadcast listener.")
     last_processed_id = 0
+    
+    # Initialize last_processed_id to current max to avoid re-processing old messages on restart
+    # Use a short-lived session for initialization
+    init_db = db_session_module.SessionLocal()
+    try:
+        last_message = init_db.query(BroadcastMessage).order_by(BroadcastMessage.id.desc()).first()
+        if last_message:
+            last_processed_id = last_message.id
+    except Exception as e:
+        print(f"WARNING: Could not initialize broadcast listener ID: {e}")
+    finally:
+        init_db.close()
+        
     while True:
         try:
             # Poll frequently for near-realtime updates (0.1s)
@@ -223,16 +269,20 @@ async def listen_for_broadcasts():
             
             db: Session = db_session_module.SessionLocal()
             try:
-                if last_processed_id == 0:
-                    last_message = db.query(BroadcastMessage).order_by(BroadcastMessage.id.desc()).first()
-                    if last_message: last_processed_id = last_message.id
-
+                # If we still haven't initialized (e.g. DB was empty before), try again inside loop logic
+                # But querying simply > last_processed_id (which is 0) works fine if DB was empty.
+                
                 messages = db.query(BroadcastMessage).filter(BroadcastMessage.id > last_processed_id).order_by(BroadcastMessage.id.asc()).limit(100).all()
 
                 for msg in messages:
                     last_processed_id = msg.id
                     payload = msg.payload
                     
+                    # --- LOOPBACK PROTECTION ---
+                    # If this message originated from THIS worker, it was already sent via broadcast_sync locally.
+                    if payload.get("_pid") == os.getpid():
+                        continue
+
                     # --- INTERNAL EVENT HANDLING (NOT FORWARDED TO CLIENTS) ---
                     if payload.get("type") == "internal_event":
                         if payload.get("event_type") == "user_cache_invalidate":
@@ -253,16 +303,20 @@ async def listen_for_broadcasts():
                         # Proceed to broadcast this to clients so they can update their UI state
 
                     # --- FORWARDING TO CLIENTS ---
-                    if payload.get("type") == "personal":
-                        user_id = payload.get("user_id")
-                        if user_id is not None:
-                            await manager.send_personal_message(payload.get("data"), user_id)
-                    elif payload.get("type") == "admins":
-                        await manager.broadcast_to_admins(payload.get("data"))
-                    else: # Default to broadcast to everyone
-                        await manager.broadcast(payload)
+                    try:
+                        if payload.get("type") == "personal":
+                            user_id = payload.get("user_id")
+                            if user_id is not None:
+                                await manager.send_personal_message(payload.get("data"), user_id)
+                        elif payload.get("type") == "admins":
+                            await manager.broadcast_to_admins(payload.get("data"))
+                        else: # Default to broadcast to everyone
+                            await manager.broadcast(payload)
+                    except Exception as client_send_error:
+                        print(f"ERROR: Failed to forward broadcast to clients: {client_send_error}")
+
                 
-                # Cleanup old messages periodically
+                # Cleanup old messages periodically (every ~200 iterations approx 20s, with probability check)
                 if random.random() < 0.05:
                     one_minute_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=1)
                     db.query(BroadcastMessage).filter(BroadcastMessage.created_at < one_minute_ago).delete(synchronize_session=False)

@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
 import traceback
 import threading
 import asyncio
@@ -31,6 +31,7 @@ from lollms_client import (LollmsClient, LollmsDiscussion, LollmsMessage,
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import func
 from ascii_colors import ASCIIColors, trace_exception
 
 # Local Application Imports
@@ -42,6 +43,7 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.discussion import SharedDiscussionLink as DBSharedDiscussionLink
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
+from backend.db.models.memory import UserMemory
 from backend.discussion import get_user_discussion, get_user_discussion_manager
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
@@ -59,14 +61,167 @@ from backend.session import (get_current_active_user,
                              get_safe_store_instance,
                              get_user_discussion_assets_path,
                              get_user_lollms_client,
-                             get_user_temp_uploads_path, user_sessions)
+                             get_user_temp_uploads_path, user_sessions,
+                             build_lollms_client_from_params)
 from backend.task_manager import task_manager, Task
 from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from lollms_client import MSG_TYPE, LollmsPersonality
-from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 
 from backend.db import get_db
+
+def process_memory_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool]:
+    """
+    Parses memory tags from the AI output, executes the corresponding DB operations,
+    and returns the cleaned text (with tags removed) and a boolean indicating if any memory action was taken.
+    Uses numerical indices (1-based) to identify memories sorted by creation date.
+    """
+    if not text:
+        return text, False
+
+    actions_performed = False
+
+    # Regex for tags
+    # <new_memory>content</new_memory>
+    new_mem_pattern = re.compile(r'<new_memory>(.*?)</new_memory>', re.DOTALL | re.IGNORECASE)
+    # <update_memory:INDEX>content</update_memory:INDEX>
+    update_mem_pattern = re.compile(r'<update_memory:(\d+)>(.*?)</update_memory:\1>', re.DOTALL | re.IGNORECASE)
+    # <delete_memory:INDEX></delete_memory:INDEX>
+    delete_mem_pattern = re.compile(r'<delete_memory:(\d+)>(.*?)</delete_memory:\1>', re.DOTALL | re.IGNORECASE)
+    
+    # Process New Memories
+    for match in new_mem_pattern.finditer(text):
+        content = match.group(1).strip()
+        if content:
+            title = content[:30] + "..." if len(content) > 30 else content
+            try:
+                new_memory = UserMemory(owner_user_id=user_id, title=title, content=content)
+                db.add(new_memory)
+                db.commit()
+                actions_performed = True
+                print(f"INFO: New memory added for user {user_id}: {title}")
+            except Exception as e:
+                print(f"ERROR: Failed to add memory: {e}")
+                db.rollback()
+
+    # Pre-fetch memories to resolve indices for Update/Delete
+    # Must match the sort order used in 'chat_in_existing_discussion' (created_at ASC)
+    current_memories = db.query(UserMemory).filter(UserMemory.owner_user_id == user_id).order_by(UserMemory.created_at.asc()).all()
+
+    # Process Updates
+    for match in update_mem_pattern.finditer(text):
+        try:
+            index = int(match.group(1)) - 1 # Convert 1-based index to 0-based
+            new_content = match.group(2).strip()
+            
+            if 0 <= index < len(current_memories) and new_content:
+                memory_to_update = current_memories[index]
+                # Re-query to attach to session if needed (though usually attached)
+                memory = db.query(UserMemory).filter(UserMemory.id == memory_to_update.id).first()
+                if memory:
+                    memory.content = new_content
+                    memory.updated_at = func.now()
+                    db.commit()
+                    actions_performed = True
+                    print(f"INFO: Memory #{index+1} (ID: {memory.id}) updated for user {user_id}")
+            else:
+                print(f"WARNING: Invalid memory index {index+1} for update.")
+        except Exception as e:
+            print(f"ERROR: Failed to update memory: {e}")
+            db.rollback()
+
+    # Process Deletes
+    # Note: If multiple deletes occur, indices might shift if we processed sequentially on the list, 
+    # but here we use the snapshot 'current_memories'. The LLM sees the snapshot, so index 1 and 2 
+    # refer to the state at generation time. This is correct.
+    for match in delete_mem_pattern.finditer(text):
+        try:
+            index = int(match.group(1)) - 1
+            if 0 <= index < len(current_memories):
+                memory_to_delete = current_memories[index]
+                # Re-query to delete
+                db.query(UserMemory).filter(UserMemory.id == memory_to_delete.id).delete()
+                db.commit()
+                actions_performed = True
+                print(f"INFO: Memory #{index+1} (ID: {memory_to_delete.id}) deleted for user {user_id}")
+            else:
+                print(f"WARNING: Invalid memory index {index+1} for deletion.")
+        except Exception as e:
+            print(f"ERROR: Failed to delete memory: {e}")
+            db.rollback()
+    
+    # Strip tags from output
+    cleaned_text = text
+    cleaned_text = new_mem_pattern.sub('', cleaned_text)
+    cleaned_text = update_mem_pattern.sub('', cleaned_text)
+    cleaned_text = delete_mem_pattern.sub('', cleaned_text)
+    
+    return cleaned_text, actions_performed
+
+def process_image_generation_tags(text: str, user: DBUser, db: Session) -> Tuple[str, List[str]]:
+    """
+    Parses <generate_image> tags, generates images via TTI binding,
+    and returns text (with tags replaced/removed) and a list of base64 images.
+    """
+    # Pattern: <generate_image n="1">prompt</generate_image> or <generate_image>prompt</generate_image>
+    pattern = re.compile(r'<generate_image(?: n="(\d+)")?>(.*?)</generate_image>', re.DOTALL | re.IGNORECASE)
+    
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return text, []
+
+    images_b64 = []
+    
+    # Initialize TTI Client using session helper
+    try:
+        lc = build_lollms_client_from_params(
+            username=user.username,
+            load_llm=False,
+            load_tti=True
+        )
+        if not lc.tti:
+            print("WARNING: TTI binding not available for image generation tag.")
+            return text, []
+    except Exception as e:
+        print(f"TTI Client Init Error: {e}")
+        return text, []
+
+    new_text = text
+    # Process in reverse to maintain indices for replacement
+    for match in reversed(matches):
+        n_variants = 1
+        if match.group(1):
+            try:
+                n_variants = int(match.group(1))
+            except: pass
+        
+        # Cap variants for safety
+        n_variants = max(1, min(n_variants, 4))
+        
+        prompt = match.group(2).strip()
+        
+        generated_count = 0
+        for _ in range(n_variants):
+            try:
+                # Use default size/params for chat generation
+                img_bytes = lc.tti.generate_image(prompt=prompt, width=1024, height=1024) 
+                if img_bytes:
+                    b64 = base64.b64encode(img_bytes).decode('utf-8')
+                    images_b64.append(b64)
+                    generated_count += 1
+            except Exception as e:
+                print(f"Image generation failed for prompt '{prompt}': {e}")
+
+        # Replace tag with a marker indicating generation happened
+        if generated_count > 0:
+            replacement = f"\n> *Generated {generated_count} image(s) for: {prompt}*\n"
+        else:
+            replacement = f"\n> *Failed to generate image for: {prompt}*\n"
+            
+        start, end = match.span()
+        new_text = new_text[:start] + replacement + new_text[end:]
+
+    return new_text, images_b64
 
 
 def build_llm_generation_router(router: APIRouter):
@@ -121,8 +276,35 @@ def build_llm_generation_router(router: APIRouter):
             except Exception as e:
                 trace_exception(e)
                 return [{"error": f"Error during RAG query on datastore {ss.name}: {e}"}]
+        
+        # --- Memory Logic ---
+        memory_content = ""
+        memory_instructions = ""
+        if owner_db_user.memory_enabled:
+            # Sort memories by creation date to provide stable indices
+            memories = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.created_at.asc()).all()
+            
+            if memories:
+                # Build context with Index #
+                memory_text = "\n".join([f"[Memory #{idx+1}] {m.title}: {m.content}" for idx, m in enumerate(memories)])
+                memory_content = f"\n## Long-Term Memory Bank\nYou have access to the following memories:\n{memory_text}\n"
+            else:
+                memory_content = "\n## Long-Term Memory Bank\nThe memory bank is currently empty.\n"
+            
+            # Instructions go to System Prompt via preamble
+            memory_instructions += "\n## Memory Management\n"
+            memory_instructions += "You have access to a long-term memory bank (provided in context).\n"
+            memory_instructions += "You can manage memories using these tags in your response. **Refer to memories by their Index number (#1, #2...)**.\n"
+            memory_instructions += "- Add: `<new_memory>concise info</new_memory>`\n"
+            memory_instructions += "- Update: `<update_memory:INDEX>new content</update_memory:INDEX>` (e.g. `<update_memory:1>...`)\n"
+            memory_instructions += "- Delete: `<delete_memory:INDEX></delete_memory:INDEX>` (e.g. `<delete_memory:1></delete_memory:1>`)\n"
+            
+            if owner_db_user.auto_memory_enabled:
+                memory_instructions += "IMPORTANT: You should automatically save important user details and preferences to memory using `<new_memory>` tags when appropriate, without being explicitly asked.\n"
 
-        discussion_obj.memory = "\n".join(["---"+m.title+"---\n"+m.content+"\n------" for m in owner_db_user.memories]) if owner_db_user and owner_db_user.memories else ""
+        # Assign content to discussion object (which goes into context/history)
+        discussion_obj.memory = memory_content
+
         rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
         
         use_rag = {}
@@ -183,11 +365,9 @@ def build_llm_generation_router(router: APIRouter):
         if owner_db_user.image_generation_enabled:
             preamble_parts.append(
                 "## Image Generation Instructions\n"
-                "To generate an image, write a code block with the language `generate_image` and describe the image you want to create inside it.\n"
-                "Example:\n"
-                "```generate_image\n"
-                "A majestic lion in the savannah at sunset, photorealistic style.\n"
-                "```"
+                "To generate an image, use the tag `<generate_image>prompt</generate_image>`.\n"
+                "To generate multiple variants, use `<generate_image n=\"number\">prompt</generate_image>` (max 4).\n"
+                "Example: `<generate_image n=\"2\">A majestic lion in the savannah at sunset, photorealistic style</generate_image>`"
             )
 
         # NEW: Note Generation Instructions
@@ -203,6 +383,10 @@ def build_llm_generation_router(router: APIRouter):
                 "If you need to show code, use code environments with mandatory code language specifier.\n"
                 "```"
             )
+
+        # Add memory instructions to preamble so AI treats them as rules
+        if memory_instructions:
+            preamble_parts.append(memory_instructions)
 
         if preamble_parts:
             dynamic_preamble = "## Dynamic Information\n" + "\n".join(preamble_parts) + "\n\n"
@@ -276,6 +460,10 @@ def build_llm_generation_router(router: APIRouter):
                     
                     if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and first_chunk_time is None:
                         first_chunk_time = time.time()
+                        if start_time:
+                            ttft = (first_chunk_time - start_time) * 1000
+                            payload = {"type": "ttft", "content": round(ttft, 2)}
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
 
                     if not params: params = {}
                     
@@ -333,7 +521,7 @@ def build_llm_generation_router(router: APIRouter):
                         result = discussion_obj.chat(
                             user_message=prompt, 
                             personality=active_personality, 
-                            use_mcps=combined_mcps,
+                            use_mcps=combined_mcps, 
                             use_data_store=use_rag, 
                             images=images_for_message,
                             streaming_callback=llm_callback, 
@@ -353,6 +541,55 @@ def build_llm_generation_router(router: APIRouter):
                     
                     ai_message_obj = result.get('ai_message')
                     if ai_message_obj:
+                        # Process memory tags
+                        if owner_db_user.memory_enabled:
+                            db_mem = next(get_db())
+                            try:
+                                processed_content, memory_action = process_memory_tags(ai_message_obj.content, owner_db_user.id, db_mem)
+                                if memory_action:
+                                    manager.send_personal_message_sync({
+                                        "type": "notification",
+                                        "data": {"message": "Memorizing...", "type": "info", "duration": 3000}
+                                    }, current_user.id)
+                                    
+                                    # Notify frontend to refresh data zones (specifically memory)
+                                    manager.send_personal_message_sync({
+                                        "type": "data_zone_processed",
+                                        "data": {"discussion_id": discussion_id, "zone": "memory"}
+                                    }, current_user.id)
+
+                                if processed_content != ai_message_obj.content:
+                                    ai_message_obj.content = processed_content
+                            except Exception as e:
+                                print(f"Error processing memory tags: {e}")
+                            finally:
+                                db_mem.close()
+
+                        # Process image generation tags
+                        if owner_db_user.image_generation_enabled:
+                            db_img = next(get_db())
+                            try:
+                                processed_text, generated_images = process_image_generation_tags(ai_message_obj.content, owner_db_user, db_img)
+                                if generated_images:
+                                    # Add images to message object (persisted by lollms-client usually on commit)
+                                    # Note: lollms_client Message object has .images list of b64 strings
+                                    if ai_message_obj.images is None:
+                                        ai_message_obj.images = []
+                                    ai_message_obj.images.extend(generated_images)
+                                    
+                                    # Update content if changed (tags replaced)
+                                    if processed_text != ai_message_obj.content:
+                                        ai_message_obj.content = processed_text
+                                        
+                                    manager.send_personal_message_sync({
+                                        "type": "notification",
+                                        "data": {"message": f"Generated {len(generated_images)} image(s).", "type": "success", "duration": 3000}
+                                    }, current_user.id)
+                            except Exception as e:
+                                print(f"Error processing image tags: {e}")
+                            finally:
+                                db_img.close()
+
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
                         total_tokens = ai_message_obj.tokens or 0
                         
@@ -383,7 +620,6 @@ def build_llm_generation_router(router: APIRouter):
                         if sources is None:
                             sources = msg_metadata.get('sources')
                         
-                        # FIX: Make sure the metadata dictionary being returned also contains the sources
                         if sources:
                             msg_metadata['sources'] = sources
 

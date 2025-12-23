@@ -79,6 +79,9 @@ from backend.routers.notes import notes_router
 from backend.routers.notebooks import router as notebooks_router # IMPORTED
 from backend.routers.public import public_router
 
+from backend.routers.services.lollms_v1 import lollms_v1_router
+from backend.routers.admin.services_management import router as admin_services_router
+
 from backend.routers.admin.email_marketing import router as email_marketing_router 
 from backend.db.models.email_marketing import EmailProposal, EmailTopic 
 from backend.tasks.email_tasks import _generate_email_proposal_task 
@@ -535,7 +538,10 @@ app.include_router(image_studio_router)
 app.include_router(notes_router)
 app.include_router(notebooks_router) # REGISTERED
 app.include_router(public_router)
+app.include_router(lollms_v1_router) # REGISTERED
 
+# Update admin_router inclusion if needed or include directly
+admin_router.include_router(admin_services_router) # REGISTERED via admin/__init__.py update usually
 
 add_ui_routes(app)
 

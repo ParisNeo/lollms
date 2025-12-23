@@ -53,6 +53,7 @@ def _bootstrap_global_settings(connection):
     print("INFO: Checking and bootstrapping global settings in the database.")
     
     all_possible_settings = {
+        # ... (keep existing settings) ...
         "host": { "value": SERVER_CONFIG.get("host", "0.0.0.0"), "type": "string", "description": "Server host address. Requires a restart to take effect.", "category": "Server" },
         "port": { "value": SERVER_CONFIG.get("port", 9642), "type": "integer", "description": "Server port. Requires a restart to take effect.", "category": "Server" },
         "https_enabled": { "value": SERVER_CONFIG.get("https_enabled", False), "type": "boolean", "description": "Enable HTTPS for the server. Requires a restart to take effect.", "category": "Server" },
@@ -103,6 +104,16 @@ def _bootstrap_global_settings(connection):
         "openai_api_require_key": { "value": True, "type": "boolean", "description": "Require an API key for the OpenAI-compatible v1 API endpoint. If disabled, requests without a key will be handled by the primary admin account.", "category": "Services" },
         "ollama_service_enabled": { "value": False, "type": "boolean", "description": "Enable the Ollama service endpoint for users (OpenAI compatible).", "category": "Services" },
         "ollama_require_key": { "value": True, "type": "boolean", "description": "Require an API key for the Ollama service endpoint. If disabled, requests without a key will be handled by the primary admin account.", "category": "Services" },
+        
+        # --- NEW SERVICES SETTINGS ---
+        "lollms_services_enabled": { "value": True, "type": "boolean", "description": "Enable the exclusive LoLLMs Services endpoint (tokenizer, long-context, rag, advanced image edit).", "category": "Services" },
+        "lollms_services_require_key": { "value": True, "type": "boolean", "description": "Require an API key for exclusive LoLLMs Services.", "category": "Services" },
+        
+        "rate_limit_enabled": { "value": False, "type": "boolean", "description": "Enable optional rate limiting for all service endpoints.", "category": "Services" },
+        "rate_limit_max_requests": { "value": 60, "type": "integer", "description": "Maximum number of requests allowed per window.", "category": "Services" },
+        "rate_limit_window_seconds": { "value": 60, "type": "integer", "description": "The window size in seconds for rate limiting.", "category": "Services" },
+        # -----------------------------
+
         "model_display_mode": { "value": "mixed", "type": "string", "description": "How models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models" },
         "tti_model_display_mode": { "value": "mixed", "type": "string", "description": "How TTI models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models" },
         "tts_model_display_mode": { "value": "mixed", "type": "string", "description": "How TTS models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models" },
@@ -225,6 +236,7 @@ def _bootstrap_lollms_user(connection):
                     include_memory_date_in_context, message_font_size,
                     image_generation_enabled, image_annotation_enabled,
                     force_ai_response_language, share_personal_info_with_llm, note_generation_enabled,
+                    memory_enabled, auto_memory_enabled,
                     default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status
                 )
                 VALUES (
@@ -235,6 +247,7 @@ def _bootstrap_lollms_user(connection):
                     :include_memory_date_in_context, :message_font_size,
                     :image_generation_enabled, :image_annotation_enabled,
                     :force_ai_response_language, :share_personal_info_with_llm, :note_generation_enabled,
+                    :memory_enabled, :auto_memory_enabled,
                     :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status
                 )
             """),
@@ -262,6 +275,8 @@ def _bootstrap_lollms_user(connection):
                 "force_ai_response_language": False,
                 "share_personal_info_with_llm": False,
                 "note_generation_enabled": False,
+                "memory_enabled": False,
+                "auto_memory_enabled": False,
                 "default_rag_chunk_size": 1024,
                 "default_rag_chunk_overlap": 256,
                 "default_rag_metadata_mode": "none",
@@ -504,6 +519,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'note_generation_enabled' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN note_generation_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
+        if 'memory_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN memory_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
+        if 'auto_memory_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN auto_memory_enabled BOOLEAN DEFAULT 0 NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
 
@@ -1021,7 +1048,19 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         except Exception as e:
             connection.rollback()
             print(f"ERROR: Failed to create notebooks table: {e}")
-
+    else:
+        # Check for 'tabs' column in notebooks
+        notebook_columns = [col['name'] for col in inspector.get_columns('notebooks')]
+        if 'tabs' not in notebook_columns:
+            try:
+                connection.execute(text("ALTER TABLE notebooks ADD COLUMN tabs JSON"))
+                # Initialize tabs with existing content if any
+                connection.execute(text("UPDATE notebooks SET tabs = '[]' WHERE tabs IS NULL"))
+                connection.commit()
+                print("INFO: Added 'tabs' column to 'notebooks' table.")
+            except Exception as e:
+                print(f"WARNING: Failed to add 'tabs' column to notebooks table: {e}")
+                connection.rollback()
     connection.commit()
 
 
@@ -1055,3 +1094,4 @@ def _migrate_user_data_folders(connection):
                     try: shutil.move(str(old_path), str(new_path))
                     except Exception: pass
     except Exception: pass
+

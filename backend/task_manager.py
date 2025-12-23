@@ -23,30 +23,34 @@ def _serialize_task(db_task: DBTask) -> Optional[dict]:
     if not db_task:
         return None
     
-    task_info = {
-        "id": db_task.id,
-        "name": db_task.name,
-        "description": db_task.description,
-        "status": db_task.status,
-        "progress": db_task.progress,
-        "logs": db_task.logs or [],
-        "result": db_task.result,
-        "error": db_task.error,
-        "created_at": db_task.created_at,
-        "started_at": db_task.started_at,
-        "completed_at": db_task.completed_at,
-        "updated_at": db_task.updated_at,
-        "file_name": db_task.file_name,
-        "total_files": db_task.total_files,
-        "owner_username": db_task.owner.username if db_task.owner else "System"
-    }
-    
-    # Serialize datetime objects to ISO strings
-    for key in ['created_at', 'started_at', 'completed_at', 'updated_at']:
-        if task_info[key] and isinstance(task_info[key], datetime.datetime):
-            task_info[key] = task_info[key].isoformat()
+    try:
+        task_info = {
+            "id": db_task.id,
+            "name": db_task.name,
+            "description": db_task.description,
+            "status": db_task.status,
+            "progress": db_task.progress,
+            "logs": db_task.logs or [],
+            "result": db_task.result,
+            "error": db_task.error,
+            "created_at": db_task.created_at,
+            "started_at": db_task.started_at,
+            "completed_at": db_task.completed_at,
+            "updated_at": db_task.updated_at,
+            "file_name": db_task.file_name,
+            "total_files": db_task.total_files,
+            "owner_username": db_task.owner.username if db_task.owner else "System"
+        }
+        
+        # Serialize datetime objects to ISO strings
+        for key in ['created_at', 'started_at', 'completed_at', 'updated_at']:
+            if task_info[key] and isinstance(task_info[key], datetime.datetime):
+                task_info[key] = task_info[key].isoformat()
 
-    return task_info
+        return task_info
+    except Exception as e:
+        print(f"Error serializing task {db_task.id}: {e}")
+        return None
 
 
 class Task:
@@ -71,24 +75,31 @@ class Task:
         """Sends a WebSocket update for the task."""
         if not db_task:
             return
-            
-        task_data = _serialize_task(db_task)
-        payload = {"type": "task_update", "data": task_data}
         
-        # Broadcast to admins and the specific user (if any)
-        # The manager will handle sending this to all relevant connections across all workers.
-        manager.broadcast_to_admins_sync(payload)
-        if db_task.owner_user_id:
-            manager.send_personal_message_sync(payload, db_task.owner_user_id)
+        try:
+            task_data = _serialize_task(db_task)
+            if not task_data:
+                return
 
-        # Handle special 'result' payloads for direct UI updates
-        is_finished = db_task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
-        
-        if is_finished:
-            end_payload = {"type": "task_end", "data": task_data}
+            payload = {"type": "task_update", "data": task_data}
+            
+            # Broadcast to admins and the specific user (if any)
+            # The manager will handle sending this to all relevant connections across all workers.
+            manager.broadcast_to_admins_sync(payload)
             if db_task.owner_user_id:
-                manager.send_personal_message_sync(end_payload, db_task.owner_user_id)
-            manager.broadcast_to_admins_sync(end_payload)
+                manager.send_personal_message_sync(payload, db_task.owner_user_id)
+
+            # Handle special 'result' payloads for direct UI updates
+            is_finished = db_task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+            
+            if is_finished:
+                end_payload = {"type": "task_end", "data": task_data}
+                if db_task.owner_user_id:
+                    manager.send_personal_message_sync(end_payload, db_task.owner_user_id)
+                manager.broadcast_to_admins_sync(end_payload)
+        except Exception as e:
+            print(f"Error broadcasting task update for {self.id}: {e}")
+            traceback.print_exc()
 
 
     def _update_db(self, **kwargs):
@@ -102,6 +113,8 @@ class Task:
                     
                     for key, value in kwargs.items():
                         setattr(task_record, key, value)
+                    
+                    task_record.updated_at = datetime.datetime.now(datetime.timezone.utc)
                     
                     db.commit()
                     db.refresh(task_record, ['owner'])
@@ -126,7 +139,14 @@ class Task:
                     if task_record:
                         if task_record.logs is None:
                             task_record.logs = []
-                        task_record.logs.append(log_entry)
+                        
+                        # Clone logs to ensure SQLAlchemy detects change on mutable JSON
+                        current_logs = list(task_record.logs)
+                        current_logs.append(log_entry)
+                        task_record.logs = current_logs
+                        
+                        task_record.updated_at = datetime.datetime.now(datetime.timezone.utc)
+                        
                         flag_modified(task_record, "logs")
                         db.commit()
                         db.refresh(task_record, ['owner'])
@@ -273,7 +293,7 @@ class TaskManager:
                     "message": "Task was cancelled manually while in a pending or orphaned state.",
                     "level": "WARNING"
                 }
-                current_logs = db_task.logs or []
+                current_logs = list(db_task.logs) if db_task.logs else []
                 current_logs.append(log_entry)
                 db_task.logs = current_logs
                 

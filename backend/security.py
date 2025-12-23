@@ -12,6 +12,7 @@ import html
 import platform
 import tempfile
 import os
+import json
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -20,7 +21,6 @@ from passlib.context import CryptContext
 
 from backend.config import SECRET_KEY, ALGORITHM
 from backend.settings import settings
-import json
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -183,6 +183,41 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
         print(f"CRITICAL: Failed to send SMTP email. Error: {e}")
         raise
 
+def _send_email_system_mail_text(to_email: str, subject: str, text_content: str):
+    """Sends a plain text email using system commands."""
+    
+    # Try sendmail first
+    if shutil.which("sendmail"):
+        safe_subject = subject.replace("\n", " ").replace("\r", " ")
+        full_email = (
+            f"To: {to_email}\n"
+            f"Subject: {safe_subject}\n"
+            f"Content-Type: text/plain; charset=utf-8\n"
+            f"\n"
+            f"{text_content}"
+        )
+        # -t reads recipients from headers
+        command = ["sendmail", "-t"]
+        try:
+            subprocess.run(command, input=full_email, capture_output=True, text=True, check=True, encoding="utf-8")
+            print(f"INFO: Email (Text system mail) sent to {to_email} via sendmail.")
+            return
+        except subprocess.CalledProcessError as e:
+            print(f"WARNING: sendmail failed: {e.stderr}")
+            # Fall through to mailx
+
+    if not shutil.which("mailx"):
+        raise FileNotFoundError("Neither 'sendmail' nor 'mailx' found.")
+    
+    # Fallback to mailx for simple text
+    command = ["mailx", "-s", subject, to_email]
+    try:
+        subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding="utf-8")
+        print(f"INFO: Email (Text system mail) sent to {to_email} via mailx.")
+    except subprocess.CalledProcessError as e:
+        print(f"ERROR: mailx failed: {e.stderr}")
+        raise
+
 def _send_email_system_mail_html(to_email: str, subject: str, html_content: str, text_content: str):
     """Alternative approach using sendmail or a temporary file with mailx."""
     
@@ -233,10 +268,6 @@ def _send_email_system_mail_html(to_email: str, subject: str, html_content: str,
             )
         
         print(f"INFO: Email (HTML system mail) sent to {to_email}.")
-        if process.stdout.strip():
-            print(f"MAILX STDOUT:\n{process.stdout}")
-        if process.stderr.strip():
-            print(f"MAILX STDERR:\n{process.stderr}")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: System 'mailx' command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         raise
@@ -270,7 +301,8 @@ def _send_email_sendmail_html(to_email: str, subject: str, html_content: str, te
         f"--{boundary}--\n"
     )
     
-    command = ["sendmail", "-v", to_email]
+    # Use -t to read headers from the input (To, Subject, etc.)
+    command = ["sendmail", "-t"]
     
     try:
         process = subprocess.run(
@@ -282,10 +314,6 @@ def _send_email_sendmail_html(to_email: str, subject: str, html_content: str, te
             encoding="utf-8"
         )
         print(f"INFO: Email sent via sendmail to {to_email}.")
-        if process.stdout.strip():
-            print(f"SENDMAIL STDOUT:\n{process.stdout}")
-        if process.stderr.strip():
-            print(f"SENDMAIL STDERR:\n{process.stderr}")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: Sendmail command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         raise
@@ -319,13 +347,19 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
     Prepares and sends a generic email, handling both HTML and plain text modes correctly.
     """
     recovery_mode = settings.get("password_recovery_mode", "manual")
-
+    
+    # Prepare HTML wrapper if needed
+    html_body = _get_full_html_email(body, background_color) if not send_as_text else None
+    
     if recovery_mode == "smtp":
         text_content = _convert_html_to_text(body)
-        _send_email_smtp(to_email, subject, body if not send_as_text else text_content, text_content)
+        _send_email_smtp(to_email, subject, html_body, text_content)
     elif recovery_mode == "system_mail":
         text_content = _convert_html_to_text(body)
-        _send_email_system_mail_html(to_email, subject, body, text_content) if not send_as_text else _send_email_system_mail_text(to_email, subject, text_content)
+        if send_as_text:
+             _send_email_system_mail_text(to_email, subject, text_content)
+        else:
+             _send_email_system_mail_html(to_email, subject, html_body, text_content)
     elif recovery_mode == "outlook":
         if platform.system() == "Windows":
             _send_email_outlook(to_email, subject, body)

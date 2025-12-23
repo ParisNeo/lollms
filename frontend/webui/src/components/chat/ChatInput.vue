@@ -67,18 +67,6 @@ const isDraggingOver = ref(false);
 
 const user = computed(() => authStore.user);
 
-// Granular Feedback Logic
-const inputPlaceholder = computed(() => {
-    if (isRecording.value) return "Recording... Click to stop.";
-    
-    // Check specific AI states
-    if (generationInProgress.value) {
-        return generationState.value.details || "AI is thinking...";
-    }
-    
-    return "Type a message... (Shift+Enter for new line)";
-});
-
 const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
 const discussionImages = computed(() => activeDiscussion.value?.discussion_images || []);
 const discussionActiveImages = computed(() => activeDiscussion.value?.active_discussion_images || []);
@@ -286,13 +274,18 @@ async function handleSendMessage() {
     if (generationInProgress.value) return;
     const text = messageText.value.trim();
     if (!text && attachedFiles.value.length === 0 && discussionImages.value.length === 0) return;
+
+    // Clear input immediately for better UX
+    messageText.value = '';
+    inputTokenCount.value = 0;
+
     try {
         await discussionsStore.sendMessage({ prompt: text, image_server_paths: [], localImageUrls: [] });
-        messageText.value = '';
-        inputTokenCount.value = 0;
     } catch(err) {
         console.error("SendMessage failed:", err);
         uiStore.addNotification('Failed to send message.', 'error');
+        // Restore text if failed
+        messageText.value = text;
     }
 }
 
@@ -309,6 +302,10 @@ async function fetchInputTokenCount(text) {
         const response = await apiClient.post('/api/discussions/tokenize', { text });
         inputTokenCount.value = response.data.tokens;
     } catch (error) {}
+}
+
+function handleStopGeneration() {
+    discussionsStore.stopGeneration();
 }
 
 watch(messageText, (newText) => {
@@ -384,7 +381,7 @@ onMounted(() => {
             </div>
 
             <!-- Input Controls -->
-            <div class="flex items-end gap-2 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm">
+            <div class="flex items-end gap-2 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm relative overflow-hidden">
                 
                 <div class="pb-1 pl-1">
                     <DropdownMenu icon="plus" collection="" title="Add" buttonClass="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative">
@@ -425,15 +422,32 @@ onMounted(() => {
                     <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
                 </div>
 
-                <div class="flex-grow min-w-0">
-                    <textarea v-model="messageText" @keydown="handleKeyDown" @paste="handlePaste" rows="1" class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-64 overflow-y-auto text-sm leading-relaxed" :placeholder="inputPlaceholder" :disabled="generationInProgress"></textarea>
+                <div class="flex-grow min-w-0 relative">
+                    <textarea 
+                        ref="textareaRef"
+                        v-model="messageText" 
+                        @keydown="handleKeyDown" 
+                        @paste="handlePaste" 
+                        rows="1" 
+                        class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-64 overflow-y-auto text-sm leading-relaxed" 
+                        :class="{ 'opacity-0 pointer-events-none': generationInProgress }"
+                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message... (Shift+Enter for new line)'" 
+                    ></textarea>
+                    
+                    <!-- Status Overlay -->
+                    <div v-if="generationInProgress" class="absolute inset-0 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none animate-pulse">
+                         <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500" /> 
+                         <span>{{ generationState.details || 'Thinking...' }}</span>
+                    </div>
                 </div>
 
                 <div class="flex items-center gap-1 pb-1 pr-1">
                     <button v-if="isSttConfigured" @click="toggleRecording" class="w-9 h-9 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-800 rounded-xl" :class="{'text-red-500 animate-pulse bg-red-50 dark:bg-red-900/20': isRecording, 'text-gray-500': !isRecording}"><IconMicrophone class="w-5.5 h-5.5" /></button>
-                    <button @click="handleSendMessage" class="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white rounded-xl shadow-sm transition-all active:scale-95">
-                         <IconAnimateSpin v-if="generationInProgress" class="w-5 h-5 animate-spin" />
-                         <IconSend v-else class="w-5 h-5" />
+                    <button v-if="!generationInProgress" @click="handleSendMessage" class="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm transition-all active:scale-95">
+                         <IconSend class="w-5 h-5" />
+                    </button>
+                    <button v-else @click="handleStopGeneration" class="w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-sm transition-all active:scale-95" title="Stop Generation">
+                        <IconStopCircle class="w-5 h-5" />
                     </button>
                 </div>
             </div>

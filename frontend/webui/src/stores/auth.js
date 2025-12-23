@@ -152,6 +152,9 @@ export const useAuthStore = defineStore('auth', () => {
             const discussionsStore = useDiscussionsStore();
 
             switch (data.type) {
+                case 'notification':
+                    uiStore.addNotification(data.data.message, data.data.type || 'info', data.data.duration || 3000);
+                    break;
                 case 'new_dm': 
                     socialStore.handleNewDm(data.data);
                     if (user.value && data.data.sender_id !== user.value.id) {
@@ -316,9 +319,11 @@ export const useAuthStore = defineStore('auth', () => {
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
             const { useSocialStore } = await import('./social');
+            const { useMemoriesStore } = await import('./memories');
             const discussionsStore = useDiscussionsStore();
             const dataStore = useDataStore();
             const socialStore = useSocialStore();
+            const memoriesStore = useMemoriesStore();
             
             loadingProgress.value = 40;
             loadingMessage.value = 'Loading user data...';
@@ -327,6 +332,7 @@ export const useAuthStore = defineStore('auth', () => {
                 discussionsStore.fetchSharedWithMe(),
                 discussionsStore.fetchDiscussionGroups(),
                 dataStore.loadAllInitialData(),
+                memoriesStore.fetchMemories(), // Fetch memories on login/reload
                 socialStore.fetchFriends().catch(() => {}),
                 socialStore.fetchConversations().catch(() => {})
             ]);

@@ -9,12 +9,15 @@ class Notebook(Base):
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String, nullable=False)
-    content = Column(Text, default="")
+    content = Column(Text, default="") # Kept for backward compatibility or main scratchpad
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Stores references to files/sources processed for this notebook
     # Each entry is a dict: { "filename": str, "content": str, "type": str }
     artefacts = Column(JSON, default=list) 
+    
+    # NEW: Stores tabs. List of dicts: { id, title, type, content, ... }
+    tabs = Column(JSON, default=list)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

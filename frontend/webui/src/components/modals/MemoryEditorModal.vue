@@ -1,44 +1,52 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue';
-import GenericModal from './GenericModal.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
+import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
-import { useDiscussionsStore } from '../../stores/discussions';
+import { useMemoriesStore } from '../../stores/memories';
+import GenericModal from './GenericModal.vue';
 
 const uiStore = useUiStore();
-const discussionsStore = useDiscussionsStore();
+const memoriesStore = useMemoriesStore();
 
-const props = computed(() => uiStore.modalData('memoryEditor') || {});
-const discussionId = computed(() => props.value.discussionId);
-const memory = computed(() => props.value.memory);
+const modalData = computed(() => uiStore.modalData('memoryEditor'));
+const memoryToEdit = computed(() => modalData.value?.memory);
+const isEditing = computed(() => !!memoryToEdit.value);
 
-const isEditing = computed(() => !!memory.value?.title);
 const title = ref('');
 const content = ref('');
 const isLoading = ref(false);
 
-watch(
-    () => uiStore.isModalOpen('memoryEditor'),
-    (isOpen) => {
-        if (isOpen) {
-            title.value = memory.value?.title || '';
-            content.value = memory.value?.content || '';
-        }
-    },
-    { immediate: true }
-);
+watch(modalData, (newData) => {
+    if (newData && newData.memory) {
+        title.value = newData.memory.title || '';
+        content.value = newData.memory.content || '';
+    } else {
+        title.value = '';
+        content.value = '';
+    }
+}, { immediate: true });
 
 async function handleSubmit() {
-    if (!title.value.trim() || !discussionId.value) return;
-
+    if (!title.value.trim() || !content.value.trim()) {
+        uiStore.addNotification('Title and content are required.', 'warning');
+        return;
+    }
+    
     isLoading.value = true;
     try {
-        await discussionsStore.createOrUpdateMemory({
-            discussionId: discussionId.value,
-            title: title.value,
-            content: content.value,
-        });
+        if (isEditing.value) {
+            await memoriesStore.updateMemory(memoryToEdit.value.id, {
+                title: title.value,
+                content: content.value
+            });
+        } else {
+            await memoriesStore.addMemory({
+                title: title.value,
+                content: content.value
+            });
+        }
         uiStore.closeModal('memoryEditor');
+    } catch (error) {
+        // Error handled in store
     } finally {
         isLoading.value = false;
     }
@@ -47,45 +55,39 @@ async function handleSubmit() {
 
 <template>
     <GenericModal
-        modal-name="memoryEditor"
-        :title="isEditing ? 'Edit Memory' : 'Create New Memory'"
-        @close="uiStore.closeModal('memoryEditor')"
-        max-width-class="max-w-3xl"
+        modalName="memoryEditor"
+        :title="isEditing ? 'Edit Memory' : 'New Memory'"
+        maxWidthClass="max-w-2xl"
     >
         <template #body>
-            <form @submit.prevent="handleSubmit" class="space-y-4">
+            <form @submit.prevent="handleSubmit" class="space-y-4 p-1">
                 <div>
-                    <label for="memory-title" class="label">Title</label>
-                    <input
-                        id="memory-title"
-                        type="text"
-                        v-model="title"
-                        class="input-field"
-                        :disabled="isEditing"
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Title</label>
+                    <input 
+                        v-model="title" 
+                        type="text" 
+                        class="input-field w-full" 
+                        placeholder="Memory Title (e.g. User Preferences)"
                         required
-                    />
+                        autofocus
+                    >
                 </div>
                 <div>
-                    <label for="memory-content" class="label">Content</label>
-                    <CodeMirrorEditor v-model="content" class="h-64" />
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Content</label>
+                    <textarea 
+                        v-model="content" 
+                        rows="6" 
+                        class="input-field w-full resize-y" 
+                        placeholder="Memory content..."
+                        required
+                    ></textarea>
                 </div>
             </form>
         </template>
         <template #footer>
-            <button
-                type="button"
-                @click="uiStore.closeModal('memoryEditor')"
-                class="btn btn-secondary"
-            >
-                Cancel
-            </button>
-            <button
-                type="button"
-                @click="handleSubmit"
-                class="btn btn-primary"
-                :disabled="isLoading"
-            >
-                {{ isLoading ? 'Saving...' : 'Save Memory' }}
+            <button @click="uiStore.closeModal('memoryEditor')" class="btn btn-secondary">Cancel</button>
+            <button @click="handleSubmit" class="btn btn-primary" :disabled="isLoading">
+                {{ isEditing ? 'Save Changes' : 'Create Memory' }}
             </button>
         </template>
     </GenericModal>

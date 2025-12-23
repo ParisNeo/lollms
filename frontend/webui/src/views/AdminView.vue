@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/views/AdminView.vue -->
 <script setup>
 import { computed, defineAsyncComponent, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -30,7 +31,6 @@ import IconKey from '../assets/icons/IconKey.vue';
 import IconEye from '../assets/icons/IconEye.vue';
 import IconGpu from '../assets/icons/IconGpu.vue';
 import IconHardDrive from '../assets/icons/IconHardDrive.vue';
-import IconPlayCircle from '../assets/icons/IconPlayCircle.vue'; // For Ops? or use Wrench
 import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
 
 const route = useRoute();
@@ -51,6 +51,7 @@ const sections = [
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
+  { type: 'link', id: 'services_mgmt', name: 'Services & Usage', icon: markRaw(IconServer) }, // ADDED
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'link', id: 'server_settings', name: 'Server Settings', icon: markRaw(IconServer) },
   { type: 'divider', label: 'Content' },

@@ -23,6 +23,8 @@ const imageGenerationEnabled = ref(false);
 const imageGenerationSystemPrompt = ref('');
 const imageAnnotationEnabled = ref(false);
 const noteGenerationEnabled = ref(false);
+const memoryEnabled = ref(false);
+const autoMemoryEnabled = ref(false);
 
 const hasChanges = ref(false);
 const isSaving = ref(false);
@@ -47,6 +49,8 @@ function populateForm() {
     imageGenerationSystemPrompt.value = user.value.image_generation_system_prompt || '';
     imageAnnotationEnabled.value = user.value.image_annotation_enabled || false;
     noteGenerationEnabled.value = user.value.note_generation_enabled || false;
+    memoryEnabled.value = user.value.memory_enabled || false;
+    autoMemoryEnabled.value = user.value.auto_memory_enabled || false;
     
     // Reset change tracker
     nextTick(() => {
@@ -62,7 +66,8 @@ watch(user, populateForm, { immediate: true, deep: true });
 watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
-    imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, noteGenerationEnabled
+    imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, noteGenerationEnabled,
+    memoryEnabled, autoMemoryEnabled
 ], () => {
   hasChanges.value = true;
 });
@@ -93,7 +98,9 @@ async function handleSaveChanges() {
             image_generation_enabled: imageGenerationEnabled.value,
             image_generation_system_prompt: imageGenerationSystemPrompt.value,
             image_annotation_enabled: imageAnnotationEnabled.value,
-            note_generation_enabled: noteGenerationEnabled.value
+            note_generation_enabled: noteGenerationEnabled.value,
+            memory_enabled: memoryEnabled.value,
+            auto_memory_enabled: autoMemoryEnabled.value
         });
         hasChanges.value = false;
     } finally {
@@ -123,6 +130,31 @@ async function handleSaveChanges() {
                 :placeholder="user?.username || 'How should the AI address you?'"
             >
             <p class="text-xs text-gray-500 mt-1">If left blank, the AI will use your username: <strong>{{ user?.username }}</strong></p>
+        </div>
+        
+        <!-- Memory Settings -->
+        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg space-y-3">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Long-Term Memory</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to access and manage your memory bank.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="memoryEnabled" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+            
+            <div v-if="memoryEnabled" class="flex items-center justify-between pl-4 border-l-2 border-blue-300 dark:border-blue-600">
+                <div>
+                    <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300">Auto Memory Decision</h4>
+                    <p class="text-[10px] text-gray-500 dark:text-gray-400">Let the AI automatically decide when to save new memories during conversation.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="autoMemoryEnabled" class="sr-only peer">
+                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
         </div>
 
         <!-- Static Info Section -->

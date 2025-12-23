@@ -60,9 +60,12 @@ export const useTasksStore = defineStore('tasks', () => {
     }
 
     function addTask(taskData) {
+        if (!taskData || !taskData.id) return;
         const index = tasks.value.findIndex(t => t.id === taskData.id);
         
         if (index !== -1) {
+            // Vue 3 reactivity best practice: Replace object properties or the object itself
+            // To ensure reactivity in deep watchers, we assign a new object merging old and new
             tasks.value[index] = { ...tasks.value[index], ...taskData };
         } else {
             tasks.value.unshift(taskData);

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useDiscussionsStore } from '../../../stores/discussions';
 import { useMemoriesStore } from '../../../stores/memories';
 import { useUiStore } from '../../../stores/ui';
@@ -10,6 +10,7 @@ import IconPlus from '../../../assets/icons/IconPlus.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
+import IconCircle from '../../../assets/icons/IconCircle.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 
@@ -21,20 +22,41 @@ const { memories, isLoading: isLoadingMemories } = storeToRefs(memoriesStore);
 const memorySearchTerm = ref('');
 const loadedMemoryTitles = ref(new Set());
 
+// Function to estimate token count (rough approximation: 1 token ~= 4 chars)
+function estimateTokens(text) {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+}
+
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
 const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
 
-const memoryContext = computed(() => {
-    return memories.value
-        .filter(m => loadedMemoryTitles.value.has(m.title))
-        .map(m => `--- Memory: ${m.title} ---\n${m.content}\n--- End Memory: ${m.title} ---`)
-        .join('\n\n');
+// Sorted memories to maintain consistent indexing display (must match backend sort order)
+const sortedMemories = computed(() => {
+    return [...memories.value].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
 });
 
+const memoryContext = computed(() => {
+    // Reconstruct context text similar to backend to show realistic preview
+    // Using simple indexing #1, #2 based on sorted list
+    const activeMems = sortedMemories.value.filter(m => loadedMemoryTitles.value.has(m.title));
+    if (activeMems.length === 0) return '';
+    
+    return activeMems.map((m) => {
+        // Find the index in the FULL sorted list for consistent reference,
+        // or should we re-index based on active selection?
+        // Backend usually sends ALL memories. So we use the index from the full list.
+        const fullIndex = sortedMemories.value.findIndex(sm => sm.id === m.id) + 1;
+        return `[Memory #${fullIndex}] ${m.title}: ${m.content}`;
+    }).join('\n\n');
+});
+
+const contextTokenCount = computed(() => estimateTokens(memoryContext.value));
+
 const filteredMemories = computed(() => {
-    if (!memorySearchTerm.value) return memories.value;
+    if (!memorySearchTerm.value) return sortedMemories.value;
     const term = memorySearchTerm.value.toLowerCase();
-    return memories.value.filter(m => 
+    return sortedMemories.value.filter(m => 
         m.title.toLowerCase().includes(term) || 
         m.content.toLowerCase().includes(term)
     );
@@ -65,12 +87,32 @@ async function handleDeleteMemory(memoryId) {
 
 function handleLoadMemory(memoryTitle) { loadedMemoryTitles.value.add(memoryTitle); }
 function handleUnloadMemory(memoryTitle) { loadedMemoryTitles.value.delete(memoryTitle); }
+
+async function refreshMemories() {
+    await memoriesStore.fetchMemories();
+    // Auto-select all new memories if not explicitly unselected?
+    // For now, keep current behavior: explicitly select/deselect
+    // If set is empty (first load), select all.
+    if (loadedMemoryTitles.value.size === 0 && memories.value.length > 0) {
+        memories.value.forEach(m => loadedMemoryTitles.value.add(m.title));
+    }
+}
+
+watch(memories, (newVal) => {
+    // If new memories appear and we have a selection "all" strategy or similar, we could update here.
+    // For now just ensuring UI reactivity.
+}, { deep: true });
+
+onMounted(() => {
+    refreshMemories();
+});
+
 </script>
 
 <template>
   <div class="flex flex-col h-full gap-3 overflow-hidden">
     <!-- Header with Actions -->
-    <div class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-2 rounded-lg shadow-sm">
+    <div class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-2 rounded-lg shadow-sm flex-shrink-0">
         <input type="text" v-model="memorySearchTerm" placeholder="Filter bank..." 
                class="w-32 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border-none focus:ring-1 focus:ring-blue-500 rounded" />
         <button @click="handleMemorize" class="btn btn-primary btn-xs py-1 px-3 shadow-sm" :disabled="isMemorizing">
@@ -87,7 +129,10 @@ function handleUnloadMemory(memoryTitle) { loadedMemoryTitles.value.delete(memor
         <div class="flex-1 flex flex-col min-h-[150px] border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900/50 shadow-inner overflow-hidden">
             <div class="p-2 border-b dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30">
                 <span class="text-[9px] font-black uppercase text-gray-400 tracking-tighter">Active Context Preview</span>
-                <span class="text-[9px] font-mono text-gray-500" v-if="memoryContext">{{ memoryContext.length }} chars</span>
+                <div class="flex gap-2">
+                    <span class="text-[9px] font-mono text-gray-500" v-if="memoryContext">{{ memoryContext.length }} chars</span>
+                    <span class="text-[9px] font-mono text-blue-500" v-if="memoryContext">~{{ contextTokenCount }} tokens</span>
+                </div>
             </div>
             <div class="flex-1 overflow-y-auto custom-scrollbar p-3">
                 <div v-if="!memoryContext" class="h-full flex flex-col items-center justify-center text-gray-400 opacity-40">
@@ -99,25 +144,33 @@ function handleUnloadMemory(memoryTitle) { loadedMemoryTitles.value.delete(memor
         </div>
 
         <!-- Bank List -->
-        <div class="h-64 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 flex flex-col shadow-sm overflow-hidden">
+        <div class="h-64 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 flex flex-col shadow-sm overflow-hidden flex-shrink-0">
             <div class="p-2 border-b dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-800/30">
                 <span class="text-[10px] font-black uppercase text-gray-500">Memory Bank ({{ filteredMemories.length }})</span>
                 <button @click="handleCreateMemory" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-blue-500" title="Manual Memory Entry"><IconPlus class="w-4 h-4" /></button>
             </div>
             <div class="flex-1 overflow-y-auto custom-scrollbar p-1">
                 <div v-if="isLoadingMemories" class="text-center py-6"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
+                <div v-else-if="filteredMemories.length === 0" class="text-center py-6 text-xs text-gray-400">Empty</div>
                 <div v-else class="space-y-1">
-                    <div v-for="mem in filteredMemories" :key="mem.id" 
+                    <div v-for="(mem, index) in filteredMemories" :key="mem.id" 
                          class="group p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 flex items-center justify-between transition-all border border-transparent"
                          :class="{'border-green-500/20 bg-green-50/10 dark:bg-green-900/5': loadedMemoryTitles.has(mem.title)}">
                         
                         <div class="flex items-center gap-3 min-w-0">
+                            <!-- Index Badge -->
+                            <span class="text-[10px] font-mono text-gray-400 font-bold w-5 text-center shrink-0">#{{ index + 1 }}</span>
+                            
                             <button @click="loadedMemoryTitles.has(mem.title) ? handleUnloadMemory(mem.title) : handleLoadMemory(mem.title)" 
                                     class="flex-shrink-0 transition-colors" :class="loadedMemoryTitles.has(mem.title) ? 'text-green-500' : 'text-gray-300 hover:text-gray-400'">
                                 <IconCheckCircle v-if="loadedMemoryTitles.has(mem.title)" class="w-5 h-5" />
                                 <IconCircle v-else class="w-5 h-5" />
                             </button>
-                            <span class="text-xs font-bold truncate text-gray-700 dark:text-gray-200">{{ mem.title }}</span>
+                            
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-xs font-bold truncate text-gray-700 dark:text-gray-200" :title="mem.title">{{ mem.title }}</span>
+                                <span class="text-[10px] truncate text-gray-400">{{ estimateTokens(mem.content) }} tokens</span>
+                            </div>
                         </div>
 
                         <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

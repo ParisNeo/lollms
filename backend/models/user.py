@@ -201,6 +201,11 @@ class UserAuthDetails(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: bool = False
     note_generation_enabled: bool = False
+    
+    # Memory Settings
+    memory_enabled: bool = False
+    auto_memory_enabled: bool = False
+
     preferred_name: Optional[str] = None
     
     reasoning_activation: bool = False
@@ -280,6 +285,10 @@ class UserUpdate(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: Optional[bool] = None
     note_generation_enabled: Optional[bool] = None
+    
+    # Memory Settings
+    memory_enabled: Optional[bool] = None
+    auto_memory_enabled: Optional[bool] = None
     
     reasoning_activation: Optional[bool] = None
     reasoning_effort: Optional[str] = None

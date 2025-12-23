@@ -17,9 +17,12 @@ memories_router = APIRouter(prefix="/api/memories", tags=["Memories"])
 
 @memories_router.get("", response_model=List[MemoryPublic])
 async def get_user_memories(
-    current_user: DBUser = Depends(get_current_db_user_from_token)
+    current_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
 ):
-    return current_user.memories
+    # Explicitly query UserMemory to ensure fresh data, avoiding stale relationship cache on current_user
+    memories = db.query(DBUserMemory).filter(DBUserMemory.owner_user_id == current_user.id).order_by(DBUserMemory.created_at.asc()).all()
+    return memories
 
 @memories_router.post("", response_model=MemoryPublic, status_code=status.HTTP_201_CREATED)
 async def create_memory(
@@ -31,7 +34,7 @@ async def create_memory(
         raise HTTPException(status_code=400, detail="Title and content cannot be empty.")
         
     new_memory = DBUserMemory(
-        user_id=current_user.id,
+        owner_user_id=current_user.id, # Use correct field name
         title=memory_data.title,
         content=memory_data.content
     )
@@ -47,7 +50,7 @@ async def update_memory(
     db: Session = Depends(get_db),
     current_user: DBUser = Depends(get_current_db_user_from_token)
 ):
-    memory = db.query(DBUserMemory).filter(DBUserMemory.id == memory_id, DBUserMemory.user_id == current_user.id).first()
+    memory = db.query(DBUserMemory).filter(DBUserMemory.id == memory_id, DBUserMemory.owner_user_id == current_user.id).first()
     if not memory:
         raise HTTPException(status_code=404, detail="Memory not found.")
     
@@ -65,7 +68,7 @@ async def delete_memory(
     db: Session = Depends(get_db),
     current_user: DBUser = Depends(get_current_db_user_from_token)
 ):
-    memory = db.query(DBUserMemory).filter(DBUserMemory.id == memory_id, DBUserMemory.user_id == current_user.id).first()
+    memory = db.query(DBUserMemory).filter(DBUserMemory.id == memory_id, DBUserMemory.owner_user_id == current_user.id).first()
     if not memory:
         raise HTTPException(status_code=404, detail="Memory not found.")
     db.delete(memory)
@@ -73,15 +76,17 @@ async def delete_memory(
 
 @memories_router.get("/export", response_class=StreamingResponse)
 async def export_memories(
-    current_user: DBUser = Depends(get_current_db_user_from_token)
+    current_user: DBUser = Depends(get_current_db_user_from_token),
+    db: Session = Depends(get_db)
 ):
+    memories = db.query(DBUserMemory).filter(DBUserMemory.owner_user_id == current_user.id).order_by(DBUserMemory.created_at.asc()).all()
     memories_to_export = [
         {
             "title": mem.title,
             "content": mem.content,
             "created_at": mem.created_at.isoformat()
         }
-        for mem in current_user.memories
+        for mem in memories
     ]
     
     export_data = {"memories": memories_to_export}
@@ -111,7 +116,7 @@ async def import_memories(
     imported_count = 0
     for mem_data in import_data.memories:
         new_memory = DBUserMemory(
-            user_id=current_user.id,
+            owner_user_id=current_user.id,
             title=mem_data.title,
             content=mem_data.content
         )

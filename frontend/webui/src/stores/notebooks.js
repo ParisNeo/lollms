@@ -26,10 +26,18 @@ export const useNotebookStore = defineStore('notebooks', () => {
         const found = notebooks.value.find(n => n.id === id);
         if(found) {
              activeNotebook.value = found;
+             // Ensure tabs array exists
+             if (!activeNotebook.value.tabs) activeNotebook.value.tabs = [];
         }
         // Then refresh list to ensure we have latest data
         await fetchNotebooks();
-        activeNotebook.value = notebooks.value.find(n => n.id === id) || null;
+        const updated = notebooks.value.find(n => n.id === id);
+        if (updated) {
+            activeNotebook.value = updated;
+            if (!activeNotebook.value.tabs) activeNotebook.value.tabs = [];
+        } else {
+            activeNotebook.value = null;
+        }
     }
 
     async function saveActive() {
@@ -38,7 +46,8 @@ export const useNotebookStore = defineStore('notebooks', () => {
             const res = await apiClient.put(`/api/notebooks/${activeNotebook.value.id}`, {
                 title: activeNotebook.value.title,
                 content: activeNotebook.value.content,
-                artefacts: activeNotebook.value.artefacts
+                artefacts: activeNotebook.value.artefacts,
+                tabs: activeNotebook.value.tabs
             });
             activeNotebook.value = res.data;
             // Update list entry
@@ -91,16 +100,55 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
-    async function processWithAi(prompt) {
+    async function processWithAi(prompt, inputTabIds, outputType) {
         if (!activeNotebook.value) return;
         try {
-            const fd = new FormData();
-            fd.append('prompt', prompt);
-            const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/process`, fd);
+            const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/process`, {
+                prompt,
+                input_tab_ids: inputTabIds,
+                output_type: outputType
+            });
             tasksStore.addTask(res.data);
-            uiStore.addNotification("AI processing started.", "info");
+            uiStore.addNotification(`AI processing (${outputType}) started.`, "info");
         } catch (e) {
             uiStore.addNotification("Failed to start AI processing.", "error");
+        }
+    }
+
+    async function generateTitle() {
+        if (!activeNotebook.value) return;
+        try {
+            uiStore.addNotification("Generating title...", "info");
+            const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/generate_title`);
+            activeNotebook.value.title = res.data.title;
+            uiStore.addNotification("Title updated.", "success");
+            // Update list entry locally
+            const idx = notebooks.value.findIndex(n => n.id === activeNotebook.value.id);
+            if (idx !== -1) notebooks.value[idx].title = res.data.title;
+        } catch (e) {
+            uiStore.addNotification("Failed to generate title.", "error");
+        }
+    }
+    
+    function addTab(type = 'markdown') {
+        if (!activeNotebook.value) return;
+        const newTab = {
+            id: crypto.randomUUID(),
+            title: "New Tab",
+            type: type,
+            content: "",
+            images: []
+        };
+        activeNotebook.value.tabs.push(newTab);
+        saveActive();
+    }
+    
+    function removeTab(tabId) {
+        if (!activeNotebook.value) return;
+        const index = activeNotebook.value.tabs.findIndex(t => t.id === tabId);
+        if (index !== -1) {
+            activeNotebook.value.tabs.splice(index, 1);
+            saveActive();
         }
     }
 
@@ -111,7 +159,8 @@ export const useNotebookStore = defineStore('notebooks', () => {
 
     return { 
         notebooks, activeNotebook, isLoading, 
-        fetchNotebooks, selectNotebook, saveActive, uploadSource, createTextArtefact, scrapeUrl, processWithAi,
+        fetchNotebooks, selectNotebook, saveActive, uploadSource, createTextArtefact, scrapeUrl, processWithAi, generateTitle,
+        addTab, removeTab,
         $reset 
     };
 });

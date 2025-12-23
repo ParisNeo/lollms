@@ -1,4 +1,4 @@
-// frontend/webui/src/stores/admin.js
+// [UPDATE] frontend/webui/src/stores/admin.js
 import { defineStore } from 'pinia';
 import { ref, reactive, watch } from 'vue';
 import apiClient from '../services/api';
@@ -6,7 +6,7 @@ import { useUiStore } from './ui';
 import { useTasksStore } from './tasks'; 
 import useEventBus from '../services/eventBus';
 
-// Helper to persist filters (unchanged)
+// Helper to persist filters
 function getStoredFilters(key, defaults) {
     try {
         const stored = localStorage.getItem(key);
@@ -47,6 +47,11 @@ export const useAdminStore = defineStore('admin', () => {
     const allUsers = ref([]);
     const isLoadingUsers = ref(false);
     
+    // --- NEW: Services State ---
+    const serviceStats = ref(null);
+    const isLoadingServiceStats = ref(false);
+    // ---------------------------
+
     // Global Settings
     const globalSettings = ref([]);
     const isLoadingSettings = ref(false);
@@ -167,6 +172,25 @@ export const useAdminStore = defineStore('admin', () => {
     }
 
     // --- Actions ---
+
+    // --- NEW: Services Actions ---
+    async function fetchServiceDashboard() {
+        isLoadingServiceStats.value = true;
+        try {
+            const res = await apiClient.get('/api/admin/services/dashboard');
+            serviceStats.value = res.data;
+        } finally {
+            isLoadingServiceStats.value = false;
+        }
+    }
+
+    async function resetServiceUsage() {
+        await apiClient.post('/api/admin/services/reset-usage');
+        await fetchServiceDashboard();
+        uiStore.addNotification('Usage statistics reset.', 'success');
+    }
+    // ---------------------------
+
     async function createBackup(password) { const response = await apiClient.post('/api/admin/backup/create', { password }); tasksStore.addTask(response.data); return response.data; }
     async function analyzeSystemLogs() { try { const response = await apiClient.post('/api/admin/system/analyze-logs'); tasksStore.addTask(response.data); return response.data; } catch (error) { uiStore.addNotification('Failed to start log analysis.', 'error'); throw error; } }
     async function purgeUnusedUploads() { const response = await apiClient.post('/api/admin/purge-unused-uploads'); tasksStore.addTask(response.data); }
@@ -199,7 +223,7 @@ export const useAdminStore = defineStore('admin', () => {
         finally { isLoadingConnectedUsers.value = false; } 
     }
     async function fetchGlobalGenerationStats() { 
-        if (globalGenerationStats.value) return; // Cache stats, refresh usually on mount is fine or explicit
+        if (globalGenerationStats.value) return; // Cache stats
         isLoadingGlobalGenerationStats.value = true; 
         try { const response = await apiClient.get('/api/admin/global-generation-stats'); globalGenerationStats.value = response.data; } 
         catch (error) { globalGenerationStats.value = null; } 
@@ -540,6 +564,7 @@ export const useAdminStore = defineStore('admin', () => {
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
+        serviceStats, isLoadingServiceStats, // EXPORTED
         globalSettings, isLoadingSettings, aiBotSettings, isLoadingAiBotSettings,
         bindings, isLoadingBindings, availableBindingTypes,
         ttiBindings, isLoadingTtiBindings, availableTtiBindingTypes,
@@ -556,6 +581,7 @@ export const useAdminStore = defineStore('admin', () => {
 
         // Actions
         fetchDashboardStats, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
+        fetchServiceDashboard, resetServiceUsage, // EXPORTED
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,
         fetchAllUsers, activateUser, fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,

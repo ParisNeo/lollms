@@ -76,6 +76,10 @@ class User(Base):
     # NEW FIELD for Notes
     note_generation_enabled = Column(Boolean, default=False, nullable=False)
 
+    # NEW FIELDS for Memory
+    memory_enabled = Column(Boolean, default=False, nullable=False)
+    auto_memory_enabled = Column(Boolean, default=False, nullable=False)
+
     # New reasoning fields
     reasoning_activation = Column(Boolean, default=False, nullable=True)
     reasoning_effort = Column(String, nullable=True) # low, medium, high

@@ -84,14 +84,20 @@ export function useDiscussionGeneration(state, stores, getActions) {
             if (!messageToUpdate) return;
             
             switch (data.type) {
+                case 'ttft':
+                    generationState.value = { 
+                        status: 'streaming', 
+                        details: `ttft: ${data.content}ms - generating...` 
+                    };
+                    break;
                 case 'chunk':
-                    if (generationState.value.status !== 'streaming') {
-                        generationState.value = { status: 'streaming', details: 'Generating response...' };
+                    if (generationState.value.status !== 'streaming' && !generationState.value.details.includes('ttft')) {
+                         generationState.value = { status: 'streaming', details: 'generating...' };
                     }
                     messageToUpdate.content += data.content;
                     break;
                 case 'step_start':
-                    generationState.value = { status: 'thinking', details: data.content || 'AI Thinking...' };
+                    generationState.value = { status: 'thinking', details: data.content || 'Thinking...' };
                     break;
                 case 'tool_call':
                     let details = 'Using tool...';
@@ -103,20 +109,27 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
                 case 'new_title_start':
                     state.titleGenerationInProgressId.value = currentDiscussionId.value;
-                    generationState.value = { status: 'generating_title', details: 'Generating discussion title...' };
+                    generationState.value = { status: 'generating_title', details: 'generating title...' };
                     break;
                 case 'new_title_end':
                     state.titleGenerationInProgressId.value = null;
                     if (state.discussions.value[currentDiscussionId.value]) {
                         state.discussions.value[currentDiscussionId.value].title = data.new_title;
                     }
+                    // Revert to streaming status if we are still going
                     if (generationInProgress.value) {
-                        generationState.value = { status: 'streaming', details: 'Continuing generation...' };
+                         // Preserve TTFT context if we had it
+                         const oldDetails = generationState.value.details;
+                         const newDetails = oldDetails.includes('ttft') ? oldDetails : 'generating...';
+                         generationState.value = { status: 'streaming', details: newDetails };
                     }
                     break;
                 case 'step_end':
-                    if (generationInProgress.value) { 
-                        generationState.value = { status: 'streaming', details: 'Continuing generation...' };
+                    // Similar logic to preserve TTFT info if desired
+                    if (generationInProgress.value) {
+                         const oldDetails = generationState.value.details;
+                         const newDetails = oldDetails.includes('ttft') ? oldDetails : 'generating...';
+                         generationState.value = { status: 'streaming', details: newDetails };
                     }
                     break;
                 case 'sources':
