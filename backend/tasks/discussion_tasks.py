@@ -137,47 +137,41 @@ def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
             system_prompt = """You are a Memory Assistant. Your goal is to extract important, long-term information about the user from the provided conversation.
 Identify key facts such as names, preferences, relationships, specific work details, or important events.
 Ignore casual conversation, greetings, or temporary context.
-
-Output ONLY a JSON object with a "memories" key containing a list of objects, each having a "title" and "content".
-Example:
-{
-  "memories": [
-    {"title": "User's Profession", "content": "User is a senior software engineer working on Python projects."},
-    {"title": "Project Deadline", "content": "The nebula project deadline is set for December 25th."}
-  ]
-}
 If no important information is found, return {"memories": []}.
-DO NOT output markdown code blocks. Output raw JSON only.
 """
+            template = """{
+  "memories": [
+    {"title": "Title of the memory", "content": "Content of the memory"}
+  ]
+}"""
             # Truncate conversation if too long (simple heuristic)
             max_chars = 12000 
             if len(conversation_text) > max_chars:
                 conversation_text = conversation_text[-max_chars:]
 
-            response_text = lc.generate_text(
-                conversation_text, 
+            # Use generate_code to handle structure enforcement and thinking block removal
+            code_content = lc.generate_code(
+                conversation_text,
                 system_prompt=system_prompt,
-                max_new_tokens=1024,
-                temperature=0.1 # Low temp for factual extraction
+                template=template,
+                language="json",
+                n_predict=1024,
+                temperature=0.1
             )
             
             task.set_progress(70)
             task.log("Parsing extracted memories...")
             
-            # Clean response (remove markdown code blocks if any)
-            response_text = response_text.strip()
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            
+            if not code_content:
+                task.log("AI failed to generate memory structure.", "WARNING")
+                return {"discussion_id": discussion_id, "zone": "memory"}
+
             try:
-                data = json.loads(response_text)
+                # Clean any potential leading/trailing whitespace before parsing
+                data = json.loads(code_content.strip())
                 extracted_memories = data.get("memories", [])
-            except json.JSONDecodeError:
-                task.log(f"Failed to parse JSON from LLM response. Raw: {response_text[:100]}...", "ERROR")
+            except json.JSONDecodeError as e:
+                task.log(f"Failed to parse JSON from AI response: {e}. Content: {code_content[:100]}...", "ERROR")
                 extracted_memories = []
 
             count = 0
@@ -200,6 +194,7 @@ DO NOT output markdown code blocks. Output raw JSON only.
                     task.log(f"Successfully saved {count} new memories.")
                     
                     # Push notification manually to ensure immediate UI update via WS
+                    from backend.ws_manager import manager
                     manager.send_personal_message_sync({
                         "type": "data_zone_processed",
                         "data": {"discussion_id": discussion_id, "zone": "memory"}

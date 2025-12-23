@@ -12,7 +12,6 @@ import html
 import platform
 import tempfile
 import os
-import json
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -21,6 +20,7 @@ from passlib.context import CryptContext
 
 from backend.config import SECRET_KEY, ALGORITHM
 from backend.settings import settings
+import json
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

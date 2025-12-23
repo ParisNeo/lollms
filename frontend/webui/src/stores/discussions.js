@@ -6,6 +6,7 @@ import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
 import { useDataStore } from './data';
 import { useTasksStore } from './tasks';
+import { useMemoriesStore } from './memories'; // Import MemoriesStore
 import useEventBus from '../services/eventBus';
 
 // Import ALL composables
@@ -24,6 +25,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const tasksStore = useTasksStore();
     const dataStore = useDataStore();
     const authStore = useAuthStore();
+    const memoriesStore = useMemoriesStore(); // Initialize
     const { user } = storeToRefs(authStore);
     const { tasks } = storeToRefs(tasksStore);
     const { on, off, emit } = useEventBus();
@@ -34,11 +36,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const sharedWithMe = ref([]);
     const isLoadingDiscussions = ref(false);
     const currentDiscussionId = ref(null);
-    const currentGroupId = ref(null); // NEW: Track selected group context
+    const currentGroupId = ref(null);
     const messages = ref([]);
     const isLoadingMessages = ref(false);
     const generationInProgress = ref(false);
-    const generationState = ref({ status: 'idle', details: '' }); // idle, starting, streaming, thinking, generating_title
+    const generationState = ref({ status: 'idle', details: '' });
     const titleGenerationInProgressId = ref(null);
     const activeDiscussionContextStatus = ref(null);
     const activeAiTasks = ref({});
@@ -61,7 +63,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     // --- WATCHER for task updates ---
-    watch(tasks, (newTasks) => {
+    watch(tasks, async (newTasks) => {
         const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
         if (activeTrackedTaskIds.length === 0) return;
 
@@ -72,13 +74,25 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 if (correspondingTaskInStore) {
                     const isFinished = ['completed', 'failed', 'cancelled'].includes(correspondingTaskInStore.status);
                     if (isFinished) {
-                        if (correspondingTaskInStore.status === 'completed' && trackedTask.type === 'import_url') {
-                            getActions().fetchArtefacts(discussionId);
+                        if (correspondingTaskInStore.status === 'completed') {
+                            if (trackedTask.type === 'import_url') {
+                                getActions().fetchArtefacts(discussionId);
+                            }
+                            // --- FIX: Explicitly refresh memories when memorization completes ---
+                            if (trackedTask.type === 'memorize') {
+                                console.log("Memorization task completed. Refreshing memories...");
+                                await memoriesStore.fetchMemories();
+                                uiStore.addNotification('Memory bank updated.', 'success');
+                            }
                         }
                         _clearActiveAiTask(discussionId);
                     }
                 } else {
-                    _clearActiveAiTask(discussionId);
+                    // Task ID exists in our tracker but not in the store list. 
+                    // It might have been cleared or not loaded yet.
+                    // To prevent infinite spinning, check if we have initialized tasks.
+                    // Only clear if we are reasonably sure it's gone.
+                    // For now, let's trust the polling to eventually bring it or clear it.
                 }
             }
         }
@@ -117,7 +131,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         return modelInfo?.alias?.has_vision ?? true;
     });
     const discussionGroupsTree = computed(() => {
-        // This computed property builds a nested tree of groups and their discussions
         const groups = JSON.parse(JSON.stringify(discussionGroups.value));
         const allDiscussions = sortedDiscussions.value;
         
@@ -142,7 +155,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
 
-        // Sort children within each group
         for (const group of groupsMap.values()) {
             group.children.sort((a,b) => a.name.localeCompare(b.name));
         }
@@ -169,7 +181,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
         promptLoadedArtefacts, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
         activeDiscussionParticipants, generationState, imageGenerationSystemPrompt,
-        currentModelVisionSupport // FIX: Added missing dependency
+        currentModelVisionSupport
     };
     const composableStores = { uiStore, authStore, dataStore, tasksStore };
 
@@ -268,7 +280,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         sharedWithMe.value = [];
         isLoadingDiscussions.value = false;
         currentDiscussionId.value = null;
-        currentGroupId.value = null; // Reset
+        currentGroupId.value = null;
         messages.value = [];
         isLoadingMessages.value = false;
         generationInProgress.value = false;

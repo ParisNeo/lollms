@@ -45,7 +45,7 @@ class UserPasswordChange(BaseModel):
     new_password: str
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    username_or_email: str
 
 class PasswordResetRequest(BaseModel):
     token: str

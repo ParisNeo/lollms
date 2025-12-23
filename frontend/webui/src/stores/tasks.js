@@ -13,6 +13,7 @@ export const useTasksStore = defineStore('tasks', () => {
     const tasks = ref([]);
     const isLoadingTasks = ref(false);
     const isClearingTasks = ref(false);
+    // Polling interval removed
 
     // --- COMPUTED ---
     const activeTasksCount = computed(() => {
@@ -53,7 +54,6 @@ export const useTasksStore = defineStore('tasks', () => {
             tasks.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to fetch tasks:", error);
-            tasks.value = [];
         } finally {
             isLoadingTasks.value = false;
         }
@@ -64,8 +64,6 @@ export const useTasksStore = defineStore('tasks', () => {
         const index = tasks.value.findIndex(t => t.id === taskData.id);
         
         if (index !== -1) {
-            // Vue 3 reactivity best practice: Replace object properties or the object itself
-            // To ensure reactivity in deep watchers, we assign a new object merging old and new
             tasks.value[index] = { ...tasks.value[index], ...taskData };
         } else {
             tasks.value.unshift(taskData);
@@ -73,8 +71,6 @@ export const useTasksStore = defineStore('tasks', () => {
 
         const isFinished = ['completed', 'failed', 'cancelled'].includes(taskData.status);
 
-        // Always emit completion for finished tasks so subscribers (like ImageStore) 
-        // can handle the result, even if the 'running' state was missed.
         if (isFinished) {
             emit('task:completed', taskData);
         }
@@ -89,9 +85,6 @@ export const useTasksStore = defineStore('tasks', () => {
         addTask(data);
         if (data.status === 'failed') {
              uiStore.addNotification(`Task '${data.name}' failed: ${data.error || 'Unknown error'}`, 'error');
-        } else if (data.status === 'completed') {
-             // Optional: Add success notification if desired, but might be spammy for frequent tasks
-             // uiStore.addNotification(`Task '${data.name}' completed.`, 'success');
         }
     }
 
@@ -100,7 +93,6 @@ export const useTasksStore = defineStore('tasks', () => {
         const currentUser = authStore.user;
         if (!currentUser) return;
 
-        // If username is null (admin cleared all) or matches current user
         if (data.username === null || data.username === currentUser.username) {
             tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
         }
@@ -120,7 +112,6 @@ export const useTasksStore = defineStore('tasks', () => {
         try {
             const response = await apiClient.post('/api/tasks/cancel-all');
             uiStore.addNotification(response.data.message || 'All active tasks cancelled.', 'success');
-            // Refresh logic handled via WS updates usually, but fetch once to be sure
             const authStore = useAuthStore();
             const filter = authStore.isAdmin ? 'all' : 'me';
             await fetchTasks(filter);
@@ -136,7 +127,6 @@ export const useTasksStore = defineStore('tasks', () => {
             const response = await apiClient.post('/api/tasks/clear-completed');
             uiStore.addNotification(response.data.message || 'Completed tasks cleared.', 'success');
             
-            // Optimistic update (backup to WS event)
             const authStore = useAuthStore();
             if (authStore.isAdmin) {
                 tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
@@ -158,7 +148,7 @@ export const useTasksStore = defineStore('tasks', () => {
     function startListening() {
         const authStore = useAuthStore();
         const filter = authStore.isAdmin ? 'all' : 'me';
-        // Initial fetch to populate state
+        // Initial fetch
         fetchTasks(filter);
 
         // Subscribe to WebSocket events
@@ -173,7 +163,7 @@ export const useTasksStore = defineStore('tasks', () => {
         off('tasks_cleared', handleTasksCleared);
     }
     
-    // Alias for backward compatibility if components use startPolling
+    // Alias for backward compatibility
     const startPolling = startListening;
     const stopPolling = stopListening;
 
