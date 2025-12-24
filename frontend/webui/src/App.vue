@@ -1,85 +1,25 @@
 <!-- [UPDATE] frontend/webui/src/App.vue -->
 <script setup>
-import { computed, onMounted, watch, defineAsyncComponent } from 'vue';
+import { computed, onMounted, watch, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useAuthStore } from './stores/auth';
 import { useUiStore } from './stores/ui';
 import { usePyodideStore } from './stores/pyodide';
 import { useTasksStore } from './stores/tasks';
-import { useDiscussionsStore } from './stores/discussions';
-import { useImageStore } from './stores/images'; 
 import logoDefault from './assets/logo.png';
 
-// Import Layouts
+// Layouts
 import Sidebar from './components/layout/Sidebar.vue';
 import GlobalHeader from './components/layout/GlobalHeader.vue';
 import AudioPlayer from './components/chat/AudioPlayer.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
+import ModalContainer from './components/modals/ModalContainer.vue';
 
-// Define Async Components for Modals
-const LoginModal = defineAsyncComponent(() => import('./components/modals/LoginModal.vue'));
-const RegisterModal = defineAsyncComponent(() => import('./components/modals/RegisterModal.vue'));
-const ForgotPasswordModal = defineAsyncComponent(() => import('./components/modals/ForgotPasswordModal.vue'));
-const PasswordResetLinkModal = defineAsyncComponent(() => import('./components/modals/PasswordResetLinkModal.vue'));
-const RenameDiscussionModal = defineAsyncComponent(() => import('./components/modals/RenameDiscussionModal.vue'));
-const PersonalityEditorModal = defineAsyncComponent(() => import('./components/modals/PersonalityEditorModal.vue'));
-const AdminUserEditModal = defineAsyncComponent(() => import('./components/modals/AdminUserEditModal.vue'));
-const ForceSettingsModal = defineAsyncComponent(() => import('./components/modals/ForceSettingsModal.vue'));
-const ConfirmationModal = defineAsyncComponent(() => import('./components/ui/ConfirmationModal.vue'));
-const ImageViewerModal = defineAsyncComponent(() => import('./components/modals/ImageViewerModal.vue'));
-const ArtefactEditorModal = defineAsyncComponent(() => import('./components/modals/ArtefactEditorModal.vue'));
-const ArtefactViewerModal = defineAsyncComponent(() => import('./components/modals/ArtefactViewerModal.vue'));
-const SourceViewerModal = defineAsyncComponent(() => import('./components/modals/SourceViewerModal.vue'));
-const AllSourcesSearchModal = defineAsyncComponent(() => import('./components/modals/AllSourcesSearchModal.vue'));
-const MemoryEditorModal = defineAsyncComponent(() => import('./components/modals/MemoryEditorModal.vue'));
-const ShareDataStoreModal = defineAsyncComponent(() => import('./components/modals/ShareDataStoreModal.vue'));
-const EditDataStoreModal = defineAsyncComponent(() => import('./components/modals/EditDataStoreModal.vue'));
-const ExportModal = defineAsyncComponent(() => import('./components/modals/ExportModal.vue'));
-const ImportModal = defineAsyncComponent(() => import('./components/modals/ImportModal.vue'));
-const InteractiveOutputModal = defineAsyncComponent(() => import('./components/modals/InteractiveOutputModal.vue'));
-const ShareDiscussionModal = defineAsyncComponent(() => import('./components/modals/ShareDiscussionModal.vue'));
-const ResetPasswordModal = defineAsyncComponent(() => import('./components/modals/ResetPasswordModal.vue'));
-const EmailAllUsersModal = defineAsyncComponent(() => import('./components/modals/EmailAllUsersModal.vue'));
-const EmailListModal = defineAsyncComponent(() => import('./components/modals/EmailListModal.vue'));
-const EmailUserModal = defineAsyncComponent(() => import('./components/modals/EmailUserModal.vue'));
-const InsertImageModal = defineAsyncComponent(() => import('./components/modals/InsertImageModal.vue'));
-const NewApiKeyModal = defineAsyncComponent(() => import('./components/modals/NewApiKeyModal.vue')); 
-const WhatsNextModal = defineAsyncComponent(() => import('./components/modals/WhatsNextModal.vue'));
-const AppInstallModal = defineAsyncComponent(() => import('./components/modals/AppInstallModal.vue'));
-const AppDetailsModal = defineAsyncComponent(() => import('./components/modals/AppDetailsModal.vue'));
-const AppConfigModal = defineAsyncComponent(() => import('./components/modals/AppConfigModal.vue'));
-const AppEnvConfigModal = defineAsyncComponent(() => import('./components/modals/AppEnvConfigModal.vue'));
-const AppLogModal = defineAsyncComponent(() => import('./components/modals/AppLogModal.vue'));
-const CreateFirstAdminModal = defineAsyncComponent(() => import('./components/modals/CreateFirstAdminModal.vue'));
-const GeneratePersonalityModal = defineAsyncComponent(() => import('./components/modals/GeneratePersonalityModal.vue'));
-const TasksManagerModal = defineAsyncComponent(() => import('./components/modals/TasksManagerModal.vue'));
-const EnhancePersonalityPromptModal = defineAsyncComponent(() => import('./components/modals/EnhancePersonalityPromptModal.vue'));
-const ContextToArtefactModal = defineAsyncComponent(() => import('./components/modals/ContextToArtefactModal.vue'));
-const ContextViewModal = defineAsyncComponent(() => import('./components/modals/ContextViewModal.vue'));
-const DataZonePromptManagementModal = defineAsyncComponent(() => import('./components/modals/DataZonePromptManagementModal.vue'));
-const FillPlaceholdersModal = defineAsyncComponent(() => import('./components/modals/FillPlaceholdersModal.vue'));
-const ServiceRegistrationModal = defineAsyncComponent(() => import('./components/modals/ServiceRegistrationModal.vue'));
-const GeneratePromptModal = defineAsyncComponent(() => import('./components/modals/GeneratePromptModal.vue'));
-const ManageModelsModal = defineAsyncComponent(() => import('./components/modals/ManageModelsModal.vue'));
-const ModelCardModal = defineAsyncComponent(() => import('./components/modals/ModelCardModal.vue'));
-const DiscussionTreeModal = defineAsyncComponent(() => import('./components/modals/DiscussionTreeModal.vue'));
-const EditPromptModal = defineAsyncComponent(() => import('./components/modals/EditPromptModal.vue'));
-const FunFactCategoryModal = defineAsyncComponent(() => import('./components/modals/FunFactCategoryModal.vue'));
-const FunFactModal = defineAsyncComponent(() => import('./components/modals/FunFactModal.vue'));
-const GenerateFunFactsModal = defineAsyncComponent(() => import('./components/modals/GenerateFunFactsModal.vue'));
-const SharePersonalityModal = defineAsyncComponent(() => import('./components/modals/SharePersonalityModal.vue'));
-const DiscussionGroupModal = defineAsyncComponent(() => import('./components/modals/DiscussionGroupModal.vue'));
-const MoveDiscussionModal = defineAsyncComponent(() => import('./components/modals/MoveDiscussionModal.vue'));
-const EnhancePromptModal = defineAsyncComponent(() => import('./components/modals/EnhancePromptModal.vue'));
-const CameraCaptureModal = defineAsyncComponent(() => import('./components/modals/CameraCaptureModal.vue'));
-const ImageEditorSettingsModal = defineAsyncComponent(() => import('./components/modals/ImageEditorSettingsModal.vue'));
-const NoteEditorModal = defineAsyncComponent(() => import('./components/modals/NoteEditorModal.vue'));
-const NoteGroupModal = defineAsyncComponent(() => import('./components/modals/NoteGroupModal.vue'));
-const SystemLogModal = defineAsyncComponent(() => import('./components/modals/SystemLogModal.vue'));
-const ScrapeUrlModal = defineAsyncComponent(() => import('./components/modals/ScrapeUrlModal.vue')); // ADDED
-
-const ChatSidebar = defineAsyncComponent(() => import('./components/chat/ChatSidebar.vue'));
+// UI Components
+import MessageContentRenderer from './components/ui/MessageContentRenderer/MessageContentRenderer.vue';
+import IconXMark from './assets/icons/IconXMark.vue';
+import IconAnimateSpin from './assets/icons/IconAnimateSpin.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -88,7 +28,6 @@ const tasksStore = useTasksStore();
 const route = useRoute();
 const { message_font_size } = storeToRefs(uiStore);
 
-const activeModal = computed(() => uiStore.activeModal);
 const isAuthenticating = computed(() => authStore.isAuthenticating);
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
@@ -97,217 +36,122 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
 const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 
+const isFunFactHanging = ref(false);
+
 const funFactStyle = computed(() => ({
     '--fun-fact-color': funFactColor.value,
-    'backgroundColor': `${funFactColor.value}15`,
+    'backgroundColor': isFunFactHanging.value ? 'transparent' : `${funFactColor.value}15`,
     'borderColor': funFactColor.value,
 }));
 
-const funFactTextStyle = computed(() => ({
-    color: funFactColor.value
-}));
-
 const layoutState = computed(() => {
-    if (isAuthenticating.value) {
-        return 'loading';
-    }
-    if (isAuthenticated.value) {
-        return 'authenticated';
-    }
-    return 'guest';
+    if (isAuthenticating.value || isFunFactHanging.value) return 'loading';
+    return isAuthenticated.value ? 'authenticated' : 'guest';
 });
 
 const showMainSidebar = computed(() => {
     if (!isAuthenticated.value) return false;
-    const noMainSidebarPaths = [
-        '/settings',
-        '/admin',
-        '/datastores',
-        '/friends',
-        '/help',
-        '/profile',
-        '/messages',
-        '/voices-studio',
-        '/image-studio'
-    ];
-    return !noMainSidebarPaths.some(path => route.path.startsWith(path));
+    const noSidebarPaths = ['/settings', '/admin', '/datastores', '/friends', '/help', '/profile', '/messages', '/voices-studio', '/image-studio'];
+    return !noSidebarPaths.some(path => route.path.startsWith(path));
 });
 
+function toggleFactHang() { isFunFactHanging.value = !isFunFactHanging.value; }
 
 onMounted(async () => {
     uiStore.initializeTheme();
     await authStore.attemptInitialAuth();
-    
-    const isFirstVisit = !localStorage.getItem('sidebarOpen');
     uiStore.initializeSidebarState();
-    if (isFirstVisit && window.innerWidth > 768) {
-        uiStore.closeSidebar();
-    }
-
     if (isAuthenticated.value) {
         pyodideStore.initialize();
         tasksStore.startPolling();
     }
 });
 
-watch(message_font_size, (newSize) => {
-  if (newSize && newSize > 0) {
-    document.documentElement.style.setProperty('--message-font-size', `${newSize}px`);
-  }
-}, { immediate: true });
+watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setProperty('--message-font-size', `${sz}px`); }, { immediate: true });
 </script>
 
 <template>
-  <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-gray-900 flex flex-col">
+  <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-50 dark:bg-gray-900 flex flex-col">
     
-    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-50 flex flex-col items-center justify-center text-center p-4 bg-gray-100 dark:bg-gray-900">
-        <div class="w-full max-w-lg mx-auto">
-            <div class="flex justify-center mb-6">
-                <img :src="logoSrc" alt="Logo" class="h-24 sm:h-28 w-auto object-contain" />
+    <!-- Splash Screen -->
+    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-6 bg-gray-50 dark:bg-gray-950 transition-all duration-700">
+        
+        <!-- Optimized Background Decor -->
+        <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
+            <div class="absolute top-[-5%] left-[-5%] w-2/3 h-2/3 rounded-full bg-blue-500/10 blur-[140px] animate-pulse will-change-transform"></div>
+            <div class="absolute bottom-[-5%] right-[-5%] w-2/3 h-2/3 rounded-full bg-indigo-500/10 blur-[140px] animate-pulse delay-1000 will-change-transform"></div>
+        </div>
+
+        <div v-if="isFunFactHanging" class="absolute inset-0 bg-white/50 dark:bg-black/60 backdrop-blur-md z-10" @click="toggleFactHang"></div>
+
+        <div class="w-full max-w-lg mx-auto relative z-20 transition-all duration-500" :class="{'scale-90 opacity-10 blur-sm pointer-events-none': isFunFactHanging}">
+            <div class="flex justify-center mb-10">
+                <img :src="logoSrc" alt="Logo" class="h-28 sm:h-36 w-auto object-contain drop-shadow-2xl" />
             </div>
-            <h1 class="text-5xl sm:text-6xl md:text-7xl font-bold text-yellow-600 dark:text-yellow-400 drop-shadow-lg" style="font-family: 'Exo 2', sans-serif;">
+            <h1 class="text-6xl sm:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-600 to-indigo-700 dark:from-blue-400 dark:to-indigo-500 tracking-tighter" style="font-family: 'Exo 2', sans-serif;">
                 {{ authStore.welcomeText || 'LoLLMs' }}
             </h1>
-            <p class="mt-2 text-lg sm:text-xl md:text-2xl text-gray-600 dark:text-gray-300">
+            <p class="mt-4 text-xl text-gray-400 dark:text-gray-500 font-medium tracking-wide">
                 {{ authStore.welcomeSlogan || 'One tool to rule them all' }}
             </p>
             
-            <div v-if="authStore.funFact" class="mt-8 mx-auto max-w-md">
-                <div 
-                     :title="funFactCategory ? `Category: ${funFactCategory}` : 'Fun Fact'" 
-                     class="p-4 border-l-4 rounded-lg text-sm text-left text-gray-900 dark:text-gray-100" 
-                     :style="funFactStyle">
-                    <span class="font-bold" :style="funFactTextStyle">🤓 {{ funFactCategory || 'Fun Fact' }}:</span> {{ authStore.funFact }}
-                </div>
-                <div class="mt-4">
-                    <button @click="authStore.fetchNewFunFact()" class="btn btn-secondary btn-sm">Next Fun Fact</button>
-                </div>
-            </div>
-            
-            <!-- Glassmorphism Progress Bar -->
-            <div class="mt-12 w-full px-4">
-                <div class="h-4 w-full rounded-full bg-gray-200/20 backdrop-blur-md border border-white/20 dark:border-gray-600/30 overflow-hidden shadow-inner relative">
-                    <div class="h-full rounded-full bg-gradient-to-r from-cyan-400/90 to-blue-500/90 backdrop-blur-sm transition-all duration-500 relative" 
-                         :style="{ width: `${authStore.loadingProgress}%` }">
-                         <!-- Shine effect -->
-                         <div class="absolute top-0 left-0 bottom-0 right-0 bg-gradient-to-b from-white/30 to-transparent"></div>
-                         <!-- Striped animation (optional css class or inline) -->
+            <div class="mt-16 w-full max-w-sm mx-auto">
+                <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden relative shadow-inner">
+                    <div class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-700 relative" :style="{ width: `${authStore.loadingProgress}%` }">
                          <div class="absolute inset-0 w-full h-full progress-bar-animated opacity-30"></div>
                     </div>
                 </div>
-                <p class="mt-3 text-sm text-gray-600 dark:text-gray-300 font-medium tracking-wide">{{ authStore.loadingMessage }}</p>
-                <p class="mt-1 text-lg font-bold text-gray-700 dark:text-gray-200">{{ authStore.loadingProgress }}%</p>
+                <div class="flex justify-between items-center mt-4">
+                    <span class="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em]">{{ authStore.loadingMessage }}</span>
+                    <span class="text-sm font-black text-gray-400 dark:text-gray-600 font-mono">{{ authStore.loadingProgress }}%</span>
+                </div>
             </div>
-
         </div>
-        <footer class="absolute bottom-4 w-full text-center text-xs text-gray-500 dark:text-gray-400">
-            Powered by <a href="https://github.com/ParisNeo/lollms-webui" target="_blank" class="font-semibold hover:underline">LoLLMs</a> by <a href="https://github.com/ParisNeo" target="_blank" class="font-semibold hover:underline">ParisNeo</a>
-        </footer>    
+
+        <!-- Fun Fact Card -->
+        <div v-if="authStore.funFact" class="mt-14 mx-auto w-full transition-all duration-700 cubic-bezier(0.34, 1.56, 0.64, 1) relative z-30"
+            :class="isFunFactHanging ? 'max-w-4xl scale-100' : 'max-w-md cursor-pointer group'"
+            @click="!isFunFactHanging && toggleFactHang()">
+            <div class="p-10 border-l-[12px] rounded-[2rem] text-left shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)] bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-gray-100 dark:border-gray-700 overflow-hidden" :style="funFactStyle">
+                <div class="flex items-center justify-between mb-6">
+                    <div class="flex items-center gap-4">
+                        <span class="text-4xl filter drop-shadow-md">💡</span>
+                        <span class="font-black text-[11px] uppercase tracking-[0.3em]" :style="{ color: funFactColor }">{{ funFactCategory || 'Fact Discovery' }}</span>
+                    </div>
+                    <button v-if="isFunFactHanging" @click.stop="toggleFactHang" class="p-2 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 rounded-full transition-all hover:rotate-90 shadow-sm"><IconXMark class="w-8 h-8" /></button>
+                </div>
+                <div class="max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
+                    <MessageContentRenderer :content="authStore.funFact" class="text-gray-900 dark:text-gray-100" />
+                </div>
+                <div v-if="!isFunFactHanging" class="mt-8 text-[9px] text-center text-gray-400 dark:text-gray-500 font-black uppercase tracking-[0.2em] animate-pulse">Tap to expand and stay here</div>
+                <div v-if="isFunFactHanging" class="mt-12 flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-8">
+                    <button @click.stop="authStore.fetchNewFunFact()" class="btn btn-secondary btn-sm px-6" :disabled="authStore.isFetchingFunFact"><IconAnimateSpin v-if="authStore.isFetchingFunFact" class="w-4 h-4 mr-2 animate-spin" />Another Fact</button>
+                    <button @click.stop="toggleFactHang" class="btn btn-primary px-10 py-3 text-sm font-black uppercase tracking-widest rounded-xl shadow-xl shadow-blue-500/20">Continue &rarr;</button>
+                </div>
+            </div>
+        </div>
+        <footer class="absolute bottom-8 w-full text-center text-[10px] font-black uppercase tracking-[0.4em] text-gray-400 dark:text-gray-600" :class="{'opacity-0 pointer-events-none': isFunFactHanging}">ParisNeo &middot; 2025</footer>    
     </div>
 
-    <!-- Authenticated App Layout -->
+    <!-- Main Layout -->
     <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0 relative overflow-hidden">
       <div class="flex flex-grow min-h-0 relative w-full h-full">
-        <div v-if="showMainSidebar" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out h-full" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
-            <Sidebar/>
-        </div>
+        <div v-if="showMainSidebar" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out h-full" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"><Sidebar/></div>
         <div v-if="showMainSidebar && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
-
         <div class="flex-1 flex flex-col overflow-hidden h-full relative">
-          <GlobalHeader />
-          <main class="flex-1 overflow-hidden relative">
-              <router-view />
-          </main>
+          <GlobalHeader /><main class="flex-1 overflow-hidden relative"><router-view /></main>
         </div>
-        
-        <!-- Global Chat Sidebar -->
         <ChatSidebar />
       </div>
     </div>
+    <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0"><router-view /></div>
 
-    <!-- Guest/Unauthenticated View -->
-    <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0">
-        <router-view />
-    </div>
-
-    <!-- Modals -->
-    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
-    <LoginModal v-if="activeModal === 'login'" />
-    <RegisterModal v-if="activeModal === 'register'" />
-    <ForgotPasswordModal v-if="activeModal === 'forgotPassword'" />
-    <PasswordResetLinkModal v-if="activeModal === 'passwordResetLink'" />
-    <RenameDiscussionModal v-if="activeModal === 'renameDiscussion'" />
-    <PersonalityEditorModal v-if="activeModal === 'personalityEditor'" />
-    <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />
-    <ForceSettingsModal v-if="activeModal === 'forceSettings'" />
-    <ConfirmationModal v-if="activeModal === 'confirmation'" />
-    <ImageViewerModal />
-    <ArtefactEditorModal v-if="activeModal === 'artefactEditor'" />
-    <ArtefactViewerModal v-if="activeModal === 'artefactViewer'" />
-    <SourceViewerModal v-if="activeModal === 'sourceViewer'" />
-    <AllSourcesSearchModal v-if="activeModal === 'allSourcesSearch'" />
-    <MemoryEditorModal v-if="activeModal === 'memoryEditor'" />
-    
-    <ShareDataStoreModal v-if="activeModal === 'shareDataStore'" />
-    <EditDataStoreModal v-if="activeModal === 'editDataStore'" />
-    <ExportModal v-if="activeModal === 'export'" />
-    <ImportModal v-if="activeModal === 'import'" />
-    <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
-    <ShareDiscussionModal v-if="activeModal === 'shareDiscussion'" />
-    <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
-    <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
-    <EmailListModal v-if="activeModal === 'emailList'" />
-    <EmailUserModal v-if="activeModal === 'adminUserEmail'" />
-    <InsertImageModal v-if="activeModal === 'insertImage'" />
-    <NewApiKeyModal v-if="activeModal === 'newApiKey'" /> 
-    <WhatsNextModal v-if="activeModal === 'whatsNext'" />
-    <AppInstallModal v-if="activeModal === 'appInstall'" />
-    <AppDetailsModal v-if="activeModal === 'appDetails'" />
-    <AppConfigModal v-if="activeModal === 'appConfig'" />
-    <AppEnvConfigModal v-if="activeModal === 'appEnvConfig'" />
-    <AppLogModal v-if="activeModal === 'appLog'" />
-    <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
-    <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
-    <TasksManagerModal v-if="activeModal === 'tasksManager'" />
-    <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />
-    <ContextToArtefactModal v-if="activeModal === 'contextToArtefact'" />
-    <ContextViewModal v-if="activeModal === 'contextViewer'" />
-    <DataZonePromptManagementModal v-if="activeModal === 'dataZonePromptManagement'" />
-    <FillPlaceholdersModal v-if="activeModal === 'fillPlaceholders'" />
-    <ServiceRegistrationModal v-if="activeModal === 'serviceRegistration'" />
-    <GeneratePromptModal v-if="activeModal === 'generatePrompt'" />
-    <ManageModelsModal v-if="activeModal === 'manageModels'" />
-    <ModelCardModal v-if="activeModal === 'modelCard'" />
-    <DiscussionTreeModal v-if="activeModal === 'discussionTree'" />
-    <EditPromptModal v-if="activeModal === 'editPrompt'" />
-    <FunFactCategoryModal v-if="activeModal === 'funFactCategory'" />
-    <FunFactModal v-if="activeModal === 'funFact'" />
-    <GenerateFunFactsModal v-if="activeModal === 'generateFunFacts'" />
-    <SharePersonalityModal v-if="activeModal === 'sharePersonality'" />
-    <DiscussionGroupModal v-if="activeModal === 'discussionGroup'" />
-    <MoveDiscussionModal v-if="activeModal === 'moveDiscussion'" />
-    <EnhancePromptModal v-if="activeModal === 'enhancePrompt'" />
-    <CameraCaptureModal v-if="activeModal === 'cameraCapture'" />
-    <ImageEditorSettingsModal v-if="activeModal === 'imageEditorSettings'" />
-    <NoteEditorModal v-if="activeModal === 'noteEditor'" />
-    <NoteGroupModal v-if="activeModal === 'noteGroup'" />
-    <SystemLogModal v-if="activeModal === 'systemLog'" />
-    <ScrapeUrlModal v-if="activeModal === 'scrapeUrl'" /> <!-- REGISTERED -->
-    
-    <!-- Always rendered panels -->
-    <NotificationPanel />
-    <AudioPlayer />
+    <ModalContainer />
+    <NotificationPanel /><AudioPlayer />
   </div>
 </template>
 
 <style>
-@keyframes progress-animation {
-  0% { background-position: 1rem 0; }
-  100% { background-position: 0 0; }
-}
-.progress-bar-animated {
-  background-image: linear-gradient(45deg, rgba(255, 255, 255, .15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .15) 50%, rgba(255, 255, 255, .15) 75%, transparent 75%, transparent);
-  background-size: 1rem 1rem;
-  animation: progress-animation 1s linear infinite;
-}
+@keyframes progress-animation { 0% { background-position: 1rem 0; } 100% { background-position: 0 0; } }
+.progress-bar-animated { background-image: linear-gradient(45deg, rgba(255, 255, 255, .15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .15) 50%, rgba(255, 255, 255, .15) 75%, transparent 75%, transparent); background-size: 1rem 1rem; animation: progress-animation 1s linear infinite; }
 </style>

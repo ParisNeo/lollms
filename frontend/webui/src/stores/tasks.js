@@ -1,5 +1,6 @@
+// [UPDATE] frontend/webui/src/stores/tasks.js
 import { defineStore } from 'pinia';
-import { ref, computed } from 'vue';
+import { ref, computed, shallowRef } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
@@ -10,10 +11,12 @@ export const useTasksStore = defineStore('tasks', () => {
     const { on, off, emit } = useEventBus();
 
     // --- STATE ---
-    const tasks = ref([]);
+    // Use shallowRef to prevent deep recursion performance issues on large lists
+    const tasks = shallowRef([]);
     const isLoadingTasks = ref(false);
     const isClearingTasks = ref(false);
-    // Polling interval removed
+    let pollingInterval = null; 
+    let isFetching = false;
 
     // --- COMPUTED ---
     const activeTasksCount = computed(() => {
@@ -40,10 +43,10 @@ export const useTasksStore = defineStore('tasks', () => {
 
     const imageGenerationTasksCount = computed(() => imageGenerationTasks.value.length);
 
-
     // --- ACTIONS ---
     async function fetchTasks(ownerFilter = 'all') {
-        isLoadingTasks.value = true;
+        if (isFetching) return; // Prevent overlapping requests
+        isFetching = true;
         try {
             const authStore = useAuthStore();
             const params = {};
@@ -56,31 +59,29 @@ export const useTasksStore = defineStore('tasks', () => {
             console.error("Failed to fetch tasks:", error);
         } finally {
             isLoadingTasks.value = false;
+            isFetching = false;
         }
     }
 
     function addTask(taskData) {
         if (!taskData || !taskData.id) return;
-        const index = tasks.value.findIndex(t => t.id === taskData.id);
+        const newTasks = [...tasks.value];
+        const index = newTasks.findIndex(t => t.id === taskData.id);
         
         if (index !== -1) {
-            tasks.value[index] = { ...tasks.value[index], ...taskData };
+            newTasks[index] = { ...newTasks[index], ...taskData };
         } else {
-            tasks.value.unshift(taskData);
+            newTasks.unshift(taskData);
         }
+        tasks.value = newTasks;
 
-        const isFinished = ['completed', 'failed', 'cancelled'].includes(taskData.status);
-
-        if (isFinished) {
+        if (['completed', 'failed', 'cancelled'].includes(taskData.status)) {
             emit('task:completed', taskData);
         }
     }
     
     // --- WebSocket Event Handlers ---
-    function handleTaskUpdate(data) {
-        addTask(data);
-    }
-
+    function handleTaskUpdate(data) { addTask(data); }
     function handleTaskEnd(data) {
         addTask(data);
         if (data.status === 'failed') {
@@ -90,10 +91,8 @@ export const useTasksStore = defineStore('tasks', () => {
 
     function handleTasksCleared(data) {
         const authStore = useAuthStore();
-        const currentUser = authStore.user;
-        if (!currentUser) return;
-
-        if (data.username === null || data.username === currentUser.username) {
+        if (!authStore.user) return;
+        if (data.username === null || data.username === authStore.user.username) {
             tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
         }
     }
@@ -103,43 +102,24 @@ export const useTasksStore = defineStore('tasks', () => {
             const response = await apiClient.post(`/api/tasks/${taskId}/cancel`);
             addTask(response.data);
             uiStore.addNotification('Task cancellation processed.', 'info');
-        } catch (error) {
-            // Error handled globally
-        }
+        } catch (error) {}
     }
 
     async function cancelAllTasks() {
         try {
             const response = await apiClient.post('/api/tasks/cancel-all');
             uiStore.addNotification(response.data.message || 'All active tasks cancelled.', 'success');
-            const authStore = useAuthStore();
-            const filter = authStore.isAdmin ? 'all' : 'me';
-            await fetchTasks(filter);
-        } catch (error) {
-            // Error handled globally
-        }
+            fetchTasks();
+        } catch (error) {}
     }
 
     async function clearCompletedTasks() {
         if (isClearingTasks.value) return;
         isClearingTasks.value = true;
         try {
-            const response = await apiClient.post('/api/tasks/clear-completed');
-            uiStore.addNotification(response.data.message || 'Completed tasks cleared.', 'success');
-            
-            const authStore = useAuthStore();
-            if (authStore.isAdmin) {
-                tasks.value = tasks.value.filter(task => !['completed', 'failed', 'cancelled'].includes(task.status));
-            } else {
-                const username = authStore.user?.username;
-                tasks.value = tasks.value.filter(task => {
-                    const isCompleted = ['completed', 'failed', 'cancelled'].includes(task.status);
-                    if (!isCompleted) return true;
-                    return task.owner_username !== username;
-                });
-            }
+            await apiClient.post('/api/tasks/clear-completed');
+            fetchTasks();
         } catch (error) {
-            // Error handled globally
         } finally {
             isClearingTasks.value = false;
         }
@@ -148,50 +128,30 @@ export const useTasksStore = defineStore('tasks', () => {
     function startListening() {
         const authStore = useAuthStore();
         const filter = authStore.isAdmin ? 'all' : 'me';
-        // Initial fetch
         fetchTasks(filter);
-
-        // Subscribe to WebSocket events
         on('task_update', handleTaskUpdate);
         on('task_end', handleTaskEnd);
         on('tasks_cleared', handleTasksCleared);
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(() => fetchTasks(filter), 2500); // Polling slightly slower to reduce UI thrash
     }
 
     function stopListening() {
         off('task_update', handleTaskUpdate);
         off('task_end', handleTaskEnd);
         off('tasks_cleared', handleTasksCleared);
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
     }
     
-    // Alias for backward compatibility
-    const startPolling = startListening;
-    const stopPolling = stopListening;
-
-    function $reset() {
-        tasks.value = [];
-        isLoadingTasks.value = false;
-        isClearingTasks.value = false;
-        stopListening();
-    }
-
     return {
-        tasks,
-        isLoadingTasks,
-        isClearingTasks,
-        activeTasksCount,
-        mostRecentActiveTask,
-        imageGenerationTasks,
-        imageGenerationTasksCount,
-        fetchTasks,
-        addTask,
-        cancelTask,
-        cancelAllTasks,
-        clearCompletedTasks,
-        handleTasksCleared,
-        startPolling,
-        stopPolling,
-        startListening,
-        stopListening,
-        $reset
+        tasks, isLoadingTasks, isClearingTasks, activeTasksCount, mostRecentActiveTask,
+        imageGenerationTasks, imageGenerationTasksCount,
+        fetchTasks, addTask, cancelTask, cancelAllTasks, clearCompletedTasks,
+        handleTasksCleared, startListening, stopListening,
+        startPolling: startListening, stopPolling: stopListening,
+        $reset: () => { tasks.value = []; stopListening(); }
     };
 });

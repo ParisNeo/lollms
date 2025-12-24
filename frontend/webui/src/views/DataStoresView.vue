@@ -1,6 +1,6 @@
 <!-- [UPDATE] frontend/webui/src/views/DataStoresView.vue -->
 <script setup>
-import { ref, computed, onMounted, watch, onUnmounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../stores/data';
@@ -132,15 +132,12 @@ function highlightedChunk(text) {
     return text.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-700 rounded">$1</mark>');
 }
 
-
-let taskPollingInterval;
 onMounted(() => {
     dataStore.fetchDataStores();
     dataStore.fetchAvailableVectorizers();
     tasksStore.fetchTasks();
-    taskPollingInterval = setInterval(tasksStore.fetchTasks, 3000);
+    // Removed polling to prevent backend spamming. Updates are handled via WebSocket events in tasksStore.
 });
-onUnmounted(() => clearInterval(taskPollingInterval));
 
 watch(tasks, (newTasks) => {
     if (!currentSelectedStore.value) { currentUploadTask.value = null; currentGraphTask.value = null; currentScrapeTask.value = null; return; }

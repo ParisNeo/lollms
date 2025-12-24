@@ -53,7 +53,6 @@ def _bootstrap_global_settings(connection):
     print("INFO: Checking and bootstrapping global settings in the database.")
     
     all_possible_settings = {
-        # ... (keep existing settings) ...
         "host": { "value": SERVER_CONFIG.get("host", "0.0.0.0"), "type": "string", "description": "Server host address. Requires a restart to take effect.", "category": "Server" },
         "port": { "value": SERVER_CONFIG.get("port", 9642), "type": "integer", "description": "Server port. Requires a restart to take effect.", "category": "Server" },
         "https_enabled": { "value": SERVER_CONFIG.get("https_enabled", False), "type": "boolean", "description": "Enable HTTPS for the server. Requires a restart to take effect.", "category": "Server" },
@@ -104,15 +103,11 @@ def _bootstrap_global_settings(connection):
         "openai_api_require_key": { "value": True, "type": "boolean", "description": "Require an API key for the OpenAI-compatible v1 API endpoint. If disabled, requests without a key will be handled by the primary admin account.", "category": "Services" },
         "ollama_service_enabled": { "value": False, "type": "boolean", "description": "Enable the Ollama service endpoint for users (OpenAI compatible).", "category": "Services" },
         "ollama_require_key": { "value": True, "type": "boolean", "description": "Require an API key for the Ollama service endpoint. If disabled, requests without a key will be handled by the primary admin account.", "category": "Services" },
-        
-        # --- NEW SERVICES SETTINGS ---
         "lollms_services_enabled": { "value": True, "type": "boolean", "description": "Enable the exclusive LoLLMs Services endpoint (tokenizer, long-context, rag, advanced image edit).", "category": "Services" },
         "lollms_services_require_key": { "value": True, "type": "boolean", "description": "Require an API key for exclusive LoLLMs Services.", "category": "Services" },
-        
         "rate_limit_enabled": { "value": False, "type": "boolean", "description": "Enable optional rate limiting for all service endpoints.", "category": "Services" },
         "rate_limit_max_requests": { "value": 60, "type": "integer", "description": "Maximum number of requests allowed per window.", "category": "Services" },
         "rate_limit_window_seconds": { "value": 60, "type": "integer", "description": "The window size in seconds for rate limiting.", "category": "Services" },
-        # -----------------------------
 
         "model_display_mode": { "value": "mixed", "type": "string", "description": "How models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models" },
         "tti_model_display_mode": { "value": "mixed", "type": "string", "description": "How TTI models are displayed to users: 'original' (shows raw names), 'aliased' (shows only models with aliases), 'mixed' (shows aliases where available, originals otherwise).", "category": "Models" },
@@ -126,9 +121,14 @@ def _bootstrap_global_settings(connection):
         "ai_bot_personality_id": { "value": "", "type": "string", "description": "The personality used by the AI Bot (optional).", "category": "AI Bot" },
         "ai_bot_moderation_enabled": { "value": False, "type": "boolean", "description": "Enable moderation for AI Bot.", "category": "AI Bot" },
         "ai_bot_moderation_criteria": { "value": "Be polite and respectful. No hate speech, spam, or explicit content.", "type": "text", "description": "Criteria for AI Bot moderation.", "category": "AI Bot" },
+        
         "welcome_text": { "value": "lollms", "type": "string", "description": "The main text displayed on the welcome page.", "category": "Welcome Page" },
         "welcome_slogan": { "value": "One tool to rule them all", "type": "string", "description": "The slogan displayed under the main text on the welcome page.", "category": "Welcome Page" },
         "welcome_logo_url": { "value": "", "type": "string", "description": "URL to a custom logo for the welcome page. Leave empty for default.", "category": "Welcome Page" },
+        "force_welcome_message": { "value": False, "type": "boolean", "description": "When enabled, the specified announcement message will replace the random fun facts for all users.", "category": "Welcome Page" },
+        "forced_welcome_message_title": { "value": "System Announcement", "type": "string", "description": "The title displayed above the forced welcome message.", "category": "Welcome Page" },
+        "forced_welcome_message_content": { "value": "", "type": "text", "description": "The content of the forced announcement displayed on the welcome/loading screen.", "category": "Welcome Page" },
+
         "latex_builder_enabled": { "value": False, "type": "boolean", "description": "Enable the LaTeX builder to compile LaTeX code blocks into PDFs.", "category": "Builders" },
         "latex_builder_path": { "value": "pdflatex", "type": "string", "description": "Path to the pdflatex executable. On Windows, this might be 'C:\\texlive\\2023\\bin\\win32\\pdflatex.exe'. On Linux, 'pdflatex' should suffice if it's in the system's PATH.", "category": "Builders" },
         "export_to_txt_enabled": { "value": True, "type": "boolean", "description": "Allow users to export messages as plain text (.txt) files.", "category": "Builders" },
@@ -423,7 +423,6 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                         json_to_add = {}
                         if 'verify_ssl_certificate' in row and row['verify_ssl_certificate'] is not None: json_to_add['verify_ssl_certificate'] = bool(row['verify_ssl_certificate'])
                         if 'host_address' in row and row['host_address'] is not None: json_to_add['host_address'] = row['host_address']
-                        # ... (add other fields as needed) ...
 
                         created_at_dt = None
                         if 'created_at' in row and row['created_at'] is not None:
@@ -1094,4 +1093,3 @@ def _migrate_user_data_folders(connection):
                     try: shutil.move(str(old_path), str(new_path))
                     except Exception: pass
     except Exception: pass
-
