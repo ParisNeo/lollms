@@ -11,11 +11,10 @@ export const useTasksStore = defineStore('tasks', () => {
     const { on, off, emit } = useEventBus();
 
     // --- STATE ---
-    // Use shallowRef to prevent deep recursion performance issues on large lists
+    // Use shallowRef to prevent deep recursion performance issues on large task lists
     const tasks = shallowRef([]);
     const isLoadingTasks = ref(false);
     const isClearingTasks = ref(false);
-    let pollingInterval = null; 
     let isFetching = false;
 
     // --- COMPUTED ---
@@ -45,7 +44,7 @@ export const useTasksStore = defineStore('tasks', () => {
 
     // --- ACTIONS ---
     async function fetchTasks(ownerFilter = 'all') {
-        if (isFetching) return; // Prevent overlapping requests
+        if (isFetching) return; 
         isFetching = true;
         try {
             const authStore = useAuthStore();
@@ -128,22 +127,22 @@ export const useTasksStore = defineStore('tasks', () => {
     function startListening() {
         const authStore = useAuthStore();
         const filter = authStore.isAdmin ? 'all' : 'me';
+        
+        // Initial fetch to get the current state
         fetchTasks(filter);
+        
+        // Setup push handlers from WebSocket
         on('task_update', handleTaskUpdate);
         on('task_end', handleTaskEnd);
         on('tasks_cleared', handleTasksCleared);
-        if (pollingInterval) clearInterval(pollingInterval);
-        pollingInterval = setInterval(() => fetchTasks(filter), 2500); // Polling slightly slower to reduce UI thrash
+        
+        // POLLING REMOVED: Relying entirely on WebSocket push events to reduce server load.
     }
 
     function stopListening() {
         off('task_update', handleTaskUpdate);
         off('task_end', handleTaskEnd);
         off('tasks_cleared', handleTasksCleared);
-        if (pollingInterval) {
-            clearInterval(pollingInterval);
-            pollingInterval = null;
-        }
     }
     
     return {

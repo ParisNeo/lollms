@@ -1,4 +1,4 @@
-# backend/routers/admin/system_management.py
+# [UPDATE] backend/routers/admin/system_management.py
 import sys
 import asyncio
 import statistics
@@ -26,7 +26,7 @@ from backend.session import get_current_admin_user, get_user_data_root
 from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
 from backend.utils import get_local_ip_addresses
-from backend.tasks.system_tasks import _create_backup_task, _analyze_logs_task
+from backend.tasks.system_tasks import _create_backup_task, _analyze_logs_task, _prune_old_tasks_task
 from backend.settings import settings
 from ascii_colors import trace_exception
 
@@ -416,6 +416,17 @@ async def create_backup(
         target=_create_backup_task,
         args=(request.password,),
         description="Creating a secure password-protected zip archive of the entire application.",
+        owner_username=current_admin.username
+    )
+    return db_task
+
+@system_management_router.post("/tasks/prune", response_model=TaskInfo, status_code=202)
+async def trigger_manual_task_pruning(current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+    """Manually triggers the background task to delete finished tasks older than configured retention."""
+    db_task = task_manager.submit_task(
+        name="Manual Task Pruning",
+        target=_prune_old_tasks_task,
+        description="Cleaning up old finished background tasks.",
         owner_username=current_admin.username
     )
     return db_task

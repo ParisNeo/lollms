@@ -1,4 +1,3 @@
-# lollms/main.py
 import shutil
 import datetime
 from pathlib import Path
@@ -11,6 +10,7 @@ from urllib.parse import urlparse
 from ascii_colors import ASCIIColors, trace_exception
 import asyncio
 import time
+import threading
 
 
 from multipart.multipart import FormParser
@@ -76,7 +76,7 @@ from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
 from backend.routers.notes import notes_router 
-from backend.routers.notebooks import router as notebooks_router # IMPORTED
+from backend.routers.notebooks import router as notebooks_router
 from backend.routers.public import public_router
 
 from backend.routers.services.lollms_v1 import lollms_v1_router
@@ -89,6 +89,7 @@ from backend.tasks.email_tasks import _generate_email_proposal_task
 from backend.routers.tasks import tasks_router
 from backend.task_manager import task_manager
 from backend.ws_manager import manager, listen_for_broadcasts
+from backend.com_hub import start_hub_server
 from backend.routers.help import help_router
 from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
@@ -98,11 +99,12 @@ from backend.zoo_cache import load_cache
 import uvicorn
 from backend.settings import settings
 
-# --- RSS Feed Imports ---
+# --- System Tasks Imports ---
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.tasks.news_tasks import _scrape_rss_feeds_task, _cleanup_old_news_articles_task
 from backend.tasks.social_tasks import _generate_feed_post_task 
-# --- End RSS Feed Imports ---
+from backend.tasks.system_tasks import _prune_old_tasks_task
+# --- End System Tasks Imports ---
 
 broadcast_listener_task = None
 rss_scheduler = None
@@ -128,6 +130,23 @@ def scheduled_news_cleanup_job():
         description="Deleting old news articles based on retention policy.",
         owner_username=None
     )
+
+def scheduled_task_pruning_job():
+    """Daily job to clear out old background task records."""
+    db = db_session_module.SessionLocal()
+    try:
+        settings.load_from_db(db)
+        if not settings.get("tasks_auto_cleanup", True):
+            return
+            
+        task_manager.submit_task(
+            name="Scheduled Task Pruning",
+            target=_prune_old_tasks_task,
+            description="Automatic background cleanup of old finished tasks.",
+            owner_username=None
+        )
+    finally:
+        db.close()
 
 def check_and_run_scheduled_posts():
     db = db_session_module.SessionLocal()
@@ -194,6 +213,17 @@ def run_one_time_startup_tasks(lock: Lock):
     
     ASCIIColors.green(f"Worker {os.getpid()} acquired startup lock. Running one-time tasks...")
     try:
+        # --- Election: Start the Communication Hub ---
+        db = db_session_module.SessionLocal()
+        try:
+            settings.load_from_db(db)
+        finally:
+            db.close()
+
+        hub_port = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
+        threading.Thread(target=start_hub_server, args=('127.0.0.1', hub_port), daemon=True).start()
+        # ---------------------------------------------
+
         print("--- Running One-Time Startup Tasks ---")
         
         engine = db_session_module.engine
@@ -336,15 +366,15 @@ def run_one_time_startup_tasks(lock: Lock):
         
         db_for_prompts: Optional[Session] = None
         try:
-            db_for_prompts = next(get_db())
+            db_for_defaults = next(get_db())
             prompt_zoo_name = "lollms_prompts_zoo"
             prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
             prompt_zoo_repo_path = PROMPTS_ZOO_ROOT_PATH / prompt_zoo_name
 
-            if not db_for_prompts.query(DBPromptZooRepository).filter(or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)).first():
+            if not db_for_defaults.query(DBPromptZooRepository).filter(or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)).first():
                 default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
-                db_for_prompts.add(default_prompt_repo)
-                db_for_prompts.commit()
+                db_for_defaults.add(default_prompt_repo)
+                db_for_defaults.commit()
                 ASCIIColors.green(f"INFO: Default Prompt Zoo repo '{prompt_zoo_name}' added to DB.")
 
             if not prompt_zoo_repo_path.exists():
@@ -354,21 +384,21 @@ def run_one_time_startup_tasks(lock: Lock):
         except Exception as e:
             ASCIIColors.error(f"ERROR during Prompt Zoo repository setup: {e}")
             trace_exception(e)
-            if db_for_prompts: db_for_prompts.rollback()
+            if db_for_defaults: db_for_defaults.rollback()
         finally:
-            if db_for_prompts: db_for_prompts.close()
+            if db_for_defaults: db_for_defaults.close()
 
         db_for_personalities: Optional[Session] = None
         try:
-            db_for_personalities = next(get_db())
+            db_for_defaults = next(get_db())
             personality_zoo_name = "lollms_personalities_zoo"
             personality_zoo_url = "https://github.com/ParisNeo/lollms_personalities_zoo.git"
             personality_zoo_repo_path = PERSONALITIES_ZOO_ROOT_PATH / personality_zoo_name
 
-            if not db_for_personalities.query(DBPersonalityZooRepository).filter(or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)).first():
+            if not db_for_defaults.query(DBPersonalityZooRepository).filter(or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)).first():
                 default_personality_repo = DBPersonalityZooRepository(name=personality_zoo_name, url=personality_zoo_url, is_deletable=False)
-                db_for_personalities.add(default_personality_repo)
-                db_for_personalities.commit()
+                db_for_defaults.add(default_personality_repo)
+                db_for_defaults.commit()
                 ASCIIColors.green(f"INFO: Default Personality Zoo repo '{personality_zoo_name}' added to DB.")
 
             if not personality_zoo_repo_path.exists():
@@ -378,9 +408,9 @@ def run_one_time_startup_tasks(lock: Lock):
         except Exception as e:
             ASCIIColors.error(f"ERROR during Personality Zoo repository setup: {e}")
             trace_exception(e)
-            if db_for_personalities: db_for_personalities.rollback()
+            if db_for_defaults: db_for_defaults.rollback()
         finally:
-            if db_for_personalities: db_for_personalities.close()
+            if db_for_defaults: db_for_defaults.close()
 
 
         ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
@@ -462,6 +492,10 @@ async def startup_event():
         rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1)
         print(f"INFO: Bot Auto-Posting schedule checker active.")
 
+        # Scheduled Task Pruning
+        rss_scheduler.add_job(scheduled_task_pruning_job, 'cron', hour=4, minute=0)
+        print(f"INFO: Background task pruning scheduled (daily at 4:00 AM).")
+
         if settings.get("email_marketing_enabled", False):
             rss_scheduler.add_job(
                 scheduled_email_proposal_job, 
@@ -473,7 +507,8 @@ async def startup_event():
         if not rss_scheduler.running:
             rss_scheduler.start()
 
-    print(f"INFO: Worker {os.getpid()} starting DB broadcast listener.")
+    hub_port = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
+    print(f"INFO: Worker {os.getpid()} starting Communication Hub client listener on port {hub_port}.")
 
 async def shutdown_event():
     ASCIIColors.info(f"--- Worker process (PID: {os.getpid()}) shutting down. ---")
@@ -536,12 +571,12 @@ app.include_router(discussion_groups_router)
 app.include_router(voices_studio_router)
 app.include_router(image_studio_router)
 app.include_router(notes_router)
-app.include_router(notebooks_router) # REGISTERED
+app.include_router(notebooks_router) 
 app.include_router(public_router)
-app.include_router(lollms_v1_router) # REGISTERED
+app.include_router(lollms_v1_router) 
 
 # Update admin_router inclusion if needed or include directly
-admin_router.include_router(admin_services_router) # REGISTERED via admin/__init__.py update usually
+admin_router.include_router(admin_services_router) 
 
 add_ui_routes(app)
 

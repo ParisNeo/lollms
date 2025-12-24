@@ -97,6 +97,7 @@ SERVER_CONFIG = {
     "https_enabled": get_env_var("HTTPS_ENABLED", False, bool),
     "ssl_certfile": get_env_var("SSL_CERTFILE", ""),
     "ssl_keyfile": get_env_var("SSL_KEYFILE", ""),
+    "com_hub_port": get_env_var("COM_HUB_PORT", 8042, int),
 }
 
 # App settings

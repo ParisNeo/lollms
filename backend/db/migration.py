@@ -141,7 +141,11 @@ def _bootstrap_global_settings(connection):
         "rss_feed_enabled": { "value": False, "type": "boolean", "description": "Enable the periodic fetching of RSS feeds to generate news and fun facts.", "category": "News Feed" },
         "rss_feed_check_interval_minutes": { "value": 60, "type": "integer", "description": "How often (in minutes) to check for new articles in the RSS feeds.", "category": "News Feed" },
         "rss_generate_fun_facts": { "value": False, "type": "boolean", "description": "When enabled, an AI will generate a 'fun fact' from the content of each new RSS article.", "category": "News Feed" },
-        "rss_news_retention_days": { "value": 1, "type": "integer", "description": "How many days to keep news articles. Older articles will be deleted daily. Set to 0 to disable cleanup.", "category": "News Feed" }
+        "rss_news_retention_days": { "value": 1, "type": "integer", "description": "How many days to keep news articles. Older articles will be deleted daily. Set to 0 to disable cleanup.", "category": "News Feed" },
+        
+        "tasks_auto_cleanup": { "value": True, "type": "boolean", "description": "Automatically delete completed, failed, or cancelled tasks from the database.", "category": "Task Manager" },
+        "tasks_retention_days": { "value": 7, "type": "integer", "description": "How many days to keep finished tasks in the database before auto-cleanup.", "category": "Task Manager" },
+        "com_hub_port": { "value": SERVER_CONFIG.get("com_hub_port", 8042), "type": "integer", "description": "Port for the inter-worker Communication Hub. Requires a restart.", "category": "Task Manager" }
     }
 
     select_keys_query = text("SELECT key FROM global_configs")
@@ -852,7 +856,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         connection.commit()
 
         if 'client_id' in new_app_cols_defs:
-            apps_to_update = connection.execute(text("SELECT id, name FROM apps WHERE client_id IS NULL")).fetchall()
+            apps_to_update = connection.execute(text("SELECT id, name FROM mcps WHERE client_id IS NULL")).fetchall()
             if apps_to_update:
                 for app_id, app_name in apps_to_update:
                     base_slug = re.sub(r'[^a-z0-9_]+', '', app_name.lower().replace(' ', '_'))

@@ -23,6 +23,7 @@ import IconDataZone from '../../assets/icons/IconDataZone.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue'; 
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -45,6 +46,7 @@ const showDataZoneButton = computed(() => {
 });
 
 const isMenuOpen = ref(false);
+const isRefreshingModels = ref(false);
 const menuTriggerRef = ref(null);
 const menuFloatingRef = ref(null);
 const isSubmenuActive = ref(false);
@@ -128,10 +130,21 @@ function selectTtiModel(id) { activeTtiModelName.value = id; }
 function selectItiModel(id) { activeItiModelName.value = id; }
 function selectTtsModel(id) { activeTtsModelName.value = id; }
 function selectSttModel(id) { activeSttModelName.value = id; }
+
+async function handleRefreshModels() {
+    isRefreshingModels.value = true;
+    try {
+        await dataStore.refreshAllModels();
+        uiStore.addNotification('Model lists refreshed.', 'success');
+    } finally {
+        isRefreshingModels.value = false;
+    }
+}
+
 function handleEditPersonality(personality, event) {
     event.stopPropagation();
     isMenuOpen.value = false;
-    router.push({ path: '/settings', query: { tab: 'personalities' } });
+    router.push({ path: '/settings', query: { section: 'personalities' } });
     nextTick(() => { uiStore.openModal('personalityEditor', { personality: personality, isSystemPersonality: false }); });
 }
 
@@ -198,6 +211,12 @@ function handleEditPersonality(personality, event) {
                         v-on-click-outside="() => { isMenuOpen = false; isSubmenuActive = false; }"
                         class="z-50 w-64 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1 flex flex-col max-h-[80vh]"
                     >
+                         <!-- Global Refresh Action -->
+                         <button @click="handleRefreshModels" class="menu-item flex items-center gap-3 border-b dark:border-gray-700 mb-1" :disabled="isRefreshingModels">
+                            <IconRefresh class="h-4 w-4 text-blue-500" :class="{'animate-spin': isRefreshingModels}" />
+                            <span class="font-bold text-xs uppercase tracking-wider">Refresh All Models</span>
+                         </button>
+
                          <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.alias?.icon">
                              <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full">
@@ -399,4 +418,5 @@ function handleEditPersonality(personality, event) {
 .toolbox-select { @apply w-full text-left text-sm bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500; }
 .menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2; }
 .menu-item-button.selected { @apply bg-blue-100 dark:bg-blue-900/50 font-semibold; }
+.menu-item { @apply w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center; }
 </style>

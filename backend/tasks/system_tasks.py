@@ -1,4 +1,4 @@
-# backend/tasks/system_tasks.py
+# [UPDATE] backend/tasks/system_tasks.py
 import os
 import zipfile
 import shutil
@@ -16,6 +16,7 @@ from backend.db.models.config import GlobalConfig
 from backend.session import get_user_lollms_client
 from backend.ws_manager import manager
 from backend.settings import settings
+from backend.db.base import TaskStatus
 
 def _create_backup_task(task: Task, password: str):
     """
@@ -311,3 +312,30 @@ def _generate_self_signed_cert_task(task: Task):
         "cert_path": cert_abs,
         "key_path": key_abs
     }
+
+def _prune_old_tasks_task(task: Task):
+    """Background logic to delete finished tasks older than retention days."""
+    retention_days = settings.get("tasks_retention_days", 7)
+    
+    task.log(f"Starting task pruning. Retention period: {retention_days} days.")
+    
+    with task.db_session_factory() as db:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+        
+        # We only delete finished tasks (COMPLETED, FAILED, CANCELLED)
+        query = db.query(DBTask).filter(
+            DBTask.status.in_([TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]),
+            DBTask.updated_at < cutoff
+        )
+        
+        count = query.count()
+        task.log(f"Found {count} tasks matching pruning criteria.")
+        
+        if count > 0:
+            query.delete(synchronize_session=False)
+            db.commit()
+            task.log(f"Successfully deleted {count} old tasks.")
+            manager.broadcast_sync({"type": "tasks_cleared", "data": {"username": None}})
+
+    task.set_progress(100)
+    return {"message": f"Pruning complete. Deleted {count} tasks."}

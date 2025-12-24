@@ -8,6 +8,7 @@ import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
 import { storeToRefs } from 'pinia';
 import apiClient from '../../services/api';
+import useEventBus from '../../services/eventBus';
 
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
@@ -41,6 +42,7 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
+const { on, off } = useEventBus();
 
 // Defensive computed properties to prevent crashes on re-mounts
 const dStoreRefs = storeToRefs(discussionsStore);
@@ -168,33 +170,48 @@ async function removeArtefact(file) {
 function triggerFileUpload() { fileInput.value?.click(); }
 function triggerImageUpload() { imageInput.value?.click(); }
 
-async function handleFileUpload(event) {
-    const files = Array.from(event.target.files || []);
-    if (!files.length) return;
+async function handleFilesInput(files) {
+    if (files.length === 0) return;
+    
+    // Separate images from other files
+    const images = files.filter(f => f.type.startsWith('image/'));
+    const others = files.filter(f => !f.type.startsWith('image/'));
+
     if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
     if (activeDiscussion.value) {
         isUploading.value = true;
         try {
-            await Promise.all(files.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true })));
+            const promises = [];
+            if (images.length > 0) {
+                 promises.push(...images.map(file => discussionsStore.uploadDiscussionImage(file)));
+            }
+            if (others.length > 0) {
+                 promises.push(...others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true })));
+            }
+            await Promise.all(promises);
         } finally {
             isUploading.value = false;
-            event.target.value = '';
         }
     }
 }
 
+async function handleFileUpload(event) {
+    const files = Array.from(event.target.files || []);
+    await handleFilesInput(files);
+    event.target.value = '';
+}
+
 async function handleImageUpload(event) {
     const files = Array.from(event.target.files || []);
-    if (!files.length) return;
-    if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
-    if (activeDiscussion.value) {
-        isUploading.value = true;
-        try {
-            await Promise.all(files.map(file => discussionsStore.uploadDiscussionImage(file)));
-        } finally {
-            isUploading.value = false;
-            event.target.value = '';
-        }
+    await handleFilesInput(files);
+    event.target.value = '';
+}
+
+async function handleDrop(event) {
+    isDraggingOver.value = false;
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length > 0) {
+        await handleFilesInput(files);
     }
 }
 
@@ -204,18 +221,15 @@ async function handlePaste(event) {
     for (let i = 0; i < items.length; i++) {
         if (items[i].type.indexOf("image") !== -1) {
             const blob = items[i].getAsFile();
-            if (blob) imageFiles.push(blob);
+            if (blob) {
+                const extension = (blob.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
+                imageFiles.push(new File([blob], `pasted_image_${Date.now()}.${extension}`, { type: blob.type }));
+            }
         }
     }
     if (imageFiles.length > 0) {
         event.preventDefault();
-        if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
-        isUploading.value = true;
-        try {
-            await Promise.all(imageFiles.map(file => discussionsStore.uploadDiscussionImage(file)));
-        } finally {
-            isUploading.value = false;
-        }
+        await handleFilesInput(imageFiles);
     }
 }
 
@@ -318,12 +332,21 @@ onMounted(() => {
     promptsStore.fetchPrompts();
     if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
     if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
+
+    // Listen for global drops/pastes from ChatView
+    on('files-dropped-in-chat', handleFilesInput);
+    on('files-pasted-in-chat', handleFilesInput);
+});
+
+onUnmounted(() => {
+    off('files-dropped-in-chat', handleFilesInput);
+    off('files-pasted-in-chat', handleFilesInput);
 });
 </script>
 
 <template>
     <div class="flex-shrink-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur border-t dark:border-gray-700 shadow-lg relative"
-         @dragover.prevent="isDraggingOver = true" @dragleave="isDraggingOver = false" @drop.prevent="isDraggingOver = false">
+         @dragover.prevent="isDraggingOver = true" @dragleave="isDraggingOver = false" @drop.prevent="handleDrop">
         
         <!-- Drop Overlay -->
         <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/10 border-4 border-dashed border-blue-500 rounded-lg z-50 flex items-center justify-center m-4 pointer-events-none transition-all">

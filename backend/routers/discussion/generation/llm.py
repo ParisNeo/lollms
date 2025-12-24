@@ -491,6 +491,15 @@ def build_llm_generation_router(router: APIRouter):
                     return True
 
                 try:
+                    # --- NEW: Include active discussion images from the gallery ---
+                    # Multimodal models usually expect images to be attached to the current message turn.
+                    # We fetch images currently active in the discussion's "Image context" zone.
+                    active_discussion_images = [
+                        img['data'] for img in discussion_obj.get_discussion_images() 
+                        if img.get('active', True)
+                    ]
+                    # --------------------------------------------------------------
+
                     images_for_message = []
                     image_server_paths = json.loads(image_server_paths_json)
                     if image_server_paths and not is_resend:
@@ -504,6 +513,9 @@ def build_llm_generation_router(router: APIRouter):
                                 shutil.move(str(temp_path / filename), str(assets_path / persistent_filename))
                                 b64_data = base64.b64encode((assets_path / persistent_filename).read_bytes()).decode('utf-8')
                                 images_for_message.append(b64_data)
+
+                    # Combine Gallery images with message-specific uploads
+                    all_input_images = active_discussion_images + images_for_message
 
                     if is_resend:
                         result = discussion_obj.regenerate_branch(
@@ -523,7 +535,7 @@ def build_llm_generation_router(router: APIRouter):
                             personality=active_personality, 
                             use_mcps=combined_mcps, 
                             use_data_store=use_rag, 
-                            images=images_for_message,
+                            images=all_input_images, # Pass combined list
                             streaming_callback=llm_callback, 
                             max_reasoning_steps=owner_db_user.rag_n_hops,
                             rag_top_k=owner_db_user.rag_top_k, 

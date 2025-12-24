@@ -322,6 +322,19 @@ export const useDataStore = defineStore('data', () => {
         ];
         await Promise.allSettled(promises);
     }
+
+    /**
+     * Refreshes all core model lists from the backend.
+     */
+    async function refreshAllModels() {
+        await Promise.allSettled([
+            fetchAvailableLollmsModels(),
+            fetchAvailableTtiModels(),
+            fetchAvailableTtsModels(),
+            fetchAvailableSttModels(),
+            fetchUserVoices()
+        ]);
+    }
     
     async function fetchAvailableLollmsModels() {
         isLoadingLollmsModels.value = true;
@@ -854,7 +867,7 @@ export const useDataStore = defineStore('data', () => {
         fetchAvailableTtsModels,
         fetchAvailableSttModels,
 
-        loadAllInitialData, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
+        loadAllInitialData, refreshAllModels, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, shareDataStore,
         revokeShare, getSharedWithList,
         fetchAvailableVectorizers, availableVectorizers,
