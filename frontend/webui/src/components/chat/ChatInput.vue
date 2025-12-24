@@ -208,6 +208,8 @@ async function handleImageUpload(event) {
 }
 
 async function handleDrop(event) {
+    // STOP PROPAGATION to prevent the parent ChatView from catching this and pasting twice
+    event.stopPropagation();
     isDraggingOver.value = false;
     const files = Array.from(event.dataTransfer.files);
     if (files.length > 0) {
@@ -216,6 +218,8 @@ async function handleDrop(event) {
 }
 
 async function handlePaste(event) {
+    // STOP PROPAGATION to prevent the parent ChatView from catching this and pasting twice
+    event.stopPropagation();
     const items = (event.clipboardData || window.clipboardData).items;
     const imageFiles = [];
     for (let i = 0; i < items.length; i++) {

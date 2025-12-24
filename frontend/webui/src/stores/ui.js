@@ -45,6 +45,13 @@ export const useUiStore = defineStore('ui', {
   getters: {
     activeModal: (state) => state.modalStack.length > 0 ? state.modalStack[state.modalStack.length - 1] : null,
     modalData: (state) => (name) => state.modalProps[name] || null,
+    /**
+     * Resolves the current source URL/Data for the image viewer.
+     */
+    imageViewerSrc: (state) => {
+        const item = state.imageViewer.imageList[state.imageViewer.startIndex];
+        return item ? item.src : null;
+    }
   },
 
   actions: {

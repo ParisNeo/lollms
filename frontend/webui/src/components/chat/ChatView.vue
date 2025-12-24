@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/chat/ChatView.vue -->
 <script setup>
 import { computed, defineAsyncComponent, ref } from 'vue';
 import { useUiStore } from '../../stores/ui';
@@ -20,7 +21,7 @@ const isDraggingOver = ref(false);
 
 function handleDragOver(event) {
     event.preventDefault();
-    if (event.dataTransfer.types.includes('Files') && currentModelVisionSupport.value) {
+    if (event.dataTransfer.types.includes('Files')) {
         isDraggingOver.value = true;
     }
 }
@@ -34,18 +35,22 @@ function handleDragLeave(event) {
 function handleDrop(event) {
     event.preventDefault();
     isDraggingOver.value = false;
-    if (!currentModelVisionSupport.value) return;
 
-    const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
+    // Pass all dropped files to the event bus.
+    // The Input component handles separating images from documents.
+    const files = Array.from(event.dataTransfer.files);
     if (files.length > 0) {
         emit('files-dropped-in-chat', files);
     }
 }
 
 async function handlePaste(event) {
+    // If vision is not supported, we don't try to intercept images at the view level.
     if (!currentModelVisionSupport.value) return;
+    
     const items = (event.clipboardData || window.clipboardData).items;
     if (!items) return;
+    
     const imageFiles = [];
     for (const item of items) {
         if (item.kind === 'file' && item.type.startsWith('image/')) {
@@ -56,7 +61,10 @@ async function handlePaste(event) {
             }
         }
     }
+    
     if (imageFiles.length > 0) {
+        // Only prevent default if we actually found images to process.
+        // This allows text paste to work normally via bubbling if no images are present.
         event.preventDefault();
         emit('files-pasted-in-chat', imageFiles);
     }
@@ -71,7 +79,7 @@ async function handlePaste(event) {
         @paste="handlePaste"
     >
         <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-30 flex items-center justify-center m-4 pointer-events-none">
-            <p class="text-2xl font-bold text-blue-600">Drop images to attach</p>
+            <p class="text-2xl font-bold text-blue-600">Drop files to attach</p>
         </div>
         <div class="flex-1 flex flex-col h-full overflow-hidden relative">
             <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-800/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">

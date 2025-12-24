@@ -82,6 +82,7 @@ except ImportError:
     safe_store = None
 
 message_grade_lock = threading.Lock()
+
 def build_message_router(router: APIRouter):
     @router.put("/{discussion_id}/messages/{message_id}/grade", response_model=MessageOutput)
     async def grade_discussion_message(discussion_id: str, message_id: str, grade_update: MessageGradeUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
@@ -164,6 +165,49 @@ def build_message_router(router: APIRouter):
             created_at=target_message.created_at, branch_id=discussion_obj.active_branch_id
         )
 
+    @router.put("/{discussion_id}/messages/{message_id}/images/{image_index}/toggle", response_model=MessageOutput)
+    async def toggle_message_image_activation(
+        discussion_id: str,
+        message_id: str,
+        image_index: int,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        msg = discussion_obj.get_message(message_id)
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found.")
+        
+        # Message objects in lollms_client have active_images (list of bools)
+        images_count = len(msg.images) if msg.images else 0
+        
+        if msg.active_images is None:
+            msg.active_images = [True] * images_count
+        
+        if 0 <= image_index < len(msg.active_images):
+            msg.active_images[image_index] = not msg.active_images[image_index]
+            discussion_obj.commit()
+        else:
+            raise HTTPException(status_code=404, detail="Image index out of bounds.")
+
+        # Re-fetch for clean output
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
+        grade = db.query(UserMessageGrade.grade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).scalar() or 0
+        
+        full_image_refs = [f"data:image/png;base64,{img}" for img in msg.images or []]
+        msg_metadata = msg.metadata or {}
+
+        return MessageOutput(
+            id=msg.id, sender=msg.sender, sender_type=msg.sender_type,
+            content=msg.content, parent_message_id=msg.parent_id,
+            binding_name=msg.binding_name, model_name=msg.model_name,
+            token_count=msg.tokens, sources=msg_metadata.get('sources'),
+            events=msg_metadata.get('events'), image_references=full_image_refs,
+            active_images=msg.active_images, user_grade=grade,
+            created_at=msg.created_at, branch_id=discussion_obj.active_branch_id
+        )
+
     @router.post("/{discussion_id}/messages", response_model=MessageOutput)
     async def add_manual_message(
         discussion_id: str,
@@ -210,7 +254,7 @@ def build_message_router(router: APIRouter):
             image_references=[],
             user_grade=0,
             created_at=new_message.created_at,
-            branch_id=discussion_obj.active_branch_id
+            border_id=discussion_obj.active_branch_id
         )
 
     @router.delete("/{discussion_id}/messages/{message_id}", status_code=200)
@@ -352,6 +396,7 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'rtf':
                 media_type = "application/rtf"
+                from bs4 import BeautifulSoup
                 text_only = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
                 rtf = r"{\rtf1\ansi " + text_only.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}") \
                     .replace("\n", r"\par ") + "}"
@@ -359,6 +404,7 @@ def build_message_router(router: APIRouter):
 
             elif export_format in ['tex', 'latex']:
                 media_type = "application/x-tex"
+                from bs4 import BeautifulSoup
                 text_only = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
                 def esc(t: str) -> str:
                     rep = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
