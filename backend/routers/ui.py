@@ -126,7 +126,7 @@ async def get_fun_fact(db: Session = Depends(get_db)):
     return {"fun_fact": fallback["content"], "category": fallback["category"], "color": fallback["color"]}
 
 # Static file serving
-STATIC_DIR = Path(__file__).parent.parent.parent / "frontend/webui/dist"
+STATIC_DIR = Path(__file__).parent.parent.parent / "frontend/dist"
 
 def add_ui_routes(app):
     @app.get("/user_assets/logo", include_in_schema=False)
