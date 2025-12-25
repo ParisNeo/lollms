@@ -3,7 +3,7 @@ import random
 import mimetypes
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
@@ -126,7 +126,7 @@ async def get_fun_fact(db: Session = Depends(get_db)):
     return {"fun_fact": fallback["content"], "category": fallback["category"], "color": fallback["color"]}
 
 # Static file serving
-STATIC_DIR = Path(__file__).parent.parent.parent / "frontend/dist"
+STATIC_DIR = Path(__file__).parent.parent.parent / "frontend/webui/dist"
 
 def add_ui_routes(app):
     @app.get("/user_assets/logo", include_in_schema=False)
@@ -138,28 +138,54 @@ def add_ui_routes(app):
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_vue_app(full_path: str):
+        # Resolve path against dist
         path = STATIC_DIR / full_path
         
+        # --- FIX: Handle asset aliases and ensure correct file resolution ---
+        # Vite production build typically puts everything in dist/assets
+        # If the request comes in for ui_assets/ or assets/, we verify the physical file.
+        if not path.exists() or not path.is_file():
+            if "assets" in full_path:
+                filename = full_path.split("/")[-1]
+                alt_path = STATIC_DIR / "assets" / filename
+                if alt_path.exists() and alt_path.is_file():
+                    path = alt_path
+        # ---------------------------------------------------------------------
+
         try:
             resolved_path = path.resolve()
             resolved_static = STATIC_DIR.resolve()
             
-            if not str(resolved_path).startswith(str(resolved_static)):
-                return FileResponse(STATIC_DIR / "index.html")
-
-            if resolved_path.exists() and resolved_path.is_file():
-                media_type, _ = mimetypes.guess_type(resolved_path)
-                if resolved_path.suffix == '.js':
-                    media_type = 'application/javascript'
-                elif resolved_path.suffix == '.css':
-                    media_type = 'text/css'
+            # Security: ensure file is inside the dist folder
+            # If the path is outside dist, or it doesn't exist:
+            if not str(resolved_path).startswith(str(resolved_static)) or not resolved_path.exists() or not resolved_path.is_file():
+                # If it's an asset request (has a file extension like .js, .css, .png),
+                # we must NOT return index.html because it causes MIME type errors in the browser.
+                # Instead, we return a proper 404.
+                file_extensions = ('.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.wasm', '.json', '.woff', '.woff2', '.ttf')
+                if any(full_path.lower().endswith(ext) for ext in file_extensions):
+                    raise HTTPException(status_code=404, detail="Asset not found")
                 
-                return FileResponse(resolved_path, media_type=media_type)
+                # Otherwise, it's likely a navigation route (like /settings or /image-studio),
+                # so we return the SPA entry point.
+                index_path = STATIC_DIR / "index.html"
+                if index_path.exists():
+                    return FileResponse(index_path)
+                raise HTTPException(status_code=404, detail="UI not found. Please build the frontend.")
+
+            # Serve the existing file
+            media_type, _ = mimetypes.guess_type(resolved_path)
+            if resolved_path.suffix == '.js':
+                media_type = 'application/javascript'
+            elif resolved_path.suffix == '.css':
+                media_type = 'text/css'
+            
+            return FileResponse(resolved_path, media_type=media_type)
+        except HTTPException:
+            raise
         except Exception:
-            pass
-        
-        index_path = STATIC_DIR / "index.html"
-        if index_path.exists():
-            return FileResponse(index_path)
-        
-        raise HTTPException(status_code=404, detail="UI not found. Please build the frontend.")
+            # Fallback to SPA entry point for non-file paths
+            index_path = STATIC_DIR / "index.html"
+            if index_path.exists():
+                return FileResponse(index_path)
+            raise HTTPException(status_code=404, detail="File not found")

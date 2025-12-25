@@ -1,224 +1,186 @@
+<!-- [UPDATE] frontend/webui/src/views/ImageStudioView.vue -->
 <template>
     <Teleport to="#global-header-actions-target">
         <div class="flex items-center gap-2">
-            <button @click="handleGenerateOrApply" class="btn btn-primary" :disabled="isGenerating || isAnyEnhancing">
-                <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-2 animate-spin" />
-                {{ isSelectionMode ? 'Apply Edit' : 'Generate' }}
+            <button @click="handleGenerateOrApply" class="btn btn-primary whitespace-nowrap" :disabled="isGenerating || isAnyEnhancing">
+                <IconAnimateSpin v-if="isGenerating" class="w-5 h-5 mr-1 sm:mr-2 animate-spin" />
+                <span class="hidden xs:inline">{{ isSelectionMode ? 'Apply Edit' : 'Generate' }}</span>
+                <IconSparkles v-if="!isGenerating" class="w-5 h-5 xs:hidden" />
+            </button>
+            <button @click="showMobileSidebar = !showMobileSidebar" class="lg:hidden btn btn-secondary p-2" title="Toggle Settings">
+                <IconAdjustmentsHorizontal class="w-6 h-6" />
             </button>
         </div>
     </Teleport>
+    
     <div 
-        class="h-full flex flex-col bg-gray-50 dark:bg-gray-900" 
+        class="h-full flex flex-col bg-gray-50 dark:bg-gray-900 overflow-hidden relative" 
         @dragover.prevent="handleDragOver"
         @dragleave.prevent="handleDragLeave"
         @drop.prevent="handleDrop"
     >
-        <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-20 flex items-center justify-center m-4 pointer-events-none">
-            <p class="text-2xl font-bold text-blue-600">Drop images anywhere to upload</p>
+        <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-50 flex items-center justify-center m-4 pointer-events-none">
+            <p class="text-xl sm:text-2xl font-bold text-blue-600 text-center">Drop images to upload</p>
         </div>
         
-        <div class="flex-grow min-h-0 flex overflow-hidden">
-            <!-- Controls Sidebar -->
-            <div class="w-80 md:w-96 flex-shrink-0 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col overflow-hidden">
-                <div class="flex-grow p-4 space-y-5 overflow-y-auto custom-scrollbar">
-                    
-                    <!-- Prompt Section -->
-                    <div class="space-y-3">
-                        <div>
-                            <div class="flex justify-between items-center mb-1">
-                                <label for="prompt" class="text-sm font-semibold text-gray-700 dark:text-gray-200">Prompt</label>
-                                <button @click="openEnhanceModal('prompt')" class="text-blue-600 dark:text-blue-400 hover:text-blue-700 p-1 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors" title="Enhance prompt with AI" :disabled="isAnyEnhancing">
-                                    <IconSparkles class="w-4 h-4" />
-                                </button>
-                            </div>
-                            <div class="relative">
-                                <textarea id="prompt" v-model="prompt" rows="4" class="input-field w-full resize-none shadow-sm" :class="{'opacity-50 pointer-events-none': isEnhancingPrompt}" :disabled="isEnhancingPrompt" placeholder="Describe your image..."></textarea>
-                                <div v-if="isEnhancingPrompt" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-white/20 dark:bg-black/20 backdrop-blur-sm rounded">
-                                    <IconAnimateSpin class="w-6 h-6 text-blue-500 animate-spin" />
-                                </div>
-                            </div>
-                        </div>
-                        <div>
-                             <div class="flex justify-between items-center mb-1">
-                                <label for="negative-prompt" class="text-sm font-semibold text-gray-700 dark:text-gray-200">Negative Prompt</label>
-                                <button @click="openEnhanceModal('negative_prompt')" class="text-red-600 dark:text-red-400 hover:text-red-700 p-1 rounded hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" title="Enhance negative prompt with AI" :disabled="isAnyEnhancing">
-                                    <IconSparkles class="w-4 h-4" />
-                                </button>
-                            </div>
-                            <div class="relative">
-                                <textarea id="negative-prompt" v-model="negativePrompt" rows="3" class="input-field w-full resize-none shadow-sm" :class="{'opacity-50 pointer-events-none': isEnhancingNegative}" :disabled="isEnhancingNegative" placeholder="Things to avoid..."></textarea>
-                                <div v-if="isEnhancingNegative" class="absolute inset-0 flex items-center justify-center pointer-events-none bg-white/20 dark:bg-black/20 backdrop-blur-sm rounded">
-                                    <IconAnimateSpin class="w-6 h-6 text-red-500 animate-spin" />
-                                </div>
-                            </div>
-                        </div>
-                        <button @click="openEnhanceModal('both')" class="btn btn-secondary w-full text-xs py-1.5" :disabled="isAnyEnhancing">
-                            <IconSparkles class="w-3 h-3 mr-1.5" /> Enhance All
+        <div class="flex-grow min-h-0 flex relative overflow-hidden">
+            <aside 
+                class="absolute inset-y-0 left-0 z-30 bg-white dark:bg-gray-800 border-r dark:border-gray-700 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 flex flex-col flex-shrink-0 shadow-lg"
+                :class="showMobileSidebar ? 'translate-x-0' : '-translate-x-full'"
+                :style="sidebarStyle"
+            >
+                <div 
+                    @mousedown.prevent="startResizing"
+                    class="hidden lg:block absolute top-0 right-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-blue-500/50 transition-colors"
+                ></div>
+
+                <div class="flex-grow p-4 space-y-6 overflow-y-auto custom-scrollbar">
+                    <div class="flex items-center justify-between lg:hidden mb-4 border-b dark:border-gray-700 pb-2">
+                        <span class="font-black uppercase tracking-widest text-xs text-gray-500">Studio Tools</span>
+                        <button @click="showMobileSidebar = false" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                            <IconXMark class="w-6 h-6" />
                         </button>
                     </div>
 
-                    <!-- Generation Settings -->
-                    <div class="pt-4 border-t dark:border-gray-700">
-                        <div class="flex items-center justify-between cursor-pointer" @click="isConfigVisible = !isConfigVisible">
-                            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Settings</h3>
-                            <IconChevronUp class="w-4 h-4 text-gray-500 transition-transform duration-200" :class="{'rotate-180': !isConfigVisible}" />
+                    <!-- Prompting Area -->
+                    <div class="space-y-4">
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label for="prompt" class="text-[10px] font-black uppercase text-gray-400">Positive Prompt</label>
+                                <button @click="openEnhanceModal('prompt')" class="text-blue-500 hover:text-blue-600 p-1 rounded" :disabled="isAnyEnhancing">
+                                    <IconSparkles class="w-4 h-4" />
+                                </button>
+                            </div>
+                            <div class="relative">
+                                <textarea id="prompt" v-model="prompt" rows="4" class="input-field w-full resize-none !text-sm" :disabled="isEnhancingPrompt" placeholder="What do you want to see?"></textarea>
+                                <div v-if="isEnhancingPrompt" class="absolute inset-0 flex items-center justify-center bg-white/40 dark:bg-black/40 backdrop-blur-sm rounded"><IconAnimateSpin class="w-6 h-6 text-blue-500 animate-spin" /></div>
+                            </div>
                         </div>
-                        
-                        <div v-show="isConfigVisible" class="mt-4 space-y-4">
-                            <div class="grid grid-cols-2 gap-4">
-                                <div v-if="!isSelectionMode">
-                                    <label class="label text-xs">Count</label>
-                                    <div class="flex items-center mt-1">
-                                        <input type="range" v-model.number="nImages" min="1" max="8" class="flex-grow mr-2 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
-                                        <span class="text-sm font-medium w-4 text-center">{{ nImages }}</span>
-                                    </div>
-                                </div>
-                                <div class="col-span-2">
-                                    <label for="size" class="label text-xs">Size</label>
-                                    <select id="size" v-model="imageSize" class="input-field mt-1 w-full text-sm">
-                                        <option value="1024x1024">1024x1024 (Square 1:1)</option>
-                                        <option value="1152x896">1152x896 (Landscape ~4:3)</option>
-                                        <option value="896x1152">896x1152 (Portrait ~3:4)</option>
-                                        <option value="1216x832">1216x832 (Landscape ~3:2)</option>
-                                        <option value="832x1216">832x1216 (Portrait ~2:3)</option>
-                                        <option value="1344x768">1344x768 (Widescreen 16:9)</option>
-                                        <option value="768x1344">768x1344 (Tall 9:16)</option>
-                                        <option value="1536x640">1536x640 (Cinematic ~2.4:1)</option>
-                                        <option value="640x1536">640x1536 (Tall Cinematic ~1:2.4)</option>
-                                        <option value="512x512">512x512 (Small Square)</option>
-                                    </select>
-                                </div>
+
+                        <!-- STYLE LIBRARY (Categorized) -->
+                        <div v-for="(group, category) in styleLibrary" :key="category" class="space-y-2 border-t dark:border-gray-700 pt-3">
+                            <div class="flex items-center justify-between cursor-pointer group" @click="collapsedStyles[category] = !collapsedStyles[category]">
+                                <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ category }}</span>
+                                <IconChevronUp class="w-3 h-3 text-gray-400 transition-transform" :class="{'rotate-180': collapsedStyles[category]}" />
                             </div>
                             
-                            <div>
-                                <label for="seed" class="label text-xs">Seed</label>
-                                <div class="flex gap-2 mt-1">
-                                    <input id="seed" v-model.number="seed" type="number" class="input-field flex-grow text-sm" placeholder="-1 (Random)">
-                                    <button @click="seed = -1" class="btn btn-secondary px-2" title="Randomize Seed"><IconRefresh class="w-4 h-4" /></button>
-                                </div>
+                            <div v-show="!collapsedStyles[category]" class="grid grid-cols-3 gap-1.5 animate-in fade-in slide-in-from-top-1">
+                                <button v-for="style in group" :key="style.name" 
+                                    @click="applyStyle(style)"
+                                    class="flex flex-col items-center p-1.5 rounded-lg border dark:border-gray-700 transition-all hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+                                    :class="selectedStyle === style.name ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-500' : 'bg-gray-50 dark:bg-gray-900/30'"
+                                    :title="style.name"
+                                >
+                                    <span class="text-lg mb-0.5">{{ style.emoji }}</span>
+                                    <span class="text-[8px] font-bold truncate w-full text-center leading-tight uppercase">{{ style.name }}</span>
+                                </button>
                             </div>
+                        </div>
 
-                            <div v-if="modelConfigurableParameters.length > 0" class="space-y-3 pt-2 border-t dark:border-gray-700/50">
-                                <p class="text-xs font-semibold text-gray-500 uppercase">Model Parameters</p>
-                                <div v-for="param in modelConfigurableParameters" :key="param.name">
-                                    <label :for="`param-${param.name}`" class="label text-xs capitalize">{{ param.name.replace(/_/g, ' ') }}</label>
-                                    <select v-if="param.options && param.options.length > 0" :id="`param-${param.name}`" v-model="generationParams[param.name]" class="input-field mt-1 w-full text-sm">
-                                        <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
-                                    </select>
-                                    <input v-else :type="param.type === 'str' ? 'text' : 'number'" :step="param.type === 'float' ? '0.1' : '1'" :id="`param-${param.name}`" v-model="generationParams[param.name]" class="input-field mt-1 w-full text-sm" :placeholder="param.default">
-                                </div>
+                        <div>
+                            <div class="flex justify-between items-center mb-1">
+                                <label for="negative-prompt" class="text-[10px] font-black uppercase text-gray-400">Negative Prompt</label>
+                                <button @click="openEnhanceModal('negative_prompt')" class="text-red-500 hover:text-red-600 p-1" :disabled="isAnyEnhancing">
+                                    <IconSparkles class="w-4 h-4" />
+                                </button>
+                            </div>
+                            <textarea id="negative-prompt" v-model="negativePrompt" rows="2" class="input-field w-full resize-none !text-xs opacity-80" placeholder="Avoid..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Layout & Seed -->
+                    <div class="pt-4 border-t dark:border-gray-700 space-y-4">
+                        <div class="space-y-2">
+                            <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Aspect Ratio</label>
+                            <div class="grid grid-cols-3 sm:flex sm:flex-wrap gap-2">
+                                <button v-for="ratio in aspectRatios" :key="ratio.name"
+                                    @click="imageSize = ratio.value"
+                                    class="p-2 rounded-xl border dark:border-gray-700 flex flex-col items-center transition-all hover:bg-gray-100 dark:hover:bg-gray-700 flex-1 min-w-[60px]"
+                                    :class="imageSize === ratio.value ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400' : 'bg-gray-50 dark:bg-gray-900/30 text-gray-500'"
+                                >
+                                    <div class="border-2 border-current rounded mb-1" :style="ratio.style"></div>
+                                    <span class="text-[10px] font-black uppercase">{{ ratio.name }}</span>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="label text-[10px] font-bold text-gray-400 uppercase">Count</label>
+                                <input type="number" v-model.number="nImages" min="1" max="10" class="input-field mt-1 !text-xs">
+                            </div>
+                            <div>
+                                <label class="label text-[10px] font-bold text-gray-400 uppercase">Seed</label>
+                                <input v-model.number="seed" type="number" class="input-field mt-1 !text-xs font-mono" placeholder="-1">
                             </div>
                         </div>
                     </div>
                 </div>
                 
                 <div class="p-4 border-t dark:border-gray-700 flex-shrink-0 bg-gray-50 dark:bg-gray-800/50">
-                    <router-link to="/" class="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors">
-                        <IconArrowLeft class="w-4 h-4" /> Back to App
+                    <router-link to="/" class="flex items-center justify-center gap-3 px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all">
+                        <IconArrowLeft class="w-4 h-4" /> <span>Back to Chat</span>
                     </router-link>
                 </div>
-            </div>
+            </aside>
 
-            <!-- Main Content Area -->
-            <div class="flex-grow flex flex-col min-w-0 h-full relative">
-                <!-- Toolbar -->
-                <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-3 flex items-center justify-between flex-shrink-0 z-10 shadow-sm">
-                    <div class="flex items-center gap-4">
+            <div v-if="showMobileSidebar" @click="showMobileSidebar = false" class="absolute inset-0 bg-black/40 z-20 lg:hidden backdrop-blur-sm"></div>
+
+            <main class="flex-grow flex flex-col min-w-0 h-full relative">
+                <div class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2 sm:p-3 flex items-center justify-between flex-shrink-0 z-10 shadow-sm overflow-x-auto no-scrollbar">
+                    <div class="flex items-center gap-3 sm:gap-4 whitespace-nowrap">
                         <div class="flex items-center gap-2">
-                            <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" title="Select All" />
-                            <h2 class="font-semibold text-gray-800 dark:text-gray-200">Gallery <span class="text-gray-500 font-normal ml-1">({{ images.length }})</span></h2>
+                            <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                            <h2 class="font-bold text-gray-800 dark:text-gray-200 text-xs uppercase tracking-widest">Library ({{ images.length }})</h2>
                         </div>
-                        <div class="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-2"></div>
-                        <div class="flex items-center gap-2">
-                            <button @click="handleRefresh" class="btn-icon text-gray-500 hover:text-blue-600" title="Refresh Gallery">
-                                <IconRefresh class="w-5 h-5" />
-                            </button>
-                            <label class="btn-icon text-gray-500 hover:text-blue-600 cursor-pointer" title="Upload Images">
-                                <IconArrowDownTray class="w-5 h-5" />
-                                <input type="file" @change="handleUpload" class="hidden" accept="image/*" multiple>
-                            </label>
-                            <button @click="openCameraModal" class="btn-icon text-gray-500 hover:text-blue-600" title="Take Photo">
-                                <IconCamera class="w-5 h-5" />
-                            </button>
-                            <button @click="handleNewBlankImage" class="btn-icon text-gray-500 hover:text-blue-600" title="Create Blank Canvas">
-                                <IconPlus class="w-5 h-5" />
-                            </button>
+                        <div class="h-6 w-px bg-gray-300 dark:bg-gray-600"></div>
+                        <div class="flex items-center gap-1">
+                            <button @click="handleRefresh" class="btn-icon text-gray-400 hover:text-blue-600 p-1.5" title="Refresh"><IconRefresh class="w-5 h-5" /></button>
+                            <label class="btn-icon text-gray-400 hover:text-blue-600 cursor-pointer p-1.5" title="Upload"><IconArrowDownTray class="w-5 h-5" /><input type="file" @change="handleUpload" class="hidden" accept="image/*" multiple></label>
+                            <button @click="openCameraModal" class="btn-icon text-gray-400 hover:text-blue-600 p-1.5" title="Camera"><IconCamera class="w-5 h-5" /></button>
+                            <button @click="handleNewBlankImage" class="btn-icon text-gray-400 hover:text-blue-600 p-1.5" title="New Canvas"><IconPlus class="w-5 h-5" /></button>
                         </div>
                     </div>
 
-                    <div v-if="isSelectionMode" class="flex items-center gap-3 bg-blue-50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg border border-blue-100 dark:border-blue-800 transition-all">
-                        <span class="text-sm font-medium text-blue-800 dark:text-blue-200">{{ selectedImages.length }} selected</span>
-                        <div class="h-4 w-px bg-blue-200 dark:bg-blue-700"></div>
-                        <button @click="handleMoveToDiscussion" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200" title="Send to Chat">
-                            <IconSend class="w-5 h-5" />
-                        </button>
-                        <button @click="handleDeleteSelected" class="text-red-500 hover:text-red-700" title="Delete">
-                            <IconTrash class="w-5 h-5" />
-                        </button>
+                    <div v-if="isSelectionMode" class="flex items-center gap-2 bg-blue-50 dark:bg-blue-900/30 px-2 py-1 rounded-xl border border-blue-100 dark:border-blue-800 transition-all ml-4 shadow-sm">
+                        <span class="text-[10px] font-black text-blue-800 dark:text-blue-200 uppercase">{{ selectedImages.length }} selected</span>
+                        <button @click="handleMoveToDiscussion" class="text-blue-600 dark:text-blue-400 p-1" title="Send to Chat"><IconSend class="w-5 h-5" /></button>
+                        <button @click="handleDeleteSelected" class="text-red-500 p-1" title="Delete"><IconTrash class="w-5 h-5" /></button>
                     </div>
                 </div>
 
-                <!-- Scrollable Gallery Area -->
                 <div class="flex-grow overflow-y-auto p-4 custom-scrollbar bg-gray-50 dark:bg-gray-900">
-                    <!-- Tasks Section (Pinned to top if active) -->
-                    <div v-if="imageGenerationTasksCount > 0" class="mb-6">
-                        <h3 class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Active Generations</h3>
-                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                            <div v-for="task in imageGenerationTasks" :key="task.id" class="relative aspect-square rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center p-4 text-center overflow-hidden group">
-                                <div class="absolute inset-0 bg-gradient-to-br from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 animate-pulse"></div>
-                                <div class="relative z-10">
-                                    <IconAnimateSpin class="w-8 h-8 text-blue-500 mb-3 animate-spin mx-auto" />
-                                    <p class="text-xs font-semibold text-gray-700 dark:text-gray-200 truncate w-full px-2" :title="task.name">{{ task.name }}</p>
-                                    <p class="text-[10px] text-gray-500 mt-1">{{ task.progress }}%</p>
-                                </div>
-                                <div class="absolute bottom-0 left-0 right-0 h-1 bg-gray-200 dark:bg-gray-700">
-                                    <div class="h-full bg-blue-500 transition-all duration-300" :style="{ width: task.progress + '%' }"></div>
-                                </div>
-                            </div>
+                    <div v-if="imageGenerationTasksCount > 0" class="mb-8 grid grid-cols-1 xs:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 animate-in fade-in zoom-in-95">
+                         <div v-for="task in imageGenerationTasks" :key="task.id" class="relative aspect-square rounded-[2rem] bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col items-center justify-center p-6 overflow-hidden">
+                            <div class="absolute inset-0 bg-gradient-to-br from-blue-500/5 to-purple-500/5 animate-pulse"></div>
+                            <IconAnimateSpin class="w-8 h-8 text-blue-500 mb-4 animate-spin" />
+                            <p class="text-[10px] font-black text-blue-600 uppercase">{{ task.progress }}% Complete</p>
+                            <div class="absolute bottom-0 left-0 right-0 h-1.5 bg-gray-100 dark:bg-gray-700"><div class="h-full bg-gradient-to-r from-blue-500 to-indigo-600" :style="{ width: task.progress + '%' }"></div></div>
                         </div>
                     </div>
 
-                    <!-- Images Grid -->
-                    <div v-if="isLoading && images.length === 0" class="h-64 flex flex-col items-center justify-center text-gray-400">
-                        <IconAnimateSpin class="w-10 h-10 mb-3 text-blue-500" />
-                        <p>Loading gallery...</p>
-                    </div>
+                    <div v-if="isLoading && images.length === 0" class="h-64 flex flex-col items-center justify-center opacity-40"><IconAnimateSpin class="w-12 h-12 mb-4 text-blue-500 animate-spin" /><p class="text-xs font-black uppercase tracking-widest">Gathering images...</p></div>
                     
-                    <div v-else-if="images.length === 0 && imageGenerationTasksCount === 0" class="h-full flex flex-col items-center justify-center text-gray-400 opacity-60">
-                        <IconPhoto class="w-24 h-24 mb-4" />
-                        <p class="text-lg font-medium">Your gallery is empty</p>
-                        <p class="text-sm mt-1">Start generating or upload images to get started!</p>
-                    </div>
+                    <div v-else-if="images.length === 0 && imageGenerationTasksCount === 0" class="h-full flex flex-col items-center justify-center text-gray-400 opacity-40"><IconPhoto class="w-20 h-20 mb-6" /><p class="text-xl font-black uppercase tracking-widest">No Creations Yet</p></div>
 
-                    <div v-else class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-10">
-                        <div v-for="(image, index) in images" :key="image.id" 
-                            @click="toggleSelection(image.id)" 
-                            class="relative aspect-square rounded-xl overflow-hidden group cursor-pointer border-2 transition-all duration-200 shadow-sm hover:shadow-md bg-gray-200 dark:bg-gray-800" 
-                            :class="isSelected(image.id) ? 'border-blue-500 ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'">
-                            
-                            <AuthenticatedImage :src="`/api/image-studio/${image.id}/file`" class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
-                            
-                            <!-- Overlay Information -->
-                            <div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex flex-col justify-end p-3">
-                                <p class="text-white text-xs line-clamp-2 drop-shadow-md">{{ image.prompt || 'No prompt' }}</p>
-                                <div class="flex items-center justify-between mt-2 pt-2 border-t border-white/20">
-                                    <span class="text-[10px] text-gray-300 font-mono">{{ image.width }}x{{ image.height }}</span>
-                                    <div class="flex gap-1">
-                                        <button @click.stop="reusePrompt(image)" class="p-1.5 bg-white/20 hover:bg-white/40 rounded text-white backdrop-blur-sm transition-colors" title="Reuse Settings"><IconRefresh class="w-3.5 h-3.5" /></button>
-                                        <button @click.stop="openInpaintingEditor(image)" class="p-1.5 bg-white/20 hover:bg-white/40 rounded text-white backdrop-blur-sm transition-colors" title="Edit"><IconPencil class="w-3.5 h-3.5" /></button>
-                                        <button @click.stop="openImageViewer(image, index)" class="p-1.5 bg-white/20 hover:bg-white/40 rounded text-white backdrop-blur-sm transition-colors" title="View"><IconMaximize class="w-3.5 h-3.5" /></button>
+                    <div v-else class="grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-6 pb-20">
+                        <div v-for="(image, index) in images" :key="image.id" @click="toggleSelection(image.id)" class="relative aspect-square rounded-[1.5rem] overflow-hidden group cursor-pointer border-2 transition-all duration-300 bg-gray-200 dark:bg-gray-800" :class="isSelected(image.id) ? 'border-blue-500 ring-4 ring-blue-500/10 scale-[0.98]' : 'border-transparent hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-xl'">
+                            <AuthenticatedImage :src="`/api/image-studio/${image.id}/file`" class="w-full h-full object-cover transition-transform duration-700 sm:group-hover:scale-110" />
+                            <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent flex flex-col justify-end p-3 transition-opacity duration-300 lg:opacity-0 lg:group-hover:opacity-100" :class="{'!opacity-100': isSelected(image.id)}">
+                                <p class="text-white text-[10px] font-medium line-clamp-2 drop-shadow-lg mb-2 opacity-90">{{ image.prompt || 'No prompt' }}</p>
+                                <div class="flex items-center justify-between pt-2 border-t border-white/20">
+                                    <span class="text-[9px] text-gray-400 font-black uppercase tracking-tighter">{{ image.width }}x{{ image.height }}</span>
+                                    <div class="flex gap-1.5">
+                                        <button @click.stop="reusePrompt(image)" class="p-2 bg-white/10 hover:bg-blue-500 rounded-lg text-white backdrop-blur-md transition-all active:scale-90"><IconRefresh class="w-4 h-4" /></button>
+                                        <button @click.stop="openInpaintingEditor(image)" class="p-2 bg-white/10 hover:bg-purple-500 rounded-lg text-white backdrop-blur-md transition-all active:scale-90"><IconPencil class="w-4 h-4" /></button>
+                                        <button @click.stop="openImageViewer(image, index)" class="p-2 bg-white/10 hover:bg-white/30 rounded-lg text-white backdrop-blur-md transition-all active:scale-90"><IconMaximize class="w-4 h-4" /></button>
                                     </div>
                                 </div>
                             </div>
-
-                            <!-- Selection Checkbox -->
-                            <div v-if="isSelected(image.id)" class="absolute top-2 left-2 bg-blue-500 text-white rounded-full p-0.5 shadow-sm z-10 animate-bounce-in">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
-                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
+            </main>
         </div>
     </div>
 </template>
@@ -236,7 +198,6 @@ import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../components/ui/AuthenticatedImage.vue';
 import apiClient from '../services/api';
 
-// Icons
 import IconPhoto from '../assets/icons/IconPhoto.vue';
 import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
 import IconTrash from '../assets/icons/IconTrash.vue';
@@ -250,6 +211,8 @@ import IconRefresh from '../assets/icons/IconRefresh.vue';
 import IconChevronUp from '../assets/icons/IconChevronUp.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconCamera from '../assets/icons/IconCamera.vue';
+import IconXMark from '../assets/icons/IconXMark.vue';
+import IconAdjustmentsHorizontal from '../assets/icons/IconAdjustmentsHorizontal.vue';
 
 const imageStore = useImageStore();
 const dataStore = useDataStore();
@@ -259,380 +222,173 @@ const discussionsStore = useDiscussionsStore();
 const tasksStore = useTasksStore();
 const router = useRouter();
 
-const { 
-    images, isLoading, isGenerating,
-    prompt, negativePrompt, imageSize, nImages, seed, generationParams 
-} = storeToRefs(imageStore);
+const { images, isLoading, isGenerating, prompt, negativePrompt, imageSize, nImages, seed, generationParams } = storeToRefs(imageStore);
 const { user } = storeToRefs(authStore);
 const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksStore);
 const { currentModelVisionSupport } = storeToRefs(discussionsStore);
 
 const isConfigVisible = ref(true);
+const selectedStyle = ref('None');
+const showMobileSidebar = ref(false);
+const sidebarWidth = ref(384); 
+const isResizing = ref(false);
+const collapsedStyles = ref({ 'Art Style': false, 'Artist Style': true, 'Enhancements': true, 'Technical': true });
 
-// --- Local state for task monitoring ---
-const isEnhancingPrompt = ref(false);
-const isEnhancingNegative = ref(false);
-const isAnyEnhancing = computed(() => isEnhancingPrompt.value || isEnhancingNegative.value);
+const sidebarStyle = computed(() => ({
+    width: window.innerWidth >= 1024 ? `${sidebarWidth.value}px` : undefined,
+    minWidth: window.innerWidth >= 1024 ? '320px' : undefined
+}));
 
-const enhancementInstructions = ref('');
-const enhancementMode = ref('description');
-
-const selectedImages = ref([]);
-const isSelectionMode = computed(() => selectedImages.value.length > 0);
-const areAllSelected = computed({
-    get: () => images.value.length > 0 && selectedImages.value.length === images.value.length,
-    set: (value) => {
-        selectedImages.value = value ? images.value.map(img => img.id) : [];
-    }
-});
-const isDraggingOver = ref(false);
-
-const selectedModel = computed(() => user.value?.tti_binding_model_name);
-
-const selectedModelDetails = computed(() => {
-    if (!selectedModel.value || dataStore.availableTtiModels.length === 0) return null;
-    return dataStore.availableTtiModels.find(m => m.id === selectedModel.value);
-});
-
-const modelConfigurableParameters = computed(() => {
-    if (!selectedModelDetails.value?.binding_params) return [];
-    
-    const params = isSelectionMode.value
-        ? (selectedModelDetails.value.binding_params.edit_parameters || [])
-        : (selectedModelDetails.value.binding_params.generation_parameters || []);
-        
-    const excluded = ['prompt', 'negative_prompt', 'image', 'mask', 'width', 'height', 'n', 'seed', 'size'];
-    return params.filter(p => !excluded.includes(p.name));
-});
-
-function parseOptions(options) {
-    if (typeof options === 'string') {
-        return options.split(',').map(o => o.trim()).filter(o => o);
-    }
-    if (Array.isArray(options)) {
-        return options.filter(o => o);
-    }
-    return [];
+function startResizing(event) {
+    isResizing.value = true;
+    const startX = event.clientX, startWidth = sidebarWidth.value;
+    const handleMouseMove = (e) => { if (!isResizing.value) return; sidebarWidth.value = Math.max(320, Math.min(startWidth + (e.clientX - startX), 700)); };
+    const handleMouseUp = () => { isResizing.value = false; localStorage.setItem('lollms_image_studio_sidebar_width', sidebarWidth.value); window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); };
+    window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp);
 }
 
-watch(selectedModelDetails, (details) => {
-    if (details) {
-        modelConfigurableParameters.value.forEach(param => {
-            if (!(param.name in generationParams.value)) {
-                 generationParams.value[param.name] = param.default;
-            }
-        });
-    }
-}, { immediate: true, deep: true });
+const styleLibrary = {
+    'Art Style': [
+        { name: 'Photo', emoji: '📸', prompt: 'photorealistic, RAW photo, 8k uhd, high detailed', negative: 'cartoon, anime, illustration, blurred' },
+        { name: 'Cinematic', emoji: '🎬', prompt: 'cinematic lighting, dramatic, epic scale, highly detailed', negative: 'grainy, simple, low res' },
+        { name: 'Anime', emoji: '🎌', prompt: 'anime style, vibrant colors, cell shaded, high quality 2d', negative: '3d, realistic, blurry' },
+        { name: 'Digital Art', emoji: '🎨', prompt: 'digital art, sharp focus, intricate detail, artstation style', negative: 'hand drawn, blurry' },
+        { name: 'Oil Paint', emoji: '🖼️', prompt: 'oil painting, thick brushstrokes, textured canvas, classical art', negative: 'photography, smooth, plastic' },
+        { name: 'Watercolor', emoji: '🖌️', prompt: 'watercolor painting, soft edges, paper texture, elegant', negative: 'dark, heavy, photography' },
+        { name: 'Cyberpunk', emoji: '🌃', prompt: 'cyberpunk aesthetic, neon lights, futuristic city, rainy night', negative: 'nature, pastoral' },
+        { name: 'Comic', emoji: '🗯️', prompt: 'comic book style, bold lines, halftone dots, vibrant', negative: 'photorealistic' },
+    ],
+    'Artist Style': [
+        { name: 'Van Gogh', emoji: '🌻', prompt: 'in the style of Vincent Van Gogh, post-impressionism, swirling colors', negative: '' },
+        { name: 'Dali', emoji: '⏳', prompt: 'in the style of Salvador Dali, surrealism, melting objects, dreamlike', negative: '' },
+        { name: 'Ghibli', emoji: '🌳', prompt: 'Studio Ghibli style, Hayao Miyazaki, lush environments, whimsical', negative: '' },
+        { name: 'Picasso', emoji: '🧊', prompt: 'cubism style, Pablo Picasso, abstract geometry, fragmented', negative: '' },
+        { name: 'Shinkai', emoji: '✨', prompt: 'Makoto Shinkai style, breathtaking sky, detailed light, emotional', negative: '' },
+    ],
+    'Enhancements': [
+        { name: 'Hyperreal', emoji: '💎', prompt: 'hyperrealistic, insanely detailed, micro texture, masterpiece', negative: 'ugly, deformed' },
+        { name: 'HDR', emoji: '🌈', prompt: 'high dynamic range, rich colors, deep contrast', negative: 'flat, dull' },
+        { name: 'Retro 8-bit', emoji: '🕹️', prompt: '8-bit style, pixel art, low resolution game aesthetic', negative: 'high definition, smooth' },
+        { name: 'Macro', emoji: '🔍', prompt: 'macro photography, shallow depth of field, extreme close-up', negative: 'wide angle' },
+    ],
+    'Thematic': [
+        { name: 'Horror', emoji: '🎃', prompt: 'horror aesthetic, dark, eerie, macabre, halloween theme', negative: 'bright, cheerful' },
+        { name: 'Minecraft', emoji: '🧱', prompt: 'minecraft style, blocky, voxel art, cubic shapes', negative: 'curved lines' },
+        { name: 'Steampunk', emoji: '⚙️', prompt: 'steampunk aesthetic, copper, brass, Victorian industrial', negative: 'modern' },
+    ]
+};
 
-// --- Auto-Refresh Watcher ---
-watch(imageGenerationTasksCount, (newCount, oldCount) => {
-    if (oldCount > 0 && newCount === 0) {
-        setTimeout(() => {
-            imageStore.fetchImages();
-        }, 1000);
-    }
+const stylePresets = styleLibrary['Art Style']; // Fallback for applyStyle logic compatibility
+
+const aspectRatios = [
+    { name: '1:1', value: '1024x1024', style: { width: '16px', height: '16px' } },
+    { name: '16:9', value: '1344x768', style: { width: '22px', height: '12px' } },
+    { name: '9:16', value: '768x1344', style: { width: '12px', height: '22px' } },
+    { name: '4:3', value: '1152x896', style: { width: '20px', height: '15px' } },
+    { name: '3:2', value: '1216x832', style: { width: '21px', height: '14px' } }
+];
+
+const isEnhancingPrompt = ref(false), isEnhancingNegative = ref(false);
+const isAnyEnhancing = computed(() => isEnhancingPrompt.value || isEnhancingNegative.value);
+const selectedImages = ref([]);
+const isSelectionMode = computed(() => selectedImages.value.length > 0);
+const areAllSelected = computed({ get: () => images.value.length > 0 && selectedImages.value.length === images.value.length, set: (v) => { selectedImages.value = v ? images.value.map(i => i.id) : []; } });
+const isDraggingOver = ref(false);
+const selectedModel = computed(() => user.value?.tti_binding_model_name);
+
+const modelConfigurableParameters = computed(() => {
+    const details = dataStore.availableTtiModels.find(m => m.id === selectedModel.value);
+    if (!details?.binding_params) return [];
+    const params = isSelectionMode.value ? (details.binding_params.edit_parameters || []) : (details.binding_params.generation_parameters || []);
+    return params.filter(p => !['prompt', 'negative_prompt', 'image', 'mask', 'width', 'height', 'n', 'seed', 'size'].includes(p.name));
 });
 
+function applyStyle(style) {
+    if (selectedStyle.value === style.name) selectedStyle.value = 'None';
+    else {
+        selectedStyle.value = style.name;
+        if (style.name !== 'None') {
+            prompt.value = prompt.value.trim() ? `${prompt.value}, ${style.prompt}` : style.prompt;
+            if (style.negative) negativePrompt.value = negativePrompt.value.trim() ? `${negativePrompt.value}, ${style.negative}` : style.negative;
+        }
+    }
+}
+
+watch(imageGenerationTasksCount, (n, o) => { if (o > 0 && n === 0) setTimeout(() => imageStore.fetchImages(), 1000); });
+
 onMounted(() => {
+    const savedWidth = localStorage.getItem('lollms_image_studio_sidebar_width');
+    if (savedWidth) sidebarWidth.value = parseInt(savedWidth, 10);
     uiStore.setPageTitle({ title: 'Image Studio', icon: markRaw(IconPhoto) });
     imageStore.fetchImages();
     if (dataStore.availableTtiModels.length === 0) dataStore.fetchAvailableTtiModels();
-    if (Object.keys(discussionsStore.discussions).length === 0) discussionsStore.loadDiscussions();
     window.addEventListener('paste', handlePaste);
 });
 
-onUnmounted(() => {
-    uiStore.setPageTitle({ title: '' });
-    window.removeEventListener('paste', handlePaste);
-});
+onUnmounted(() => { uiStore.setPageTitle({ title: '' }); window.removeEventListener('paste', handlePaste); });
 
-function isSelected(imageId) { return selectedImages.value.includes(imageId); }
-function toggleSelection(imageId) {
-    const index = selectedImages.value.indexOf(imageId);
-    if (index > -1) selectedImages.value.splice(index, 1);
-    else selectedImages.value.push(imageId);
-}
+function toggleSelection(id) { const i = selectedImages.value.indexOf(id); if (i > -1) selectedImages.value.splice(i, 1); else selectedImages.value.push(id); }
+function isSelected(id) { return selectedImages.value.includes(id); }
 
 async function handleGenerateOrApply() {
-    if (!prompt.value.trim() || !selectedModel.value) {
-        uiStore.addNotification('A prompt and model are required.', 'warning');
-        return;
-    }
-
-    const commonPayload = {
-        prompt: prompt.value,
-        negative_prompt: negativePrompt.value,
-        model: selectedModel.value,
-        seed: seed.value,
-        ...generationParams.value
-    };
-
+    if (!prompt.value.trim() || !selectedModel.value) return;
+    showMobileSidebar.value = false;
+    const payload = { prompt: prompt.value, negative_prompt: negativePrompt.value, model: selectedModel.value, seed: seed.value, ...generationParams.value };
     if (isSelectionMode.value) {
-        // Edit mode logic here
-        const [width, height] = imageSize.value.split('x').map(Number);
-        await imageStore.editImage({ 
-            ...commonPayload, 
-            image_ids: selectedImages.value,
-            width: width,
-            height: height
-        });
+        const [w, h] = imageSize.value.split('x').map(Number);
+        await imageStore.editImage({ ...payload, image_ids: selectedImages.value, width: w, height: h });
     } else {
-        await imageStore.generateImage({ 
-            ...commonPayload, 
-            size: imageSize.value,
-            n: nImages.value 
-        });
+        await imageStore.generateImage({ ...payload, size: imageSize.value, n: nImages.value });
     }
 }
 
 async function handleEnhance(type, options = {}) {
-    if (type !== 'negative_prompt' && !prompt.value.trim()) {
-        uiStore.addNotification('Please enter a prompt to enhance.', 'warning');
-        return;
-    }
-    
-    // Set local loading state
+    if (type !== 'negative_prompt' && !prompt.value.trim()) return;
     if (type === 'prompt' || type === 'both') isEnhancingPrompt.value = true;
     if (type === 'negative_prompt' || type === 'both') isEnhancingNegative.value = true;
-
-    const payload = { 
-        prompt: prompt.value, 
-        negative_prompt: negativePrompt.value, 
-        target: type,
-        model: authStore.user?.lollms_model_name,
-        instructions: options.instructions || '',
-        mode: options.mode || 'description'
-    };
-
-    if (isSelectionMode.value && currentModelVisionSupport.value && selectedImages.value.length > 0) {
-        uiStore.addNotification('Enhancing prompt with image context...', 'info');
-        const image_b64s = [];
-        for (const imageId of selectedImages.value) {
-            try {
-                const response = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
-                const b64 = await new Promise((resolve, reject) => {
-                    const reader = new FileReader();
-                    reader.onloadend = () => resolve(reader.result.split(',')[1]);
-                    reader.onerror = reject;
-                    reader.readAsDataURL(response.data);
-                });
-                image_b64s.push(b64);
-            } catch (error) {
-                console.error(`Failed to fetch and encode image ${imageId}`, error);
-                uiStore.addNotification(`Could not load image ${imageId} for context.`, 'warning');
-            }
-        }
-        if (image_b64s.length > 0) {
-            payload.image_b64s = image_b64s;
-        }
-    }
-    
+    const payload = { prompt: prompt.value, negative_prompt: negativePrompt.value, target: type, model: authStore.user?.lollms_model_name, instructions: options.instructions || '', mode: options.mode || 'description' };
     try {
-        uiStore.addNotification('Prompt enhancement started...', 'info');
-        // Dispatch action
         const task = await imageStore.enhanceImagePrompt(payload);
-        if (task && task.id) {
-            monitorEnhancementTask(task.id, type);
-        } else {
-            // Task creation failed or invalid response
-            resetEnhancingFlags(type);
-        }
-    } catch (e) {
-        console.error("Enhancement failed to start:", e);
-        resetEnhancingFlags(type);
-    }
+        if (task?.id) monitorEnhancementTask(task.id, type);
+        else resetEnhancingFlags(type);
+    } catch (e) { resetEnhancingFlags(type); }
 }
 
-function monitorEnhancementTask(taskId, type) {
-    console.log(`Monitoring task ${taskId} for ${type}`);
-    const unwatch = watch(
-        () => tasksStore.tasks.find(t => t.id === taskId),
-        (updatedTask) => {
-            if (!updatedTask) {
-                 console.log(`Task ${taskId} not found in store yet.`);
-                 return;
-            }
-            console.log(`Task ${taskId} status: ${updatedTask.status}`);
-
-            if (updatedTask.status === 'completed') {
-                console.log("Task completed. Result:", updatedTask.result);
-                // Success! Update local fields
-                let result = updatedTask.result;
-                if (typeof result === 'string') {
-                    try { result = JSON.parse(result); } catch (e) {}
-                }
-
-                if (result) {
-                    if (result.prompt) imageStore.prompt = result.prompt;
-                    if (result.negative_prompt) imageStore.negativePrompt = result.negative_prompt;
-                    uiStore.addNotification('Prompt enhanced successfully!', 'success');
-                }
-                
-                resetEnhancingFlags(type);
-                unwatch();
-            } else if (['failed', 'cancelled'].includes(updatedTask.status)) {
-                // Failure
-                uiStore.addNotification('Enhancement task failed.', 'error');
-                resetEnhancingFlags(type);
-                unwatch();
-            }
-        },
-        { deep: true, immediate: true }
-    );
-    
-    // Safety timeout - Stop watching after 2 minutes if no completion
-    setTimeout(() => {
-        if (isEnhancingPrompt.value || isEnhancingNegative.value) {
-            console.warn("Task monitoring timed out.");
-            resetEnhancingFlags(type);
-            unwatch();
-        }
-    }, 120000); 
+function monitorEnhancementTask(id, type) {
+    const unwatch = watch(() => tasksStore.tasks.find(t => t.id === id), (t) => {
+        if (!t) return;
+        if (t.status === 'completed') {
+            let res = typeof t.result === 'string' ? JSON.parse(t.result) : t.result;
+            if (res) { if (res.prompt) imageStore.prompt = res.prompt; if (res.negative_prompt) imageStore.negativePrompt = res.negative_prompt; }
+            resetEnhancingFlags(type); unwatch();
+        } else if (['failed', 'cancelled'].includes(t.status)) { resetEnhancingFlags(type); unwatch(); }
+    }, { deep: true, immediate: true });
 }
 
-function resetEnhancingFlags(type) {
-    if (type === 'prompt' || type === 'both') isEnhancingPrompt.value = false;
-    if (type === 'negative_prompt' || type === 'both') isEnhancingNegative.value = false;
-}
-
-function openEnhanceModal(target) {
-    uiStore.openModal('enhancePrompt', {
-        instructions: enhancementInstructions.value,
-        mode: enhancementMode.value,
-        onConfirm: ({ instructions, mode }) => {
-            enhancementInstructions.value = instructions;
-            enhancementMode.value = mode;
-            handleEnhance(target, { instructions, mode });
-        }
-    });
-}
-
-function handleNewBlankImage() {
-    router.push('/image-studio/edit/new');
-}
-
-
-function reusePrompt(image) {
-    prompt.value = image.prompt;
-    negativePrompt.value = image.negative_prompt;
-    seed.value = image.seed;
-    uiStore.addNotification('Prompt and parameters have been reused.', 'success');
-}
-
-function openInpaintingEditor(image) { 
-    router.push(`/image-studio/edit/${image.id}`);
-}
-
-function openImageViewer(image, index) {
-    uiStore.openImageViewer({
-        imageList: images.value.map(img => ({ ...img, src: `/api/image-studio/${img.id}/file`})),
-        startIndex: index
-    });
-}
-async function handleUpload(event) {
-    const files = Array.from(event.target.files);
-    if (files.length > 0) {
-        uiStore.addNotification(`Uploading ${files.length} image(s)...`, 'info');
-        await imageStore.uploadImages(files);
-    }
-}
-async function handleDeleteSelected() {
-    const confirmed = await uiStore.showConfirmation({ title: `Delete ${selectedImages.value.length} Images?`, message: 'This action cannot be undone.', confirmText: 'Delete' });
-    if (confirmed.confirmed) {
-        await Promise.all(selectedImages.value.map(id => imageStore.deleteImage(id)));
-        selectedImages.value = [];
-    }
-}
+function resetEnhancingFlags(type) { if (type === 'prompt' || type === 'both') isEnhancingPrompt.value = false; if (type === 'negative_prompt' || type === 'both') isEnhancingNegative.value = false; }
+function openEnhanceModal(target) { uiStore.openModal('enhancePrompt', { onConfirm: (opts) => handleEnhance(target, opts) }); }
+function handleNewBlankImage() { router.push('/image-studio/edit/new'); }
+function reusePrompt(img) { prompt.value = img.prompt; negativePrompt.value = img.negative_prompt; seed.value = img.seed; }
+function openInpaintingEditor(img) { router.push(`/image-studio/edit/${img.id}`); }
+function openImageViewer(img, idx) { uiStore.openImageViewer({ imageList: images.value.map(i => ({ ...i, src: `/api/image-studio/${i.id}/file` })), startIndex: idx }); }
+async function handleUpload(e) { if (e.target.files.length) await imageStore.uploadImages(Array.from(e.target.files)); }
+async function handleDeleteSelected() { if (await uiStore.showConfirmation({ title: 'Delete Images?' })) { await Promise.all(selectedImages.value.map(id => imageStore.deleteImage(id))); selectedImages.value = []; } }
 async function handleMoveToDiscussion() {
-    if (!isSelectionMode.value) return;
-    const { confirmed, value: discussionId } = await uiStore.showConfirmation({
-        title: `Move ${selectedImages.value.length} Images to Discussion`,
-        message: 'Select a discussion:', confirmText: 'Move', inputType: 'select',
-        inputOptions: discussionsStore.sortedDiscussions.map(d => ({ text: d.title, value: d.id })),
-        inputValue: discussionsStore.currentDiscussionId
-    });
-    if (confirmed && discussionId) {
-        await Promise.all(selectedImages.value.map(id => imageStore.moveImageToDiscussion(id, discussionId)));
-        selectedImages.value = [];
-    }
+    const { confirmed, value: id } = await uiStore.showConfirmation({ title: 'Move to Discussion', inputType: 'select', inputOptions: discussionsStore.sortedDiscussions.map(d => ({ text: d.title, value: d.id })) });
+    if (confirmed && id) { await Promise.all(selectedImages.value.map(imgId => imageStore.moveImageToDiscussion(imgId, id))); selectedImages.value = []; }
 }
-
-function handleDragOver(event) {
-    event.preventDefault();
-    isDraggingOver.value = true;
-}
-
-function handleDragLeave(event) {
-    if (!event.currentTarget.contains(event.relatedTarget)) {
-        isDraggingOver.value = false;
-    }
-}
-
-async function handleDrop(event) {
-    event.preventDefault();
-    isDraggingOver.value = false;
-    const files = Array.from(event.dataTransfer.files).filter(file => file.type.startsWith('image/'));
-    if (files.length > 0) {
-        uiStore.addNotification(`Uploading ${files.length} image(s)...`, 'info');
-        await imageStore.uploadImages(files);
-    }
-}
-
-async function handlePaste(event) {
-    const items = (event.clipboardData || window.clipboardData).items;
-    if (!items) return;
-    
-    const imageFiles = [];
-    for (const item of items) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
-            const file = item.getAsFile();
-            if (file) {
-                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
-                imageFiles.push(new File([file], `pasted_image_${Date.now()}_${Math.random().toString(36).substr(2, 9)}.${extension}`, { type: file.type }));
-            }
-        }
-    }
-    
-    if (imageFiles.length > 0) { 
-        event.preventDefault();
-        uiStore.addNotification(`Pasting ${imageFiles.length} image(s)...`, 'info');
-        await imageStore.uploadImages(imageFiles); 
-    }
-}
-
-function openCameraModal() {
-    uiStore.openModal('cameraCapture');
-}
-
-async function handleRefresh() {
-    await imageStore.fetchImages();
-    uiStore.addNotification('Image gallery refreshed.', 'success');
-}
+function handleDragOver(e) { e.preventDefault(); isDraggingOver.value = true; }
+function handleDragLeave(e) { if (!e.currentTarget.contains(e.relatedTarget)) isDraggingOver.value = false; }
+async function handleDrop(e) { e.preventDefault(); isDraggingOver.value = false; const f = Array.from(e.dataTransfer.files).filter(i => i.type.startsWith('image/')); if (f.length) await imageStore.uploadImages(f); }
+async function handlePaste(e) { const items = (e.clipboardData || window.clipboardData).items; const files = []; for (const i of items) { if (i.kind === 'file' && i.type.startsWith('image/')) { const f = i.getAsFile(); if (f) files.push(new File([f], `pasted_${Date.now()}.png`, { type: f.type })); } } if (files.length) { e.preventDefault(); await imageStore.uploadImages(files); } }
+function openCameraModal() { uiStore.openModal('cameraCapture'); }
+function handleRefresh() { imageStore.fetchImages(); }
+function parseOptions(o) { return typeof o === 'string' ? o.split(',').map(v => v.trim()).filter(Boolean) : Array.isArray(o) ? o : []; }
 </script>
 
 <style scoped>
-/* Custom Scrollbar for Sidebar */
-.custom-scrollbar::-webkit-scrollbar {
-    width: 6px;
-}
-.custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-}
-.custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(156, 163, 175, 0.5);
-    border-radius: 20px;
-}
-.dark .custom-scrollbar::-webkit-scrollbar-thumb {
-    background-color: rgba(75, 85, 99, 0.5);
-}
-
-@keyframes bounce-in {
-  0% { transform: scale(0); opacity: 0; }
-  50% { transform: scale(1.2); }
-  100% { transform: scale(1); opacity: 1; }
-}
-.animate-bounce-in {
-  animation: bounce-in 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
-}
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(156, 163, 175, 0.5); border-radius: 20px; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 </style>

@@ -47,10 +47,9 @@ export const useAdminStore = defineStore('admin', () => {
     const allUsers = ref([]);
     const isLoadingUsers = ref(false);
     
-    // --- NEW: Services State ---
+    // Services State
     const serviceStats = ref(null);
     const isLoadingServiceStats = ref(false);
-    // ---------------------------
 
     // Global Settings
     const globalSettings = ref([]);
@@ -160,20 +159,19 @@ export const useAdminStore = defineStore('admin', () => {
     }
     on('task:completed', handleTaskCompletion);
 
-    function handleAppStatusUpdate(appData) {
-        const updateItemInList = (list) => {
-            if (Array.isArray(list)) {
-                const index = list.findIndex(item => item.id === appData.id);
-                if (index !== -1) Object.assign(list[index], appData);
-            }
-        };
-        if (appData.item_type === 'app') updateItemInList(zooApps.value.items);
-        else if (appData.item_type === 'mcp') updateItemInList(zooMcps.value.items);
-    }
-
     // --- Actions ---
 
-    // --- NEW: Services Actions ---
+    async function forceAllUsersConfig(payload) {
+        try {
+            const res = await apiClient.post('/api/admin/system/force-all-users-config', payload);
+            uiStore.addNotification(res.data.message, 'success');
+            return true;
+        } catch (e) {
+            console.error(e);
+            return false;
+        }
+    }
+
     async function fetchServiceDashboard() {
         isLoadingServiceStats.value = true;
         try {
@@ -189,13 +187,11 @@ export const useAdminStore = defineStore('admin', () => {
         await fetchServiceDashboard();
         uiStore.addNotification('Usage statistics reset.', 'success');
     }
-    // ---------------------------
 
     async function createBackup(password) { const response = await apiClient.post('/api/admin/backup/create', { password }); tasksStore.addTask(response.data); return response.data; }
     async function analyzeSystemLogs() { try { const response = await apiClient.post('/api/admin/system/analyze-logs'); tasksStore.addTask(response.data); return response.data; } catch (error) { uiStore.addNotification('Failed to start log analysis.', 'error'); throw error; } }
     async function purgeUnusedUploads() { const response = await apiClient.post('/api/admin/purge-unused-uploads'); tasksStore.addTask(response.data); }
 
-    
     async function triggerBatchModeration() {
         const response = await apiClient.post('/api/admin/trigger-moderation');
         tasksStore.addTask(response.data);
@@ -209,7 +205,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
     async function killProcess(pid) { await apiClient.post('/api/admin/system/kill-process', { pid }); uiStore.addNotification(`Process ${pid} killed.`, 'success'); fetchSystemStatus(); }
 
-    // Dashboard
     async function fetchDashboardStats() { 
         isLoadingDashboardStats.value = true; 
         try { const response = await apiClient.get('/api/admin/stats'); dashboardStats.value = response.data; } 
@@ -223,14 +218,13 @@ export const useAdminStore = defineStore('admin', () => {
         finally { isLoadingConnectedUsers.value = false; } 
     }
     async function fetchGlobalGenerationStats() { 
-        if (globalGenerationStats.value) return; // Cache stats
+        if (globalGenerationStats.value) return; 
         isLoadingGlobalGenerationStats.value = true; 
         try { const response = await apiClient.get('/api/admin/global-generation-stats'); globalGenerationStats.value = response.data; } 
         catch (error) { globalGenerationStats.value = null; } 
         finally { isLoadingGlobalGenerationStats.value = false; } 
     }
     
-    // System
     async function fetchSystemStatus() { 
         isLoadingSystemStatus.value = true; 
         try { const response = await apiClient.get('/api/admin/system-status'); systemStatus.value = response.data; } 
@@ -256,7 +250,6 @@ export const useAdminStore = defineStore('admin', () => {
         finally { isLoadingModelUsageStats.value = false; } 
     }
 
-    // Settings
     async function fetchGlobalSettings(force = false) { 
         if (!force && globalSettings.value.length > 0) return;
         isLoadingSettings.value = true; 
@@ -280,7 +273,6 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('AI Bot user settings updated.', 'success'); 
     }
 
-    // Bindings (LLM)
     async function fetchBindings(force = false) { 
         if (!force && bindings.value.length > 0) return;
         isLoadingBindings.value = true; 
@@ -295,7 +287,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateBinding(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; uiStore.addNotification(`Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteBinding(id) { await apiClient.delete(`/api/admin/bindings/${id}`); bindings.value = bindings.value.filter(b => b.id !== id); uiStore.addNotification('Binding deleted.', 'success'); }
 
-    // Bindings (TTI)
     async function fetchTtiBindings(force = false) { 
         if (!force && ttiBindings.value.length > 0) return;
         isLoadingTtiBindings.value = true; 
@@ -310,7 +301,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateTtiBinding(id, payload) { const r = await apiClient.put(`/api/admin/tti-bindings/${id}`, payload); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) ttiBindings.value[i] = r.data; uiStore.addNotification(`TTI Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtiBinding(id) { await apiClient.delete(`/api/admin/tti-bindings/${id}`); ttiBindings.value = ttiBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTI Binding deleted.', 'success'); }
 
-    // Bindings (TTS)
     async function fetchTtsBindings(force = false) { 
         if (!force && ttsBindings.value.length > 0) return;
         isLoadingTtsBindings.value = true; 
@@ -325,7 +315,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateTtsBinding(id, payload) { const r = await apiClient.put(`/api/admin/tts-bindings/${id}`, payload); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) ttsBindings.value[i] = r.data; uiStore.addNotification(`TTS Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtsBinding(id) { await apiClient.delete(`/api/admin/tts-bindings/${id}`); ttsBindings.value = ttsBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTS Binding deleted.', 'success'); }
 
-    // Bindings (STT)
     async function fetchSttBindings(force = false) { 
         if (!force && sttBindings.value.length > 0) return;
         isLoadingSttBindings.value = true; 
@@ -340,7 +329,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateSttBinding(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; uiStore.addNotification(`STT Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteSttBinding(id) { await apiClient.delete(`/api/admin/stt-bindings/${id}`); sttBindings.value = sttBindings.value.filter(b => b.id !== id); uiStore.addNotification('STT Binding deleted.', 'success'); }
 
-    // Bindings (RAG)
     async function fetchRagBindings(force = false) { 
         if (!force && ragBindings.value.length > 0) return;
         isLoadingRagBindings.value = true; 
@@ -355,7 +343,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateRagBinding(id, payload) { const r = await apiClient.put(`/api/admin/rag-bindings/${id}`, payload); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; uiStore.addNotification(`RAG Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteRagBinding(id) { await apiClient.delete(`/api/admin/rag-bindings/${id}`); ragBindings.value = ragBindings.value.filter(b => b.id !== id); uiStore.addNotification('RAG Binding deleted.', 'success'); }
     
-    // Binding Models & Utils
     async function fetchBindingModels(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/models`); return r.data; }
     async function getModelCtxSize(id, name) { const r = await apiClient.post(`/api/admin/bindings/${id}/context-size`, { model_name: name }); return r.data.ctx_size; }
     async function saveModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}/alias`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; }
@@ -449,7 +436,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function installZooPersonality(payload) { const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
     
-    // Binding Zoos
     async function fetchBindingZoo(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/zoo`); return r.data; }
     async function installLlmFromZoo(id, index) { const r = await apiClient.post(`/api/admin/bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
     async function fetchTtiBindingZoo(id) { const r = await apiClient.get(`/api/admin/tti-bindings/${id}/zoo`); return r.data; }
@@ -459,7 +445,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchSttBindingZoo(id) { const r = await apiClient.get(`/api/admin/stt-bindings/${id}/zoo`); return r.data; }
     async function installSttFromZoo(id, index) { const r = await apiClient.post(`/api/admin/stt-bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
 
-    // Misc Content
     async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); const response = await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); return response.data; }
     async function updateSystemPrompt(promptId, promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); await usePromptsStore().fetchPrompts(); }
     async function deleteSystemPrompt(promptId) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); await usePromptsStore().fetchPrompts(); await fetchZooPrompts({}, true); }
@@ -516,7 +501,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateNewsArticle(id, payload) { await apiClient.put(`/api/admin/news-articles/${id}`, payload); await fetchNewsArticles(true); uiStore.addNotification('Article updated.', 'success'); }
     async function deleteBatchNewsArticles(ids) { await apiClient.post('/api/admin/news-articles/batch-delete', { article_ids: ids }); await fetchNewsArticles(true); uiStore.addNotification(`${ids.length} article(s) deleted.`, 'success'); }
 
-    // Users
     async function fetchAllUsers(filters = {}) { 
         isLoadingUsers.value = true; 
         try { const response = await apiClient.get('/api/admin/users', { params: filters }); allUsers.value = response.data; } 
@@ -541,11 +525,9 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function generateIconForModel(prompt) { const response = await apiClient.post('/api/admin/bindings/generate_icon', { prompt }); tasksStore.addTask(response.data); return response.data; }
     
-    // Actions for RSS and others
     async function triggerRssScraping() { const response = await apiClient.post('/api/admin/rss-feeds/scrape'); tasksStore.addTask(response.data); return response.data; }
     async function refreshZooCache() { const response = await apiClient.post('/api/admin/refresh-zoo-cache'); tasksStore.addTask(response.data); return response.data; }
 
-    // Moderation
     async function fetchModerationQueue(filter = null) {
         const params = {};
         if (filter) params.status_filter = filter;
@@ -553,18 +535,13 @@ export const useAdminStore = defineStore('admin', () => {
         return response.data;
     }
 
-    async function approveContent(type, id) {
-        await apiClient.post(`/api/admin/moderation/${type}/${id}/approve`);
-    }
-
-    async function deleteContent(type, id) {
-        await apiClient.delete(`/api/admin/moderation/${type}/${id}`);
-    }
+    async function approveContent(type, id) { await apiClient.post(`/api/admin/moderation/${type}/${id}/approve`); }
+    async function deleteContent(type, id) { await apiClient.delete(`/api/admin/moderation/${type}/${id}`); }
 
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
-        serviceStats, isLoadingServiceStats, // EXPORTED
+        serviceStats, isLoadingServiceStats, 
         globalSettings, isLoadingSettings, aiBotSettings, isLoadingAiBotSettings,
         bindings, isLoadingBindings, availableBindingTypes,
         ttiBindings, isLoadingTtiBindings, availableTtiBindingTypes,
@@ -580,8 +557,9 @@ export const useAdminStore = defineStore('admin', () => {
         appFilters, mcpFilters, promptFilters, systemLogs, isLoadingSystemLogs,
 
         // Actions
+        forceAllUsersConfig, // EXPORTED
         fetchDashboardStats, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
-        fetchServiceDashboard, resetServiceUsage, // EXPORTED
+        fetchServiceDashboard, resetServiceUsage, 
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,
         fetchAllUsers, activateUser, fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
@@ -612,7 +590,6 @@ export const useAdminStore = defineStore('admin', () => {
         sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
         fetchBindingZoo, installLlmFromZoo, fetchTtiBindingZoo, installTtiFromZoo, fetchTtsBindingZoo, installTtsFromZoo, fetchSttBindingZoo, installSttFromZoo,
 
-        // Moderation
         fetchModerationQueue, approveContent, deleteContent
     };
 });

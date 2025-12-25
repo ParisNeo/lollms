@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ================================================================
-#   Simplified LOLLMs – Installer & Runner (TTY‑safe)
+#   LOLLMs – Installer & Runner (TTY‑safe)
 #   Runs the application via the Python interpreter instead of uvicorn
 # ================================================================
 
@@ -45,7 +45,88 @@ if [ "$IS_TTY" -eq 1 ] && command -v tput >/dev/null 2>&1; then
   tput reset || true
 fi
 
-print_header "Simplified LOLLMs Installer & Runner"
+print_header "LOLLMs Installer & Runner"
+
+# --- Parse optional arguments ---
+HOST_VAL=""
+PORT_VAL=""
+UPDATE_ONLY=0
+
+# Create a temporary copy of args to avoid issues with shifting in the loop
+ARGS=("$@")
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --update)
+      UPDATE_ONLY=1
+      shift
+      ;;
+    --host)
+      if [[ -n "${2-}" && ! "$2" =~ ^-- ]]; then
+        HOST_VAL="$2"
+        shift 2
+      else
+        print_error "Missing value for --host"
+        exit 1
+      fi
+      ;;
+    --port)
+      if [[ -n "${2-}" && ! "$2" =~ ^-- ]]; then
+        PORT_VAL="$2"
+        shift 2
+      else
+        print_error "Missing value for --port"
+        exit 1
+      fi
+      ;;
+    *)
+      # Ignore other arguments for now
+      shift
+      ;;
+  esac
+done
+
+# --- Update Logic ---
+if [ "$UPDATE_ONLY" -eq 1 ]; then
+    print_header "Updating LOLLMs"
+    
+    if [ ! -d ".git" ]; then
+        print_error "Not a git repository. Update aborted."
+        exit 1
+    fi
+
+    print_info "Fetching latest updates from git..."
+    git fetch --all --tags
+
+    # Check if we are on a branch or a detached head (tag)
+    if git symbol-ref -q HEAD > /dev/null 2>&1; then
+        print_info "Updating current branch..."
+        git pull
+    else
+        LATEST_TAG=$(git describe --tags "$(git rev-list --tags --max-count=1)" 2>/dev/null || true)
+        if [ -n "$LATEST_TAG" ]; then
+            print_info "Updating to latest tag: $LATEST_TAG..."
+            git checkout "$LATEST_TAG"
+        else
+            print_warn "Not on a branch and no tags found. Performing simple pull."
+            git pull
+        fi
+    fi
+
+    # Ensure venv exists before installing requirements
+    if [ ! -d "$VENV_DIR" ]; then
+        print_info "Creating virtual environment..."
+        python3 -m venv "$VENV_DIR"
+    fi
+
+    print_info "Installing/Updating dependencies..."
+    "./$VENV_DIR/bin/pip" install --no-cache-dir -r "$REQUIREMENTS_FILE"
+    
+    print_success "Update complete!"
+    print_info "To start the application, run: ./run.sh"
+    exit 0
+fi
+
+# --- Standard Runner Logic ---
 print_info "Performing initial system checks..."
 
 # Choose Python interpreter
@@ -99,37 +180,6 @@ if [ "$IS_TTY" -eq 1 ] && [ ! -f ".env" ] && [ -f ".env.example" ]; then
   print_success "'.env' file created. Edit it for custom configurations."
 fi
 
-# --- Parse optional host/port arguments ---
-HOST_VAL=""
-PORT_VAL=""
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --host)
-      if [[ -n "${2-}" && ! "$2" =~ ^-- ]]; then
-        HOST_VAL="$2"
-        shift 2
-      else
-        print_error "Missing value for --host"
-        exit 1
-      fi
-      ;;
-    --port)
-      if [[ -n "${2-}" && ! "$2" =~ ^-- ]]; then
-        PORT_VAL="$2"
-        shift 2
-      else
-        print_error "Missing value for --port"
-        exit 1
-      fi
-      ;;
-    *)
-      print_error "Unknown option: $1"
-      exit 1
-      ;;
-  esac
-done
-
 # --- Paths ---
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PYTHONPATH_VALUE="$PROJECT_DIR"
@@ -141,7 +191,7 @@ if [ ! -x "$PYTHON_BIN" ]; then
 fi
 
 # --- Start server (foreground, service‑safe) ---
-print_header "Starting Simplified LOLLMs"
+print_header "Starting LOLLMs"
 export PYTHONPATH="$PYTHONPATH_VALUE"
 export PYTHONUNBUFFERED=1
 

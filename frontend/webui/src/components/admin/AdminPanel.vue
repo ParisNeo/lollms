@@ -18,7 +18,8 @@ const Operations = defineAsyncComponent(() => import('./Operations.vue'));
 
 const UserTable = defineAsyncComponent(() => import('./UserTable.vue'));
 const ServerSettings = defineAsyncComponent(() => import('./ServerSettings.vue'));
-const GlobalSettings = defineAsyncComponent(() => import('./GlobalSettings.vue'));
+// GlobalSettings REMOVED as it is now merged into ServerSettings
+
 const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBindingsSettings.vue'));
 const TTIBindingsSettings = defineAsyncComponent(() => import('./bindings/TTIBindingsSettings.vue'));
 const TTSBindingsSettings = defineAsyncComponent(() => import('./bindings/TTSBindingsSettings.vue'));
@@ -40,7 +41,6 @@ const RssManagement = defineAsyncComponent(() => import('./RssManagement.vue'));
 const NewsFeedSettings = defineAsyncComponent(() => import('./NewsFeedSettings.vue'));
 const NewsManagement = defineAsyncComponent(() => import('./NewsManagement.vue'));
 const ModerationQueue = defineAsyncComponent(() => import('./ModerationQueue.vue'));
-// NEW Component
 const ServicesManagement = defineAsyncComponent(() => import('./ServicesManagement.vue'));
 
 const tabs = [
@@ -63,7 +63,7 @@ const tabs = [
     { id: 'mcps', component: McpsManagement },
     { id: 'personalities', component: PersonalitiesManagement },
     { id: 'prompts', component: PromptsManagement },
-    { id: 'global_settings', component: GlobalSettings },
+    // global_settings tab REMOVED
     { id: 'email', component: EmailSettings },
     { id: 'sso_client_settings', component: SSOClientSettings },
     { id: 'scim_settings', component: SCIMSettings },
@@ -73,7 +73,7 @@ const tabs = [
     { id: 'news_feed_settings', component: NewsFeedSettings },
     { id: 'news_management', component: NewsManagement },
     { id: 'moderation', component: ModerationQueue },
-    { id: 'services_mgmt', component: ServicesManagement }, // REGISTERED
+    { id: 'services_mgmt', component: ServicesManagement },
 ];
 
 const activeComponent = computed(() => {

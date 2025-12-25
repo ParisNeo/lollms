@@ -11,6 +11,57 @@ set VENV_DIR=venv
 set REQUIREMENTS_FILE=requirements.txt
 set PYTHON_EXECUTABLE=python
 
+:: --- 0. ARGUMENT PARSING ---
+set UPDATE_ONLY=0
+for %%x in (%*) do (
+    if "%%x"=="--update" set UPDATE_ONLY=1
+)
+
+:: --- 1. UPDATE LOGIC ---
+if "%UPDATE_ONLY%"=="1" (
+    echo [INFO] Update flag detected. Starting repository update...
+    
+    if not exist ".git" (
+        echo [ERROR] Not a git repository. Update aborted.
+        pause
+        exit /b 1
+    )
+
+    echo [INFO] Fetching latest updates from git...
+    git fetch --all --tags
+    
+    :: Check if we are on a branch
+    git symbol-ref -q HEAD >nul 2>nul
+    if !errorlevel! equ 0 (
+        echo [INFO] Updating current branch...
+        git pull
+    ) else (
+        :: Find latest tag
+        for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0 2^>nul') do set LATEST_TAG=%%i
+        if defined LATEST_TAG (
+            echo [INFO] Updating to latest tag: !LATEST_TAG!...
+            git checkout !LATEST_TAG!
+        ) else (
+            echo [WARNING] Not on a branch and no tags found. Performing simple pull.
+            git pull
+        )
+    )
+
+    :: Ensure venv exists
+    if not exist "%VENV_DIR%\Scripts\activate.bat" (
+        echo [INFO] Creating virtual environment...
+        %PYTHON_EXECUTABLE% -m venv %VENV_DIR%
+    )
+
+    echo [INFO] Installing/Updating dependencies...
+    call .\%VENV_DIR%\Scripts\activate.bat
+    pip install --no-cache-dir -r %REQUIREMENTS_FILE%
+    
+    echo [SUCCESS] Update complete!
+    echo To start the application, run: run_windows.bat
+    exit /b 0
+)
+
 :: --- 1. PRE-CHECKS ---
 echo [INFO] Checking for Python installation...
 where %PYTHON_EXECUTABLE% >nul 2>nul
@@ -85,7 +136,7 @@ if exist ".env" (
     )
 )
 
-echo [INFO] Starting Simplified LOLLMs Server on port !PORT_TO_USE!...
+echo [INFO] Starting LOLLMs Server on port !PORT_TO_USE!...
 echo To stop the server, simply close this window or press Ctrl+C.
 echo.
 

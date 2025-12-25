@@ -1,185 +1,190 @@
+<!-- [UPDATE] frontend/webui/src/components/admin/Operations.vue -->
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useAdminStore } from '../../stores/admin';
 import { useUiStore } from '../../stores/ui';
-import { useSocialStore } from '../../stores/social';
-import UserAvatar from '../ui/Cards/UserAvatar.vue';
-import IconArchiveBox from '../../assets/icons/IconArchiveBox.vue';
-import IconTrash from '../../assets/icons/IconTrash.vue';
-import IconSend from '../../assets/icons/IconSend.vue';
-import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
+import { useDataStore } from '../../stores/data';
+import { storeToRefs } from 'pinia';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
-const socialStore = useSocialStore();
+const dataStore = useDataStore();
 
-const connectedUsers = computed(() => adminStore.connectedUsers);
-const allUsers = computed(() => adminStore.allUsers);
-const isLoadingConnected = computed(() => adminStore.isLoadingConnectedUsers);
+const { adminAvailableLollmsModels, isLoadingLollmsModels } = storeToRefs(adminStore);
+const { availableTtiModels, availableTtsModels, availableSttModels, availableItiModels } = storeToRefs(dataStore);
 
-// Renamed local ref to avoid any naming conflict with the store action (though scope rules should allow it)
-const broadcastMsg = ref('');
-const isBroadcasting = ref(false);
+const isPurging = ref(false);
+const isForcingConfig = ref(false);
+const isRebuildingCache = ref(false);
 
-const liveUsersList = computed(() => {
-    // Merge connected IDs with full user details
-    if (!allUsers.value.length) return connectedUsers.value;
-    return connectedUsers.value.map(cu => {
-        const full = allUsers.value.find(u => u.id === cu.id);
-        return full || cu;
-    });
+const forceForm = ref({
+    lollms_model_name: '',
+    tti_binding_model_name: '',
+    tts_binding_model_name: '',
+    stt_binding_model_name: '',
+    iti_binding_model_name: ''
 });
 
 onMounted(() => {
-    adminStore.fetchConnectedUsers();
-    adminStore.fetchAllUsers();
+    adminStore.fetchAdminAvailableLollmsModels();
+    dataStore.fetchAdminAvailableTtiModels();
+    dataStore.fetchAdminAvailableTtsModels();
+    dataStore.fetchAdminAvailableSttModels();
 });
 
-async function handleBackup() {
-    const { confirmed, value } = await uiStore.showConfirmation({
-        title: 'Secure System Backup',
-        message: 'Enter a MANDATORY password to encrypt the backup.',
-        confirmText: 'Backup',
-        inputType: 'password',
-        inputPlaceholder: 'Encryption Password'
-    });
-
-    if (confirmed) {
-        if (!value) {
-            uiStore.addNotification('Password is required for backup.', 'error');
-            return;
-        }
-        try {
-            await adminStore.createBackup(value);
-            uiStore.addNotification('Secure backup task started.', 'info');
-        } catch (e) {
-            uiStore.addNotification('Failed to start backup.', 'error');
-        }
-    }
-}
-
 async function handlePurge() {
-  const confirmed = await uiStore.showConfirmation({
-    title: 'Purge Temporary Files?',
-    message: 'Delete temporary files older than 24 hours from all user directories?',
-    confirmText: 'Purge',
-    cancelText: 'Cancel'
-  });
-  if (confirmed && confirmed.confirmed) {
-    adminStore.purgeUnusedUploads();
-    uiStore.addNotification('Purge task started.', 'info');
-  }
-}
-
-async function handleBroadcast() {
-    if (!broadcastMsg.value.trim()) return;
-    isBroadcasting.value = true;
-    try {
-        await adminStore.broadcastMessage(broadcastMsg.value);
-        uiStore.addNotification('Broadcast sent successfully.', 'success');
-        broadcastMsg.value = '';
-    } finally {
-        isBroadcasting.value = false;
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Purge Temporary Files?',
+        message: 'This will delete all temporary uploaded files older than 24 hours. This action cannot be undone.',
+        confirmText: 'Yes, Purge'
+    });
+    if (confirmed.confirmed) {
+        isPurging.value = true;
+        try {
+            await adminStore.purgeUnusedUploads();
+            uiStore.addNotification('Purge task started.', 'info');
+        } finally {
+            isPurging.value = false;
+        }
     }
 }
 
-function dmUser(user) {
-    socialStore.openConversation({
-        id: user.id,
-        username: user.username,
-        icon: user.icon
+async function handleRebuildZooCache() {
+    isRebuildingCache.value = true;
+    try {
+        await adminStore.refreshZooCache();
+        uiStore.addNotification('Zoo cache rebuild task started.', 'info');
+    } finally {
+        isRebuildingCache.value = false;
+    }
+}
+
+async function handleForceAll() {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Force Global Configuration?',
+        message: 'This will instantly change the model settings for EVERY user in the system. Active sessions will be refreshed. Continue?',
+        confirmText: 'Yes, Force All',
+        isDanger: true
     });
-    uiStore.setMainView('chat'); // Ensure chat view is active if redirecting
+
+    if (confirmed.confirmed) {
+        isForcingConfig.value = true;
+        try {
+            // Only send fields that have a value
+            const payload = Object.fromEntries(
+                Object.entries(forceForm.value).filter(([_, v]) => v !== '')
+            );
+            
+            if (Object.keys(payload).length === 0) {
+                uiStore.addNotification('Please select at least one model to force.', 'warning');
+                return;
+            }
+
+            await adminStore.forceAllUsersConfig(payload);
+        } finally {
+            isForcingConfig.value = false;
+        }
+    }
 }
 </script>
 
 <template>
-    <div class="space-y-8">
-        <h3 class="text-xl font-bold text-gray-900 dark:text-white">System Operations</h3>
-
-        <!-- Maintenance Actions -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <!-- Backup -->
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                <div class="flex items-center gap-4 mb-4">
-                    <div class="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-full">
-                        <IconArchiveBox class="w-6 h-6"/>
-                    </div>
+    <div class="space-y-8 pb-20">
+        <!-- Force Config Tool -->
+        <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg overflow-hidden border border-red-200 dark:border-red-900/30">
+            <div class="p-6 bg-red-50 dark:bg-red-950/20 border-b border-red-200 dark:border-red-900/30">
+                <div class="flex items-center gap-3">
+                    <IconWrenchScrewdriver class="w-6 h-6 text-red-600 dark:text-red-400" />
+                    <h3 class="text-xl font-bold text-red-900 dark:text-red-100">Force Global AI Configuration</h3>
+                </div>
+                <p class="mt-2 text-sm text-red-700 dark:text-red-300">
+                    Instantly override the model settings for <b>every registered user</b>. Use this to migrate the whole server to new models or enforce specific bindings.
+                </p>
+            </div>
+            
+            <div class="p-6 space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- LLM -->
                     <div>
-                        <h4 class="font-bold text-lg">System Backup</h4>
-                        <p class="text-sm text-gray-500">Create an encrypted full backup.</p>
+                        <label class="block text-sm font-bold mb-1">Force LLM Model</label>
+                        <select v-model="forceForm.lollms_model_name" class="input-field" :disabled="isLoadingLollmsModels">
+                            <option value="">-- No Change --</option>
+                            <option v-for="m in adminAvailableLollmsModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                        </select>
+                    </div>
+
+                    <!-- TTI -->
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Force TTI (Images)</label>
+                        <select v-model="forceForm.tti_binding_model_name" class="input-field">
+                            <option value="">-- No Change --</option>
+                            <option v-for="m in availableTtiModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                        </select>
+                    </div>
+
+                    <!-- TTS -->
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Force TTS (Speech)</label>
+                        <select v-model="forceForm.tts_binding_model_name" class="input-field">
+                            <option value="">-- No Change --</option>
+                            <option v-for="m in availableTtsModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                        </select>
+                    </div>
+
+                    <!-- STT -->
+                    <div>
+                        <label class="block text-sm font-bold mb-1">Force STT (Voice-to-Text)</label>
+                        <select v-model="forceForm.stt_binding_model_name" class="input-field">
+                            <option value="">-- No Change --</option>
+                            <option v-for="m in availableSttModels" :key="m.id" :value="m.id">{{ m.name }}</option>
+                        </select>
                     </div>
                 </div>
-                <button @click="handleBackup" class="btn btn-primary w-full">Start Backup</button>
-            </div>
 
-            <!-- Purge -->
-            <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-                <div class="flex items-center gap-4 mb-4">
-                    <div class="p-3 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-full">
-                        <IconTrash class="w-6 h-6"/>
-                    </div>
-                    <div>
-                        <h4 class="font-bold text-lg">Cleanup</h4>
-                        <p class="text-sm text-gray-500">Purge old temporary files.</p>
-                    </div>
-                </div>
-                <button @click="handlePurge" class="btn btn-danger-outline w-full">Purge Temp Files</button>
-            </div>
-        </div>
-
-        <!-- Broadcast -->
-        <div class="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
-            <h4 class="font-bold text-lg mb-4 flex items-center gap-2">
-                <IconSend class="w-5 h-5 text-gray-500"/> Broadcast Message
-            </h4>
-            <div class="flex gap-2">
-                <input 
-                    v-model="broadcastMsg" 
-                    type="text" 
-                    class="input-field flex-grow" 
-                    placeholder="Type a message to send to all connected users..."
-                    @keyup.enter="handleBroadcast"
-                >
-                <button 
-                    @click="handleBroadcast" 
-                    :disabled="!broadcastMsg || isBroadcasting" 
-                    class="btn btn-primary px-6"
-                >
-                    Send
-                </button>
-            </div>
-        </div>
-
-        <!-- Connected Users -->
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 overflow-hidden">
-            <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border-b dark:border-gray-700 flex justify-between items-center">
-                <h4 class="font-bold text-lg">Live Users</h4>
-                <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium px-2 py-1 bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 rounded-full">
-                        {{ liveUsersList.length }} Online
-                    </span>
-                    <button @click="adminStore.fetchConnectedUsers" class="btn-icon p-1">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" :class="{'animate-spin': isLoadingConnected}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd" /></svg>
+                <div class="flex justify-end pt-4 border-t dark:border-gray-700">
+                    <button @click="handleForceAll" class="btn btn-danger flex items-center gap-2" :disabled="isForcingConfig">
+                        <IconAnimateSpin v-if="isForcingConfig" class="w-5 h-5 animate-spin" />
+                        <IconSparkles v-else class="w-5 h-5" />
+                        Apply to All Users
                     </button>
                 </div>
             </div>
+        </div>
+
+        <!-- Maintenance Operations -->
+        <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
+            <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+                <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Maintenance Operations</h3>
+            </div>
             
-            <div class="max-h-96 overflow-y-auto p-4">
-                <div v-if="liveUsersList.length === 0" class="text-center text-gray-500 py-4">No users currently connected.</div>
-                <div v-else class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    <div v-for="user in liveUsersList" :key="user.id" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-200 dark:border-gray-700">
-                        <div class="flex items-center gap-3 overflow-hidden">
-                            <UserAvatar :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
-                            <div class="truncate">
-                                <p class="font-medium text-sm truncate" :title="user.username">{{ user.username }}</p>
-                                <p class="text-xs text-gray-500">ID: {{ user.id }}</p>
-                            </div>
-                        </div>
-                        <button @click="dmUser(user)" class="btn btn-secondary btn-xs" title="Send Direct Message">
-                            <IconChatBubbleLeftRight class="w-4 h-4"/>
-                        </button>
+            <div class="divide-y divide-gray-200 dark:divide-gray-700">
+                <!-- Purge -->
+                <div class="p-6 flex items-center justify-between gap-4">
+                    <div>
+                        <h4 class="font-bold text-gray-800 dark:text-gray-200">Purge Unused Uploads</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">Deletes temporary files older than 24 hours that aren't attached to active discussions.</p>
                     </div>
+                    <button @click="handlePurge" class="btn btn-danger-outline whitespace-nowrap" :disabled="isPurging">
+                         <IconAnimateSpin v-if="isPurging" class="w-4 h-4 mr-2 animate-spin" />
+                        Start Purge
+                    </button>
+                </div>
+
+                <!-- Rebuild Cache -->
+                <div class="p-6 flex items-center justify-between gap-4">
+                    <div>
+                        <h4 class="font-bold text-gray-800 dark:text-gray-200">Refresh Zoo Cache</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400">Force a background rescan of all Zoo repositories to update metadata and availability.</p>
+                    </div>
+                    <button @click="handleRebuildZooCache" class="btn btn-secondary whitespace-nowrap" :disabled="isRebuildingCache">
+                        <IconAnimateSpin v-if="isRebuildingCache" class="w-4 h-4 mr-2 animate-spin" />
+                        <IconRefresh v-else class="w-4 h-4 mr-2" />
+                        Refresh Zoo
+                    </button>
                 </div>
             </div>
         </div>

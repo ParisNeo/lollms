@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/App.vue -->
 <script setup>
 import { computed, onMounted, watch, ref } from 'vue';
 import { useRoute } from 'vue-router';
@@ -12,9 +11,11 @@ import logoDefault from './assets/logo.png';
 // Layouts
 import Sidebar from './components/layout/Sidebar.vue';
 import GlobalHeader from './components/layout/GlobalHeader.vue';
+import ChatSidebar from './components/chat/ChatSidebar.vue';
 import AudioPlayer from './components/chat/AudioPlayer.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ModalContainer from './components/modals/ModalContainer.vue';
+import ImageViewerModal from './components/ui/ImageViewerModal.vue';
 
 // UI Components
 import MessageContentRenderer from './components/ui/MessageContentRenderer/MessageContentRenderer.vue';
@@ -38,11 +39,17 @@ const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 
 const isFunFactHanging = ref(false);
 
-const funFactStyle = computed(() => ({
-    '--fun-fact-color': funFactColor.value,
-    'backgroundColor': isFunFactHanging.value ? 'transparent' : `${funFactColor.value}15`,
-    'borderColor': funFactColor.value,
-}));
+const funFactStyle = computed(() => {
+    const style = {
+        '--fun-fact-color': funFactColor.value,
+        'borderColor': funFactColor.value,
+    };
+    // Only apply the subtle tinted background to the collapsed card
+    if (!isFunFactHanging.value) {
+        style.backgroundColor = `${funFactColor.value}10`;
+    }
+    return style;
+});
 
 const layoutState = computed(() => {
     if (isAuthenticating.value || isFunFactHanging.value) return 'loading';
@@ -74,63 +81,103 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-50 dark:bg-gray-900 flex flex-col">
     
     <!-- Splash Screen -->
-    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col items-center justify-center text-center p-6 bg-gray-50 dark:bg-gray-950 transition-all duration-700">
+    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col bg-gray-50 dark:bg-gray-950 transition-all duration-700 overflow-hidden">
         
-        <!-- Optimized Background Decor -->
-        <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-            <div class="absolute top-[-5%] left-[-5%] w-2/3 h-2/3 rounded-full bg-blue-500/10 blur-[140px] animate-pulse will-change-transform"></div>
-            <div class="absolute bottom-[-5%] right-[-5%] w-2/3 h-2/3 rounded-full bg-indigo-500/10 blur-[140px] animate-pulse delay-1000 will-change-transform"></div>
+        <!-- Background Decor -->
+        <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-all duration-1000" :class="{'blur-3xl opacity-20 scale-110': isFunFactHanging}">
+            <div class="absolute top-[-5%] left-[-5%] w-2/3 h-2/3 rounded-full bg-blue-500/10 blur-[140px] animate-pulse"></div>
+            <div class="absolute bottom-[-5%] right-[-5%] w-2/3 h-2/3 rounded-full bg-indigo-500/10 blur-[140px] animate-pulse delay-1000"></div>
         </div>
 
-        <div v-if="isFunFactHanging" class="absolute inset-0 bg-white/50 dark:bg-black/60 backdrop-blur-md z-10" @click="toggleFactHang"></div>
+        <!-- Backdrop for expanded state -->
+        <div v-if="isFunFactHanging" class="fixed inset-0 bg-white/40 dark:bg-black/60 backdrop-blur-xl z-[140] transition-all duration-500" @click="toggleFactHang"></div>
 
-        <div class="w-full max-w-lg mx-auto relative z-20 transition-all duration-500" :class="{'scale-90 opacity-10 blur-sm pointer-events-none': isFunFactHanging}">
-            <div class="flex justify-center mb-10">
-                <img :src="logoSrc" alt="Logo" class="h-28 sm:h-36 w-auto object-contain drop-shadow-2xl" />
-            </div>
-            <h1 class="text-6xl sm:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-600 to-indigo-700 dark:from-blue-400 dark:to-indigo-500 tracking-tighter" style="font-family: 'Exo 2', sans-serif;">
-                {{ authStore.welcomeText || 'LoLLMs' }}
-            </h1>
-            <p class="mt-4 text-xl text-gray-400 dark:text-gray-500 font-medium tracking-wide">
-                {{ authStore.welcomeSlogan || 'One tool to rule them all' }}
-            </p>
+        <!-- Main Layout Container: Splits Top branding/fact from Bottom progress -->
+        <div class="flex-grow flex flex-col relative z-10 transition-all duration-500" :class="{'blur-2xl opacity-10 scale-95 pointer-events-none': isFunFactHanging}">
             
-            <div class="mt-16 w-full max-w-sm mx-auto">
+            <!-- Branding & Fact Group: Pushed toward top-middle -->
+            <div class="flex-grow flex flex-col items-center justify-center p-6 space-y-8 sm:space-y-12">
+                
+                <!-- Branding -->
+                <div class="text-center splash-branding">
+                    <div class="flex justify-center mb-4 sm:mb-6 logo-wrap">
+                        <img :src="logoSrc" alt="Logo" class="h-24 sm:h-32 w-auto object-contain drop-shadow-2xl" />
+                    </div>
+                    <h1 class="text-6xl sm:text-8xl font-black text-transparent bg-clip-text bg-gradient-to-br from-blue-600 to-indigo-700 dark:from-blue-400 dark:to-indigo-500 tracking-tighter leading-none" style="font-family: 'Exo 2', sans-serif;">
+                        {{ authStore.welcomeText || 'LoLLMs' }}
+                    </h1>
+                    <p class="mt-3 text-lg sm:text-2xl text-gray-400 dark:text-gray-500 font-medium tracking-wide italic">
+                        {{ authStore.welcomeSlogan || 'One tool to rule them all' }}
+                    </p>
+                </div>
+
+                <!-- Fact Card (Natural flow, z-index 20) -->
+                <div v-if="authStore.funFact" 
+                    class="w-full max-w-md cursor-pointer group transition-all duration-500"
+                    @click="toggleFactHang()">
+                    <div class="p-6 sm:p-8 border-l-[8px] rounded-2xl text-left shadow-xl bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl border border-gray-100 dark:border-gray-700 overflow-hidden transform group-hover:scale-[1.02]" :style="funFactStyle">
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="flex items-center gap-3">
+                                <span class="text-2xl">💡</span>
+                                <span class="font-black text-[10px] uppercase tracking-[0.2em]" :style="{ color: funFactColor }">{{ funFactCategory || 'Knowledge Bit' }}</span>
+                            </div>
+                        </div>
+                        <div class="max-h-[15vh] overflow-y-auto custom-scrollbar pr-2">
+                            <!-- ADDED :key to prevent DOM patching crash -->
+                            <MessageContentRenderer :key="authStore.funFact" :content="authStore.funFact" class="text-gray-900 dark:text-gray-100 text-sm sm:text-base line-clamp-4" />
+                        </div>
+                        <div class="mt-4 text-[8px] text-center text-gray-400 dark:text-gray-500 font-black uppercase tracking-[0.2em] animate-pulse">Tap to expand</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Expanded Fact Overlay (Z-150 ensures it's above the loading screen) -->
+        <Teleport to="body" v-if="isFunFactHanging">
+            <div class="fixed inset-0 z-[150] flex items-center justify-center p-6" @click.self="toggleFactHang">
+                <div class="p-8 sm:p-12 border-l-[12px] rounded-[2.5rem] text-left shadow-[0_50px_100px_-20px_rgba(0,0,0,0.6)] bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 overflow-hidden w-full max-w-4xl animate-fade-in-up" :style="funFactStyle">
+                    <div class="flex items-center justify-between mb-8 border-b dark:border-gray-800 pb-6">
+                        <div class="flex items-center gap-4">
+                            <span class="text-4xl">💡</span>
+                            <span class="font-black text-xs uppercase tracking-[0.3em]" :style="{ color: funFactColor }">{{ funFactCategory || 'Fact Discovery' }}</span>
+                        </div>
+                        <button @click.stop="toggleFactHang" class="p-3 bg-gray-100 dark:bg-gray-800 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 rounded-full transition-all hover:rotate-90">
+                            <IconXMark class="w-8 h-8" />
+                        </button>
+                    </div>
+                    <div class="max-h-[55vh] overflow-y-auto custom-scrollbar pr-6">
+                        <!-- ADDED :key to prevent DOM patching crash -->
+                        <MessageContentRenderer :key="authStore.funFact" :content="authStore.funFact" class="text-gray-900 dark:text-gray-100 text-lg sm:text-xl leading-relaxed" />
+                    </div>
+                    <div class="mt-10 flex items-center justify-between">
+                        <button @click.stop="authStore.fetchNewFunFact()" class="btn btn-secondary px-6" :disabled="authStore.isFetchingFunFact">
+                            <IconAnimateSpin v-if="authStore.isFetchingFunFact" class="w-5 h-5 mr-2 animate-spin" />
+                            Next Fact
+                        </button>
+                        <button @click.stop="toggleFactHang" class="btn btn-primary px-10 py-3 text-sm font-black uppercase tracking-widest rounded-2xl shadow-xl">
+                            Got it &rarr;
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Teleport>
+
+        <!-- Progress Area: Always at the bottom, z-30 -->
+        <div class="w-full bg-white/30 dark:bg-black/40 backdrop-blur-2xl p-6 sm:p-10 border-t border-gray-200/20 dark:border-gray-800/20 relative z-30 transition-all duration-500" :class="{'translate-y-full opacity-0': isFunFactHanging}">
+            <div class="max-w-md mx-auto">
                 <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-800 overflow-hidden relative shadow-inner">
                     <div class="h-full rounded-full bg-gradient-to-r from-blue-500 to-indigo-600 transition-all duration-700 relative" :style="{ width: `${authStore.loadingProgress}%` }">
                          <div class="absolute inset-0 w-full h-full progress-bar-animated opacity-30"></div>
                     </div>
                 </div>
                 <div class="flex justify-between items-center mt-4">
-                    <span class="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em]">{{ authStore.loadingMessage }}</span>
-                    <span class="text-sm font-black text-gray-400 dark:text-gray-600 font-mono">{{ authStore.loadingProgress }}%</span>
+                    <span class="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-[0.2em] animate-pulse">{{ authStore.loadingMessage }}</span>
+                    <span class="text-sm font-black text-gray-500 dark:text-gray-500 font-mono">{{ authStore.loadingProgress }}%</span>
                 </div>
             </div>
         </div>
 
-        <!-- Fun Fact Card -->
-        <div v-if="authStore.funFact" class="mt-14 mx-auto w-full transition-all duration-700 cubic-bezier(0.34, 1.56, 0.64, 1) relative z-30"
-            :class="isFunFactHanging ? 'max-w-4xl scale-100' : 'max-w-md cursor-pointer group'"
-            @click="!isFunFactHanging && toggleFactHang()">
-            <div class="p-10 border-l-[12px] rounded-[2rem] text-left shadow-[0_35px_60px_-15px_rgba(0,0,0,0.3)] bg-white/90 dark:bg-gray-800/90 backdrop-blur-xl border border-gray-100 dark:border-gray-700 overflow-hidden" :style="funFactStyle">
-                <div class="flex items-center justify-between mb-6">
-                    <div class="flex items-center gap-4">
-                        <span class="text-4xl filter drop-shadow-md">💡</span>
-                        <span class="font-black text-[11px] uppercase tracking-[0.3em]" :style="{ color: funFactColor }">{{ funFactCategory || 'Fact Discovery' }}</span>
-                    </div>
-                    <button v-if="isFunFactHanging" @click.stop="toggleFactHang" class="p-2 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-500 rounded-full transition-all hover:rotate-90 shadow-sm"><IconXMark class="w-8 h-8" /></button>
-                </div>
-                <div class="max-h-[60vh] overflow-y-auto custom-scrollbar pr-2">
-                    <MessageContentRenderer :content="authStore.funFact" class="text-gray-900 dark:text-gray-100" />
-                </div>
-                <div v-if="!isFunFactHanging" class="mt-8 text-[9px] text-center text-gray-400 dark:text-gray-500 font-black uppercase tracking-[0.2em] animate-pulse">Tap to expand and stay here</div>
-                <div v-if="isFunFactHanging" class="mt-12 flex items-center justify-between border-t border-gray-100 dark:border-gray-700 pt-8">
-                    <button @click.stop="authStore.fetchNewFunFact()" class="btn btn-secondary btn-sm px-6" :disabled="authStore.isFetchingFunFact"><IconAnimateSpin v-if="authStore.isFetchingFunFact" class="w-4 h-4 mr-2 animate-spin" />Another Fact</button>
-                    <button @click.stop="toggleFactHang" class="btn btn-primary px-10 py-3 text-sm font-black uppercase tracking-widest rounded-xl shadow-xl shadow-blue-500/20">Continue &rarr;</button>
-                </div>
-            </div>
-        </div>
-        <footer class="absolute bottom-8 w-full text-center text-[10px] font-black uppercase tracking-[0.4em] text-gray-400 dark:text-gray-600" :class="{'opacity-0 pointer-events-none': isFunFactHanging}">ParisNeo &middot; 2025</footer>    
+        <footer class="absolute bottom-2 w-full text-center text-[9px] font-black uppercase tracking-[0.4em] text-gray-400 dark:text-gray-600 pointer-events-none" :class="{'opacity-0': isFunFactHanging}">ParisNeo &middot; 2025</footer>    
     </div>
 
     <!-- Main Layout -->
@@ -147,6 +194,7 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0"><router-view /></div>
 
     <ModalContainer />
+    <ImageViewerModal />
     <NotificationPanel /><AudioPlayer />
   </div>
 </template>
@@ -154,4 +202,17 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 <style>
 @keyframes progress-animation { 0% { background-position: 1rem 0; } 100% { background-position: 0 0; } }
 .progress-bar-animated { background-image: linear-gradient(45deg, rgba(255, 255, 255, .15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .15) 50%, rgba(255, 255, 255, .15) 75%, transparent 75%, transparent); background-size: 1rem 1rem; animation: progress-animation 1s linear infinite; }
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+/* Landscape optimization */
+@media (max-height: 600px) {
+    .splash-branding img { height: 4rem !important; }
+    .splash-branding h1 { font-size: 3rem !important; }
+    .space-y-8 > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem !important; }
+}
 </style>

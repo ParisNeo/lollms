@@ -21,16 +21,21 @@ const messageContentRef = ref(null);
 
 // --- Math Rendering ---
 function renderMath() {
-  if (messageContentRef.value && window.renderMathInElement) {
-    window.renderMathInElement(messageContentRef.value, {
-      delimiters: [
-        { left: '$$', right: '$$', display: true },
-        { left: '\\[', right: '\\]', display: true },
-        { left: '\\(', right: '\\)', display: false },
-        { left: '$', right: '$', display: false }
-      ],
-      throwOnError: false
-    });
+  // Defensive check: ensure the ref is still attached to the DOM
+  if (messageContentRef.value && messageContentRef.value.isConnected && window.renderMathInElement) {
+    try {
+      window.renderMathInElement(messageContentRef.value, {
+        delimiters: [
+          { left: '$$', right: '$$', display: true },
+          { left: '\\[', right: '\\]', display: true },
+          { left: '\\(', right: '\\)', display: false },
+          { left: '$', right: '$', display: false }
+        ],
+        throwOnError: false
+      });
+    } catch (e) {
+      console.warn("Math rendering failed or was interrupted:", e);
+    }
   }
 }
 
@@ -49,7 +54,7 @@ const parsedMarkdown = (content) => {
   const mathBlocks = [];
   const placeholder = 'zZz_MATH_PLACEHOLDER_zZz';
   const sanitizedContent = content.replace(
-    /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\$)\$[^\s$](?:[\s\S]*?[^\s$])?\$(?!\$))/g,
+    /(\$\$[\s\S]*?\$$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|(?<!\$)\$[^\s$](?:[\s\S]*?[^\s$])?\$(?!\$))/g,
     (match) => {
       mathBlocks.push(match);
       return placeholder;
@@ -99,7 +104,14 @@ const messageParts = computed(() => {
                 parts.push({ type: 'think', content: thinkContent });
             }
         } else if (match[2]) { // Captured an <annotate> block
-            const annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
+            let annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
+            
+            // --- FIX: Robustly extract JSON block and ignore surrounding backticks or commentary ---
+            const jsonMatch = annotateContent.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+            if (jsonMatch) {
+                annotateContent = jsonMatch[0];
+            }
+            
             if (annotateContent) {
                 try {
                     parts.push({ type: 'annotate', annotations: JSON.parse(annotateContent) });
@@ -279,7 +291,7 @@ function onImageLoad(event, annotations) {
             Object.assign(canvas.style, { top: `${verticalMargin}px`, left: '0px', width: `${containerWidth}px`, height: `${scaledHeight}px` });
         } else {
             const scaledWidth = containerHeight * imgAspectRatio;
-            const horizontalMargin = (containerWidth - scaledWidth) / 2;
+            const horizontalMargin = (containerHeight - scaledWidth) / 2;
             Object.assign(canvas.style, { left: `${horizontalMargin}px`, top: '0px', width: `${scaledWidth}px`, height: `${containerHeight}px` });
         }
     };
@@ -294,6 +306,7 @@ function onImageLoad(event, annotations) {
       <template v-else>
         <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
           <template v-if="part.type === 'content'">
+            <!-- ADDED unique key to each token part -->
             <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
               <details v-else-if="token.type === 'document'" class="document-block my-4">

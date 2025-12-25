@@ -51,7 +51,7 @@ const sections = [
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
-  { type: 'link', id: 'services_mgmt', name: 'Services & Usage', icon: markRaw(IconServer) }, // ADDED
+  { type: 'link', id: 'services_mgmt', name: 'Services & Usage', icon: markRaw(IconServer) },
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'link', id: 'server_settings', name: 'Server Settings', icon: markRaw(IconServer) },
   { type: 'divider', label: 'Content' },
@@ -73,7 +73,7 @@ const sections = [
   { type: 'link', id: 'ai_bot', name: 'AI Bot', icon: markRaw(IconLollms) },
   { type: 'divider', label: 'System & Tools' },
   { type: 'link', id: 'welcome_settings', name: 'Welcome Page', icon: markRaw(IconHome) },
-  { type: 'link', id: 'global_settings', name: 'Application Settings', icon: markRaw(IconCog) },
+  // global_settings link REMOVED
   { type: 'link', id: 'email', name: 'Email Settings', icon: markRaw(IconMail) },
   { type: 'link', id: 'sso_client_settings', name: 'SSO Client', icon: markRaw(IconKey) },
   { type: 'link', id: 'scim_settings', name: 'SCIM Provisioning', icon: markRaw(IconUserGroup) },

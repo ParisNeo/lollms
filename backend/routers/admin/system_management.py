@@ -10,7 +10,7 @@ from typing import List, Optional, Dict, Any
 import psutil
 from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import func, desc
+from sqlalchemy import func, desc, update
 from lollms_client import LollmsDataManager
 
 from sqlalchemy.orm import Session, joinedload, defer
@@ -20,9 +20,9 @@ from backend.db.models.service import App as DBApp
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.db_task import DBTask
 from backend.models import UserAuthDetails, SystemUsageStats, GPUInfo, DiskInfo, TaskInfo
-from backend.models.admin import GlobalGenerationStats, UserActivityStat
+from backend.models.admin import GlobalGenerationStats, UserActivityStat, ForceGlobalConfigPayload
 from backend.config import PROJECT_ROOT, APP_DATA_DIR, SERVER_CONFIG, APP_VERSION, USERS_DIR_NAME, TEMP_UPLOADS_DIR_NAME
-from backend.session import get_current_admin_user, get_user_data_root
+from backend.session import get_current_admin_user, get_user_data_root, user_sessions
 from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
 from backend.utils import get_local_ip_addresses
@@ -32,7 +32,6 @@ from ascii_colors import trace_exception
 
 system_management_router = APIRouter()
 
-# ... (Previous Pydantic models remain same) ...
 class AdminBroadcastRequest(BaseModel):
     message: str
 
@@ -88,8 +87,35 @@ class LogEntry(BaseModel):
     level: str
     message: str
 
+@system_management_router.post("/system/force-all-users-config", response_model=Dict[str, str])
+async def force_all_users_config(payload: ForceGlobalConfigPayload, db: Session = Depends(get_db)):
+    """
+    Instantly updates all users in the database to use specific models for various services.
+    Also clears active server-side sessions to enforce the change immediately on the next request.
+    """
+    try:
+        update_data = payload.model_dump(exclude_unset=True)
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No configuration provided to force.")
+        
+        # Batch update all users
+        stmt = update(DBUser).values(**update_data)
+        result = db.execute(stmt)
+        db.commit()
+        
+        # Clear all in-memory user sessions to force client re-initialization
+        user_sessions.clear()
+        
+        # Notify all connected clients that their configuration has changed
+        await manager.broadcast({"type": "settings_updated", "data": {"reason": "global_force_update"}})
+        
+        return {"message": f"Successfully forced configuration on {result.rowcount} users."}
+    except Exception as e:
+        db.rollback()
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to apply global configuration: {str(e)}")
+
 def _purge_unused_temp_files_task(task: Task):
-    # ... (same as before) ...
     task.log("Starting purge of unused temporary files older than 24 hours.")
     deleted_count, total_scanned = 0, 0
     retention_period = timedelta(hours=24)
@@ -131,7 +157,6 @@ def _purge_unused_temp_files_task(task: Task):
 
 @system_management_router.get("/system-status", response_model=ExpandedSystemUsageStats)
 async def get_system_status():
-    # ... (Hardware status logic same as before) ...
     ram = psutil.virtual_memory()
     
     disks_info = []
@@ -231,12 +256,6 @@ async def analyze_logs(current_user: UserAuthDetails = Depends(get_current_admin
 
 @system_management_router.get("/system/logs", response_model=List[LogEntry])
 async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_admin_user)):
-    """
-    Retrieves aggregated logs from recent tasks.
-    Optimized to fetch fewer tasks and avoid loading unnecessary fields.
-    """
-    # Only fetch ID, name, logs from last 30 tasks to avoid heavy load
-    # Defer result and error if they are huge text fields
     recent_tasks = db.query(DBTask)\
         .options(defer(DBTask.result), defer(DBTask.error))\
         .order_by(desc(DBTask.updated_at))\
@@ -246,10 +265,8 @@ async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), curre
     all_logs = []
     count = 0
     
-    # Process latest tasks first
     for t in recent_tasks:
         if t.logs:
-            # Reverse logs to get latest first if appending
             for l in reversed(t.logs): 
                 all_logs.append(LogEntry(
                     task_id=t.id,
@@ -264,7 +281,6 @@ async def get_system_logs(limit: int = 200, db: Session = Depends(get_db), curre
         if count >= limit:
             break
     
-    # Sort by timestamp descending
     all_logs.sort(key=lambda x: x.timestamp, reverse=True)
     return all_logs[:limit]
 
@@ -283,7 +299,6 @@ async def kill_process(payload: KillProcessRequest, current_user: UserAuthDetail
 
 @system_management_router.get("/model-usage-stats", response_model=List[ModelUsageStat])
 async def get_model_usage_stats(db: Session = Depends(get_db)):
-    # ... (same as before) ...
     results = db.query(DBUser.lollms_model_name, func.count(DBUser.id)).group_by(DBUser.lollms_model_name).all()
     stats = []
     for model_name, count in results:
@@ -292,7 +307,6 @@ async def get_model_usage_stats(db: Session = Depends(get_db)):
 
 @system_management_router.get("/server-info", response_model=ServerInfo)
 async def get_server_info(request: Request, db: Session = Depends(get_db)):
-    # ... (same as before) ...
     running_apps = db.query(DBApp).filter(DBApp.status == 'running', DBApp.port != None).all()
     active_ports = [AppPortInfo(port=app.port, app_name=app.name, app_id=app.id) for app in running_apps]
 
@@ -351,7 +365,6 @@ async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_
 
 @system_management_router.get("/global-generation-stats", response_model=GlobalGenerationStats)
 def get_global_generation_stats(db: Session = Depends(get_db)):
-    # ... (same as before) ...
     all_users = db.query(DBUser).all()
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
     

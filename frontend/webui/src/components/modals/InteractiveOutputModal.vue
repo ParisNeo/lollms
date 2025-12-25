@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/modals/InteractiveOutputModal.vue -->
 <script setup>
 import { computed, ref, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
@@ -8,13 +9,13 @@ import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconMinus from '../../assets/icons/IconMinus.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
-import IconArrowPath from '../../assets/icons/IconArrowPath.vue'; // Using a reset icon
+import IconArrowPath from '../../assets/icons/IconArrowPath.vue'; 
 import InteractiveMermaid from './InteractiveMermaid.vue'; 
 
 const uiStore = useUiStore();
 const isFullScreen = ref(false);
 const viewerRef = ref(null);
-const mermaidInstance = ref(null); // Ref to the InteractiveMermaid child component
+const mermaidInstance = ref(null); 
 const pngBgColor = ref(uiStore.currentTheme === 'dark' ? '#1F2937' : '#FFFFFF');
 
 const isOpen = computed(() => uiStore.isModalOpen('interactiveOutput'));
@@ -62,12 +63,30 @@ const zoomOut = () => { if (isPlainSvg.value) scale.value = Math.max(0.5, scale.
 // --- End of Plain SVG logic ---
 
 function closeModal() { uiStore.closeModal('interactiveOutput'); }
-function toggleFullScreen() { isFullScreen.value = !isFullScreen.value; }
 
-/**
- * UNIFIED Reset View function.
- * It calls the appropriate reset method based on the content type.
- */
+function toggleFullScreen() {
+    if (!viewerRef.value) return;
+    
+    if (!document.fullscreenElement) {
+        viewerRef.value.requestFullscreen().then(() => {
+            isFullScreen.value = true;
+        }).catch(err => {
+            console.warn(`Fullscreen error: ${err.message}`);
+            // Fallback to CSS only if API fails
+            isFullScreen.value = !isFullScreen.value;
+        });
+    } else {
+        document.exitFullscreen();
+    }
+}
+
+// Watch for native fullscreen changes (e.g. user pressing Esc)
+if (typeof document !== 'undefined') {
+    document.addEventListener('fullscreenchange', () => {
+        isFullScreen.value = !!document.fullscreenElement;
+    });
+}
+
 function resetView() {
     if (isInteractiveMermaid.value) {
         mermaidInstance.value?.resetView();
@@ -76,7 +95,13 @@ function resetView() {
     }
 }
 
-watch(isOpen, (newVal) => { if (!newVal) { isFullScreen.value = false; resetPlainSvgView(); }});
+watch(isOpen, (newVal) => { 
+    if (!newVal) { 
+        if (document.fullscreenElement) document.exitFullscreen();
+        isFullScreen.value = false; 
+        resetPlainSvgView(); 
+    }
+});
 watch(() => uiStore.currentTheme, (newTheme) => { pngBgColor.value = newTheme === 'dark' ? '#1F2937' : '#FFFFFF'; });
 
 // --- UNIFIED Download Functions ---
@@ -99,7 +124,6 @@ function handleDownloadPNG() {
     if (isInteractiveMermaid.value) {
         mermaidInstance.value?.exportPNG({ filename: `${data.value.title || 'diagram'}.png`, bgColor: pngBgColor.value });
     }
-    // Note: PNG export for plain SVG is not implemented here, but could be added.
 }
 
 function handleDownloadSource() {
@@ -118,7 +142,7 @@ const modalBodyClass = computed(() => isFullScreen.value ? 'p-0' : 'p-4');
             <div v-if="isOpen" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-40 flex items-center justify-center" @click.self="closeModal">
                 <Transition enter-active-class="transition-all ease-out duration-300" enter-from-class="opacity-0 scale-95" enter-to-class="opacity-100 scale-100" leave-active-class="transition-all ease-in duration-200" leave-from-class="opacity-100 scale-100" leave-to-class="opacity-0 scale-95">
                     <div :class="modalPanelClass" class="bg-white dark:bg-gray-900 flex flex-col max-h-screen transition-all duration-300 ease-in-out">
-                        <header class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                        <header v-if="!isFullScreen" class="flex items-center justify-between p-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
                             <h3 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ data?.title || 'Interactive Output' }}</h3>
                             <div class="flex items-center space-x-2">
                                 <button @click="toggleFullScreen" class="modal-header-btn" :title="isFullScreen ? 'Exit Fullscreen' : 'Fullscreen'"><IconMinimize v-if="isFullScreen" class="w-5 h-5" /><IconMaximize v-else class="w-5 h-5" /></button>
@@ -127,7 +151,6 @@ const modalBodyClass = computed(() => isFullScreen.value ? 'p-0' : 'p-4');
                         </header>
                         <main class="flex-grow min-h-0 relative" :class="modalBodyClass">
                             <div ref="viewerRef" class="absolute inset-0 overflow-hidden bg-gray-100 dark:bg-gray-800/50" @wheel.prevent="handleWheel" @mousedown="startDrag">
-                                <!-- The ref="mermaidInstance" links this component to the script -->
                                 <InteractiveMermaid v-if="isInteractiveMermaid" :mermaid-code="data.sourceCode" ref="mermaidInstance" />
                                 
                                 <div v-else-if="data?.htmlContent" class="w-full h-full">
@@ -138,7 +161,12 @@ const modalBodyClass = computed(() => isFullScreen.value ? 'p-0' : 'p-4');
                             </div>
 
                             <!-- UNIFIED CONTROL BAR -->
-                            <div v-if="isVisualContent" class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-gray-900/60 text-white p-2 rounded-lg backdrop-blur-md shadow-lg z-10">
+                            <div v-if="isVisualContent" class="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-gray-900/60 text-white p-2 rounded-lg backdrop-blur-md shadow-lg z-50">
+                                <template v-if="isFullScreen">
+                                    <button @click="toggleFullScreen" class="btn-viewer" title="Exit Fullscreen"><IconMinimize class="w-5 h-5" /></button>
+                                    <div class="w-px h-6 bg-white/20 mx-1"></div>
+                                </template>
+
                                 <!-- Controls for Plain SVG -->
                                 <template v-if="isPlainSvg">
                                     <button @click="zoomOut" class="btn-viewer" title="Zoom Out"><IconMinus class="w-5 h-5" /></button>

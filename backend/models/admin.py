@@ -1,7 +1,14 @@
-# [UPDATE] backend/models/admin.py
+# backend/models/admin.py
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, EmailStr
 import datetime
+
+class ForceGlobalConfigPayload(BaseModel):
+    lollms_model_name: Optional[str] = None
+    tti_binding_model_name: Optional[str] = None
+    tts_binding_model_name: Optional[str] = None
+    stt_binding_model_name: Optional[str] = None
+    iti_binding_model_name: Optional[str] = None
 
 class RagVectorizerAlias(BaseModel):
     vectorizer_name: str

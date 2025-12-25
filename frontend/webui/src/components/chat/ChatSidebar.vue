@@ -33,6 +33,10 @@ function backToList() {
     socialStore.activeConversationId = null;
 }
 
+function closeSidebar() {
+    uiStore.isChatSidebarOpen = false;
+}
+
 async function createGroup() {
     if(!newGroupName.value || selectedFriendsForGroup.value.length === 0) return;
     await socialStore.createGroupConversation(newGroupName.value, selectedFriendsForGroup.value);
@@ -82,7 +86,7 @@ watch(isOpen, (val) => {
             <!-- Header -->
             <div class="flex items-center justify-between p-3 border-b dark:border-gray-700">
                 <h2 class="font-semibold text-lg">Messaging</h2>
-                <button @click="uiStore.isChatSidebarOpen = false"><IconXMark class="w-5 h-5"/></button>
+                <button @click="closeSidebar"><IconXMark class="w-5 h-5"/></button>
             </div>
 
             <!-- Active Conversation View -->
@@ -130,7 +134,7 @@ watch(isOpen, (val) => {
                 <div v-if="activeTab==='friends'" class="flex-1 overflow-y-auto p-2 space-y-1">
                     <div v-for="f in friends" :key="f.id" @click="openChat(f)" class="flex items-center gap-3 p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded cursor-pointer relative">
                         <div class="relative">
-                            <UserAvatar :username="f.username" :icon="f.icon" size-class="w-10 h-10" />
+                            <UserAvatar :username="f.username" :icon="f.icon" size-class="h-10 w-10" />
                             <div 
                                 class="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 border-2 border-white dark:border-gray-800 rounded-full"
                                 :class="getStatusColor(f.status)"
