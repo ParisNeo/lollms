@@ -13,17 +13,26 @@ function fileToBase64(file) {
 
 export function useDiscussionMessages(state, stores, getActions) {
     const { messages, currentDiscussionId, discussions } = state;
-    const { uiStore, authStore } = stores;
+    const { uiStore, authStore, tasksStore } = stores;
 
+    /**
+     * Handles updates for messages that might already exist in the UI (e.g. image regeneration)
+     * or adds new ones if they don't.
+     */
     function handleNewMessageFromTask({ discussion_id, message }) {
         if (currentDiscussionId.value === discussion_id) {
             const processedMsg = processSingleMessage(message);
-            // Avoid duplicates if a refresh is already in flight
-            if (!messages.value.some(m => m.id === processedMsg.id)) {
+            
+            // REQUIREMENT: Check if message exists to update the gallery/state instead of appending a duplicate
+            const existingIndex = messages.value.findIndex(m => m.id === processedMsg.id);
+            if (existingIndex !== -1) {
+                // Update in place to trigger reactivity in MessageBubble
+                messages.value.splice(existingIndex, 1, processedMsg);
+            } else {
                 messages.value.push(processedMsg);
             }
         }
-        // Also update the discussion list for last activity
+        // Also update the discussion list for last activity timestamp
         if (discussions.value[discussion_id]) {
             discussions.value[discussion_id].last_activity_at = message.created_at;
         }
@@ -44,13 +53,30 @@ export function useDiscussionMessages(state, stores, getActions) {
     async function toggleImageActivation({ messageId, imageIndex }) {
         if (!currentDiscussionId.value) return;
         try {
+            // Backend now handles deactivating others when one is selected (Single active variant)
             const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/images/${imageIndex}/toggle`);
             const updatedMessage = processSingleMessage(response.data);
             const index = messages.value.findIndex(m => m.id === messageId);
             if (index !== -1) messages.value[index] = updatedMessage;
+            
+            // Refresh context status because changing active images changes token count
             await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch (error) {
             uiStore.addNotification('Failed to toggle image status.', 'error');
+        }
+    }
+
+    async function regenerateMessageImage(messageId, imageIndex, prompt = null) {
+        if (!currentDiscussionId.value) return;
+        try {
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/images/${imageIndex}/regenerate`, {
+                prompt
+            });
+            const task = response.data;
+            tasksStore.addTask(task);
+            uiStore.addNotification(`Regenerating image...`, 'info');
+        } catch (error) {
+            uiStore.addNotification('Failed to start image regeneration.', 'error');
         }
     }
 
@@ -96,7 +122,9 @@ export function useDiscussionMessages(state, stores, getActions) {
             if (index !== -1) messages.value[index] = updatedMessage;
             uiStore.addNotification('Message updated.', 'success');
             await getActions().fetchContextStatus(currentDiscussionId.value);
-        } catch (e) {}
+        } catch (e) {
+             uiStore.addNotification('Failed to save message changes.', 'error');
+        }
     }
 
     async function deleteMessage({ messageId }) {
@@ -104,6 +132,7 @@ export function useDiscussionMessages(state, stores, getActions) {
         const discussionId = currentDiscussionId.value;
         try {
             await apiClient.delete(`/api/discussions/${discussionId}/messages/${messageId}`);
+            // Re-select to rebuild the branch history correctly
             await getActions().selectDiscussion(discussionId, null, true); 
             uiStore.addNotification('Message and branch deleted.', 'success');
         } catch (error) {
@@ -117,7 +146,9 @@ export function useDiscussionMessages(state, stores, getActions) {
             const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/grade`, { change });
             const message = messages.value.find(m => m.id === messageId);
             if(message) message.user_grade = response.data.user_grade;
-        } catch (e) {}
+        } catch (e) {
+             console.error("Grade update failed:", e);
+        }
     }
 
     async function uploadDiscussionImage(file) {
@@ -155,7 +186,9 @@ export function useDiscussionMessages(state, stores, getActions) {
                 Object.assign(state.discussions.value[currentDiscussionId.value], response.data);
             }
             await getActions().fetchContextStatus(currentDiscussionId.value);
-        } catch(error) {}
+        } catch(error) {
+             console.error("Delete gallery image failed:", error);
+        }
     }
 
     return {
@@ -163,6 +196,6 @@ export function useDiscussionMessages(state, stores, getActions) {
         toggleImageActivation, addManualMessage, saveManualMessage,
         saveMessageChanges, deleteMessage, gradeMessage,
         uploadDiscussionImage, deleteAllDiscussionImages, deleteDiscussionImage,
-        handleNewMessageFromTask,
+        handleNewMessageFromTask, regenerateMessageImage
     };
 }

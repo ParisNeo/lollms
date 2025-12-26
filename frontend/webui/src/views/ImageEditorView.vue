@@ -1,50 +1,49 @@
 <!-- [UPDATE] frontend/webui/src/views/ImageEditorView.vue -->
 <template>
+    <!-- TELEPORT EDITOR TOOLBAR TO GLOBAL HEADER -->
+    <Teleport to="#global-header-title-target" v-if="isComponentMounted">
+        <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 sm:p-1 gap-0.5 sm:gap-1 pointer-events-auto">
+            <button v-for="t in tools" :key="t.id" 
+                @click="setTool(t.id)" 
+                class="p-1.5 sm:p-2 rounded-md transition-colors"
+                :class="tool === t.id ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                :title="t.name"
+            >
+                <component :is="t.icon" class="w-4 h-4 sm:w-5 sm:h-5" />
+            </button>
+        </div>
+    </Teleport>
+
+    <Teleport to="#global-header-actions-target" v-if="isComponentMounted">
+        <div class="flex items-center gap-1 sm:gap-2 shrink-0 pointer-events-auto">
+            <!-- Undo/Redo -->
+            <button @click="undo" :disabled="historyIndex <= 0" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-20 transition-opacity"><IconUndo class="w-5 h-5" /></button>
+            <button @click="redo" :disabled="historyIndex >= history.length - 1" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-20 transition-opacity"><IconRedo class="w-5 h-5" /></button>
+            
+            <div class="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
+
+            <!-- Layer Switcher -->
+            <div class="hidden sm:flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-1 border dark:border-gray-700">
+                <button @click="activeLayer = 'image'" class="px-2 py-1 text-[9px] font-black rounded transition-colors uppercase" :class="activeLayer === 'image' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500'">Img</button>
+                <button @click="activeLayer = 'mask'" class="px-2 py-1 text-[9px] font-black rounded transition-colors uppercase" :class="activeLayer === 'mask' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500'">Mask</button>
+            </div>
+
+            <button @click="saveCanvas" class="btn btn-primary btn-sm gap-2"><IconSave class="w-4 h-4" /> <span class="hidden sm:inline">Save</span></button>
+            <button @click="showMobileSidebar = !showMobileSidebar" class="lg:hidden btn btn-secondary p-2 ml-1"><IconAdjustmentsHorizontal class="w-5 h-5" /></button>
+        </div>
+    </Teleport>
+
     <div class="h-full flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden relative select-none">
-        <!-- Top Toolbar (Full Responsive) -->
-        <div class="h-16 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between px-2 sm:px-4 z-20 shadow-sm gap-2 sm:gap-4 overflow-x-auto no-scrollbar">
-            <div class="flex items-center gap-1 sm:gap-2 shrink-0">
-                <button @click="goBack" class="btn-icon" title="Back"><IconArrowLeft class="w-5 h-5" /></button>
-                <div class="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1 sm:mx-2"></div>
-                
-                <!-- Full Tool Palette -->
-                <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 sm:p-1 gap-0.5 sm:gap-1">
-                    <button v-for="t in tools" :key="t.id" 
-                        @click="setTool(t.id)" 
-                        class="p-1.5 sm:p-2 rounded-md transition-colors"
-                        :class="tool === t.id ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
-                        :title="t.name"
-                    >
-                        <component :is="t.icon" class="w-5 h-5" />
-                    </button>
-                </div>
+        <!-- Floating Tool Settings (Below Header) -->
+        <div class="absolute top-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-4 bg-white/90 dark:bg-gray-900/90 backdrop-blur px-4 py-2 rounded-2xl shadow-xl border dark:border-gray-800" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text'].includes(tool)">
+            <div class="flex items-center gap-2">
+                <input type="color" v-model="color" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent">
             </div>
-
-            <!-- Dynamic Settings -->
-            <div class="flex items-center gap-2 sm:gap-4 flex-grow justify-center whitespace-nowrap px-2">
-                <div class="flex items-center gap-2" title="Color">
-                    <input type="color" v-model="color" class="w-7 h-7 sm:w-8 sm:h-8 rounded-lg cursor-pointer border-0 p-0 bg-transparent">
-                </div>
-
-                <div class="flex items-center gap-2" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text'].includes(tool)">
-                    <span class="hidden sm:inline text-[10px] font-black text-gray-400 uppercase tracking-tighter">{{ tool === 'text' ? 'Font' : 'Size' }}</span>
-                    <input type="range" v-model.number="brushSize" min="1" max="400" class="w-16 sm:w-24 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer">
-                    <span class="text-[10px] font-mono w-6">{{ brushSize }}</span>
-                </div>
-
-                <!-- Layer Switcher -->
-                <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-1">
-                    <button @click="activeLayer = 'image'" class="px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-black rounded transition-colors uppercase" :class="activeLayer === 'image' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500'">Image</button>
-                    <button @click="activeLayer = 'mask'" class="px-2 sm:px-3 py-1 text-[10px] sm:text-xs font-black rounded transition-colors uppercase" :class="activeLayer === 'mask' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500'">Mask</button>
-                </div>
-            </div>
-
-            <!-- Main Actions -->
-            <div class="flex items-center gap-1 sm:gap-2 shrink-0">
-                <button @click="undo" :disabled="historyIndex <= 0" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-20 transition-opacity"><IconUndo class="w-5 h-5" /></button>
-                <button @click="redo" :disabled="historyIndex >= history.length - 1" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-20 transition-opacity"><IconRedo class="w-5 h-5" /></button>
-                <button @click="saveCanvas" class="btn btn-primary btn-sm gap-2"><IconSave class="w-4 h-4" /> <span class="hidden sm:inline">Save</span></button>
-                <button @click="showMobileSidebar = !showMobileSidebar" class="lg:hidden btn btn-secondary p-2 ml-1"><IconAdjustmentsHorizontal class="w-5 h-5" /></button>
+            <div class="h-4 w-px bg-gray-300 dark:bg-gray-700"></div>
+            <div class="flex items-center gap-2">
+                <span class="text-[9px] font-black text-gray-400 uppercase tracking-tighter">{{ tool === 'text' ? 'Font' : 'Size' }}</span>
+                <input type="range" v-model.number="brushSize" min="1" max="400" class="w-24 sm:w-32 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer">
+                <span class="text-[10px] font-mono w-6">{{ brushSize }}</span>
             </div>
         </div>
 
@@ -77,6 +76,15 @@
                 </div>
                 
                 <div class="flex-grow overflow-y-auto custom-scrollbar p-1">
+                    <!-- Layer Switcher (Mobile Only inside sidebar) -->
+                    <div class="p-4 border-b dark:border-gray-800 sm:hidden">
+                        <label class="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-2 block">Active Layer</label>
+                        <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-1 gap-1 border dark:border-gray-700">
+                            <button @click="activeLayer = 'image'" class="flex-1 py-2 text-xs font-black rounded transition-colors uppercase" :class="activeLayer === 'image' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500'">Image</button>
+                            <button @click="activeLayer = 'mask'" class="flex-1 py-2 text-xs font-black rounded transition-colors uppercase" :class="activeLayer === 'mask' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-500'">Mask</button>
+                        </div>
+                    </div>
+
                     <div v-for="(group, key) in editLibrary" :key="key" class="p-4 border-b dark:border-gray-800 space-y-4">
                         <div class="flex items-center justify-between cursor-pointer group" @click="collapsedGroups[key] = !collapsedGroups[key]">
                             <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest group-hover:text-blue-500 transition-colors">{{ key }}</span>
@@ -241,6 +249,7 @@ function reset3DRotation() { rotationX.value = 0; rotationY.value = 0; }
 
 onMounted(async () => {
     isComponentMounted.value = true; on('prompt:enhanced', onPromptEnhanced); on('image:generated', onImageGenerated); on('task:completed', onTaskCompleted);
+    uiStore.setPageTitle({ title: 'Image Editor', icon: markRaw(IconPencil) });
     if (imageCanvasRef.value) ctxImage.value = imageCanvasRef.value.getContext('2d', { willReadFrequently: true });
     if (maskCanvasRef.value) ctxMask.value = maskCanvasRef.value.getContext('2d', { willReadFrequently: true });
     if (previewCanvasRef.value) ctxPreview.value = previewCanvasRef.value.getContext('2d');
@@ -249,7 +258,7 @@ onMounted(async () => {
     window.addEventListener('keydown', handleKeydown); window.addEventListener('resize', fitToScreen);
 });
 
-onUnmounted(() => { isComponentMounted.value = false; off('prompt:enhanced', onPromptEnhanced); off('image:generated', onImageGenerated); off('task:completed', onTaskCompleted); window.removeEventListener('keydown', handleKeydown); window.removeEventListener('resize', fitToScreen); });
+onUnmounted(() => { isComponentMounted.value = false; uiStore.setPageTitle({ title: '' }); off('prompt:enhanced', onPromptEnhanced); off('image:generated', onImageGenerated); off('task:completed', onTaskCompleted); window.removeEventListener('keydown', handleKeydown); window.removeEventListener('resize', fitToScreen); });
 
 async function promptForNewCanvas() {
     const { confirmed, value } = await uiStore.showConfirmation({ title: 'Canvas Size', inputType: 'select', inputOptions: [{ text: '1:1', value: '1024x1024' }, { text: '16:9', value: '1344x768' }, { text: '9:16', value: '768x1344' }], inputValue: '1024x1024' });
@@ -285,6 +294,9 @@ function handleWheel(e) { if (e.ctrlKey || tool.value === 'pan') { e.preventDefa
 function zoomIn() { zoom.value = Math.min(5, zoom.value + 0.1); }
 function zoomOut() { zoom.value = Math.max(0.1, zoom.value - 0.1); }
 function goBack() { router.push('/image-studio'); }
+function undo() { if (historyIndex.value > 0) { historyIndex.value--; applyHistoryState(history.value[historyIndex.value]); } }
+function redo() { if (historyIndex.value < history.value.length - 1) { historyIndex.value++; applyHistoryState(history.value[historyIndex.value]); } }
+function applyHistoryState(s) { const i = new Image(); i.onload = () => ctxImage.value.drawImage(i, 0,0); i.src = s.image; const m = new Image(); m.onload = () => ctxMask.value.drawImage(m, 0,0); m.src = s.mask; }
 function saveState() { if (historyIndex.value < history.value.length - 1) history.value = history.value.slice(0, historyIndex.value + 1); history.value.push({ image: imageCanvasRef.value.toDataURL(), mask: maskCanvasRef.value.toDataURL() }); historyIndex.value++; if (history.value.length > 20) { history.value.shift(); historyIndex.value--; } }
 function onPromptEnhanced(d) { if (isComponentMounted.value) { prompt.value = d.prompt || prompt.value; isEnhancing.value = false; isProcessingTask.value = false; } }
 function onImageGenerated(i) { if (isComponentMounted.value && i) { loadImage(i.id); isProcessingTask.value = false; } }

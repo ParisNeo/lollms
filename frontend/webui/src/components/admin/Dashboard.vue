@@ -37,7 +37,8 @@ async function fetchDashboardData() {
 }
 
 function openPendingModal() {
-    if(pendingCount.value > 0) uiStore.openModal('pendingUsers');
+    // Check removed to allow opening even if count is 0 or loading
+    uiStore.openModal('pendingUsers');
 }
 
 onMounted(fetchDashboardData);

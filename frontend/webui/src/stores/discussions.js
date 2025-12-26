@@ -1,4 +1,4 @@
-// [UPDATE] frontend/webui/src/stores/discussions.js
+// frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import apiClient from '../services/api'; // Import apiClient
@@ -89,10 +89,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                     }
                 } else {
                     // Task ID exists in our tracker but not in the store list. 
-                    // It might have been cleared or not loaded yet.
-                    // To prevent infinite spinning, check if we have initialized tasks.
-                    // Only clear if we are reasonably sure it's gone.
-                    // For now, let's trust the polling to eventually bring it or clear it.
                 }
             }
         }

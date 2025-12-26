@@ -420,15 +420,179 @@ def md_to_pdf_bytes(md_text: str, toc_level: int = 3) -> bytes:
     return data
 
 def md_to_pptx_bytes(md_text: str) -> bytes:
-    slides = md_to_pptx_parse(md_text)
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as tf:
-        out_path = tf.name
-    create_ppt(slides, out_path)
-    with open(out_path, "rb") as f:
-        data = f.read()
-    try: os.unlink(out_path)
-    except Exception: pass
-    return data
+    """
+    Robust Markdown to PowerPoint converter with improved text chunking and image support.
+    
+    1. Extracts images embedded in markdown (e.g. ![alt](data:image...)).
+    2. Removes image tags from text to process separately.
+    3. Splits remaining text into logical chunks (headers, paragraphs) to fit slides.
+    4. Creates separate slides for images.
+    """
+    prs = Presentation()
+    
+    # 1. Extract Images
+    # Regex to find markdown images: ![alt](url)
+    image_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
+    found_images = image_pattern.findall(md_text)
+    
+    # 2. Clean Text
+    # Remove image tags to leave only text for chunking
+    clean_text = image_pattern.sub('', md_text).strip()
+    
+    # --- Helper: Add Title Slide ---
+    def add_title_slide(title, subtitle=""):
+        slide_layout = prs.slide_layouts[0] # Title Slide
+        slide = prs.slides.add_slide(slide_layout)
+        slide.shapes.title.text = title if title else "Presentation"
+        if subtitle and len(slide.placeholders) > 1:
+            slide.placeholders[1].text = subtitle
+
+    # --- Helper: Add Content Slide ---
+    def add_content_slide(title, body_text):
+        slide_layout = prs.slide_layouts[1] # Title and Content
+        slide = prs.slides.add_slide(slide_layout)
+        slide.shapes.title.text = title
+        
+        # Basic markdown cleanup for body
+        # Convert bullets
+        clean_body = body_text.replace('* ', '• ').replace('- ', '• ')
+        
+        tf = slide.placeholders[1].text_frame
+        tf.text = clean_body
+
+    # --- Helper: Add Image Slide ---
+    def add_image_slide(image_src):
+        # Blank layout for images to maximize space
+        slide_layout = prs.slide_layouts[6] 
+        slide = prs.slides.add_slide(slide_layout)
+        
+        tmp_path = None
+        try:
+            tmp_path = _download_image_to_temp(image_src)
+            
+            # Add picture
+            # Center and fit logic
+            slide_width = prs.slide_width
+            slide_height = prs.slide_height
+            
+            # We add it first to get dimensions, then adjust
+            pic = slide.shapes.add_picture(tmp_path, 0, 0)
+            
+            # Scale to fit within slide
+            # Calculate ratios
+            image_ratio = pic.width / pic.height
+            slide_ratio = slide_width / slide_height
+            
+            if image_ratio > slide_ratio:
+                # Image is wider relative to slide -> fit width
+                pic.width = slide_width
+                pic.height = int(slide_width / image_ratio)
+                pic.left = 0
+                pic.top = int((slide_height - pic.height) / 2)
+            else:
+                # Image is taller relative to slide -> fit height
+                pic.height = slide_height
+                pic.width = int(slide_height * image_ratio)
+                pic.top = 0
+                pic.left = int((slide_width - pic.width) / 2)
+
+        except Exception as e:
+            print(f"Failed to add image to slide: {e}")
+            txBox = slide.shapes.add_textbox(PptxInches(1), PptxInches(1), PptxInches(8), PptxInches(5))
+            tf = txBox.text_frame
+            tf.text = "[Image could not be loaded]"
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try: os.unlink(tmp_path)
+                except: pass
+
+    # --- Logic: Create Slides ---
+    
+    # 1. Image Slides (If any exist, we put them first or interspersed? 
+    # Current request: "use those images as the slides". We'll put them first for visibility, 
+    # or if text refers to them, interspersing is hard without complex parsing.
+    # Let's add them at the end of the presentation to not obscure the intro text, OR
+    # if the text is empty, just images.
+    # A safe bet for "slide deck" generation is Intro -> Text Content -> Images (Appendix/Gallery).
+    
+    # 3. Intelligent Text Chunking
+    chunks = []
+    
+    # Split by explicit horizontal rules first
+    segments = re.split(r'\n---\n', clean_text)
+    
+    for segment in segments:
+        if not segment.strip(): continue
+        
+        # Split by Headers (#)
+        header_parts = re.split(r'\n(#+ )', '\n' + segment)
+        # header_parts will look like ['', '# ', 'Title', '## ', 'Subtitle...', ...]
+        
+        current_title = "Slide"
+        current_body = ""
+        
+        # Iterate and reconstruct
+        i = 0
+        while i < len(header_parts):
+            part = header_parts[i]
+            
+            if part.strip().startswith('#'):
+                # It's a header marker, next part is the content line
+                if i + 1 < len(header_parts):
+                    # Extract title line
+                    full_line = header_parts[i+1].split('\n', 1)
+                    current_title = full_line[0].strip()
+                    
+                    # Any content after the title on the same chunk
+                    rest_of_section = full_line[1] if len(full_line) > 1 else ""
+                    
+                    if current_body.strip():
+                        chunks.append({'title': "Content", 'body': current_body.strip()})
+                        current_body = ""
+                    
+                    current_body = rest_of_section
+                    i += 2
+                else:
+                    i += 1
+            else:
+                current_body += part
+                i += 1
+        
+        if current_body.strip():
+            # Check length of body
+            # PPTX slide fits roughly 600-800 chars comfortably depending on font size
+            MAX_CHARS = 700
+            if len(current_body) > MAX_CHARS:
+                # Split by paragraphs
+                paras = current_body.split('\n\n')
+                temp_chunk = ""
+                for para in paras:
+                    if len(temp_chunk) + len(para) < MAX_CHARS:
+                        temp_chunk += para + "\n\n"
+                    else:
+                        chunks.append({'title': current_title, 'body': temp_chunk.strip()})
+                        temp_chunk = para + "\n\n"
+                if temp_chunk.strip():
+                     chunks.append({'title': current_title, 'body': temp_chunk.strip()})
+            else:
+                chunks.append({'title': current_title, 'body': current_body.strip()})
+
+    # Add Text Slides
+    for chunk in chunks:
+        add_content_slide(chunk['title'], chunk['body'])
+
+    # Add Image Slides
+    for img_src in found_images:
+        add_image_slide(img_src)
+        
+    # If no content at all, add a placeholder
+    if len(prs.slides) == 0:
+        add_title_slide("Empty Presentation")
+
+    # Output
+    bio = io.BytesIO()
+    prs.save(bio)
+    return bio.getvalue()
 
 def html_wrapper(html_body: str, title: str = "Export") -> bytes:
     return f"<html><head><meta charset='utf-8'><title>{title}</title></head><body>{html_body}</body></html>".encode("utf-8")
@@ -472,7 +636,7 @@ async def export_content(payload: ContentExportRequest):
 
         elif export_format == 'pptx':
             media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            file_content = md_to_pptx_bytes(content)  # Markdown slides via mdtopptx
+            file_content = md_to_pptx_bytes(content)  # Markdown slides via custom logic
 
         elif export_format == 'xlsx':
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

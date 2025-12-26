@@ -22,9 +22,15 @@ const forceAiResponseLanguage = ref(false);
 const imageGenerationEnabled = ref(false);
 const imageGenerationSystemPrompt = ref('');
 const imageAnnotationEnabled = ref(false);
+const imageEditingEnabled = ref(false); // NEW
+const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
 const memoryEnabled = ref(false);
 const autoMemoryEnabled = ref(false);
+const maxImageWidth = ref(-1);
+const maxImageHeight = ref(-1);
+const compressImages = ref(false);
+const imageCompressionQuality = ref(85);
 
 const hasChanges = ref(false);
 const isSaving = ref(false);
@@ -48,9 +54,15 @@ function populateForm() {
     imageGenerationEnabled.value = user.value.image_generation_enabled || false;
     imageGenerationSystemPrompt.value = user.value.image_generation_system_prompt || '';
     imageAnnotationEnabled.value = user.value.image_annotation_enabled || false;
+    imageEditingEnabled.value = user.value.image_editing_enabled || false; // NEW
+    activateGeneratedImages.value = user.value.activate_generated_images || false;
     noteGenerationEnabled.value = user.value.note_generation_enabled || false;
     memoryEnabled.value = user.value.memory_enabled || false;
     autoMemoryEnabled.value = user.value.auto_memory_enabled || false;
+    maxImageWidth.value = user.value.max_image_width ?? -1;
+    maxImageHeight.value = user.value.max_image_height ?? -1;
+    compressImages.value = user.value.compress_images || false;
+    imageCompressionQuality.value = user.value.image_compression_quality ?? 85;
     
     // Reset change tracker
     nextTick(() => {
@@ -66,8 +78,8 @@ watch(user, populateForm, { immediate: true, deep: true });
 watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
-    imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, noteGenerationEnabled,
-    memoryEnabled, autoMemoryEnabled
+    imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, activateGeneratedImages, noteGenerationEnabled,
+    memoryEnabled, autoMemoryEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality
 ], () => {
   hasChanges.value = true;
 });
@@ -98,9 +110,15 @@ async function handleSaveChanges() {
             image_generation_enabled: imageGenerationEnabled.value,
             image_generation_system_prompt: imageGenerationSystemPrompt.value,
             image_annotation_enabled: imageAnnotationEnabled.value,
+            image_editing_enabled: imageEditingEnabled.value,
+            activate_generated_images: activateGeneratedImages.value,
             note_generation_enabled: noteGenerationEnabled.value,
             memory_enabled: memoryEnabled.value,
-            auto_memory_enabled: autoMemoryEnabled.value
+            auto_memory_enabled: autoMemoryEnabled.value,
+            max_image_width: maxImageWidth.value,
+            max_image_height: maxImageHeight.value,
+            compress_images: compressImages.value,
+            image_compression_quality: imageCompressionQuality.value
         });
         hasChanges.value = false;
     } finally {
@@ -239,6 +257,17 @@ async function handleSaveChanges() {
                     <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
                 </label>
             </div>
+            
+            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
+                <div class="flex-grow">
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Image Editing</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to edit existing images using tags like &lt;edit_image&gt;.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="imageEditingEnabled" class="sr-only peer" :disabled="!isTtiConfigured">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
+                </label>
+            </div>
         </div>
         
         <!-- Image Generation Settings -->
@@ -255,10 +284,63 @@ async function handleSaveChanges() {
                     <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
                 </label>
             </div>
-            <div v-if="imageGenerationEnabled && isTtiConfigured" class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
-                <label for="image-gen-prompt" class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200">Image Generation System Prompt</label>
-                <textarea id="image-gen-prompt" v-model="imageGenerationSystemPrompt" class="styled-textarea" placeholder="e.g., All images should be in a photorealistic style, 4k, detailed."></textarea>
-                <p class="text-xs text-gray-500 mt-1">This prompt will be added to every image generation request made from within a chat message.</p>
+
+            <div v-if="imageGenerationEnabled && isTtiConfigured" class="space-y-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+                <!-- System Prompt -->
+                <div>
+                    <label for="image-gen-prompt" class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200">Image Generation System Prompt</label>
+                    <textarea id="image-gen-prompt" v-model="imageGenerationSystemPrompt" class="styled-textarea" placeholder="e.g., All images should be in a photorealistic style, 4k, detailed."></textarea>
+                    <p class="text-xs text-gray-500 mt-1">This prompt will be added to every image generation request made from within a chat message.</p>
+                </div>
+
+                <!-- Auto Activate Setting -->
+                <div class="flex items-center justify-between">
+                    <div class="flex-grow pr-4">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Auto-Activate Generated Images</h4>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">If enabled, images generated by the AI will be automatically added to the conversation context for future turns.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="activateGeneratedImages" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+            </div>
+        </div>
+
+        <!-- Image Resizing Settings -->
+        <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg">
+            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Image Upload Resizing</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                Automatically resize images sent to the AI if they exceed these dimensions. Set to -1 to disable resizing.
+            </p>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                    <label for="max-image-width" class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Max Width (px)</label>
+                    <input type="number" id="max-image-width" v-model.number="maxImageWidth" class="input-field w-full" placeholder="-1">
+                </div>
+                <div>
+                    <label for="max-image-height" class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Max Height (px)</label>
+                    <input type="number" id="max-image-height" v-model.number="maxImageHeight" class="input-field w-full" placeholder="-1">
+                </div>
+            </div>
+
+             <!-- NEW: Compression Settings -->
+             <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
+                <div class="flex items-center justify-between mb-3">
+                    <div class="flex-grow pr-4">
+                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Compress Images</h4>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Convert uploads to JPEG to reduce size (helps avoid API limits). Defaults to PNG if disabled.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="compressImages" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+                
+                <div v-if="compressImages">
+                    <label for="compression-quality" class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Quality ({{ imageCompressionQuality }})</label>
+                    <input type="range" id="compression-quality" v-model.number="imageCompressionQuality" min="10" max="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+                </div>
             </div>
         </div>
 

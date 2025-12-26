@@ -72,6 +72,10 @@ class User(Base):
     image_generation_enabled = Column(Boolean, default=False, nullable=False)
     image_generation_system_prompt = Column(Text, nullable=True)
     image_annotation_enabled = Column(Boolean, default=False, nullable=False)
+    image_editing_enabled = Column(Boolean, default=False, nullable=False)
+    
+    # NEW: Toggle for auto-activating generated images
+    activate_generated_images = Column(Boolean, default=False, nullable=False)
 
     # NEW FIELD for Notes
     note_generation_enabled = Column(Boolean, default=False, nullable=False)
@@ -84,6 +88,12 @@ class User(Base):
     reasoning_activation = Column(Boolean, default=False, nullable=True)
     reasoning_effort = Column(String, nullable=True) # low, medium, high
     reasoning_summary = Column(Boolean, default=False, nullable=True)
+
+    # New Image Resizing preferences
+    max_image_width = Column(Integer, default=-1, nullable=True) # -1 means no limit
+    max_image_height = Column(Integer, default=-1, nullable=True) # -1 means no limit
+    compress_images = Column(Boolean, default=False, nullable=False) # Force JPEG conversion
+    image_compression_quality = Column(Integer, default=85, nullable=False) # JPEG Quality (0-100)
 
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
@@ -172,7 +182,6 @@ class User(Base):
     def verify_password(self, plain_password):
         return pwd_context.verify(plain_password, self.hashed_password)
 
-   
 
 class UserStarredDiscussion(Base):
     __tablename__ = "user_starred_discussions"

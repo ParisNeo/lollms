@@ -174,6 +174,9 @@ export const useAuthStore = defineStore('auth', () => {
                     }
                     discussionsStore.loadDiscussions();
                     break;
+                case 'discussion_images_updated':
+                    discussionsStore.handleDiscussionImagesUpdated(data.data);
+                    break;
                 case 'new_message_from_task': discussionsStore.handleNewMessageFromTask(data.data); break;
                 case 'admin_broadcast': uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); break;
                 case 'task_update': tasksStore.addTask(data.data); break;

@@ -41,7 +41,8 @@ const handleWheel = (event) => {
     event.preventDefault();
     const scaleAmount = 0.1;
     let newScale = scale.value + (event.deltaY > 0 ? -scaleAmount : scaleAmount);
-    scale.value = Math.min(Math.max(1, newScale), 10); 
+    // [FIX] Allow zoom under 100% (down to 10%)
+    scale.value = Math.min(Math.max(0.1, newScale), 10); 
     
     if(scale.value === 1) {
         resetZoom();
@@ -77,7 +78,8 @@ const zoomIn = () => {
 }
 
 const zoomOut = () => {
-    let newScale = Math.max(1, scale.value - 0.25);
+    // [FIX] Allow zoom under 100% via UI buttons
+    let newScale = Math.max(0.1, scale.value - 0.25);
     if(newScale === 1) {
         resetZoom();
     } else {

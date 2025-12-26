@@ -67,12 +67,15 @@ const inputTokenCount = ref(0);
 let tokenizeInputDebounceTimer = null;
 const isDraggingOver = ref(false);
 
+// Local state for user uploads (NOT generated images)
+const stagedImages = ref([]); // { file, previewUrl }
+
 const user = computed(() => authStore.user);
 
 const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
-const discussionImages = computed(() => activeDiscussion.value?.discussion_images || []);
-const discussionActiveImages = computed(() => activeDiscussion.value?.active_discussion_images || []);
 
+// REQUIREMENT: Separate generated images from user uploads. 
+// We no longer preview the global discussion gallery here.
 const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 
 // --- Context Bar Logic ---
@@ -135,16 +138,11 @@ function toggleMcpTool(toolId) {
 }
 
 // --- Image & File Handling ---
-const isImageActive = (index) => {
-    if (!discussionActiveImages.value || discussionActiveImages.value.length <= index) return true;
-    return discussionActiveImages.value[index];
-};
-
-function openAttachedImageViewer(startIndex) {
+function openStagedImageViewer(startIndex) {
     uiStore.openImageViewer({
-        imageList: discussionImages.value.map((img, idx) => ({ 
-            src: 'data:image/png;base64,' + img, 
-            prompt: `Attached image ${idx + 1}` 
+        imageList: stagedImages.value.map((img) => ({ 
+            src: img.previewUrl, 
+            prompt: `Uploaded image: ${img.file.name}` 
         })),
         startIndex
     });
@@ -167,6 +165,13 @@ async function removeArtefact(file) {
     }
 }
 
+function removeStagedImage(index) {
+    const removed = stagedImages.value.splice(index, 1)[0];
+    if (removed && removed.previewUrl) {
+        URL.revokeObjectURL(removed.previewUrl);
+    }
+}
+
 function triggerFileUpload() { fileInput.value?.click(); }
 function triggerImageUpload() { imageInput.value?.click(); }
 
@@ -177,20 +182,28 @@ async function handleFilesInput(files) {
     const images = files.filter(f => f.type.startsWith('image/'));
     const others = files.filter(f => !f.type.startsWith('image/'));
 
-    if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
-    if (activeDiscussion.value) {
-        isUploading.value = true;
-        try {
-            const promises = [];
-            if (images.length > 0) {
-                 promises.push(...images.map(file => discussionsStore.uploadDiscussionImage(file)));
+    if (images.length > 0) {
+        images.forEach(file => {
+            stagedImages.value.push({
+                file,
+                previewUrl: URL.createObjectURL(file)
+            });
+        });
+    }
+
+    if (others.length > 0) {
+        if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
+        if (activeDiscussion.value) {
+            isUploading.value = true;
+            try {
+                await Promise.all(others.map(file => discussionsStore.addArtefact({ 
+                    discussionId: activeDiscussion.value.id, 
+                    file, 
+                    extractImages: true 
+                })));
+            } finally {
+                isUploading.value = false;
             }
-            if (others.length > 0) {
-                 promises.push(...others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true })));
-            }
-            await Promise.all(promises);
-        } finally {
-            isUploading.value = false;
         }
     }
 }
@@ -208,7 +221,6 @@ async function handleImageUpload(event) {
 }
 
 async function handleDrop(event) {
-    // STOP PROPAGATION to prevent the parent ChatView from catching this and pasting twice
     event.stopPropagation();
     isDraggingOver.value = false;
     const files = Array.from(event.dataTransfer.files);
@@ -218,7 +230,6 @@ async function handleDrop(event) {
 }
 
 async function handlePaste(event) {
-    // STOP PROPAGATION to prevent the parent ChatView from catching this and pasting twice
     event.stopPropagation();
     const items = (event.clipboardData || window.clipboardData).items;
     const imageFiles = [];
@@ -291,19 +302,32 @@ async function toggleRecording() {
 async function handleSendMessage() {
     if (generationInProgress.value) return;
     const text = messageText.value.trim();
-    if (!text && attachedFiles.value.length === 0 && discussionImages.value.length === 0) return;
+    if (!text && attachedFiles.value.length === 0 && stagedImages.value.length === 0) return;
+
+    // Prepare files for transport
+    const imagesToUpload = stagedImages.value.map(item => item.file);
+    const localPreviews = stagedImages.value.map(item => item.previewUrl);
 
     // Clear input immediately for better UX
     messageText.value = '';
     inputTokenCount.value = 0;
+    stagedImages.value = []; // Clear staged images after sending
 
     try {
-        await discussionsStore.sendMessage({ prompt: text, image_server_paths: [], localImageUrls: [] });
+        await discussionsStore.sendMessage({ 
+            prompt: text, 
+            image_server_paths: [], // Handled inside store by actual file objects if needed
+            localImageUrls: localPreviews,
+            image_files: imagesToUpload
+        });
     } catch(err) {
         console.error("SendMessage failed:", err);
         uiStore.addNotification('Failed to send message.', 'error');
-        // Restore text if failed
+        // Restore state if failed
         messageText.value = text;
+        imagesToUpload.forEach((file, i) => {
+            stagedImages.value.push({ file, previewUrl: localPreviews[i] });
+        });
     }
 }
 
@@ -345,6 +369,8 @@ onMounted(() => {
 onUnmounted(() => {
     off('files-dropped-in-chat', handleFilesInput);
     off('files-pasted-in-chat', handleFilesInput);
+    // Cleanup preview URLs
+    stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl));
 });
 </script>
 
@@ -358,9 +384,9 @@ onUnmounted(() => {
         </div>
 
         <!-- Vision Warning -->
-        <div v-if="!currentModelVisionSupport && discussionImages.length > 0" class="px-4 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-[10px] text-yellow-700 dark:text-yellow-300 flex items-center gap-2">
+        <div v-if="!currentModelVisionSupport && stagedImages.length > 0" class="px-4 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-[10px] text-yellow-700 dark:text-yellow-300 flex items-center gap-2">
             <IconInfo class="w-3.5 h-3.5 flex-shrink-0" />
-            <p>Model lacks vision support. Images will be ignored.</p>
+            <p>Model lacks vision support. Your uploaded images will be ignored.</p>
         </div>
 
         <!-- Context Bar -->
@@ -385,16 +411,15 @@ onUnmounted(() => {
                 </span>
             </div>
 
-            <!-- Attached Previews -->
-            <div v-if="discussionImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
-                <div v-for="(img_b64, index) in discussionImages" :key="`in-img-${index}`" 
-                     @click="openAttachedImageViewer(index)"
-                     class="relative w-16 h-16 group rounded-lg overflow-hidden border-2 transition-all shadow-sm cursor-pointer"
-                     :class="[isImageActive(index) ? (currentModelVisionSupport ? 'border-blue-500' : 'border-yellow-400') : 'border-gray-300 grayscale opacity-60']">
-                    <AuthenticatedImage :src="'data:image/png;base64,' + img_b64" class="w-full h-full object-cover" />
+            <!-- Attached Previews (User uploads only) -->
+            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
+                <div v-for="(img, index) in stagedImages" :key="`staged-img-${index}`" 
+                     @click="openStagedImageViewer(index)"
+                     class="relative w-16 h-16 group rounded-lg overflow-hidden border-2 transition-all shadow-sm cursor-pointer border-blue-500"
+                     :class="{'grayscale opacity-60': !currentModelVisionSupport}">
+                    <img :src="img.previewUrl" class="w-full h-full object-cover" />
                     <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
-                        <button @click.stop="discussionsStore.toggleDiscussionImage(index)" class="text-white hover:text-blue-300 p-0.5" :title="isImageActive(index) ? 'Disable' : 'Enable'"><IconEye v-if="isImageActive(index)" class="w-4 h-4" /><IconEyeOff v-else class="w-4 h-4" /></button>
-                        <button @click.stop="discussionsStore.deleteDiscussionImage(index)" class="text-white hover:text-red-400 p-0.5" title="Remove"><IconXMark class="w-4 h-4" /></button>
+                        <button @click.stop="removeStagedImage(index)" class="text-white hover:text-red-400 p-0.5" title="Remove"><IconXMark class="w-5 h-5" /></button>
                     </div>
                 </div>
 

@@ -3,7 +3,6 @@ import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
-import UserInfo from './UserInfo.vue';
 import DiscussionList from './DiscussionList.vue';
 
 import logoDefault from '../../assets/logo.png';
@@ -14,7 +13,8 @@ import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
-import IconServer from '../../assets/icons/IconServer.vue'; // For Notebooks
+import IconServer from '../../assets/icons/IconServer.vue';
+import IconDatabase from '../../assets/icons/IconDatabase.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -35,9 +35,8 @@ const resetActivityTimer = () => {
     clearTimeout(activityTimeout.value);
     if (isSidebarOpen.value) {
         activityTimeout.value = setTimeout(() => {
-            if (window.innerWidth > 768) {
-                uiStore.closeSidebar();
-            }
+            // Automatically collapse sidebar after inactivity
+            uiStore.closeSidebar();
         }, 30000); // 30 seconds
     }
 };
@@ -53,8 +52,18 @@ watch(isSidebarOpen, (isOpen) => {
 onMounted(() => {
     const sidebarElement = sidebarRef.value;
     if (sidebarElement) {
+        // Desktop interactions
         sidebarElement.addEventListener('mousemove', resetActivityTimer);
         sidebarElement.addEventListener('mousedown', resetActivityTimer);
+        sidebarElement.addEventListener('wheel', resetActivityTimer);
+        
+        // Mobile interactions
+        sidebarElement.addEventListener('touchstart', resetActivityTimer);
+        sidebarElement.addEventListener('touchmove', resetActivityTimer);
+        sidebarElement.addEventListener('scroll', resetActivityTimer, { passive: true });
+        
+        // Keyboard interactions
+        sidebarElement.addEventListener('keydown', resetActivityTimer);
     }
     resetActivityTimer();
 });
@@ -64,6 +73,11 @@ onUnmounted(() => {
     if (sidebarElement) {
         sidebarElement.removeEventListener('mousemove', resetActivityTimer);
         sidebarElement.removeEventListener('mousedown', resetActivityTimer);
+        sidebarElement.removeEventListener('wheel', resetActivityTimer);
+        sidebarElement.removeEventListener('touchstart', resetActivityTimer);
+        sidebarElement.removeEventListener('touchmove', resetActivityTimer);
+        sidebarElement.removeEventListener('scroll', resetActivityTimer);
+        sidebarElement.removeEventListener('keydown', resetActivityTimer);
     }
     clearTimeout(activityTimeout.value);
 });
@@ -107,13 +121,20 @@ onUnmounted(() => {
           <IconHome class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </button>
 
-        <!-- Notebook Studio Link -->
-        <router-link 
-          to="/notebooks" 
+        <router-link
+          to="/notebooks"
           class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Notebook Studio"
         >
-          <IconServer class="w-5 h-5 text-slate-500 dark:text-gray-400" />
+            <IconServer class="w-5 h-5 text-purple-500" />
+        </router-link>
+
+        <router-link
+          to="/datastores"
+          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          title="Data Studio"
+        >
+            <IconDatabase class="w-5 h-5 text-green-500" />
         </router-link>
 
         <router-link
@@ -140,11 +161,6 @@ onUnmounted(() => {
           <IconSettings class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </router-link>
       </div>
-    </div>
-    
-    <!-- Compact User Info Footer -->
-    <div class="border-t border-slate-200 dark:border-gray-700 flex-shrink-0" :class="isSidebarOpen ? 'p-3' : 'p-2'">
-      <UserInfo />
     </div>
   </aside>
 </template>

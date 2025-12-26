@@ -35,10 +35,15 @@ class EmailUsersRequest(BaseModel):
     send_to_all: bool = False
 
 class EnhanceEmailRequest(BaseModel):
-    content: str
+    subject: str
+    body: str
+    background_color: Optional[str] = None
+    prompt: Optional[str] = None
 
 class EnhancedEmailResponse(BaseModel):
-    content: str
+    subject: str
+    body: str
+    background_color: Optional[str] = None
 
 class UserPasswordChange(BaseModel):
     current_password: str
@@ -55,7 +60,8 @@ class DataZoneUpdate(BaseModel):
     data_zone: str
 
 class MemoryUpdate(BaseModel):
-    memory: str
+    title: str
+    content: str
 
 class UserLLMParams(BaseModel):
     llm_ctx_size: Optional[int] = None
@@ -200,7 +206,9 @@ class UserAuthDetails(BaseModel):
     image_generation_enabled: bool = False
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: bool = False
+    image_editing_enabled: bool = False
     note_generation_enabled: bool = False
+    activate_generated_images: bool = False
     
     # Memory Settings
     memory_enabled: bool = False
@@ -211,6 +219,11 @@ class UserAuthDetails(BaseModel):
     reasoning_activation: bool = False
     reasoning_effort: Optional[str] = None
     reasoning_summary: bool = False
+
+    max_image_width: Optional[int] = -1
+    max_image_height: Optional[int] = -1
+    compress_images: bool = False
+    image_compression_quality: int = 85
 
     class Config:
         from_attributes = True
@@ -284,6 +297,8 @@ class UserUpdate(BaseModel):
     image_generation_enabled: Optional[bool] = None
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: Optional[bool] = None
+    image_editing_enabled: Optional[bool] = None
+    activate_generated_images: Optional[bool] = None
     note_generation_enabled: Optional[bool] = None
     
     # Memory Settings
@@ -293,3 +308,8 @@ class UserUpdate(BaseModel):
     reasoning_activation: Optional[bool] = None
     reasoning_effort: Optional[str] = None
     reasoning_summary: Optional[bool] = None
+
+    max_image_width: Optional[int] = None
+    max_image_height: Optional[int] = None
+    compress_images: Optional[bool] = None
+    image_compression_quality: Optional[int] = None

@@ -238,10 +238,11 @@ def _bootstrap_lollms_user(connection):
                     put_thoughts_in_context, auto_title, chat_active, first_page,
                     show_token_counter, rag_use_graph, tell_llm_os, share_dynamic_info_with_llm,
                     include_memory_date_in_context, message_font_size,
-                    image_generation_enabled, image_annotation_enabled,
+                    image_generation_enabled, image_annotation_enabled, image_editing_enabled,
                     force_ai_response_language, share_personal_info_with_llm, note_generation_enabled,
                     memory_enabled, auto_memory_enabled,
-                    default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status
+                    default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status,
+                    max_image_width, max_image_height
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
@@ -249,10 +250,11 @@ def _bootstrap_lollms_user(connection):
                     :put_thoughts_in_context, :auto_title, :chat_active, :first_page,
                     :show_token_counter, :rag_use_graph, :tell_llm_os, :share_dynamic_info_with_llm,
                     :include_memory_date_in_context, :message_font_size,
-                    :image_generation_enabled, :image_annotation_enabled,
+                    :image_generation_enabled, :image_annotation_enabled, :image_editing_enabled,
                     :force_ai_response_language, :share_personal_info_with_llm, :note_generation_enabled,
                     :memory_enabled, :auto_memory_enabled,
-                    :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status
+                    :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status,
+                    -1, -1
                 )
             """),
             {
@@ -276,6 +278,7 @@ def _bootstrap_lollms_user(connection):
                 "message_font_size": 14,
                 "image_generation_enabled": False,
                 "image_annotation_enabled": False,
+                "image_editing_enabled": False,
                 "force_ai_response_language": False,
                 "share_personal_info_with_llm": False,
                 "note_generation_enabled": False,
@@ -524,6 +527,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("ALTER TABLE users ADD COLUMN note_generation_enabled BOOLEAN DEFAULT 0 NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
+            
+        if 'image_editing_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN image_editing_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
 
         if 'memory_enabled' not in user_columns_db:
             try:
@@ -631,9 +640,15 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "image_generation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "image_generation_system_prompt": "TEXT",
             "image_annotation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "image_editing_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "reasoning_activation": "BOOLEAN DEFAULT 0",
             "reasoning_effort": "VARCHAR",
-            "reasoning_summary": "BOOLEAN DEFAULT 0"
+            "reasoning_summary": "BOOLEAN DEFAULT 0",
+            "max_image_width": "INTEGER DEFAULT -1",
+            "max_image_height": "INTEGER DEFAULT -1",
+            "activate_generated_images": "BOOLEAN DEFAULT 0 NOT NULL",
+            "compress_images": "BOOLEAN DEFAULT 0 NOT NULL",
+            "image_compression_quality": "INTEGER DEFAULT 85 NOT NULL"
         }
         
         added_cols = []

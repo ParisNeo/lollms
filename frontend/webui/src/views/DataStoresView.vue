@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/views/DataStoresView.vue -->
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue';
 import { useRouter } from 'vue-router';
@@ -136,7 +135,13 @@ onMounted(() => {
     dataStore.fetchDataStores();
     dataStore.fetchAvailableVectorizers();
     tasksStore.fetchTasks();
-    // Removed polling to prevent backend spamming. Updates are handled via WebSocket events in tasksStore.
+    
+    // Support opening the new form via a global event
+    window.addEventListener('lollms:open-new-datastore', handleAddStoreClick);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('lollms:open-new-datastore', handleAddStoreClick);
 });
 
 watch(tasks, (newTasks) => {
@@ -265,7 +270,7 @@ async function handleFileDrop(event) {
                 resolve();
             }, reject));
         } else if (entry.isDirectory) {
-            const entries = await getFilesInDirectory(entry);
+            const entries = await getFilesInDirectory(directoryEntry);
             for (const subEntry of entries) {
                 await traverseEntry(subEntry);
             }

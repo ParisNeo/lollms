@@ -473,6 +473,20 @@ export const useAdminStore = defineStore('admin', () => {
     async function syncInstallations() { const response = await apiClient.post('/api/apps_zoo/sync-installs'); tasksStore.addTask(response.data); }
     async function purgeBrokenInstallation(item) { const response = await apiClient.post('/api/apps_zoo/purge-broken', { item_type: item.item_type || 'app', folder_name: item.folder_name }); tasksStore.addTask(response.data); }
     async function fixBrokenInstallation(item) { const response = await apiClient.post('/api/apps_zoo/fix-broken', { item_type: item.item_type || 'app', folder_name: item.folder_name }); tasksStore.addTask(response.data); }
+    
+    // --- ADDED MISSING FUNCTION ---
+    function handleAppStatusUpdate(data) {
+        if (!installedApps.value) return;
+        const app = installedApps.value.find(a => a.id === data.id);
+        if (app) {
+            if (data.status) app.status = data.status;
+            if (data.is_installed !== undefined) app.is_installed = data.is_installed;
+        } else {
+             // Optional: reload if new app appears
+             fetchInstalledApps(true); 
+        }
+    }
+    // ------------------------------
 
     async function fetchFunFacts(force=false) { 
         if(!force && funFacts.value.length > 0) return;

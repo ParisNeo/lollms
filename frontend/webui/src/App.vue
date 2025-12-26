@@ -123,7 +123,6 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
                             </div>
                         </div>
                         <div class="max-h-[15vh] overflow-y-auto custom-scrollbar pr-2">
-                            <!-- ADDED :key to prevent DOM patching crash -->
                             <MessageContentRenderer :key="authStore.funFact" :content="authStore.funFact" class="text-gray-900 dark:text-gray-100 text-sm sm:text-base line-clamp-4" />
                         </div>
                         <div class="mt-4 text-[8px] text-center text-gray-400 dark:text-gray-500 font-black uppercase tracking-[0.2em] animate-pulse">Tap to expand</div>
@@ -146,7 +145,6 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
                         </button>
                     </div>
                     <div class="max-h-[55vh] overflow-y-auto custom-scrollbar pr-6">
-                        <!-- ADDED :key to prevent DOM patching crash -->
                         <MessageContentRenderer :key="authStore.funFact" :content="authStore.funFact" class="text-gray-900 dark:text-gray-100 text-lg sm:text-xl leading-relaxed" />
                     </div>
                     <div class="mt-10 flex items-center justify-between">
@@ -182,17 +180,28 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 
     <!-- Main Layout -->
     <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0 relative overflow-hidden">
+      <!-- HEADER NOW ON TOP OF EVERYTHING -->
+      <GlobalHeader />
+      
       <div class="flex flex-grow min-h-0 relative w-full h-full">
+        <!-- Main Sidebar (Discussions, etc.) -->
         <div v-if="showMainSidebar" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out h-full" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"><Sidebar/></div>
         <div v-if="showMainSidebar && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
-        <div class="flex-1 flex flex-col overflow-hidden h-full relative">
-          <GlobalHeader /><main class="flex-1 overflow-hidden relative"><router-view /></main>
-        </div>
+        
+        <!-- Viewport -->
+        <main class="flex-1 overflow-hidden relative">
+            <router-view />
+        </main>
+        
+        <!-- Social/Messaging Sidebar -->
         <ChatSidebar />
       </div>
     </div>
+    
+    <!-- Guest Layout (Login/Welcome) -->
     <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0"><router-view /></div>
 
+    <!-- Global Overlays -->
     <ModalContainer />
     <ImageViewerModal />
     <NotificationPanel /><AudioPlayer />

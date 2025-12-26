@@ -1,5 +1,4 @@
-# backend/routers/discussion/message.py
-# Standard Library Imports
+# [UPDATE] backend/routers/discussion/message.py
 import base64
 import io
 import json
@@ -63,7 +62,8 @@ from backend.session import (get_current_active_user,
                              get_safe_store_instance,
                              get_user_discussion_assets_path,
                              get_user_lollms_client,
-                             get_user_temp_uploads_path, user_sessions)
+                             get_user_temp_uploads_path, user_sessions,
+                             build_lollms_client_from_params)
 from backend.task_manager import task_manager, Task
 from backend.settings import settings
 from backend.routers.files import (
@@ -73,7 +73,7 @@ from backend.routers.files import (
     md_to_pptx_bytes,         # Markdown → PPTX (slides via ---)
     html_wrapper              # Wrap HTML body in a shell
 )
-
+from backend.tasks.image_generation_tasks import _generate_image_task
 
 # safe_store is needed for RAG callbacks
 try:
@@ -83,7 +83,11 @@ except ImportError:
 
 message_grade_lock = threading.Lock()
 
+class RegenerateImageRequest(BaseModel):
+    prompt: Optional[str] = None # Optional override, otherwise use stored
+
 def build_message_router(router: APIRouter):
+    # ... (other endpoints like grade_discussion_message, update_discussion_message etc. remain unchanged)
     @router.put("/{discussion_id}/messages/{message_id}/grade", response_model=MessageOutput)
     async def grade_discussion_message(discussion_id: str, message_id: str, grade_update: MessageGradeUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         username = current_user.username
@@ -132,10 +136,13 @@ def build_message_router(router: APIRouter):
 
         target_message.content = payload.content
 
+        # Handle image updates
         final_images_b64 = []
+        new_images_b64 = []
+        
         all_image_uris = (payload.kept_images_b64 or []) + (payload.new_images_b64 or [])
         
-        for uri in all_image_uris:
+        for uri in payload.kept_images_b64 or []:
             try:
                 if isinstance(uri, str) and ',' in uri:
                     _, encoded = uri.split(',', 1)
@@ -144,15 +151,37 @@ def build_message_router(router: APIRouter):
                     final_images_b64.append(uri)
             except ValueError:
                 final_images_b64.append(uri)
+
+        for uri in payload.new_images_b64 or []:
+            try:
+                if isinstance(uri, str) and ',' in uri:
+                    _, encoded = uri.split(',', 1)
+                    new_images_b64.append(encoded)
+                    final_images_b64.append(encoded)
+                else:
+                    new_images_b64.append(uri)
+                    final_images_b64.append(uri)
+            except ValueError:
+                new_images_b64.append(uri)
+                final_images_b64.append(uri)
         
+        # We need to preserve existing active state or reset if images changed significantly
+        # Simplest approach: Rebuild images list. Add new images as new packs.
+        
+        # 1. Update main image list
         target_message.images = final_images_b64
+        
+        # 2. If new images were added, process them as packs
+        if new_images_b64:
+             for img in new_images_b64:
+                 target_message.add_image_pack([img], group_type="upload", active_by_default=True, title="User Upload")
+        
         discussion_obj.commit()
 
         db_user = db.query(DBUser).filter(DBUser.username == username).one()
         grade = db.query(UserMessageGrade.grade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).scalar() or 0
         
         full_image_refs = [f"data:image/png;base64,{img}" for img in target_message.images or []]
-        active_images = [True] * len(full_image_refs)
 
         msg_metadata = target_message.metadata or {}
         return MessageOutput(
@@ -161,7 +190,7 @@ def build_message_router(router: APIRouter):
             binding_name=target_message.binding_name, model_name=target_message.model_name,
             token_count=target_message.tokens, sources=msg_metadata.get('sources'),
             events=msg_metadata.get('events'), image_references=full_image_refs,
-            active_images=active_images, user_grade=grade,
+            active_images=target_message.active_images, user_grade=grade,
             created_at=target_message.created_at, branch_id=discussion_obj.active_branch_id
         )
 
@@ -179,17 +208,14 @@ def build_message_router(router: APIRouter):
         if not msg:
             raise HTTPException(status_code=404, detail="Message not found.")
         
-        # Message objects in lollms_client have active_images (list of bools)
-        images_count = len(msg.images) if msg.images else 0
-        
-        if msg.active_images is None:
-            msg.active_images = [True] * images_count
-        
-        if 0 <= image_index < len(msg.active_images):
-            msg.active_images[image_index] = not msg.active_images[image_index]
-            discussion_obj.commit()
-        else:
+        # Use the message object's toggle functionality to respect grouping/packs logic
+        try:
+            msg.toggle_image_activation(image_index)
+        except IndexError:
             raise HTTPException(status_code=404, detail="Image index out of bounds.")
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail="Failed to toggle image activation.")
 
         # Re-fetch for clean output
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
@@ -208,6 +234,116 @@ def build_message_router(router: APIRouter):
             created_at=msg.created_at, branch_id=discussion_obj.active_branch_id
         )
 
+    @router.post("/{discussion_id}/messages/{message_id}/images/{image_index}/regenerate", response_model=TaskInfo, status_code=202)
+    async def regenerate_message_image(
+        discussion_id: str,
+        message_id: str,
+        image_index: int,
+        payload: RegenerateImageRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        msg = discussion_obj.get_message(message_id)
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found.")
+
+        # Find metadata for this image
+        msg_metadata = msg.metadata or {}
+        gen_infos = msg_metadata.get("generated_image_infos", [])
+        
+        target_info = next((info for info in gen_infos if info.get('index') == image_index), None)
+        
+        prompt_to_use = payload.prompt
+        width_to_use = 1024
+        height_to_use = 1024
+        if not prompt_to_use and target_info:
+            prompt_to_use = target_info.get('prompt')
+            width_to_use = target_info.get('width', 1024)
+            height_to_use = target_info.get('height', 1024)
+            
+        if not prompt_to_use:
+             raise HTTPException(status_code=400, detail="No prompt found for this image, and none provided.")
+
+        def _update_message_image_task(task: Task, username, discussion_id, message_id, image_index, prompt, width, height):
+            task.log(f"Regenerating image {image_index} in message {message_id}...")
+            task.set_progress(10)
+            
+            try:
+                # Re-fetch discussion inside thread
+                discussion = get_user_discussion(username, discussion_id)
+                msg_obj = discussion.get_message(message_id)
+                
+                lc = build_lollms_client_from_params(username=username, load_llm=False, load_tti=True)
+                if not lc.tti:
+                     raise Exception("TTI binding not available.")
+                
+                task.set_progress(30)
+                # Generate
+                img_bytes = lc.tti.generate_image(prompt=prompt, width=width, height=height)
+                if not img_bytes:
+                    raise Exception("Generation returned empty data.")
+                
+                b64 = base64.b64encode(img_bytes).decode('utf-8')
+                
+                # Update message using the new method for adding packs
+                # This ensures consistent metadata updates and activation logic
+                msg_obj.add_image_pack([b64], group_type="generated", active_by_default=True, title=prompt)
+                
+                # We need to manually link the new image (which is now the last one)
+                # to the prompt metadata and potentially the group of the original image if we want to replace it logically
+                # However, add_image_pack creates a NEW group.
+                # If we want to ADD to an EXISTING group, we need custom logic here or rely on the frontend handling separate groups.
+                
+                # For simplicity in this task, let's assume regeneration creates a NEW variation in a NEW pack
+                # but we want it associated with the same metadata logic as the original request if possible.
+                
+                new_index = len(msg_obj.images) - 1
+                meta = msg_obj.metadata or {}
+                
+                # Update Infos
+                infos = meta.get("generated_image_infos", [])
+                infos.append({
+                    'index': new_index, 
+                    'prompt': prompt,
+                    'width': width,
+                    'height': height
+                })
+                msg_obj.set_metadata_item("generated_image_infos", infos, discussion)
+                
+                discussion.commit()
+                
+                task.set_progress(100)
+                task.log("Image added to gallery and activated.")
+                
+                # Return full message to sync frontend
+                full_image_refs = [f"data:image/png;base64,{img}" for img in msg_obj.images or []]
+                return {
+                    "status": "image_generated_in_message",
+                    "discussion_id": discussion_id,
+                    "new_message": {
+                        "id": msg_obj.id, "sender": msg_obj.sender, "content": msg_obj.content,
+                        "created_at": msg_obj.created_at.isoformat() if hasattr(msg_obj.created_at, 'isoformat') else str(msg_obj.created_at),
+                        "parent_message_id": msg_obj.parent_id, "binding_name": msg_obj.binding_name, "model_name": msg_obj.model_name,
+                        "token_count": msg_obj.tokens, "metadata": msg_obj.metadata, "image_references": full_image_refs,
+                        "active_images": msg_obj.active_images, "sender_type": msg_obj.sender_type
+                    }
+                }
+
+            except Exception as e:
+                task.log(f"Regeneration failed: {e}", "ERROR")
+                raise e
+
+        db_task = task_manager.submit_task(
+            name=f"Regenerate Image {image_index}",
+            target=_update_message_image_task,
+            args=(current_user.username, discussion_id, message_id, image_index, prompt_to_use, width_to_use, height_to_use),
+            description=f"Regenerating image for prompt: '{prompt_to_use[:30]}...'",
+            owner_username=current_user.username
+        )
+        return db_task
+
     @router.post("/{discussion_id}/messages", response_model=MessageOutput)
     async def add_manual_message(
         discussion_id: str,
@@ -218,7 +354,7 @@ def build_message_router(router: APIRouter):
         username = current_user.username
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, "interact")
         if not discussion_obj:
-            raise HTTPException(status_code=404, detail="Discussion not found.")
+            raise HTTPException(status_code=404, detail="Discussion found.")
 
         if payload.sender_type not in ['user', 'assistant']:
             raise HTTPException(status_code=400, detail="Invalid sender_type.")
@@ -334,18 +470,16 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'docx':
                 media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                html_content = md2_to_html(content)
-                file_content = html_to_docx_bytes(html_content)
+                html_content = md2_to_html(content)  # markdown2
+                file_content = html_to_docx_bytes(html_content)  # map HTML → Word
 
             elif export_format == 'pptx':
                 media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                file_content = md_to_pptx_bytes(content)  # Markdown slides delimited by ---
+                file_content = md_to_pptx_bytes(content)  # Markdown slides via mdtopptx
 
             elif export_format == 'xlsx':
                 media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 wb = Workbook()
-
-                # Regex to find markdown tables
                 table_regex = re.compile(r'(\|.*\|(?:\r?\n|\r)?\|[-| :]*\|(?:\r?\n|\r)?(?:\|.*\|(?:\r?\n|\r)?)+)')
                 tables = table_regex.findall(content)
 
@@ -353,65 +487,55 @@ def build_message_router(router: APIRouter):
                     for i, table_md in enumerate(tables):
                         ws = wb.create_sheet(title=f"Table {i+1}")
                         lines = [line.strip() for line in table_md.strip().split('\n')]
-                        # Skip header separator line
                         data_rows = [line for line in lines if not re.match(r'^\|[-| :]*\|$', line)]
                         for row_idx, line in enumerate(data_rows):
                             cells = [cell.strip() for cell in line.strip('|').split('|')]
                             for col_idx, cell_text in enumerate(cells):
                                 ws.cell(row=row_idx + 1, column=col_idx + 1, value=cell_text)
-                        # Auto-adjust column widths
                         for col in ws.columns:
                             max_length = 0
                             column = get_column_letter(col[0].column)
                             for cell in col:
-                                try:
-                                    if cell.value and len(str(cell.value)) > max_length:
-                                        max_length = len(str(cell.value))
-                                except Exception:
-                                    pass
+                                if cell.value and len(str(cell.value)) > max_length:
+                                    max_length = len(str(cell.value))
                             ws.column_dimensions[column].width = (max_length + 2)
                     if wb.sheetnames[0] == 'Sheet':
-                        wb.remove(wb['Sheet'])  # Remove default sheet if we added new ones
+                        wb.remove(wb['Sheet'])
                 else:
-                    # Fallback for content without tables
                     ws = wb.active
-                    ws.title = "Message"
+                    ws.title = "Content"
                     ws['A1'] = content
                     ws.column_dimensions['A'].width = 100
                     ws['A1'].alignment = ws['A1'].alignment.copy(wrapText=True)
 
-                bio = io.BytesIO()
-                wb.save(bio)
-                file_content = bio.getvalue()
+                bio = io.BytesIO(); wb.save(bio); file_content = bio.getvalue()
 
             elif export_format == 'epub':
                 media_type = "application/epub+zip"
                 html_content = md2_to_html(content)
-                file_content = html_wrapper(html_content, title="Message Export")  # placeholder XHTML
+                file_content = html_wrapper(html_content, title="Export")  # placeholder xhtml; replace with proper EPUB packaging
 
             elif export_format == 'odt':
                 media_type = "application/vnd.oasis.opendocument.text"
                 html_content = md2_to_html(content)
-                file_content = html_wrapper(html_content, title="Message Export")  # placeholder
+                file_content = html_wrapper(html_content, title="Export")  # placeholder
 
             elif export_format == 'rtf':
                 media_type = "application/rtf"
                 from bs4 import BeautifulSoup
-                text_only = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
-                rtf = r"{\rtf1\ansi " + text_only.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}") \
-                    .replace("\n", r"\par ") + "}"
+                text = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
+                rtf = r"{\rtf1\ansi " + text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\par ") + "}"
                 file_content = rtf.encode("utf-8", errors="ignore")
 
             elif export_format in ['tex', 'latex']:
                 media_type = "application/x-tex"
                 from bs4 import BeautifulSoup
-                text_only = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
+                text = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
                 def esc(t: str) -> str:
                     rep = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
-                    for k, v in rep.items():
-                        t = t.replace(k, v)
+                    for k, v in rep.items(): t = t.replace(k, v)
                     return t
-                tex = "\\documentclass{article}\n\\usepackage[utf8]{inputenc}\n\\begin{document}\n" + esc(text_only) + "\n\\end{document}\n"
+                tex = "\\documentclass{article}\n\\usepackage[utf8]{inputenc}\n\\begin{document}\n" + esc(text) + "\n\\end{document}\n"
                 file_content = tex.encode("utf-8")
 
             else:
@@ -423,5 +547,5 @@ def build_message_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to generate export file: {e}")
 
-        headers = {'Content-Disposition': f'attachment; filename="{filename}"'}
+        headers = {'Content-Disposition': f'attachment; filename=\"{filename}\"'}
         return Response(content=file_content, media_type=media_type, headers=headers)

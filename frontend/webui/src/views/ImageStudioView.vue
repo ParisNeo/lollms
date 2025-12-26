@@ -116,12 +116,6 @@
                         </div>
                     </div>
                 </div>
-                
-                <div class="p-4 border-t dark:border-gray-700 flex-shrink-0 bg-gray-50 dark:bg-gray-800/50">
-                    <router-link to="/" class="flex items-center justify-center gap-3 px-4 py-3 text-xs font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-xl transition-all">
-                        <IconArrowLeft class="w-4 h-4" /> <span>Back to Chat</span>
-                    </router-link>
-                </div>
             </aside>
 
             <div v-if="showMobileSidebar" @click="showMobileSidebar = false" class="absolute inset-0 bg-black/40 z-20 lg:hidden backdrop-blur-sm"></div>

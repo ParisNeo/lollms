@@ -1,10 +1,12 @@
+<!-- [UPDATE] frontend/webui/src/components/chat/MessageBubble.vue -->
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, watch, markRaw } from 'vue';
 import { marked } from 'marked';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
+import { useTasksStore } from '../../stores/tasks'; // Import tasks store for spinner
 import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
@@ -41,11 +43,14 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 import IconMagnifyingGlass from '../../assets/icons/IconMagnifyingGlass.vue';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconCircle from '../../assets/icons/IconCircle.vue';
 
 const props = defineProps({
   message: { type: Object, required: true },
 });
 
+// ... (math rendering logic remains same)
 const mathPlaceholders = new Map();
 let mathCounter = 0;
 
@@ -54,7 +59,7 @@ function protectMath(text) {
     mathCounter = 0;
     mathPlaceholders.clear();
 
-    return text.replace(/(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$)/g, (match) => {
+    return text.replace(/(\$\$[\s\S]*?\$$|\$[\s\S]*?\$)/g, (match) => {
         const placeholder = `<!--MATH_PLACEHOLDER_${mathCounter}-->`;
         mathPlaceholders.set(placeholder, match);
         mathCounter++;
@@ -83,7 +88,9 @@ const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
+const tasksStore = useTasksStore();
 const { currentModelVisionSupport, ttsState, currentPlayingAudio } = storeToRefs(discussionsStore);
+const { imageGenerationTasks } = storeToRefs(tasksStore);
 
 const isEventsCollapsed = ref(true);
 const isEditing = ref(false);
@@ -96,6 +103,9 @@ const newImageFiles = ref([]);
 const editImageInput = ref(null);
 const audioPlayerRef = ref(null);
 
+// Local state: Which index is selected for view in EACH group. Map<GroupId, ImageIndex>
+const selectedViewIndices = ref({});
+
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
 const isTtsActive = computed(() => !!user.value?.tts_binding_model_name);
@@ -107,6 +117,7 @@ const isAi = computed(() => props.message.sender_type === 'assistant');
 const isSystem = computed(() => props.message.sender_type === 'system');
 const isNewManualMessage = computed(() => props.message.id.startsWith('temp-manual-'));
 
+// ... (other computed properties remain same)
 const otherUserIcon = computed(() => {
     if (!isOtherUser.value) return null;
     return discussionsStore.activeDiscussionParticipants[props.message.sender]?.icon;
@@ -125,12 +136,9 @@ const lastUserImage = computed(() => {
     const allMessages = discussionsStore.activeMessages;
     const currentMessageIndex = allMessages.findIndex(m => m.id === props.message.id);
     if (currentMessageIndex === -1) return null;
-
-    // Search backwards from the current message
     for (let i = currentMessageIndex - 1; i >= 0; i--) {
         const msg = allMessages[i];
         if (msg.image_references && msg.image_references.length > 0) {
-            // Return the last image from that message
             return msg.image_references[msg.image_references.length - 1];
         }
     }
@@ -159,7 +167,6 @@ function handleExport(format) {
 
 function handleSpeak() {
     if (messageTtsState.value.audioUrl) {
-        // This case is handled by the audio element's play button
     } else if (!messageTtsState.value.isLoading) {
         const textToSpeak = props.message.content.replace(/```[\s\S]*?```/g, 'Code block.').replace(/<think>[\s\S]*?<\/think>/g, '');
         discussionsStore.generateTTSForMessage(props.message.id, textToSpeak);
@@ -176,17 +183,73 @@ onMounted(() => {
         toggleEdit();
         delete props.message.startInEditMode;
     }
+    
+    // Initialize selected indices for each group
+    if (imageGroups.value.length > 0) {
+        imageGroups.value.forEach(group => {
+            // Default to the active image in the group, or the last one if none found
+            if (!selectedViewIndices.value[group.id]) {
+                // Find the first active image in this group
+                const activeIdx = group.indices.find(idx => isImageActive(idx));
+                // Use the active one, or fallback to the last one (most recent)
+                selectedViewIndices.value[group.id] = activeIdx !== undefined ? activeIdx : group.indices[group.indices.length - 1];
+            }
+        });
+    }
 });
 
-const imagesToRender = computed(() => {
+const allImages = computed(() => {
     if (props.message.localImageUrls?.length > 0) return props.message.localImageUrls;
     if (props.message.image_references?.length > 0) return props.message.image_references;
     return [];
 });
 
+const imageGroups = computed(() => {
+    const images = allImages.value;
+    if (images.length === 0) return [];
+
+    const metadata = props.message.metadata || {};
+    // Combine generation groups and uploaded packs
+    const metaGroups = (metadata.image_generation_groups || []).concat(metadata.image_groups || []);
+    
+    // Track which indices are handled by groups
+    const handledIndices = new Set();
+    const resultGroups = [];
+
+    // 1. Process defined groups
+    metaGroups.forEach((g, idx) => {
+        const groupIndices = g.indices.filter(i => i < images.length);
+        if (groupIndices.length > 0) {
+            groupIndices.forEach(i => handledIndices.add(i));
+            resultGroups.push({
+                id: g.id || `gen_group_${idx}`,
+                title: g.prompt || (g.type === 'upload' ? `Image Pack ${idx + 1}` : `Image Generation ${idx + 1}`),
+                type: g.type || 'generated',
+                indices: groupIndices,
+                images: groupIndices.map(i => images[i])
+            });
+        }
+    });
+
+    // 2. Collect leftover (uploaded/legacy) images into "Attachments" if they aren't in a specific group
+    const leftoverIndices = images.map((_, i) => i).filter(i => !handledIndices.has(i));
+    if (leftoverIndices.length > 0) {
+        resultGroups.push({
+            id: 'attachments',
+            title: 'Attachments',
+            type: 'upload',
+            indices: leftoverIndices,
+            images: leftoverIndices.map(i => images[i])
+        });
+    }
+
+    return resultGroups;
+});
+
+
 const isImageActive = (index) => {
     if (!props.message.active_images || props.message.active_images.length <= index) {
-        return true;
+        return true; 
     }
     return props.message.active_images[index];
 };
@@ -199,14 +262,57 @@ const toggleImage = (index) => {
     });
 };
 
-function openImageViewer(startIndex) {
+function openImageViewer(index) {
     uiStore.openImageViewer({
-        imageList: imagesToRender.value.map(src => ({ src, prompt: 'Image from message' })),
-        startIndex
+        imageList: allImages.value.map(src => ({ src, prompt: 'Image from message' })),
+        startIndex: index
     });
 }
 
+function canRegenerateImage(index) {
+    const infos = props.message.metadata?.generated_image_infos || [];
+    return infos.some(info => info.index === index);
+}
 
+// Watch tasks store to see if this message has a regeneration task
+const isRegenerating = (groupId) => {
+    // We check if any active task relates to regenerating an image in this message for this group
+    // The task logic is generic, so we rely on the UI button click to set a local spinner if desired,
+    // or better, check the global task list for a name match.
+    // Task name format: "Regenerate Image {index}"
+    const group = imageGroups.value.find(g => g.id === groupId);
+    if (!group) return false;
+    
+    // Check if any index in this group has a running task
+    return group.indices.some(idx => 
+        imageGenerationTasks.value.some(t => t.name.includes(`Regenerate Image ${idx}`))
+    );
+};
+
+function handleRegenerateImage(index) {
+    if (areActionsDisabled.value) return;
+    discussionsStore.regenerateMessageImage(props.message.id, index);
+}
+
+function selectView(groupId, index) {
+    selectedViewIndices.value[groupId] = index;
+}
+
+// Ensure view index updates if new images arrive (e.g. after regeneration)
+watch(() => props.message.image_references, (newRefs, oldRefs) => {
+    if (newRefs && oldRefs && newRefs.length > oldRefs.length) {
+        // Find which group got a new image
+        imageGroups.value.forEach(group => {
+            const lastIndex = group.indices[group.indices.length - 1];
+            // If the last index is new (greater than old length), auto-select it
+            if (lastIndex >= oldRefs.length) {
+                selectedViewIndices.value[group.id] = lastIndex;
+            }
+        });
+    }
+}, { deep: true });
+
+// ... (Rest of logic: containsCode, events, branches, editing, etc. remains same)
 const containsCode = computed(() => {
     return props.message.content && props.message.content.includes('```');
 });
@@ -244,47 +350,26 @@ const eventIconMap = {
 
 const groupedEvents = computed(() => {
     if (!hasEvents.value) return [];
-
     const result = [];
     const stack = [];
     const filteredEvents = props.message.events.filter(event => event.type !== 'sources');
-
     for (const event of filteredEvents) {
         const lowerType = event.type?.toLowerCase() || '';
-
         if (lowerType.includes('step_start')) {
-            const newGroup = {
-                type: 'step_group',
-                startEvent: event,
-                children: [],
-                endEvent: null,
-                isInitiallyOpen: false,
-            };
-            
-            if (stack.length > 0) {
-                stack[stack.length - 1].children.push(newGroup);
-            } else {
-                result.push(newGroup);
-            }
+            const newGroup = { type: 'step_group', startEvent: event, children: [], endEvent: null, isInitiallyOpen: false };
+            if (stack.length > 0) stack[stack.length - 1].children.push(newGroup);
+            else result.push(newGroup);
             stack.push(newGroup);
         } else if (lowerType.includes('step_end')) {
             if (stack.length > 0) {
                 const currentGroup = stack.pop();
                 currentGroup.endEvent = event;
-                const hasContent = (currentGroup.startEvent.content && String(currentGroup.startEvent.content).trim() !== '') || 
-                                   (currentGroup.endEvent.content && String(currentGroup.endEvent.content).trim() !== '');
-                if (currentGroup.children.length > 0 || hasContent) {
-                    currentGroup.isInitiallyOpen = true;
-                }
-            } else {
-                result.push(event);
-            }
+                const hasContent = (currentGroup.startEvent.content && String(currentGroup.startEvent.content).trim() !== '') || (currentGroup.endEvent.content && String(currentGroup.endEvent.content).trim() !== '');
+                if (currentGroup.children.length > 0 || hasContent) currentGroup.isInitiallyOpen = true;
+            } else { result.push(event); }
         } else {
-            if (stack.length > 0) {
-                stack[stack.length - 1].children.push(event);
-            } else {
-                result.push(event);
-            }
+            if (stack.length > 0) stack[stack.length - 1].children.push(event);
+            else result.push(event);
         }
     }
     return result;
@@ -300,27 +385,15 @@ function getEventIcon(type) {
 const branchInfo = computed(() => {
     const hasMultipleBranches = props.message.branches && props.message.branches.length > 1;
     if (!hasMultipleBranches || props.message.sender_type !== 'user') return null;
-
     const currentMessages = discussionsStore.activeMessages;
     const currentMessageIndex = currentMessages.findIndex(m => m.id === props.message.id);
     const nextMessage = currentMessages[currentMessageIndex + 1];
-
     let activeBranchIndex = -1;
     if (nextMessage && nextMessage.parent_message_id === props.message.id) {
         activeBranchIndex = props.message.branches.findIndex(id => id === nextMessage.id);
     }
-    
-    if (activeBranchIndex === -1) {
-        activeBranchIndex = 0;
-    }
-
-    return {
-        isBranchPoint: true,
-        current: activeBranchIndex + 1,
-        total: props.message.branches.length,
-        branchIds: props.message.branches,
-        currentIndex: activeBranchIndex,
-    };
+    if (activeBranchIndex === -1) activeBranchIndex = 0;
+    return { isBranchPoint: true, current: activeBranchIndex + 1, total: props.message.branches.length, branchIds: props.message.branches, currentIndex: activeBranchIndex };
 });
 
 function navigateBranch(direction) {
@@ -331,19 +404,10 @@ function navigateBranch(direction) {
 }
 
 const editorExtensions = computed(() => {
-    const extensions = [
-        EditorView.lineWrapping,
-        keymap.of([
-            { key: "Mod-Enter", run: () => { handleSaveEdit(); return true; }},
-            { key: "Escape", run: () => { handleCancelEdit(); return true; }}
-        ])
-    ];
-    if (uiStore.currentTheme === 'dark' || isCurrentUser.value) {
-        extensions.push(oneDark);
-    }
+    const extensions = [EditorView.lineWrapping, keymap.of([{ key: "Mod-Enter", run: () => { handleSaveEdit(); return true; } }, { key: "Escape", run: () => { handleCancelEdit(); return true; } }])];
+    if (uiStore.currentTheme === 'dark' || isCurrentUser.value) extensions.push(oneDark);
     return extensions;
 });
-
 
 function toggleEdit() {
     isEditing.value = !isEditing.value;
@@ -357,21 +421,10 @@ function toggleEdit() {
 
 async function handleSaveEdit() {
     if (isNewManualMessage.value) {
-        await discussionsStore.saveManualMessage({
-            tempId: props.message.id,
-            content: editedContent.value
-        });
+        await discussionsStore.saveManualMessage({ tempId: props.message.id, content: editedContent.value });
     } else {
-        const keptImagesB64 = editedImages.value
-            .filter(img => !img.isNew)
-            .map(img => img.url);
-
-        await discussionsStore.saveMessageChanges({
-            messageId: props.message.id,
-            newContent: editedContent.value,
-            keptImagesB64: keptImagesB64,
-            newImageFiles: newImageFiles.value
-        });
+        const keptImagesB64 = editedImages.value.filter(img => !img.isNew).map(img => img.url);
+        await discussionsStore.saveMessageChanges({ messageId: props.message.id, newContent: editedContent.value, keptImagesB64: keptImagesB64, newImageFiles: newImageFiles.value });
         isEditing.value = false;
     }
 }
@@ -380,16 +433,11 @@ function removeEditedImage(index) {
     const removed = editedImages.value.splice(index, 1);
     if (removed.isNew) {
         const fileIndex = newImageFiles.value.findIndex(f => f === removed.file);
-        if (fileIndex > -1) {
-            newImageFiles.value.splice(index, 1);
-        }
+        if (fileIndex > -1) newImageFiles.value.splice(index, 1);
     }
 }
 
-function triggerEditImageUpload() {
-    editImageInput.value.click();
-}
-
+function triggerEditImageUpload() { editImageInput.value.click(); }
 function handleEditImageSelected(event) {
     const files = Array.from(event.target.files);
     for (const file of files) {
@@ -399,14 +447,10 @@ function handleEditImageSelected(event) {
     }
     event.target.value = '';
 }
-
-
 function handleCancelEdit() {
     if (isNewManualMessage.value) {
         const index = discussionsStore.activeMessages.findIndex(m => m.id === props.message.id);
-        if (index !== -1) {
-            discussionsStore.activeMessages.splice(index, 1);
-        }
+        if (index !== -1) discussionsStore.activeMessages.splice(index, 1);
     } else {
         isEditing.value = false;
     }
@@ -415,22 +459,8 @@ function handleEditorReady(payload) { codeMirrorView.value = payload.view; }
 function copyContent() { uiStore.copyToClipboard(props.message.content); }
 async function handleDelete() { const confirmed = await uiStore.showConfirmation({ title: 'Delete Message', message: 'This will delete the message and its entire branch.', confirmText: 'Delete' }); if (confirmed.confirmed) discussionsStore.deleteMessage({ messageId: props.message.id}); }
 function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.message.id, change }); }
-
-function handleExportCode() {
-    discussionsStore.exportMessageCodeToZip({
-        content: props.message.content,
-        title: discussionsStore.activeDiscussion?.title || 'discussion'
-    });
-}
-
-function handleBuildNewDiscussion(event) {
-  event.stopPropagation();
-  discussionsStore.createDiscussionFromMessage({
-    discussionId: discussionsStore.currentDiscussionId,
-    messageId: props.message.id,
-  });
-}
-
+function handleExportCode() { discussionsStore.exportMessageCodeToZip({ content: props.message.content, title: discussionsStore.activeDiscussion?.title || 'discussion' }); }
+function handleBuildNewDiscussion(event) { event.stopPropagation(); discussionsStore.createDiscussionFromMessage({ discussionId: discussionsStore.currentDiscussionId, messageId: props.message.id }); }
 function handleBranchOrRegenerate() {
     let messageToBranchFrom = props.message.sender_type === 'user' ? props.message : null;
     if (!messageToBranchFrom) {
@@ -443,31 +473,10 @@ function handleBranchOrRegenerate() {
     if (messageToBranchFrom) discussionsStore.initiateBranch(messageToBranchFrom);
     else uiStore.addNotification('Could not find a valid user prompt to regenerate from.', 'error');
 }
+function showSourceDetails(source) { uiStore.openModal('sourceViewer', { ...source }); }
+function openAllSourcesSearch() { uiStore.openModal('allSourcesSearch', { sources: props.message.sources }); }
+function getSimilarityColor(score) { if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600'; if (score >= 80) return 'bg-green-500'; if (score >= 50) return 'bg-yellow-500'; return 'bg-red-500'; }
 
-function showSourceDetails(source) {
-    uiStore.openModal('sourceViewer', { ...source });
-}
-function openAllSourcesSearch() {
-    uiStore.openModal('allSourcesSearch', { sources: props.message.sources });
-}
-
-function getSimilarityColor(score) {
-  if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600';
-  if (score >= 80) return 'bg-green-500';
-  if (score >= 50) return 'bg-yellow-500';
-  return 'bg-red-500';
-}
-
-function insertTextAtCursor(before, after = '', placeholder = '') {
-    const view = codeMirrorView.value; if (!view) return;
-    const { from, to } = view.state.selection.main;
-    const selectedText = view.state.doc.sliceString(from, to);
-    let textToInsert, selStart, selEnd;
-    if (selectedText) { textToInsert = `${before}${selectedText}${after}`; selStart = from + before.length; selEnd = selStart + selectedText.length; } 
-    else { textToInsert = `${before}${placeholder}${after}`; selStart = from + before.length; selEnd = selStart + placeholder.length; }
-    view.dispatch({ changes: { from: to, to: to, insert: textToInsert }, selection: { anchor: selStart, head: selEnd } });
-    view.focus();
-}
 </script>
 <template>
     <div v-if="isSystem" class="w-full flex justify-center my-2" :data-message-id="message.id">
@@ -480,8 +489,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
         <div class="message-content-container">
             <!-- Avatar -->
             <div class="flex-shrink-0 pt-1">
-                <UserAvatar v-if="isCurrentUser" :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
-                <UserAvatar v-else-if="isAi || isOtherUser" :icon="isAi ? senderPersonalityIcon : otherUserIcon" :username="senderName" size-class="h-8 w-8" />
+                <UserAvatar :icon="isCurrentUser ? user.icon : (isAi ? senderPersonalityIcon : otherUserIcon)" :username="senderName" size-class="h-8 w-8" />
             </div>
 
             <!-- Main Content -->
@@ -506,32 +514,98 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                 <!-- Content Wrapper -->
                 <div class="message-content-wrapper">
                     <div v-if="!isEditing">
-                        <div v-if="imagesToRender.length > 0" class="my-2 grid gap-2" :class="[imagesToRender.length > 1 ? 'grid-cols-2 md:grid-cols-3' : 'grid-cols-1']">
-                            <div v-for="(imgSrc, index) in imagesToRender" 
-                                 :key="imgSrc"
-                                 @click.stop="openImageViewer(index)"
-                                 class="group/image relative rounded-lg overflow-hidden bg-gray-200 dark:bg-gray-800 cursor-pointer">
-                                <AuthenticatedImage :src="imgSrc" class="w-full h-auto max-h-80 object-contain transition-all duration-300" :class="{'grayscale': !isImageActive(index)}" />
-                                <div class="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover/image:opacity-100 transition-opacity duration-200">
-                                    <button v-if="currentModelVisionSupport" @click.stop="toggleImage(index)" class="p-1.5 bg-black/60 text-white rounded-full hover:bg-black/80" :title="isImageActive(index) ? 'Deactivate Image' : 'Activate Image'">
-                                        <IconEye v-if="isImageActive(index)" class="w-4 h-4" />
-                                        <IconEyeOff v-else class="w-4 h-4" />
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                        <!-- Text Content -->
                         <MessageContentRenderer
                             :content="message.content"
                             :is-streaming="message.isStreaming"
                             :is-user="isCurrentUser"
-                            :has-images="imagesToRender.length > 0"
+                            :has-images="allImages.length > 0"
                             :last-user-image="lastUserImage"
                             :message-id="message.id"
                         />
-                        <div v-if="message.isStreaming && !message.content && (!imagesToRender || imagesToRender.length === 0)" class="typing-indicator">
+
+                        <!-- Centralized Image Zone with Gallery Underneath -->
+                        <!-- MOVED BELOW TEXT CONTENT -->
+                        <div v-if="imageGroups.length > 0" class="my-4 space-y-6">
+                            
+                            <!-- Iterate over Groups -->
+                            <div v-for="group in imageGroups" :key="group.id" class="image-group-container">
+                                <!-- Group Header (for generated series or uploaded packs) -->
+                                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 flex justify-between">
+                                    <span class="truncate" :title="group.title">{{ group.title }}</span>
+                                    <span class="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 rounded">{{ group.images.length }} version(s)</span>
+                                </div>
+
+                                <!-- Main Image Display for this Group -->
+                                <div v-if="group.images.length > 0" class="main-image-viewport relative aspect-video sm:aspect-square max-h-[500px] w-full rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 dark:border-gray-700 shadow-lg group/viewport transition-all duration-300"
+                                     :class="{'grayscale opacity-50': !isImageActive(selectedViewIndices[group.id] ?? group.indices[0])}">
+                                    
+                                    <!-- Spinner Overlay for Regenerating -->
+                                    <div v-if="isRegenerating(group.id)" class="absolute inset-0 z-20 bg-white/60 dark:bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
+                                        <IconAnimateSpin class="w-10 h-10 text-blue-500 animate-spin mb-2" />
+                                        <span class="text-sm font-bold text-gray-800 dark:text-gray-200">Generating variation...</span>
+                                    </div>
+
+                                    <AuthenticatedImage 
+                                        :src="allImages[selectedViewIndices[group.id] ?? group.indices[0]]" 
+                                        class="w-full h-full object-contain"
+                                    />
+
+                                    <!-- Viewport Controls Overlay -->
+                                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/viewport:opacity-100 transition-opacity flex items-center justify-center gap-3 z-10">
+                                        <button @click.stop="openImageViewer(selectedViewIndices[group.id] ?? group.indices[0])" class="p-3 bg-white/20 hover:bg-white/40 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90" title="Full Screen">
+                                            <IconMaximize class="w-6 h-6" />
+                                        </button>
+                                        
+                                        <!-- Visibility Toggle -->
+                                        <button @click.stop="toggleImage(selectedViewIndices[group.id] ?? group.indices[0])" class="p-3 bg-white/20 hover:bg-white/40 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90" :title="isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'Deactivate (Hide from LLM)' : 'Activate (Show to LLM)'">
+                                            <IconEye v-if="isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="w-6 h-6" />
+                                            <IconEyeOff v-else class="w-6 h-6" />
+                                        </button>
+
+                                        <!-- Regenerate (Only for generated) -->
+                                        <button v-if="group.type === 'generated' && canRegenerateImage(selectedViewIndices[group.id] ?? group.indices[0])" 
+                                                @click.stop="handleRegenerateImage(selectedViewIndices[group.id] ?? group.indices[0])" 
+                                                class="p-3 bg-white/20 hover:bg-green-500/80 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90" 
+                                                title="Regenerate another iteration">
+                                            <IconRefresh class="w-6 h-6" />
+                                        </button>
+                                    </div>
+
+                                    <!-- Visibility Status Badge -->
+                                    <div v-if="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="absolute top-4 left-4 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-full text-white text-[10px] font-black uppercase tracking-widest border border-white/20 flex items-center gap-2 pointer-events-none z-10">
+                                         <IconEyeOff class="w-3.5 h-3.5" />
+                                         <span>Hidden from context</span>
+                                    </div>
+                                </div>
+
+                                <!-- Gallery Thumbnails -->
+                                <div v-if="group.images.length > 1" class="gallery-thumb-row flex items-center gap-2 overflow-x-auto pb-2 pt-2 custom-scrollbar">
+                                    <div v-for="(imgSrc, idx) in group.images" 
+                                         :key="`${group.id}-thumb-${idx}`"
+                                         class="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl overflow-hidden border-2 transition-all duration-200 cursor-pointer shadow-sm"
+                                         :class="(selectedViewIndices[group.id] ?? group.indices[0]) === group.indices[idx] ? 'border-blue-500 scale-105 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'"
+                                         @click.stop="selectView(group.id, group.indices[idx])"
+                                    >
+                                        <AuthenticatedImage :src="allImages[group.indices[idx]]" class="w-full h-full object-cover" />
+                                        
+                                        <!-- Mini Status Indicators -->
+                                        <div v-if="!isImageActive(group.indices[idx])" class="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                            <IconEyeOff class="w-4 h-4 text-white opacity-80" />
+                                        </div>
+                                        <div v-else-if="isImageActive(group.indices[idx])" class="absolute top-0.5 right-0.5 bg-green-500 text-white rounded-full p-0.5 shadow-sm">
+                                            <IconCheckCircle class="w-3 h-3" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div v-if="message.isStreaming && !message.content && (!allImages || allImages.length === 0)" class="typing-indicator">
                             <span class="dot"></span><span class="dot"></span><span class="dot"></span>
                         </div>
                     </div>
+                    <!-- Editing Mode -->
                     <div v-else class="w-full">
                         <input type="file" ref="editImageInput" @change="handleEditImageSelected" multiple accept="image/*" class="hidden">
                         <div v-if="editedImages.length > 0" class="mb-2 p-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md">
@@ -562,7 +636,7 @@ function insertTextAtCursor(before, after = '', placeholder = '') {
                     </div>
                 </div>
 
-                 <!-- NEW: TTS Player -->
+                 <!-- TTS Player -->
                  <div v-if="isAi && isTtsActive && (messageTtsState.audioUrl || messageTtsState.isLoading)" class="mt-3">
                     <div v-if="messageTtsState.isLoading" class="flex items-center gap-2 text-sm text-gray-500">
                         <IconAnimateSpin class="w-4 h-4 animate-spin" />

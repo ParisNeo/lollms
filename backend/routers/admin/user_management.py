@@ -376,17 +376,34 @@ async def email_users(payload: EmailUsersRequest, current_admin: UserAuthDetails
 async def enhance_email_with_ai(payload: EnhanceEmailRequest, current_admin: UserAuthDetails = Depends(get_current_admin_user)):
     try:
         lc = get_user_lollms_client(current_admin.username)
-        prompt = f"""{payload.prompt.strip() if payload.prompt else 'You are an expert copywriter and designer. Enhance the following email draft to be more engaging and professional. Also, suggest a suitable HTML background color.'}
-Return ONLY a single valid JSON object with keys: "subject", "body", "background_color".
-
-Original Subject: {payload.subject}
+        
+        schema = {
+            "type": "object",
+            "properties": {
+                "subject": {"type": "string", "description": "The enhanced subject line."},
+                "body": {"type": "string", "description": "The enhanced email body content (HTML allowed)."},
+                "background_color": {"type": "string", "description": "Suggested hex code for background color (e.g. #FFFFFF)."}
+            },
+            "required": ["subject", "body"]
+        }
+        
+        system_prompt = "You are an expert copywriter and designer. Enhance the email draft to be more engaging and professional."
+        
+        prompt = f"""Original Subject: {payload.subject}
 Original Body: {payload.body}
 Current Background: {payload.background_color or "#FFFFFF"}
+
+Instruction: {payload.prompt.strip() if payload.prompt else 'Enhance this email.'}
 """
-        raw_response = lc.generate_text(prompt, stream=False)
-        json_match = raw_response[raw_response.find('{'):raw_response.rfind('}') + 1]
-        enhanced_data = json.loads(json_match)
+
+        # Use structured content generation which handles JSON parsing robustly
+        enhanced_data = lc.generate_structured_content(prompt, system_prompt=system_prompt, schema=schema)
+        
+        if not enhanced_data or not isinstance(enhanced_data, dict):
+             raise ValueError("AI failed to generate valid structured data.")
+
         return EnhancedEmailResponse(**enhanced_data)
+        
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"AI enhancement failed: {e}")

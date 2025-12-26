@@ -39,9 +39,34 @@ export function useDiscussionGeneration(state, stores, getActions) {
             return;
         }
 
+        // --- NEW: Handle Image Uploads ---
+        let uploadedPaths = [];
+        if (payload.image_files && payload.image_files.length > 0) {
+            try {
+                const uploadFormData = new FormData();
+                payload.image_files.forEach(file => {
+                    uploadFormData.append('files', file);
+                });
+                
+                // Upload to temp staging
+                const uploadRes = await apiClient.post('/api/upload/chat_image', uploadFormData, {
+                     headers: { 'Content-Type': 'multipart/form-data' }
+                });
+                
+                // Response is list of {filename, server_path}
+                uploadedPaths = uploadRes.data.map(f => f.server_path);
+                
+            } catch (err) {
+                console.error("Failed to upload chat images:", err);
+                uiStore.addNotification('Failed to upload images. Sending text only.', 'error');
+            }
+        }
+        
+        // Combine with any existing server paths (e.g. from a draft or previous context if applicable)
+        let imagesToSend = (payload.image_server_paths || []).concat(uploadedPaths);
+
         // Vision Support Enforcement:
         // Filter out images if the current model doesn't support them.
-        let imagesToSend = payload.image_server_paths || [];
         if (!currentModelVisionSupport.value && imagesToSend.length > 0) {
             uiStore.addNotification('Active model does not support images. Sending text only.', 'warning');
             imagesToSend = [];
@@ -75,8 +100,15 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
         const formData = new FormData();
         formData.append('prompt', payload.prompt);
+        // Pass the array of server-side filenames to the chat endpoint
         formData.append('image_server_paths_json', JSON.stringify(imagesToSend));
+        
         if (payload.is_resend) formData.append('is_resend', 'true');
+        
+        // For regeneration (resend), we need to ensure the backend branches from the correct message.
+        if (lastMessage) {
+            formData.append('parent_message_id', lastMessage.id);
+        }
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
 

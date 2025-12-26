@@ -281,12 +281,17 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             image_generation_enabled=db_user.image_generation_enabled,
             image_generation_system_prompt=db_user.image_generation_system_prompt,
             image_annotation_enabled=db_user.image_annotation_enabled,
+            activate_generated_images=db_user.activate_generated_images,
             note_generation_enabled=db_user.note_generation_enabled,
             memory_enabled=db_user.memory_enabled,
             auto_memory_enabled=db_user.auto_memory_enabled,
             preferred_name=db_user.preferred_name,
             user_personal_info=db_user.user_personal_info,
-            share_personal_info_with_llm=db_user.share_personal_info_with_llm
+            share_personal_info_with_llm=db_user.share_personal_info_with_llm,
+            max_image_width=db_user.max_image_width,
+            max_image_height=db_user.max_image_height,
+            compress_images=db_user.compress_images,
+            image_compression_quality=db_user.image_compression_quality
         )
     finally:
         if db_was_created:
@@ -853,3 +858,4 @@ def get_user_notebook_assets_path(username: str, notebook_id: str) -> Path:
     path = get_user_data_root(username) / NOTEBOOK_ASSETS_DIR_NAME / secure_filename(notebook_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
+

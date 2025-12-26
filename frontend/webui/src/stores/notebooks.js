@@ -152,6 +152,32 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
+    // --- New Actions for List Integration ---
+    async function createNotebook(title = 'New Research') {
+        try {
+            const res = await apiClient.post('/api/notebooks', { title, content: '' });
+            await fetchNotebooks();
+            return res.data;
+        } catch (e) {
+            uiStore.addNotification("Failed to create notebook.", "error");
+            throw e;
+        }
+    }
+
+    async function deleteNotebook(id) {
+        try {
+            await apiClient.delete(`/api/notebooks/${id}`);
+            notebooks.value = notebooks.value.filter(n => n.id !== id);
+            if (activeNotebook.value && activeNotebook.value.id === id) {
+                activeNotebook.value = null;
+            }
+            uiStore.addNotification("Notebook deleted.", "success");
+        } catch (e) {
+            uiStore.addNotification("Failed to delete notebook.", "error");
+            throw e;
+        }
+    }
+
     function $reset() {
         notebooks.value = [];
         activeNotebook.value = null;
@@ -161,6 +187,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
         notebooks, activeNotebook, isLoading, 
         fetchNotebooks, selectNotebook, saveActive, uploadSource, createTextArtefact, scrapeUrl, processWithAi, generateTitle,
         addTab, removeTab,
+        createNotebook, deleteNotebook, // Exported new actions
         $reset 
     };
 });

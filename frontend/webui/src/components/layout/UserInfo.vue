@@ -14,7 +14,8 @@ import IconTicket from '../../assets/icons/IconTicket.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconSignOut from '../../assets/icons/IconSignOut.vue';
-import IconChevronUp from '../../assets/icons/IconChevronUp.vue';
+import IconChevronDown from '../../assets/icons/IconChevronDown.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
@@ -27,81 +28,16 @@ const dataStore = useDataStore();
 
 const isMenuOpen = ref(false);
 const activeSubMenu = ref(null); // null, 'apps', 'studios'
-const menuStyle = ref({});
 const triggerRef = ref(null);
-const menuDivRef = ref(null);
 
 const user = computed(() => authStore.user);
 const isAdmin = computed(() => authStore.isAdmin);
-const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 const runningApps = computed(() => {
     const allServices = [...dataStore.userApps, ...dataStore.systemApps];
     return allServices.filter(app => app.active && app.url && (!app.is_installed || app.status === 'running'));
-});
-
-function calculateMenuPosition() {
-    if (!triggerRef.value || !menuDivRef.value) return;
-
-    const rect = triggerRef.value.getBoundingClientRect();
-    const margin = 8;
-    const viewportHeight = window.innerHeight;
-    const viewportWidth = window.innerWidth;
-
-    const naturalMenuHeight = menuDivRef.value.offsetHeight;
-    const naturalMenuWidth = menuDivRef.value.offsetWidth;
-
-    let newTop = 'auto';
-    let newBottom = 'auto';
-    let newLeft = 'auto';
-    let newRight = 'auto';
-
-    if (isSidebarOpen.value) {
-        newLeft = `${rect.left}px`;
-        const spaceBelow = viewportHeight - rect.bottom;
-        const spaceAbove = rect.top;
-
-        if (spaceBelow >= naturalMenuHeight + margin || spaceBelow > spaceAbove) {
-            newTop = `${rect.bottom + margin}px`;
-        } else {
-            newBottom = `${viewportHeight - rect.top + margin}px`;
-        }
-    } else {
-        newLeft = `${rect.right + margin}px`;
-        const desiredTop = rect.top + (rect.height / 2) - (naturalMenuHeight / 2);
-        newTop = `${Math.max(margin, Math.min(desiredTop, viewportHeight - naturalMenuHeight - margin))}px`;
-        
-        if (newLeft !== 'auto' && parseFloat(newLeft) + naturalMenuWidth > viewportWidth - margin) {
-            newLeft = `${rect.left - naturalMenuWidth - margin}px`;
-        }
-    }
-    
-    if (newLeft !== 'auto' && parseFloat(newLeft) < margin) {
-        newLeft = `${margin}px`;
-    }
-
-    menuStyle.value = {
-        top: newTop,
-        bottom: newBottom,
-        left: newLeft,
-        right: newRight,
-        width: isSidebarOpen.value ? `${rect.width}px` : '240px',
-        maxHeight: `${viewportHeight - 2 * margin}px`,
-    };
-}
-
-watch(isMenuOpen, (isOpen) => {
-    if (isOpen) {
-        dataStore.fetchApps();
-        nextTick(() => {
-            setTimeout(calculateMenuPosition, 50);
-            window.addEventListener('resize', calculateMenuPosition, { passive: true });
-        });
-    } else {
-        window.removeEventListener('resize', calculateMenuPosition);
-    }
 });
 
 function toggleMenu() {
@@ -122,10 +58,9 @@ function handleLogout() {
 }
 
 const vOnClickOutside = {
-  beforeMount: (el, binding) => {
+  mounted: (el, binding) => {
     el.clickOutsideEvent = event => {
-      const triggerEl = triggerRef.value;
-      if (!(el === event.target || el.contains(event.target) || triggerEl?.contains(event.target))) {
+      if (!(el === event.target || el.contains(event.target) || triggerRef.value?.contains(event.target))) {
         binding.value();
       }
     };
@@ -138,42 +73,44 @@ const vOnClickOutside = {
 </script>
 
 <template>
-  <div class="relative w-full" v-if="user">
+  <div class="relative" v-if="user">
+    <!-- Compact Header Trigger -->
     <button 
       ref="triggerRef"
       @click="toggleMenu"
-      class="w-full flex items-center justify-center rounded-lg p-2 text-gray-800 transition-colors hover:bg-gray-200 focus:outline-none dark:text-gray-100 dark:hover:bg-gray-700"
+      class="flex items-center gap-2 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-600 shadow-sm"
+      :class="{'ring-2 ring-blue-500/20 bg-blue-50 dark:bg-blue-900/20': isMenuOpen}"
     >
-      <div class="flex items-center" :class="{ 'w-full justify-between': isSidebarOpen }">
-        <div class="flex min-w-0 items-center">
-          <UserAvatar :icon="user.icon" :username="user.username" size-class="w-8 h-8" class="mr-3 flex-shrink-0" />
-          
-          <div v-if="isSidebarOpen" class="flex min-w-0 flex-col items-start">
-            <span class="truncate text-sm font-bold">{{ user.username }}</span>
-            <span v-if="isAdmin" class="text-[10px] uppercase font-black text-red-500 dark:text-red-400 tracking-tighter">Administrator</span>
-          </div>
-        </div>
-        <IconChevronUp v-if="isSidebarOpen" class="ml-2 h-4 w-4 transform transition-transform" :class="{'rotate-180': isMenuOpen}" />
-      </div>
+      <UserAvatar :icon="user.icon" :username="user.username" size-class="h-8 w-8" />
+      <IconChevronDown v-if="!isMenuOpen" class="w-3.5 h-3.5 text-gray-400 mr-1" />
+      <IconXMark v-else class="w-3.5 h-3.5 text-gray-500 mr-1" />
     </button>
 
     <Teleport to="body">
         <Transition
-            enter-active-class="transition-opacity ease-out duration-200"
-            enter-from-class="opacity-0"
-            enter-to-class="opacity-100"
-            leave-active-class="transition-opacity ease-in duration-150"
-            leave-from-class="opacity-100"
-            leave-to-class="opacity-0"
+            enter-active-class="transition ease-out duration-100"
+            enter-from-class="transform opacity-0 scale-95"
+            enter-to-class="transform opacity-100 scale-100"
+            leave-active-class="transition ease-in duration-75"
+            leave-from-class="transform opacity-100 scale-100"
+            leave-to-class="transform opacity-0 scale-95"
         >
             <div 
                 v-if="isMenuOpen"
-                :style="menuStyle"
                 v-on-click-outside="closeMenu"
-                class="fixed z-[60] rounded-xl border bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
-                ref="menuDivRef"
+                class="fixed z-[60] top-14 right-4 w-64 rounded-xl border border-gray-200 bg-white shadow-2xl dark:border-gray-700 dark:bg-gray-800 overflow-hidden"
             >
-                <div class="relative overflow-hidden min-h-[320px]">
+                <div class="relative overflow-hidden min-h-[350px] flex flex-col">
+                    <!-- User Header in Menu -->
+                    <div class="p-4 border-b dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 flex items-center gap-3">
+                         <UserAvatar :icon="user.icon" :username="user.username" size-class="h-10 w-10" />
+                         <div class="min-w-0">
+                            <p class="font-black text-sm text-gray-900 dark:text-white truncate">{{ user.username }}</p>
+                            <p v-if="isAdmin" class="text-[9px] font-black uppercase text-red-500 tracking-widest">Administrator</p>
+                            <p v-else class="text-[9px] font-black uppercase text-blue-500 tracking-widest">Explorer</p>
+                         </div>
+                    </div>
+
                     <!-- MAIN MENU -->
                     <transition
                         enter-active-class="transition ease-out duration-200"
@@ -185,7 +122,7 @@ const vOnClickOutside = {
                     >
                         <div v-if="!activeSubMenu" class="w-full py-2 flex flex-col h-full">
                             <router-link to="/profile/me" @click="closeMenu" class="menu-item flex items-center gap-3">
-                                <UserAvatar :icon="user.icon" :username="user.username" size-class="h-5 w-5" />
+                                <IconUserCircle class="h-5 w-5 text-gray-400" />
                                 <span>My Profile</span>
                             </router-link>
                             <router-link to="/friends" @click="closeMenu" class="menu-item flex items-center gap-3">
@@ -301,7 +238,7 @@ const vOnClickOutside = {
                                 <span>Back</span>
                             </button>
                             <div class="px-4 py-2 text-[10px] font-black uppercase text-gray-400 tracking-widest border-b dark:border-gray-700 mb-1">Active Services</div>
-                            <div class="overflow-y-auto max-h-[200px]">
+                            <div class="overflow-y-auto max-h-[300px]">
                                 <a v-for="app in runningApps" :key="app.id" :href="app.url" target="_blank" rel="noopener noreferrer" class="menu-item flex items-center gap-3">
                                     <UserAvatar :icon="app.icon" :username="app.name" size-class="h-5 w-5" />
                                     <span class="truncate">{{ app.name }}</span>

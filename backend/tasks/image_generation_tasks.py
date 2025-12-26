@@ -87,6 +87,16 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
             images=[b64_image],
             parent_id=parent_message_id
         )
+        
+        # [FIX] Add generation metadata to allow regeneration
+        gen_info = [{
+            'index': 0,
+            'prompt': prompt,
+            'width': width,
+            'height': height
+        }]
+        new_message.set_metadata_item("generated_image_infos", gen_info, discussion)
+        
         discussion.commit()
         
         serialized_message = {

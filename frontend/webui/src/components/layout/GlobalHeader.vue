@@ -12,6 +12,10 @@ import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 import TasksManagerButton from './TasksManagerButton.vue';
 import NotificationBell from '../ui/NotificationBell.vue';
 import ThemeToggle from '../ui/ThemeToggle.vue';
+import UserInfo from './UserInfo.vue';
+import logoDefault from '../../assets/logo.png';
+
+// Icons
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
@@ -24,6 +28,8 @@ import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue'; 
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconChevronDown from '../../assets/icons/IconChevronDown.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -41,6 +47,14 @@ const pageTitleIcon = computed(() => uiStore.pageTitleIcon);
 const mainView = computed(() => uiStore.mainView);
 const unreadDmCount = computed(() => socialStore.totalUnreadDms);
 
+const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
+
+const showMainSidebarToggle = computed(() => {
+    if (!authStore.isAuthenticated) return false;
+    const noSidebarPaths = ['/settings', '/admin', '/datastores', '/friends', '/help', '/profile', '/messages', '/voices-studio', '/image-studio', '/image-studio/edit'];
+    return !noSidebarPaths.some(path => route.path.startsWith(path));
+});
+
 const showDataZoneButton = computed(() => {
     return route.name === 'Home' && mainView.value === 'chat';
 });
@@ -53,7 +67,7 @@ const isSubmenuActive = ref(false);
 let closeTimer = null;
 
 const { floatingStyles } = useFloating(menuTriggerRef, menuFloatingRef, {
-  placement: 'bottom',
+  placement: 'bottom-start',
   whileElementsMounted: autoUpdate,
   middleware: [offset(5), flip(), shift({ padding: 5 })],
 });
@@ -122,12 +136,9 @@ const filteredAvailableTtsModels = computed(() => ttsModelSearchTerm.value ? for
 const filteredAvailableSttModels = computed(() => sttModelSearchTerm.value ? formattedAvailableSttModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(sttModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableSttModels.value);
 const filteredAvailablePersonalities = computed(() => personalitySearchTerm.value ? availablePersonalities.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(personalitySearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : availablePersonalities.value);
 
-
-function openModelCard(model) { uiStore.openModal('modelCard', { model }); }
 function selectModel(id) { activeModelName.value = id; }
 function selectPersonality(id) { activePersonalityId.value = id; }
 function selectTtiModel(id) { activeTtiModelName.value = id; }
-function selectItiModel(id) { activeItiModelName.value = id; }
 function selectTtsModel(id) { activeTtsModelName.value = id; }
 function selectSttModel(id) { activeSttModelName.value = id; }
 
@@ -140,59 +151,49 @@ async function handleRefreshModels() {
         isRefreshingModels.value = false;
     }
 }
-
-function handleEditPersonality(personality, event) {
-    event.stopPropagation();
-    isMenuOpen.value = false;
-    router.push({ path: '/settings', query: { section: 'personalities' } });
-    nextTick(() => { uiStore.openModal('personalityEditor', { personality: personality, isSystemPersonality: false }); });
-}
-
 </script>
 
 <template>
-  <header class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-2 sm:p-3 flex items-center justify-between shadow-sm z-10">
-    <!-- Left Section: Logo/Title/Model Selector -->
-    <div v-if="route.name === 'Home' && user && user.user_ui_level >= 2" class="hidden md:flex items-center gap-2 flex-1 min-w-0 justify-center px-4">
-         <div class="relative">
-            <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" class="toolbox-select flex items-center gap-2 max-w-sm !p-1">
-                 <div class="flex items-center flex-shrink-0">
-                      <!-- LLM Icon -->
-                      <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md">
-                          <img v-if="selectedModel?.alias?.icon" :src="selectedModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                          <IconCpuChip v-else class="w-4 h-4" />
-                      </div>
-                      <!-- TTI Icon -->
-                      <div v-if="!user.tti_model_forced" class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                           <img v-if="selectedTtiModel?.alias?.icon" :src="selectedTtiModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                           <IconPhoto v-else class="w-4 h-4" />
-                      </div>
-                      <!-- ITI Icon -->
-                      <div v-if="!user.iti_model_forced" class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                           <img v-if="selectedItiModel?.alias?.icon" :src="selectedItiModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                           <IconPencil v-else class="w-4 h-4" />
-                      </div>
-                       <!-- TTS Icon -->
-                      <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                           <img v-if="selectedTtsModel?.alias?.icon" :src="selectedTtsModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                           <IconMicrophone v-else class="w-4 h-4" />
-                      </div>
-                      <!-- STT Icon -->
-                      <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-10 border-2 border-white dark:border-gray-800">
-                           <img v-if="selectedSttModel?.alias?.icon" :src="selectedSttModel.alias.icon" class="h-full w-full rounded-md object-cover"/>
-                           <IconMicrophone v-else class="w-4 h-4" />
-                      </div>
-                       <!-- Personality Icon -->
-                        <div class="w-7 h-7 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md -ml-3 z-20 border-2 border-white dark:border-gray-800">
-                            <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="h-full w-full rounded-md object-cover"/>
-                            <IconUserCircle v-else class="w-4 h-4" />
-                        </div>
-                 </div>
-                 <div class="min-w-0 text-left flex-grow">
-                      <span class="block font-semibold truncate text-xs" :title="selectedModel?.name || 'Select Model'">{{ selectedModel?.name || 'Select Model' }}</span>
-                      <span class="block text-xs text-gray-500/80 truncate" :title="selectedPersonality?.name || 'Select Personality'">{{ selectedPersonality?.name || 'Select Personality' }}</span>
-                 </div>
-                 <svg class="w-4 h-4 text-gray-400 flex-shrink-0 ml-auto" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+  <header class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 h-14 flex items-center justify-between px-3 sm:px-4 z-[50] relative shadow-sm">
+    
+    <!-- Left: Logo & Sidebar Toggle & Model Selector -->
+    <div class="flex items-center gap-2 sm:gap-4 min-w-0">
+        <!-- Logo / Home Link -->
+        <router-link to="/" class="flex items-center gap-2 flex-shrink-0 group">
+             <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
+             <span class="hidden md:inline font-black text-lg tracking-tighter text-blue-600 dark:text-blue-400">LoLLMs</span>
+        </router-link>
+
+        <!-- Sidebar Toggle -->
+        <button v-if="showMainSidebarToggle" @click="uiStore.toggleSidebar" 
+                class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Toggle Sidebar">
+            <IconMenu class="w-5 h-5" />
+        </button>
+
+        <div class="h-6 w-px bg-gray-200 dark:border-gray-700 hidden sm:block"></div>
+
+        <!-- Compact Model Selector -->
+        <div class="relative" v-if="user && user.user_ui_level >= 2">
+            <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" 
+                class="flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group border border-transparent hover:border-gray-200 dark:hover:border-gray-600">
+                <!-- Personality Avatar -->
+                <div class="w-8 h-8 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 flex-shrink-0 border border-gray-300 dark:border-gray-600 shadow-sm relative">
+                     <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="w-full h-full object-cover" />
+                     <IconUserCircle v-else class="w-full h-full p-1 text-gray-500" />
+                     <!-- Tiny Model Icon Overlay -->
+                     <div class="absolute bottom-0 right-0 bg-white dark:bg-gray-800 rounded-full p-0.5 border border-gray-300 dark:border-gray-600">
+                         <IconCpuChip class="w-2.5 h-2.5 text-blue-500" />
+                     </div>
+                </div>
+                
+                <!-- Text Info -->
+                <div class="hidden lg:flex flex-col items-start text-xs leading-tight">
+                    <span class="font-bold text-gray-800 dark:text-gray-100 max-w-[140px] truncate" :title="selectedModel?.name || 'No Model'">{{ selectedModel?.name || 'Select Model' }}</span>
+                    <span class="text-gray-500 dark:text-gray-400 max-w-[140px] truncate text-[10px]" :title="selectedPersonality?.name">{{ selectedPersonality?.name || 'Default' }}</span>
+                </div>
+                
+                <IconChevronDown class="w-3 h-3 text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300 ml-1" />
             </button>
             
              <Teleport to="body">
@@ -209,214 +210,115 @@ function handleEditPersonality(personality, event) {
                         ref="menuFloatingRef" 
                         :style="floatingStyles" 
                         v-on-click-outside="() => { isMenuOpen = false; isSubmenuActive = false; }"
-                        class="z-50 w-64 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1 flex flex-col max-h-[80vh]"
+                        class="z-[60] w-72 origin-top-left rounded-lg bg-white dark:bg-gray-800 shadow-xl ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1 flex flex-col max-h-[85vh] border dark:border-gray-700"
                     >
-                         <!-- Global Refresh Action -->
-                         <button @click="handleRefreshModels" class="menu-item flex items-center gap-3 border-b dark:border-gray-700 mb-1" :disabled="isRefreshingModels">
+                         <button @click="handleRefreshModels" class="menu-item flex items-center gap-3 border-b dark:border-gray-700 mb-1 py-3 px-4 hover:bg-gray-50 dark:hover:bg-gray-700" :disabled="isRefreshingModels">
                             <IconRefresh class="h-4 w-4 text-blue-500" :class="{'animate-spin': isRefreshingModels}" />
-                            <span class="font-bold text-xs uppercase tracking-wider">Refresh All Models</span>
+                            <span class="font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300">Refresh Models</span>
                          </button>
 
                          <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.alias?.icon">
-                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full">
-                            </div>
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full"></div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
-                                 <button @click="selectModel(null)" class="menu-item-button" :class="{'selected': !activeModelName}">
-                                    <div class="flex items-center space-x-3 truncate">
-                                        <IconCpuChip class="w-6 h-6 p-0.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
-                                    </div>
-                                </button>
-                                <div v-if="filteredAvailableModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
+                                <button @click="selectModel(null)" class="menu-item-button" :class="{'selected': !activeModelName}"><span class="truncate">None</span></button>
                                 <div v-for="group in filteredAvailableModels" :key="group.label">
-                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                    <button v-for="item in group.items" :key="item.id" @click="selectModel(item.id)" class="menu-item-button group/item" :class="{'selected': activeModelName === item.id}">
-                                         <div class="flex items-center space-x-3 truncate flex-1 min-w-0">
-                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                            <IconCpuChip v-else class="w-6 h-6 p-0.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                            <div class="truncate text-left flex-1 min-w-0">
-                                                <p class="font-medium truncate text-sm">{{ item.name }}</p>
-                                            </div>
-                                        </div>
-                                        <div class="flex items-center gap-1 pl-2 flex-shrink-0">
-                                            <IconEye v-if="item.alias?.has_vision" class="w-4 h-4 text-blue-500" title="Vision Supported" />
-                                            <div class="opacity-0 group-hover/item:opacity-100 focus-within:opacity-100 transition-opacity w-6 h-6 flex items-center justify-center">
-                                                <div @click.stop="openModelCard(item)" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-full cursor-pointer" title="Model Information">
-                                                    <IconInfo class="w-4 h-4 text-gray-500 dark:text-gray-400" />
-                                                </div>
-                                            </div>
-                                        </div>
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
+                                    <button v-for="item in group.items" :key="item.id" @click="selectModel(item.id)" class="menu-item-button" :class="{'selected': activeModelName === item.id}">
+                                        <div class="flex items-center gap-2 truncate"><span class="truncate">{{ item.name }}</span><IconEye v-if="item.alias?.has_vision" class="w-3.5 h-3.5 text-green-500" /></div>
                                     </button>
                                 </div>
                             </div>
                          </DropdownSubmenu>
-                         <DropdownSubmenu v-if="!user.tti_model_forced" title="Text-to-Image" icon="photo" :icon-src="selectedTtiModel?.alias?.icon">
-                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI models..." class="input-field-sm w-full">
-                            </div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
-                                <button @click="selectTtiModel(null)" class="menu-item-button" :class="{'selected': !activeTtiModelName}">
-                                    <div class="flex items-center space-x-3 truncate">
-                                        <IconPhoto class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
-                                    </div>
-                                </button>
-                                <div v-if="filteredAvailableTtiModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                <div v-for="group in filteredAvailableTtiModels" :key="group.label">
-                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                     <button v-for="item in group.items" :key="item.id" @click="selectTtiModel(item.id)" class="menu-item-button" :class="{'selected': activeTtiModelName === item.id}">
-                                         <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                            <IconPhoto v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-                         </DropdownSubmenu>
-                         <DropdownSubmenu v-if="!user.iti_model_forced" title="Image Editing" icon="pencil" :icon-src="selectedItiModel?.alias?.icon">
-                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
-                                <button @click="selectItiModel(null)" class="menu-item-button" :class="{'selected': !activeItiModelName}">
-                                    <div class="flex items-center space-x-3 truncate">
-                                        <IconPencil class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
-                                    </div>
-                                </button>
-                                <div v-if="filteredAvailableTtiModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                <div v-for="group in filteredAvailableTtiModels" :key="group.label">
-                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                    <button v-for="item in group.items" :key="item.id" @click="selectItiModel(item.id)" class="menu-item-button" :class="{'selected': activeItiModelName === item.id}">
-                                        <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                            <IconPencil v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
-                                        </div>
-                                    </button>
-                                </div>
-                             </div>
-                         </DropdownSubmenu>
-
-                         <DropdownSubmenu title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.alias?.icon">
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full">
-                            </div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
-                                <button @click="selectTtsModel(null)" class="menu-item-button" :class="{'selected': !activeTtsModelName}">
-                                    <div class="flex items-center space-x-3 truncate">
-                                        <IconMicrophone class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
-                                    </div>
-                                </button>
-                                <div v-if="filteredAvailableTtsModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                <div v-for="group in filteredAvailableTtsModels" :key="group.label">
-                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                    <button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}">
-                                        <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                            <IconMicrophone v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-                        </DropdownSubmenu>
-
-                        <DropdownSubmenu title="Speech-to-Text" icon="microphone" :icon-src="selectedSttModel?.alias?.icon">
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search STT models..." class="input-field-sm w-full">
-                            </div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
-                                <button @click="selectSttModel(null)" class="menu-item-button" :class="{'selected': !activeSttModelName}">
-                                    <div class="flex items-center space-x-3 truncate">
-                                        <IconMicrophone class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
-                                    </div>
-                                </button>
-                                <div v-if="filteredAvailableSttModels.length > 0" class="my-1 border-t dark:border-gray-600"></div>
-                                <div v-for="group in filteredAvailableSttModels" :key="group.label">
-                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                    <button v-for="item in group.items" :key="item.id" @click="selectSttModel(item.id)" class="menu-item-button" :class="{'selected': activeSttModelName === item.id}">
-                                        <div class="flex items-center space-x-3 truncate">
-                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                            <IconMicrophone v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                            <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
-                                        </div>
-                                    </button>
-                                </div>
-                            </div>
-                        </DropdownSubmenu>
-
+                         
                          <DropdownSubmenu title="Personality" icon="user-circle" :icon-src="selectedPersonality?.icon_base64">
-                              <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search personalities..." class="input-field-sm w-full">
-                            </div>
+                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
-                                <button @click="selectPersonality(null)" class="menu-item-button" :class="{'selected': !activePersonalityId}">
-                                    <div class="flex items-center space-x-3 truncate">
-                                        <IconUserCircle class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                        <div class="truncate text-left"><p class="font-medium truncate text-sm">None</p></div>
-                                    </div>
-                                </button>
-                                <div v-if="filteredAvailablePersonalities.length > 0" class="my-1 border-t dark:border-gray-600"></div>
                                 <div v-for="group in filteredAvailablePersonalities" :key="group.label">
-                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
-                                     <div v-for="item in group.items" :key="item.id" class="relative group/personality">
+                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
+                                     <div v-for="item in group.items" :key="item.id" class="relative group/p">
                                         <button @click="selectPersonality(item.id)" class="menu-item-button w-full" :class="{'selected': activePersonalityId === item.id}">
-                                            <div class="flex items-center space-x-3 truncate">
-                                                <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                                <IconUserCircle v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-                                                <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
+                                            <div class="flex items-center gap-2 truncate">
+                                                <img v-if="item.icon_base64" :src="item.icon_base64" class="h-5 w-5 rounded object-cover" />
+                                                <IconUserCircle v-else class="h-5 w-5 text-gray-400" />
+                                                <span class="truncate">{{ item.name }}</span>
                                             </div>
-                                        </button>
-                                        <button v-if="group.label === 'Personal'" @click="handleEditPersonality(item, $event)" class="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-md bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-50 opacity-0 group-hover/personality:opacity-100 transition-opacity" title="Edit Personality">
-                                            <IconPencil class="w-4 h-4"/>
                                         </button>
                                     </div>
                                 </div>
                             </div>
+                         </DropdownSubmenu>
+
+                         <div class="border-t dark:border-gray-700 my-1"></div>
+                         <DropdownSubmenu v-if="!user.tti_model_forced" title="Image Generation" icon="photo" :icon-src="selectedTtiModel?.alias?.icon">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
+                            <div class="p-1 flex-grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtiModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtiModel(item.id)" class="menu-item-button" :class="{'selected': activeTtiModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
+                         </DropdownSubmenu>
+                         <DropdownSubmenu v-if="!user.tts_model_forced" title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.alias?.icon">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
+                            <div class="p-1 flex-grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtsModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
+                         </DropdownSubmenu>
+                         <DropdownSubmenu v-if="!user.stt_model_forced" title="Speech-to-Text" icon="microphone" :icon-src="selectedSttModel?.alias?.icon">
+                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
+                            <div class="p-1 flex-grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableSttModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectSttModel(item.id)" class="menu-item-button" :class="{'selected': activeSttModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
                          </DropdownSubmenu>
                      </div>
                 </Transition>
              </Teleport>
         </div>
     </div>
-    <div v-else class="flex-1 flex items-center justify-center min-w-0 px-4">
-        <div class="flex items-center gap-3">
-            <component v-if="pageTitleIcon" :is="pageTitleIcon" class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
-            <h2 class="text-xl font-semibold text-gray-900 dark:text-gray-100 truncate">{{ pageTitle }}</h2>
+
+    <!-- Center: Dynamic Title / Context Area (Portal) -->
+    <div class="flex-1 flex justify-center min-w-0 px-2 lg:px-6">
+        <!-- 1. Try to render portal content (Views can push custom controls here) -->
+        <div id="global-header-title-target" class="w-full flex justify-center items-center h-full pointer-events-auto"></div>
+        
+        <!-- 2. Fallback: Standard Page Title -->
+        <div v-if="pageTitle" class="absolute pointer-events-none flex items-center gap-2 text-gray-600 dark:text-gray-300 font-semibold truncate">
+            <component v-if="pageTitleIcon" :is="pageTitleIcon" class="w-5 h-5 opacity-70" />
+            <span>{{ pageTitle }}</span>
         </div>
     </div>
 
-    <!-- Right Side: Action Buttons -->
-    <div class="flex items-center space-x-1 sm:space-x-2">
-      <div 
-        class="w-3 h-3 rounded-full transition-colors flex-shrink-0"
-        :class="wsConnected ? 'bg-green-50 animate-pulse' : 'bg-red-500'"
-        :title="wsConnected ? 'WebSocket Connected' : 'WebSocket Disconnected. Attempting to reconnect...'"
-      ></div>
-      <ThemeToggle />
-      <NotificationBell v-if="user && user.user_ui_level >= 2" />
-      <!-- NEW: Chat Sidebar Toggle Button -->
-      <button v-if="user && user.chat_active" @click="uiStore.toggleChatSidebar()" class="btn-icon relative" title="Toggle Messages">
-          <IconMessage class="w-5 h-5" />
-          <span v-if="unreadDmCount > 0" class="absolute -top-1 -right-1 flex items-center justify-center w-4 h-4 text-xs font-bold text-white bg-red-600 rounded-full border-2 border-white dark:border-gray-800">
-              {{ unreadDmCount }}
-          </span>
-      </button>
+    <!-- Right: Actions, System Tools & User Profile -->
+    <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+        <!-- Portal Target for View-Specific Actions -->
+        <div id="global-header-actions-target" class="flex items-center gap-1 mr-1 sm:mr-3"></div>
+        
+        <div class="h-6 w-px bg-gray-200 dark:border-gray-700 mx-1 hidden sm:block"></div>
 
-      <TasksManagerButton />      
-      <!-- Slot for view-specific actions -->
-      <div id="global-header-actions-target" class="flex items-center gap-2"></div>
-      <button v-if="showDataZoneButton" @click="uiStore.toggleDataZone()" class="btn-icon" :class="{'bg-gray-200 dark:bg-gray-700': isDataZoneVisible}" title="Toggle Data Zone">
-          <IconDataZone class="w-5 h-5" />
-      </button>
+        <TasksManagerButton />
+        
+        <NotificationBell v-if="user && user.user_ui_level >= 2" />
+        
+        <ThemeToggle />
+        
+        <!-- Data Zone Toggle (Only in Chat) -->
+        <button v-if="showDataZoneButton" @click="uiStore.toggleDataZone()" 
+            class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative" 
+            :class="{'text-blue-600 bg-blue-50 dark:bg-blue-900/20': isDataZoneVisible, 'text-gray-500': !isDataZoneVisible}"
+            title="Context Explorer"
+        >
+            <IconDataZone class="w-5 h-5" />
+        </button>
+        
+        <!-- Chat Sidebar Toggle -->
+        <button v-if="user && user.chat_active" @click="uiStore.toggleChatSidebar()" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 relative transition-colors">
+            <IconMessage class="w-5 h-5" />
+            <span v-if="unreadDmCount > 0" class="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white dark:ring-gray-800"></span>
+        </button>
+
+        <div class="h-6 w-px bg-gray-200 dark:border-gray-700 mx-1 hidden sm:block"></div>
+
+        <!-- NEW: User Menu integrated into Header -->
+        <UserInfo />
     </div>
   </header>
 </template>
+
 <style scoped>
-.toolbox-select { @apply w-full text-left text-sm bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500; }
-.menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2; }
-.menu-item-button.selected { @apply bg-blue-100 dark:bg-blue-900/50 font-semibold; }
 .menu-item { @apply w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center; }
+.menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2 text-sm text-gray-700 dark:text-gray-200; }
+.menu-item-button.selected { @apply bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 font-medium; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 </style>
