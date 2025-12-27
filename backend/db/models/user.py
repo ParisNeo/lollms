@@ -95,6 +95,12 @@ class User(Base):
     max_image_height = Column(Integer, default=-1, nullable=True) # -1 means no limit
     compress_images = Column(Boolean, default=False, nullable=False) # Force JPEG conversion
     image_compression_quality = Column(Integer, default=85, nullable=False) # JPEG Quality (0-100)
+    
+    # New: Google Search Tool Credentials & Preferences
+    google_api_key = Column(String, nullable=True)
+    google_cse_id = Column(String, nullable=True)
+    web_search_enabled = Column(Boolean, default=False, nullable=False)
+    web_search_deep_analysis = Column(Boolean, default=False, nullable=False) # If true, scrapes content of top results
 
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
@@ -184,7 +190,7 @@ class User(Base):
         return pwd_context.verify(plain_password, self.hashed_password)
 
 
-class UserStarredDiscussion(Base):
+class UserStarredDiscussion(BaseModel):
     __tablename__ = "user_starred_discussions"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)

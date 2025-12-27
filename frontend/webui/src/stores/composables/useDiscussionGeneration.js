@@ -105,6 +105,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
         
         if (payload.is_resend) formData.append('is_resend', 'true');
         
+        // Pass web search flag
+        formData.append('web_search_enabled', payload.webSearchEnabled ? 'true' : 'false');
+
         // For regeneration (resend), we need to ensure the backend branches from the correct message.
         if (lastMessage) {
             formData.append('parent_message_id', lastMessage.id);
@@ -166,7 +169,12 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
                 case 'sources':
                     if (!messageToUpdate.sources) messageToUpdate.sources = [];
-                    messageToUpdate.sources = data.content;
+                    // Ensure backend sends array, or push if single
+                    if (Array.isArray(data.content)) {
+                        messageToUpdate.sources = data.content;
+                    } else {
+                        messageToUpdate.sources.push(data.content);
+                    }
                     break;
                 case 'finalize': {
                     const finalData = data.data;

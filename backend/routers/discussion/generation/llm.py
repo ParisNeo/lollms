@@ -71,6 +71,17 @@ from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.tasks.image_generation_tasks import _generate_slides_task
 
+# Google Search Tools
+try:
+    from googleapiclient.discovery import build as google_build
+except ImportError:
+    google_build = None
+
+try:
+    from scrapemaster import ScrapeMaster
+except ImportError:
+    ScrapeMaster = None
+
 def _sanitize_b64(data: str) -> str:
     """Removes data URI scheme if present to return raw base64."""
     if "base64," in data:
@@ -708,6 +719,19 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
 
     return cleaned_text, images_b64, generation_infos, generated_groups
 
+def perform_google_search(query: str, api_key: str, cse_id: str) -> List[Dict[str, str]]:
+    """Performs a Google Custom Search and returns a list of results."""
+    if not google_build:
+        raise ImportError("google-api-python-client is not installed.")
+    
+    try:
+        service = google_build("customsearch", "v1", developerKey=api_key)
+        res = service.cse().list(q=query, cx=cse_id, num=5).execute()
+        items = res.get('items', [])
+        return [{'title': item.get('title'), 'link': item.get('link'), 'snippet': item.get('snippet')} for item in items]
+    except Exception as e:
+        print(f"Google Search Error: {e}")
+        return []
 
 def build_llm_generation_router(router: APIRouter):
     @router.post("/{discussion_id}/chat")
@@ -717,6 +741,7 @@ def build_llm_generation_router(router: APIRouter):
         image_server_paths_json: str = Form("[]"),
         parent_message_id: Optional[str] = Form(None), 
         is_resend: bool = Form(False),
+        web_search_enabled: bool = Form(False), # New param from frontend
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> StreamingResponse:
@@ -1034,11 +1059,83 @@ def build_llm_generation_router(router: APIRouter):
                         all_input_images = resized_images
                     # -------------------------
 
+                    # --- Google Search "Agent" Loop ---
+                    # If web search is enabled, we need to check if the AI wants to use it before final generation.
+                    # This logic assumes "one-shot" tool usage (decide -> search -> answer), which is simpler than a full loop.
+                    
+                    search_context = ""
+                    search_sources_list = []
+                    
+                    if web_search_enabled and owner_db_user.google_api_key and owner_db_user.google_cse_id:
+                        # 1. Ask LLM if it needs to search
+                        pre_flight_prompt = f"The user asked: \"{prompt}\".\nDo you need to search the internet for current information to answer this?\nReply with JSON: {{ \"search\": true/false, \"query\": \"search terms\" }}"
+                        
+                        try:
+                            # Use a separate non-streaming call for decision
+                            # Note: This adds latency.
+                            decision_text = lc.generate_text(pre_flight_prompt, max_new_tokens=100, temperature=0.0)
+                            try:
+                                # Extract JSON
+                                json_match = re.search(r'\{.*\}', decision_text, re.DOTALL)
+                                if json_match:
+                                    decision = json.loads(json_match.group(0))
+                                    
+                                    if decision.get("search"):
+                                        query = decision.get("query")
+                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "info", "content": f"Searching web for: {query}"}) + "\n")
+                                        
+                                        # Perform Search
+                                        from backend.tasks.social_tasks import perform_google_search
+                                        results = perform_google_search(query, owner_db_user.google_api_key, owner_db_user.google_cse_id)
+                                        
+                                        if results:
+                                            # Optional: Deep Analysis (Scraping)
+                                            scraped_content = []
+                                            if owner_db_user.web_search_deep_analysis and ScrapeMaster:
+                                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "info", "content": "Analyzing search results..."}) + "\n")
+                                                scraper = ScrapeMaster()
+                                                for res in results[:2]: # Limit deep read to top 2
+                                                    try:
+                                                        content = scraper.scrape(res['link'])
+                                                        if content:
+                                                            scraped_content.append(f"Source: {res['link']}\nContent: {content[:1500]}...") # Limit content size
+                                                    except: pass
+                                            
+                                            # Construct Context
+                                            search_context = "### Web Search Results:\n"
+                                            for res in results:
+                                                search_context += f"- Title: {res['title']}\n  Link: {res['link']}\n  Snippet: {res['snippet']}\n\n"
+                                                search_sources_list.append({"title": res['title'], "content": res['snippet'], "source": res['link'], "score": 100})
+                                            
+                                            if scraped_content:
+                                                search_context += "\n### Deep Content Analysis:\n" + "\n\n".join(scraped_content)
+                                                
+                                            # Send sources to frontend immediately
+                                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "content": search_sources_list}) + "\n")
+
+                                        else:
+                                            search_context = "Web search returned no results."
+                                    else:
+                                        # AI decided no search needed
+                                        pass
+                                else:
+                                    # Fallback if JSON parse fails
+                                    pass
+                            except Exception as e:
+                                print(f"Search decision parse error: {e}")
+                        except Exception as e:
+                            print(f"Pre-flight search check failed: {e}")
+                    
+                    # Augment prompt if search context exists
+                    final_user_message = prompt
+                    if search_context:
+                        final_user_message = f"{prompt}\n\n[Context from Web Search]:\n{search_context}\n\n[Instruction]: Answer the user's question using the provided search context. Cite sources where appropriate."
+
                     # FIX: Pass add_user_message=not is_resend to prevent duplication on regeneration
                     # FIX: Pass generation_tip_id which was set correctly above
                     result = discussion_obj.chat(
                         branch_tip_id=parent_message_id, # This is the parent to branch from
-                        user_message=prompt, 
+                        user_message=final_user_message, 
                         personality=active_personality, 
                         use_mcps=combined_mcps, 
                         use_data_store=use_rag, 
@@ -1061,6 +1158,11 @@ def build_llm_generation_router(router: APIRouter):
                     
                     ai_message_obj = result.get('ai_message')
                     if ai_message_obj:
+                        # Append search sources to message metadata so they persist
+                        if search_sources_list:
+                            existing_sources = (ai_message_obj.metadata or {}).get('sources', [])
+                            ai_message_obj.set_metadata_item('sources', existing_sources + search_sources_list, discussion_obj)
+
                         if owner_db_user.memory_enabled:
                              # ... memory processing ...
                             db_mem = next(get_db())

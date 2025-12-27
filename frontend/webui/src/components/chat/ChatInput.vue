@@ -39,6 +39,7 @@ import IconServer from '../../assets/icons/IconServer.vue';
 import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue'; // Google/Web Search Icon
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -70,10 +71,21 @@ const inputTokenCount = ref(0);
 let tokenizeInputDebounceTimer = null;
 const isDraggingOver = ref(false);
 
+// Local override for web search if user wants to toggle it quickly per-chat
+const isWebSearchActive = ref(false); 
+
 // Local state for user uploads (NOT generated images)
 const stagedImages = ref([]); // { file, previewUrl }
 
 const user = computed(() => authStore.user);
+
+// Initialize web search toggle from user pref
+watch(user, (newUser) => {
+    if (newUser) {
+        isWebSearchActive.value = !!newUser.web_search_enabled;
+    }
+}, { immediate: true });
+
 
 const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
 
@@ -140,6 +152,10 @@ function toggleMcpTool(toolId) {
     mcpToolSelection.value = Array.from(current);
 }
 
+function toggleWebSearch() {
+    isWebSearchActive.value = !isWebSearchActive.value;
+}
+
 // --- Active Features Badges ---
 const activeFeatures = computed(() => {
     const features = [];
@@ -163,6 +179,17 @@ const activeFeatures = computed(() => {
             label: 'Tools', 
             colorClass: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800',
             title: `${mcpToolSelection.value.length} Tool(s) Active`
+        });
+    }
+    
+    // Web Search
+    if (isWebSearchActive.value) {
+        features.push({
+            id: 'web_search',
+            icon: IconGlobeAlt,
+            label: 'Web',
+            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+            title: 'Web Search Active'
         });
     }
 
@@ -556,6 +583,21 @@ onUnmounted(() => {
                         <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>
                         <button @click="handleAddFromUrl" class="menu-item"><IconWeb class="w-4 h-4 mr-3 text-cyan-500" /> <span>Scrape URL</span></button>
                         <div class="menu-divider"></div>
+                        
+                        <!-- NEW Context Options Submenu -->
+                        <DropdownSubmenu title="Context Options" icon="cog" collection="ui">
+                             <div class="p-1 min-w-[200px]">
+                                <button @click.stop="toggleWebSearch" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconGlobeAlt class="w-4 h-4 text-blue-500" />
+                                        <span>Web Search</span>
+                                    </span>
+                                    <IconCheckCircle v-if="isWebSearchActive" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                             </div>
+                        </DropdownSubmenu>
+
                         <DropdownSubmenu title="RAG Context" icon="database">
                              <div class="p-1 max-h-64 overflow-y-auto min-w-[200px]">
                                 <div v-if="availableRagStores.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No stores available.</div>

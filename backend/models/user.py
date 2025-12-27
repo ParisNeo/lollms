@@ -226,6 +226,12 @@ class UserAuthDetails(BaseModel):
     compress_images: bool = False
     image_compression_quality: int = 85
 
+    # Google Search Settings
+    google_api_key: Optional[str] = None
+    google_cse_id: Optional[str] = None
+    web_search_enabled: bool = False
+    web_search_deep_analysis: bool = False
+
     class Config:
         from_attributes = True
 
@@ -315,3 +321,9 @@ class UserUpdate(BaseModel):
     max_image_height: Optional[int] = None
     compress_images: Optional[bool] = None
     image_compression_quality: Optional[int] = None
+
+    # Google Search Settings
+    google_api_key: Optional[str] = None
+    google_cse_id: Optional[str] = None
+    web_search_enabled: Optional[bool] = None
+    web_search_deep_analysis: Optional[bool] = None

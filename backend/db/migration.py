@@ -600,6 +600,23 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 except Exception as e:
                     print(f"WARNING: Failed to add column {col_name} to users table: {e}")
                     connection.rollback()
+        
+        # New Google Search & Web Search fields
+        new_web_search_cols = {
+            "google_api_key": "VARCHAR",
+            "google_cse_id": "VARCHAR",
+            "web_search_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "web_search_deep_analysis": "BOOLEAN DEFAULT 0 NOT NULL"
+        }
+        
+        for col_name, col_sql_def in new_web_search_cols.items():
+            if col_name not in user_columns_db:
+                try:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
+                    connection.commit()
+                except Exception as e:
+                    print(f"WARNING: Failed to add column {col_name} to users table: {e}")
+                    connection.rollback()
 
         new_user_cols_defs = {
             "is_active": "BOOLEAN DEFAULT 1 NOT NULL", "created_at": "DATETIME", 

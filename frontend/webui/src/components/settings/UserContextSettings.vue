@@ -3,6 +3,8 @@ import { computed, ref, watch, nextTick, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { storeToRefs } from 'pinia';
 import LanguageSelector from '../ui/LanguageSelector.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 
 const authStore = useAuthStore();
 const { user } = storeToRefs(authStore);
@@ -23,7 +25,7 @@ const imageGenerationEnabled = ref(false);
 const imageGenerationSystemPrompt = ref('');
 const imageAnnotationEnabled = ref(false);
 const imageEditingEnabled = ref(false); 
-const slideMakerEnabled = ref(false); // NEW
+const slideMakerEnabled = ref(false); 
 const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
 const memoryEnabled = ref(false);
@@ -32,6 +34,13 @@ const maxImageWidth = ref(-1);
 const maxImageHeight = ref(-1);
 const compressImages = ref(false);
 const imageCompressionQuality = ref(85);
+
+// New Google Search States
+const googleApiKey = ref('');
+const googleCseId = ref('');
+const webSearchEnabled = ref(false);
+const webSearchDeepAnalysis = ref(false);
+const isKeyVisible = ref(false);
 
 const hasChanges = ref(false);
 const isSaving = ref(false);
@@ -56,7 +65,7 @@ function populateForm() {
     imageGenerationSystemPrompt.value = user.value.image_generation_system_prompt || '';
     imageAnnotationEnabled.value = user.value.image_annotation_enabled || false;
     imageEditingEnabled.value = user.value.image_editing_enabled || false;
-    slideMakerEnabled.value = user.value.slide_maker_enabled || false; // NEW
+    slideMakerEnabled.value = user.value.slide_maker_enabled || false;
     activateGeneratedImages.value = user.value.activate_generated_images || false;
     noteGenerationEnabled.value = user.value.note_generation_enabled || false;
     memoryEnabled.value = user.value.memory_enabled || false;
@@ -65,6 +74,12 @@ function populateForm() {
     maxImageHeight.value = user.value.max_image_height ?? -1;
     compressImages.value = user.value.compress_images || false;
     imageCompressionQuality.value = user.value.image_compression_quality ?? 85;
+    
+    // Google Search
+    googleApiKey.value = user.value.google_api_key || '';
+    googleCseId.value = user.value.google_cse_id || '';
+    webSearchEnabled.value = user.value.web_search_enabled || false;
+    webSearchDeepAnalysis.value = user.value.web_search_deep_analysis || false;
     
     // Reset change tracker
     nextTick(() => {
@@ -81,7 +96,8 @@ watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
-    memoryEnabled, autoMemoryEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality
+    memoryEnabled, autoMemoryEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
+    googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis
 ], () => {
   hasChanges.value = true;
 });
@@ -113,7 +129,7 @@ async function handleSaveChanges() {
             image_generation_system_prompt: imageGenerationSystemPrompt.value,
             image_annotation_enabled: imageAnnotationEnabled.value,
             image_editing_enabled: imageEditingEnabled.value,
-            slide_maker_enabled: slideMakerEnabled.value, // NEW
+            slide_maker_enabled: slideMakerEnabled.value,
             activate_generated_images: activateGeneratedImages.value,
             note_generation_enabled: noteGenerationEnabled.value,
             memory_enabled: memoryEnabled.value,
@@ -121,7 +137,11 @@ async function handleSaveChanges() {
             max_image_width: maxImageWidth.value,
             max_image_height: maxImageHeight.value,
             compress_images: compressImages.value,
-            image_compression_quality: imageCompressionQuality.value
+            image_compression_quality: imageCompressionQuality.value,
+            google_api_key: googleApiKey.value,
+            google_cse_id: googleCseId.value,
+            web_search_enabled: webSearchEnabled.value,
+            web_search_deep_analysis: webSearchDeepAnalysis.value
         });
         hasChanges.value = false;
     } finally {
@@ -153,8 +173,50 @@ async function handleSaveChanges() {
             <p class="text-xs text-gray-500 mt-1">If left blank, the AI will use your username: <strong>{{ user?.username }}</strong></p>
         </div>
         
+        <!-- Google Search Settings (NEW) -->
+        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Web Search</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to search Google for real-time information.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="webSearchEnabled" class="sr-only peer" :disabled="!googleApiKey || !googleCseId">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
+                </label>
+            </div>
+            
+            <div v-if="webSearchEnabled" class="flex items-center justify-between pl-4 border-l-2 border-blue-300 dark:border-blue-600">
+                <div>
+                    <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300">Deep Content Analysis</h4>
+                    <p class="text-[10px] text-gray-500 dark:text-gray-400">If enabled, the AI will visit top search result pages to read detailed content instead of just snippets.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="webSearchDeepAnalysis" class="sr-only peer">
+                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google API Key</label>
+                    <div class="relative">
+                        <input :type="isKeyVisible ? 'text' : 'password'" v-model="googleApiKey" class="input-field w-full pr-10 text-xs" placeholder="AIza...">
+                        <button type="button" @click="isKeyVisible = !isKeyVisible" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500">
+                            <IconEyeOff v-if="isKeyVisible" class="w-4 h-4" /><IconEye v-else class="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google CSE ID</label>
+                    <input type="text" v-model="googleCseId" class="input-field w-full text-xs" placeholder="cx...">
+                </div>
+            </div>
+            <p v-if="!googleApiKey || !googleCseId" class="text-xs text-red-500 italic">API Key and CSE ID are required to enable Web Search.</p>
+        </div>
+
         <!-- Memory Settings -->
-        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg space-y-3">
+        <div class="p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800/50 rounded-lg space-y-3">
             <div class="flex items-center justify-between">
                 <div>
                     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Long-Term Memory</h3>
@@ -162,18 +224,18 @@ async function handleSaveChanges() {
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" v-model="memoryEnabled" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-teal-600"></div>
                 </label>
             </div>
             
-            <div v-if="memoryEnabled" class="flex items-center justify-between pl-4 border-l-2 border-blue-300 dark:border-blue-600">
+            <div v-if="memoryEnabled" class="flex items-center justify-between pl-4 border-l-2 border-teal-300 dark:border-teal-600">
                 <div>
                     <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300">Auto Memory Decision</h4>
                     <p class="text-[10px] text-gray-500 dark:text-gray-400">Let the AI automatically decide when to save new memories during conversation.</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" v-model="autoMemoryEnabled" class="sr-only peer">
-                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-teal-600"></div>
                 </label>
             </div>
         </div>

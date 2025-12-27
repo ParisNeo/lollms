@@ -105,39 +105,44 @@ function handleClose() {
       <div v-else class="p-4 text-center space-y-6">
         <h3 class="text-xl font-bold text-gray-900 dark:text-white">Congratulations, Admin!</h3>
         <p class="text-gray-700 dark:text-gray-300">
-          You've successfully set up your LoLLMs Chat instance. Here are your next steps to configure the system:
+          Your LoLLMs instance is ready. As the superuser, you have a few important tasks:
         </p>
         
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
-          <div class="whats-next-card">
-            <div class="icon-box bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">1</div>
+          <div class="whats-next-card ring-2 ring-red-400 dark:ring-red-500/50">
+            <div class="icon-box bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">1</div>
             <div>
-                <h5 class="font-bold">Configure Bindings</h5>
-                <p class="text-xs text-gray-500 dark:text-gray-400">Go to Settings > Bindings to connect AI providers (Ollama, OpenAI, etc.).</p>
+                <h5 class="font-bold text-red-600 dark:text-red-400">Change Password</h5>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                    Go to <strong>Settings &gt; Account</strong> immediately and change the default password. 
+                    <br><em class="text-[10px]">If you get locked out, run: <code>python main.py --reset-password admin NEW_PASS</code></em>
+                </p>
+            </div>
+          </div>
+
+          <div class="whats-next-card">
+            <div class="icon-box bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">2</div>
+            <div>
+                <h5 class="font-bold">Add AI Models</h5>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Navigate to <strong>Settings &gt; Bindings</strong> to configure providers like Ollama, OpenAI, or local models.</p>
             </div>
           </div>
           
           <div class="whats-next-card">
-            <div class="icon-box bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400">2</div>
+            <div class="icon-box bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400">3</div>
             <div>
                 <h5 class="font-bold">Install Personas</h5>
-                <p class="text-xs text-gray-500 dark:text-gray-400">Visit the Zoo to install personalities for different tasks.</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Visit the <strong>Zoo</strong> in the Admin Panel to install personalities for different tasks.</p>
             </div>
           </div>
 
           <div class="whats-next-card">
-             <div class="icon-box bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">3</div>
+             <div class="icon-box bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">4</div>
             <div>
-                <h5 class="font-bold">Manage Data</h5>
-                <p class="text-xs text-gray-500 dark:text-gray-400">Create RAG Data Stores in the Data Studio to let AI read your docs.</p>
-            </div>
-          </div>
-
-          <div class="whats-next-card">
-             <div class="icon-box bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">4</div>
-            <div>
-                <h5 class="font-bold">System Settings</h5>
-                <p class="text-xs text-gray-500 dark:text-gray-400">Adjust global server settings, email, and security options.</p>
+                <h5 class="font-bold">Updates</h5>
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                    To update LoLLMs, run <code>run_windows.bat --update</code> (Windows) or <code>./run.sh --update</code> (Linux/Mac).
+                </p>
             </div>
           </div>
         </div>
