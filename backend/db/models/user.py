@@ -190,7 +190,7 @@ class User(Base):
         return pwd_context.verify(plain_password, self.hashed_password)
 
 
-class UserStarredDiscussion(BaseModel):
+class UserStarredDiscussion(Base):
     __tablename__ = "user_starred_discussions"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
