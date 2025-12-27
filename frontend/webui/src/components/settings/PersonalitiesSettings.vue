@@ -5,6 +5,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import PersonalityCard from '../ui/Cards/PersonalityCard.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
@@ -20,6 +21,7 @@ const savingPersonalityId = ref(null);
 const searchQuery = ref('');
 const selectedCategory = ref('All');
 const starredPersonalityIds = ref(new Set());
+const importInputRef = ref(null);
 
 const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
 
@@ -167,13 +169,28 @@ async function handleShare(personality) {
         title: personality.name
     });
 }
+
+function triggerImport() {
+    importInputRef.value.click();
+}
+
+async function handleImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    await dataStore.importPersonality(file);
+    event.target.value = '';
+}
 </script>
 
 <template>
     <section>
-        <div class="flex justify-between items-center mb-4">
+        <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
             <h4 class="text-lg font-semibold">Personalities</h4>
-            <div class="flex gap-2">
+            <div class="flex items-center gap-2">
+                <input type="file" ref="importInputRef" @change="handleImport" class="hidden" accept=".zip">
+                <button @click="triggerImport" class="btn btn-secondary flex items-center gap-2" title="Import from Zip">
+                    <IconArrowUpTray class="w-4 h-4" /> Import
+                </button>
                 <button @click="openGeneratePersonalityModal()" class="btn btn-primary">Generate from Prompt</button>
                 <button @click="openEditor()" class="btn btn-secondary">+ Create New</button>
             </div>

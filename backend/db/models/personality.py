@@ -25,6 +25,7 @@ class Personality(Base):
     is_public = Column(Boolean, default=False, index=True) 
     owner_user_id = Column(Integer, ForeignKey("users.id", name="fk_personality_owner", ondelete="SET NULL"), nullable=True, index=True)
     active_mcps = Column(JSON, nullable=True)
+    required_context_options = Column(JSON, nullable=True) # NEW: List of required flags (e.g. ['image_generation', 'memory'])
     data_source_type = Column(String, default="none", nullable=False)
     data_source = Column(Text, nullable=True)
 

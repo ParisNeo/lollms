@@ -12,6 +12,7 @@ class PersonalityBase(BaseModel):
     script_code: Optional[str] = None
     icon_base64: Optional[str] = None
     active_mcps: Optional[List[str]] = Field(default_factory=list)
+    required_context_options: Optional[List[str]] = Field(default_factory=list) # NEW
     data_source_type: Optional[str] = "none"
     data_source: Optional[str] = None
 
@@ -24,6 +25,8 @@ class PersonalityUpdate(PersonalityBase):
     name: Optional[constr(min_length=1, max_length=100)] = None
     prompt_text: Optional[str] = None
     is_public: Optional[bool] = None
+    # Explicitly redeclare icon_base64 to ensure it is picked up by Pydantic's exclude_unset mechanism correctly
+    icon_base64: Optional[str] = None
 
 class PersonalityPublic(PersonalityBase):
     id: str

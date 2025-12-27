@@ -390,13 +390,67 @@ export const useAuthStore = defineStore('auth', () => {
         useUiStore().addNotification('Profile updated.', 'success');
     }
     
+    // --- Helper to map option key to preference key ---
+    function optionToPrefKey(opt) {
+        const map = {
+            'image_generation': 'image_generation_enabled',
+            'image_editing': 'image_editing_enabled',
+            'slide_maker': 'slide_maker_enabled',
+            'memory': 'memory_enabled',
+            'note_generation': 'note_generation_enabled'
+        };
+        return map[opt];
+    }
+
     async function updateUserPreferences(preferences, notify = true) {
+        // --- NEW LOGIC: Handle Personality Requirements ---
+        const { useDataStore } = await import('./data');
+        const dataStore = useDataStore();
+        const uiStore = useUiStore();
+
+        // 1. If switching personality, enable its required options
+        if (preferences.active_personality_id) {
+            const personality = dataStore.getPersonalityById(preferences.active_personality_id);
+            if (personality && personality.required_context_options) {
+                personality.required_context_options.forEach(opt => {
+                    const prefKey = optionToPrefKey(opt);
+                    if (prefKey) preferences[prefKey] = true;
+                });
+            }
+        }
+
+        // 2. If changing context settings, verify against current active personality
+        // Determine the effective personality ID (new one if changing, else current)
+        const targetPersonalityId = preferences.active_personality_id !== undefined 
+            ? preferences.active_personality_id 
+            : user.value?.active_personality_id;
+
+        if (targetPersonalityId) {
+            const personality = dataStore.getPersonalityById(targetPersonalityId);
+            if (personality && personality.required_context_options) {
+                let revertToDefault = false;
+                personality.required_context_options.forEach(opt => {
+                    const prefKey = optionToPrefKey(opt);
+                    // Check if this specific option is being explicitly disabled in this update
+                    if (prefKey && preferences[prefKey] === false) {
+                        revertToDefault = true;
+                    }
+                });
+                
+                if (revertToDefault) {
+                    preferences.active_personality_id = null; // Reset to default
+                    if (notify) uiStore.addNotification(`Reverted to default personality because a required option was disabled.`, 'warning');
+                }
+            }
+        }
+        // --- END NEW LOGIC ---
+
         const response = await apiClient.put('/api/auth/me', preferences);
         if (user.value) {
             Object.assign(user.value, response.data);
-            if (preferences.message_font_size) useUiStore().message_font_size = preferences.message_font_size;
+            if (preferences.message_font_size) uiStore.message_font_size = preferences.message_font_size;
         }
-        if (notify) useUiStore().addNotification('Settings saved.', 'success');
+        if (notify) uiStore.addNotification('Settings saved.', 'success');
     }
 
     async function changePassword(passwordData) {

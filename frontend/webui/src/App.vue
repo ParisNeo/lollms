@@ -32,6 +32,7 @@ const { message_font_size } = storeToRefs(uiStore);
 const isAuthenticating = computed(() => authStore.isAuthenticating);
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
+const user = computed(() => authStore.user);
 
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
@@ -73,6 +74,13 @@ onMounted(async () => {
         tasksStore.startPolling();
     }
 });
+
+// Watch for first login to show terms/welcome modal
+watch(user, (newUser) => {
+    if (newUser && newUser.first_login_done === false) {
+        uiStore.openModal('whatsNext');
+    }
+}, { immediate: true });
 
 watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setProperty('--message-font-size', `${sz}px`); }, { immediate: true });
 </script>

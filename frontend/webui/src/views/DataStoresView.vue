@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../stores/data';
@@ -10,9 +10,17 @@ import { useAuthStore } from '../stores/auth';
 import apiClient from '../services/api';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
-import DataStoreGraphManager from '../components/datastores/DataStoreGraphManager.vue';
 import JsonRenderer from '../components/ui/JsonRenderer.vue';
 import GenericModal from '../components/modals/GenericModal.vue';
+
+// Async import for graph manager to prevent view crash if dependencies are missing
+const DataStoreGraphManager = defineAsyncComponent({
+  loader: () => import('../components/datastores/DataStoreGraphManager.vue'),
+  loadingComponent: null,
+  delay: 200,
+  errorComponent: null,
+  timeout: 3000
+});
 
 // Icons
 import IconDatabase from '../assets/icons/IconDatabase.vue';
@@ -139,6 +147,13 @@ onMounted(() => {
     // Support opening the new form via a global event
     window.addEventListener('lollms:open-new-datastore', handleAddStoreClick);
 });
+
+// Watch route params for store selection
+watch(() => router.currentRoute.value.query.storeId, (newId) => {
+    if (newId) {
+        selectStore(newId);
+    }
+}, { immediate: true });
 
 onUnmounted(() => {
     window.removeEventListener('lollms:open-new-datastore', handleAddStoreClick);

@@ -674,18 +674,66 @@ export const useDataStore = defineStore('data', () => {
 
     async function generatePersonalityIcon(prompt) {
         const uiStore = useUiStore();
+        const tasksStore = useTasksStore();
+        
         if (!prompt || !prompt.trim()) {
             uiStore.addNotification('A prompt is needed to generate an icon.', 'warning');
             return null;
         }
         try {
             const response = await apiClient.post('/api/personalities/generate_icon', { prompt });
-            uiStore.addNotification('Icon generated successfully!', 'success');
-            return response.data.icon_base64;
+            uiStore.addNotification('Icon generation task started.', 'info');
+            tasksStore.addTask(response.data);
+            return response.data; // Return task info
         } catch (error) {
+            console.error(error);
             return null;
         }
     }
+
+    async function exportPersonality(personalityId) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.get(`/api/personalities/${personalityId}/export`, { responseType: 'blob' });
+            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const link = document.createElement('a');
+            link.href = url;
+            // Get filename from header if available, else standard format
+            let filename = 'personality_export.zip';
+            const contentDisposition = response.headers['content-disposition'];
+            if (contentDisposition) {
+                const match = contentDisposition.match(/filename="?([^"]+)"?/);
+                if (match) filename = match[1];
+            }
+            link.setAttribute('download', filename);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            uiStore.addNotification('Personality exported.', 'success');
+        } catch (error) {
+            console.error("Export failed:", error);
+            uiStore.addNotification('Failed to export personality.', 'error');
+        }
+    }
+
+    async function importPersonality(file) {
+        const uiStore = useUiStore();
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            uiStore.addNotification('Importing personality...', 'info');
+            const response = await apiClient.post('/api/personalities/import', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            await fetchPersonalities();
+            uiStore.addNotification(`Imported '${response.data.name}'.`, 'success');
+        } catch (error) {
+            console.error("Import failed:", error);
+            const msg = error.response?.data?.detail || 'Import failed.';
+            uiStore.addNotification(msg, 'error');
+        }
+    }
+
     async function triggerMcpReload() {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
@@ -888,7 +936,7 @@ export const useDataStore = defineStore('data', () => {
         deleteGraphEdge,
         fetchPersonalities, addPersonality,
         updatePersonality, deletePersonality, generatePersonalityFromPrompt, enhancePersonalityPrompt,
-        generatePersonalityIcon,
+        generatePersonalityIcon, exportPersonality, importPersonality,
         fetchMcps, addMcp, updateMcp, deleteMcp,
         fetchMcpTools, triggerMcpReload,
         refreshMcps, refreshRags,

@@ -1,11 +1,10 @@
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue';
+import { ref, computed, onMounted, watch, defineAsyncComponent } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { useTasksStore } from '../../stores/tasks';
 import { storeToRefs } from 'pinia';
-import InteractiveGraphViewer from './InteractiveGraphViewer.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
@@ -14,6 +13,15 @@ import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconSave from '../../assets/icons/IconSave.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconPlay from '../../assets/icons/IconPlayCircle.vue';
+
+// Async import for interactive graph to avoid initial load block
+const InteractiveGraphViewer = defineAsyncComponent({
+  loader: () => import('./InteractiveGraphViewer.vue'),
+  loadingComponent: null,
+  delay: 200,
+  errorComponent: null,
+  timeout: 3000
+});
 
 const props = defineProps({
     store: {

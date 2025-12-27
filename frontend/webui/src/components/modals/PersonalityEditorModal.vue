@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch, onMounted } from 'vue';
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { storeToRefs } from 'pinia';
 import GenericModal from './GenericModal.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
@@ -7,10 +7,15 @@ import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
 import { useAuthStore } from '../../stores/auth';
+import { useTasksStore } from '../../stores/tasks';
+import useEventBus from '../../services/eventBus';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 
 const uiStore = useUiStore();
 const dataStore = useDataStore();
 const authStore = useAuthStore();
+const tasksStore = useTasksStore();
+const { on, off } = useEventBus();
 
 const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
 
@@ -21,6 +26,7 @@ const getInitialFormState = () => ({
     id: null, name: '', category: '', author: '', description: '',
     prompt_text: '', disclaimer: '', script_code: '', icon_base64: null,
     is_public: false, data_source_type: 'none', data_source: null, active_mcps: [],
+    required_context_options: [], // NEW
     owner_type: 'user'
 });
 
@@ -30,6 +36,20 @@ const staticTextInputRef = ref(null);
 const isLoading = ref(false);
 const isLoadingIcon = ref(false);
 const formIconLoadFailed = ref(false);
+const activeIconTask = ref(null);
+
+const contextOptionChoices = [
+    { id: 'image_generation', name: 'Image Generation' },
+    { id: 'image_editing', name: 'Image Editing' },
+    { id: 'slide_maker', name: 'Slide Maker' },
+    { id: 'note_generation', name: 'Note Generation' },
+    { id: 'memory', name: 'Long-Term Memory' }
+];
+
+// Helper for multi-select - passing flat array directly to fix rendering issue
+const formattedContextOptions = computed(() => {
+    return contextOptionChoices;
+});
 
 watch(() => form.value.icon_base64, () => {
     formIconLoadFailed.value = false;
@@ -38,6 +58,8 @@ watch(() => form.value.icon_base64, () => {
 watch(() => personality.value, (newVal) => {
     if (newVal) {
         form.value = { ...getInitialFormState(), ...newVal };
+        // Ensure array
+        if (!form.value.required_context_options) form.value.required_context_options = [];
     } else {
         form.value = getInitialFormState();
     }
@@ -46,9 +68,38 @@ watch(() => personality.value, (newVal) => {
 onMounted(() => {
     if(dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
     if(dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
+    on('task:completed', handleTaskCompleted);
 });
 
-// FIX: Reset data_source when data_source_type changes
+onUnmounted(() => {
+    off('task:completed', handleTaskCompleted);
+});
+
+function handleTaskCompleted(task) {
+    if (activeIconTask.value && task.id === activeIconTask.value) {
+        let result = task.result;
+        // Safe parsing of result if it's a string
+        if (typeof result === 'string') {
+            try {
+                result = JSON.parse(result);
+            } catch (e) {
+                console.error("Failed to parse task result JSON", e);
+            }
+        }
+
+        if (task.status === 'completed' && result?.icon_base64) {
+            // FORCE reactivity update by creating a new object
+            form.value = { ...form.value, icon_base64: result.icon_base64 };
+            formIconLoadFailed.value = false;
+            uiStore.addNotification('Icon generated. Don\'t forget to save!', 'success');
+        } else if (task.status === 'failed') {
+             uiStore.addNotification('Icon generation failed.', 'error');
+        }
+        isLoadingIcon.value = false;
+        activeIconTask.value = null;
+    }
+}
+
 watch(() => form.value.data_source_type, (newType, oldType) => {
     if (newType !== oldType) {
         form.value.data_source = null;
@@ -86,12 +137,21 @@ function handleEnhancePrompt() {
 async function handleGenerateIcon() {
     isLoadingIcon.value = true;
     try {
-        const prompt = form.value.name || form.value.description;
-        const generatedIcon = await dataStore.generatePersonalityIcon(prompt);
-        if (generatedIcon) {
-            form.value.icon_base64 = generatedIcon;
+        const name = form.value.name || 'AI Assistant';
+        const category = form.value.category || 'General';
+        // Take first 100 chars of description to avoid huge prompts, remove newlines
+        const desc = form.value.description ? form.value.description.replace(/\n/g, ' ').slice(0, 150) : 'helpful AI assistant';
+        
+        // Construct a richer prompt that provides context to the image generator
+        const prompt = `Profile icon/avatar of ${name}, ${category}. ${desc}. High quality digital art, centered, smooth, professional style.`;
+
+        const task = await dataStore.generatePersonalityIcon(prompt);
+        if (task) {
+            activeIconTask.value = task.id;
+        } else {
+            isLoadingIcon.value = false;
         }
-    } finally {
+    } catch (e) {
         isLoadingIcon.value = false;
     }
 }
@@ -153,6 +213,11 @@ function handleStaticTextFileSelect(event) {
     reader.readAsText(file);
     event.target.value = '';
 }
+
+async function handleExport() {
+    if (!form.value.id) return;
+    await dataStore.exportPersonality(form.value.id);
+}
 </script>
 
 <template>
@@ -162,14 +227,18 @@ function handleStaticTextFileSelect(event) {
         <!-- Icon and Basic Info -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div class="md:col-span-1 flex flex-col items-center">
-            <div class="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden mb-2">
+            <div class="w-24 h-24 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden mb-2 relative">
               <img v-if="form.icon_base64 && !formIconLoadFailed" :src="form.icon_base64" @error="formIconLoadFailed = true" alt="Icon Preview" class="h-full w-full object-cover">
               <svg v-else class="w-16 h-16 text-gray-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A17.933 17.933 0 0 1 12 21.75c-2.676 0-5.216-.584-7.499-1.632Z" /></svg>
+               <!-- Spinner Overlay -->
+               <div v-if="isLoadingIcon" class="absolute inset-0 bg-black/50 flex items-center justify-center">
+                  <svg class="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+               </div>
             </div>
             <div class="flex gap-2">
                 <button @click="triggerFileInput" type="button" class="btn btn-secondary btn-sm">Upload</button>
                 <button @click="handleGenerateIcon" type="button" class="btn btn-secondary btn-sm" :disabled="isLoadingIcon">
-                    <svg v-if="isLoadingIcon" class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                    <span v-if="isLoadingIcon">Generating...</span>
                     <span v-else>Generate</span>
                 </button>
             </div>
@@ -261,6 +330,18 @@ function handleStaticTextFileSelect(event) {
                 <CodeMirrorEditor v-model="form.data_source" id="data_source_static" class="h-32" />
             </div>
 
+            <!-- Required Context Options (NEW) -->
+             <div>
+                <label class="block text-sm font-medium mb-1">Mandatory Context Features</label>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Selecting these will auto-activate them when this personality is used. Disabling them manually later will revert to the default personality.</p>
+                 <MultiSelectMenu 
+                    v-model="form.required_context_options" 
+                    :items="formattedContextOptions"
+                    placeholder="Select required features (e.g. Image Gen)"
+                    class="mt-1"
+                />
+            </div>
+
             <!-- MCP Tools Settings -->
             <div>
                 <label class="block text-sm font-medium">Active MCPs</label>
@@ -281,8 +362,18 @@ function handleStaticTextFileSelect(event) {
       </form>
     </template>
     <template #footer>
-      <button @click="uiStore.closeModal('personalityEditor')" type="button" class="btn btn-secondary">Cancel</button>
-      <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save' }}</button>
+        <div class="w-full flex justify-between">
+            <div class="flex gap-2">
+                <button v-if="form.id" @click="handleExport" type="button" class="btn btn-secondary-outline">
+                    <IconArrowDownTray class="w-4 h-4 mr-2" />
+                    Export
+                </button>
+            </div>
+            <div class="flex gap-2">
+                <button @click="uiStore.closeModal('personalityEditor')" type="button" class="btn btn-secondary">Cancel</button>
+                <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading">{{ isLoading ? 'Saving...' : 'Save' }}</button>
+            </div>
+        </div>
     </template>
   </GenericModal>
 </template>

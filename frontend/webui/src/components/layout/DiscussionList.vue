@@ -186,9 +186,8 @@ async function openNotebook(notebook) {
 
 async function openDataStore(store) {
     // Navigate to Data Studio and trigger selection
-    await router.push('/datastores');
-    // We rely on the DataStoresView watching the route/local state, 
-    // but we can also set it directly if needed or via a global bus.
+    // Pass the store ID as a query parameter so the view can pick it up
+    await router.push({ path: '/datastores', query: { storeId: store.id } });
 }
 
 async function handleDeleteNotebook(notebook) {

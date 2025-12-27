@@ -380,13 +380,13 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
         email=user_data.email,
         hashed_password=get_password_hash(user_data.password),
         is_active=is_active_on_creation,
-        status=user_status, # NEW
+        status=user_status,
         is_admin=False,
         lollms_model_name=settings.get("default_lollms_model_name"),
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
         llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
-        first_login_done=True,
+        first_login_done=False, # CHANGED to False so the Terms modal appears
         user_ui_level=settings.get("default_user_ui_level", 0),
         auto_title=settings.get("default_auto_title", False)
     )
@@ -625,7 +625,7 @@ async def create_first_admin(user_data: UserCreateAdmin, db: Session = Depends(g
         llm_temperature=settings.get("default_llm_temperature"),
         user_ui_level=4,
         auto_title=True,
-        first_login_done=False
+        first_login_done=False # Changed to False to force Terms of Use
     )
 
     try:

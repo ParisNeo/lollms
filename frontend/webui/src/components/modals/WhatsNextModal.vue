@@ -1,22 +1,51 @@
 <script setup>
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import { useAuthStore } from '../../stores/auth';
 import GenericModal from './GenericModal.vue';
 import { useRouter } from 'vue-router';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconArrowRight from '../../assets/icons/IconArrowRight.vue';
 
 const uiStore = useUiStore();
+const authStore = useAuthStore();
 const router = useRouter();
 
 const modalName = 'whatsNext';
-const title = "Welcome! What's Next?";
+const currentStep = ref(1); // 1: Terms, 2: Welcome (if admin) or Finish
 
-function closeAndNavigate(routeName) {
-  uiStore.closeModal(modalName);
-  router.push({ name: routeName });
+const isAdmin = computed(() => authStore.isAdmin);
+
+const title = computed(() => {
+    return currentStep.value === 1 ? 'Terms of Use & Mission' : 'Welcome to LoLLMs!';
+});
+
+async function acceptTerms() {
+    if (isAdmin.value) {
+        currentStep.value = 2;
+    } else {
+        await finalizeSetup();
+    }
+}
+
+async function finalizeSetup() {
+    try {
+        await authStore.updateUserPreferences({ first_login_done: true });
+        uiStore.closeModal(modalName);
+        if (isAdmin.value) {
+            router.push({ name: 'Admin' });
+        } else {
+            router.push({ name: 'Home' });
+        }
+    } catch (e) {
+        console.error("Failed to update user profile:", e);
+        // Close anyway to not block user
+        uiStore.closeModal(modalName);
+    }
 }
 
 function handleClose() {
-    uiStore.closeModal(modalName);
+    // Only allow closing via buttons to ensure terms acceptance
 }
 </script>
 
@@ -25,61 +54,115 @@ function handleClose() {
     :modal-name="modalName"
     :title="title"
     :allow-overlay-close="false"
-    max-width-class="max-w-xl"
+    :show-close-button="false"
+    max-width-class="max-w-2xl"
     @close="handleClose"
   >
     <template #body>
-      <div class="p-6 text-center space-y-6">
+      <!-- STEP 1: Terms of Use -->
+      <div v-if="currentStep === 1" class="space-y-6">
+        <div class="prose dark:prose-invert text-sm text-gray-700 dark:text-gray-300 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+            <h4 class="text-lg font-bold">Mission Statement</h4>
+            <p>
+                LoLLMs (Lord of Large Language Models) aims to provide open, accessible, and privacy-focused AI tools for everyone. 
+                We believe in ethical AI usage that empowers individuals while respecting legal and moral standards.
+            </p>
+
+            <h4 class="text-lg font-bold mt-4">Terms of Use</h4>
+            <p>By using this platform, you agree to the following conditions:</p>
+            
+            <ul class="list-disc pl-5 space-y-2">
+                <li>
+                    <strong>Legal Compliance:</strong> You must respect the legislation of your country of residence at all times while using this software.
+                </li>
+                <li>
+                    <strong>EU AI Act:</strong> If you are located in the European Union, you acknowledge and agree to adhere to all obligations set forth in the EU AI Act, 
+                    particularly regarding transparency, data governance, and prohibited AI practices.
+                </li>
+                <li>
+                    <strong>Prohibited Content:</strong> You strictly agree NOT to use this product for the generation or dissemination of:
+                    <ul class="list-circle pl-5 mt-1">
+                        <li>Disinformation, fake news, or misleading content intended to deceive.</li>
+                        <li>Hate speech, harassment, or content promoting violence.</li>
+                        <li>Any material that violates applicable laws or regulations.</li>
+                    </ul>
+                </li>
+                <li>
+                    <strong>Responsibility:</strong> You are solely responsible for the content you generate and how you use it. The developers of LoLLMs assume no liability for misuse of the platform.
+                </li>
+            </ul>
+        </div>
+        
+        <div class="flex justify-end pt-4 border-t dark:border-gray-700">
+            <button @click="acceptTerms" class="btn btn-primary flex items-center gap-2 px-6 py-2.5 shadow-lg transform hover:scale-105 transition-all">
+                <IconCheckCircle class="w-5 h-5" />
+                <span>I Accept & Continue</span>
+            </button>
+        </div>
+      </div>
+
+      <!-- STEP 2: Admin Welcome (Only for Admins) -->
+      <div v-else class="p-4 text-center space-y-6">
         <h3 class="text-xl font-bold text-gray-900 dark:text-white">Congratulations, Admin!</h3>
         <p class="text-gray-700 dark:text-gray-300">
-          You've successfully set up your LoLLMs Chat instance. Here are some recommended first steps to get started:
+          You've successfully set up your LoLLMs Chat instance. Here are your next steps to configure the system:
         </p>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <button @click="closeAndNavigate('Admin')" class="whats-next-button">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-2 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.827 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.827 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.827-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.827-3.31 2.37-2.37.526.323 1.09.559 1.724 1.066z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-            <span class="font-semibold">Configure Settings</span>
-            <span class="text-sm">Adjust global app behavior, LLM bindings, and email.</span>
-          </button>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-left">
+          <div class="whats-next-card">
+            <div class="icon-box bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400">1</div>
+            <div>
+                <h5 class="font-bold">Configure Bindings</h5>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Go to Settings > Bindings to connect AI providers (Ollama, OpenAI, etc.).</p>
+            </div>
+          </div>
           
-          <button @click="closeAndNavigate('DataStores')" class="whats-next-button">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-2 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10l2 2h10l2-2V7m-2 0H6m2 0V5a2 2 0 012-2h4a2 2 0 012 2v2m-6 0h.01M6 20h12a2 2 0 002-2V8l-2-2H6a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-            <span class="font-semibold">Manage Data Stores</span>
-            <span class="text-sm">Create personal RAG data stores and upload documents.</span>
-          </button>
+          <div class="whats-next-card">
+            <div class="icon-box bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400">2</div>
+            <div>
+                <h5 class="font-bold">Install Personas</h5>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Visit the Zoo to install personalities for different tasks.</p>
+            </div>
+          </div>
 
-          <button @click="closeAndNavigate('Settings')" class="whats-next-button">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-2 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.827 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.827 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.827-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.827-3.31 2.37-2.37.526.323 1.09.559 1.724 1.066z" /><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-            <span class="font-semibold">Explore Personal Settings</span>
-            <span class="text-sm">Set your preferred LLM parameters, UI level, and language.</span>
-          </button>
+          <div class="whats-next-card">
+             <div class="icon-box bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400">3</div>
+            <div>
+                <h5 class="font-bold">Manage Data</h5>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Create RAG Data Stores in the Data Studio to let AI read your docs.</p>
+            </div>
+          </div>
 
-          <button @click="closeAndNavigate('Home')" class="whats-next-button">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mb-2 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m0 0l-7 7-7-7m7 7v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>
-            <span class="font-semibold">Start Chatting!</span>
-            <span class="text-sm">Begin a new conversation or explore the social feed.</span>
-          </button>
+          <div class="whats-next-card">
+             <div class="icon-box bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400">4</div>
+            <div>
+                <h5 class="font-bold">System Settings</h5>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Adjust global server settings, email, and security options.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-center pt-6">
+            <button @click="finalizeSetup" class="btn btn-primary flex items-center gap-2 px-8 py-3 text-lg shadow-xl">
+                <span>Go to Admin Panel</span>
+                <IconArrowRight class="w-5 h-5" />
+            </button>
         </div>
       </div>
     </template>
-    <template #footer>
-      <button @click="handleClose" class="btn btn-secondary">
-        Close
-      </button>
-    </template>
+    
+    <!-- No Footer needed as buttons are inline -->
+    <template #footer><div></div></template>
   </GenericModal>
 </template>
 
 <style scoped>
-.whats-next-button {
-    @apply flex flex-col items-center justify-center p-4 text-center rounded-lg border-2 border-gray-200 dark:border-gray-700
-           hover:bg-blue-50 dark:hover:bg-blue-900/30 hover:border-blue-400 dark:hover:border-blue-600 transition-all duration-200
-           text-gray-800 dark:text-gray-100 space-y-1 h-36; /* Fixed height to keep grid uniform */
+.whats-next-card {
+    @apply flex items-start gap-3 p-3 rounded-lg border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50;
 }
-.whats-next-button span {
-    @apply text-sm text-gray-600 dark:text-gray-300;
+.icon-box {
+    @apply w-8 h-8 flex items-center justify-center rounded-full font-bold text-sm flex-shrink-0;
 }
-.whats-next-button .font-semibold {
-    @apply text-gray-900 dark:text-white text-lg;
-}
+.custom-scrollbar::-webkit-scrollbar { width: 6px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 </style>
