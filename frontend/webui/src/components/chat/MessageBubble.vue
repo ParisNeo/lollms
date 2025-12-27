@@ -6,7 +6,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
-import { useTasksStore } from '../../stores/tasks'; // Import tasks store for spinner
+import { useTasksStore } from '../../stores/tasks';
 import { storeToRefs } from 'pinia';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
@@ -103,7 +103,6 @@ const newImageFiles = ref([]);
 const editImageInput = ref(null);
 const audioPlayerRef = ref(null);
 
-// Local state: Which index is selected for view in EACH group. Map<GroupId, ImageIndex>
 const selectedViewIndices = ref({});
 
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
@@ -117,7 +116,6 @@ const isAi = computed(() => props.message.sender_type === 'assistant');
 const isSystem = computed(() => props.message.sender_type === 'system');
 const isNewManualMessage = computed(() => props.message.id.startsWith('temp-manual-'));
 
-// ... (other computed properties remain same)
 const otherUserIcon = computed(() => {
     if (!isOtherUser.value) return null;
     return discussionsStore.activeDiscussionParticipants[props.message.sender]?.icon;
@@ -187,11 +185,8 @@ onMounted(() => {
     // Initialize selected indices for each group
     if (imageGroups.value.length > 0) {
         imageGroups.value.forEach(group => {
-            // Default to the active image in the group, or the last one if none found
             if (!selectedViewIndices.value[group.id]) {
-                // Find the first active image in this group
                 const activeIdx = group.indices.find(idx => isImageActive(idx));
-                // Use the active one, or fallback to the last one (most recent)
                 selectedViewIndices.value[group.id] = activeIdx !== undefined ? activeIdx : group.indices[group.indices.length - 1];
             }
         });
@@ -209,10 +204,8 @@ const imageGroups = computed(() => {
     if (images.length === 0) return [];
 
     const metadata = props.message.metadata || {};
-    // Combine generation groups and uploaded packs
     const metaGroups = (metadata.image_generation_groups || []).concat(metadata.image_groups || []);
     
-    // Track which indices are handled by groups
     const handledIndices = new Set();
     const resultGroups = [];
 
@@ -231,21 +224,23 @@ const imageGroups = computed(() => {
         }
     });
 
-    // 2. Collect leftover (uploaded/legacy) images into "Attachments" if they aren't in a specific group
+    // 2. Collect leftover images as distinct "User Upload" packs if they aren't grouped
     const leftoverIndices = images.map((_, i) => i).filter(i => !handledIndices.has(i));
     if (leftoverIndices.length > 0) {
-        resultGroups.push({
-            id: 'attachments',
-            title: 'Attachments',
-            type: 'upload',
-            indices: leftoverIndices,
-            images: leftoverIndices.map(i => images[i])
+        // [UPDATE] Create a SEPARATE group for each leftover image so they stack vertically
+        leftoverIndices.forEach((imgIndex, i) => {
+            resultGroups.push({
+                id: `upload_${imgIndex}`,
+                title: `Attachment ${i + 1}`,
+                type: 'upload',
+                indices: [imgIndex],
+                images: [images[imgIndex]]
+            });
         });
     }
 
     return resultGroups;
 });
-
 
 const isImageActive = (index) => {
     if (!props.message.active_images || props.message.active_images.length <= index) {
@@ -274,16 +269,9 @@ function canRegenerateImage(index) {
     return infos.some(info => info.index === index);
 }
 
-// Watch tasks store to see if this message has a regeneration task
 const isRegenerating = (groupId) => {
-    // We check if any active task relates to regenerating an image in this message for this group
-    // The task logic is generic, so we rely on the UI button click to set a local spinner if desired,
-    // or better, check the global task list for a name match.
-    // Task name format: "Regenerate Image {index}"
     const group = imageGroups.value.find(g => g.id === groupId);
     if (!group) return false;
-    
-    // Check if any index in this group has a running task
     return group.indices.some(idx => 
         imageGenerationTasks.value.some(t => t.name.includes(`Regenerate Image ${idx}`))
     );
@@ -298,13 +286,10 @@ function selectView(groupId, index) {
     selectedViewIndices.value[groupId] = index;
 }
 
-// Ensure view index updates if new images arrive (e.g. after regeneration)
 watch(() => props.message.image_references, (newRefs, oldRefs) => {
     if (newRefs && oldRefs && newRefs.length > oldRefs.length) {
-        // Find which group got a new image
         imageGroups.value.forEach(group => {
             const lastIndex = group.indices[group.indices.length - 1];
-            // If the last index is new (greater than old length), auto-select it
             if (lastIndex >= oldRefs.length) {
                 selectedViewIndices.value[group.id] = lastIndex;
             }
@@ -312,7 +297,6 @@ watch(() => props.message.image_references, (newRefs, oldRefs) => {
     }
 }, { deep: true });
 
-// ... (Rest of logic: containsCode, events, branches, editing, etc. remains same)
 const containsCode = computed(() => {
     return props.message.content && props.message.content.includes('```');
 });
@@ -535,10 +519,19 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                     <span class="truncate" :title="group.title">{{ group.title }}</span>
                                     <span class="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 rounded">{{ group.images.length }} version(s)</span>
                                 </div>
+                                
+                                <!-- Export Actions (NEW) -->
+                                <div class="flex gap-2 my-1" v-if="group.type === 'slideshow'">
+                                     <button @click="handleExport('pptx')" class="btn btn-secondary btn-xs flex items-center gap-1">
+                                        <IconArrowDownTray class="w-3 h-3"/> Download PPTX
+                                     </button>
+                                     <button @click="handleExport('pdf')" class="btn btn-secondary btn-xs flex items-center gap-1">
+                                        <IconArrowDownTray class="w-3 h-3"/> Download PDF
+                                     </button>
+                                </div>
 
                                 <!-- Main Image Display for this Group -->
-                                <div v-if="group.images.length > 0" class="main-image-viewport relative aspect-video sm:aspect-square max-h-[500px] w-full rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 dark:border-gray-700 shadow-lg group/viewport transition-all duration-300"
-                                     :class="{'grayscale opacity-50': !isImageActive(selectedViewIndices[group.id] ?? group.indices[0])}">
+                                <div v-if="group.images.length > 0" class="main-image-viewport relative aspect-video sm:aspect-square max-h-[500px] w-full rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 dark:border-gray-700 shadow-lg group/viewport transition-all duration-300">
                                     
                                     <!-- Spinner Overlay for Regenerating -->
                                     <div v-if="isRegenerating(group.id)" class="absolute inset-0 z-20 bg-white/60 dark:bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
@@ -572,10 +565,12 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                         </button>
                                     </div>
 
-                                    <!-- Visibility Status Badge -->
-                                    <div v-if="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="absolute top-4 left-4 px-3 py-1.5 bg-black/60 backdrop-blur-md rounded-full text-white text-[10px] font-black uppercase tracking-widest border border-white/20 flex items-center gap-2 pointer-events-none z-10">
-                                         <IconEyeOff class="w-3.5 h-3.5" />
-                                         <span>Hidden from context</span>
+                                    <!-- Visibility Status Badge (Replaced Grayscale with Eye-Off Overlay) -->
+                                    <div v-if="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="absolute inset-0 z-10 flex items-center justify-center bg-black/20 backdrop-blur-[2px] pointer-events-none">
+                                         <div class="px-4 py-2 bg-black/70 rounded-full text-white flex items-center gap-2 shadow-xl border border-white/20">
+                                             <IconEyeOff class="w-6 h-6 text-red-400" />
+                                             <span class="font-bold uppercase tracking-widest text-xs">Inactive</span>
+                                         </div>
                                     </div>
                                 </div>
 
@@ -584,7 +579,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                     <div v-for="(imgSrc, idx) in group.images" 
                                          :key="`${group.id}-thumb-${idx}`"
                                          class="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl overflow-hidden border-2 transition-all duration-200 cursor-pointer shadow-sm"
-                                         :class="(selectedViewIndices[group.id] ?? group.indices[0]) === group.indices[idx] ? 'border-blue-500 scale-105 shadow-md' : 'border-transparent opacity-60 hover:opacity-100'"
+                                         :class="(selectedViewIndices[group.id] ?? group.indices[0]) === group.indices[idx] ? 'border-blue-500 scale-105 shadow-md' : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'"
                                          @click.stop="selectView(group.id, group.indices[idx])"
                                     >
                                         <AuthenticatedImage :src="allImages[group.indices[idx]]" class="w-full h-full object-cover" />

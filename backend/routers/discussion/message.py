@@ -87,7 +87,6 @@ class RegenerateImageRequest(BaseModel):
     prompt: Optional[str] = None # Optional override, otherwise use stored
 
 def build_message_router(router: APIRouter):
-    # ... (other endpoints like grade_discussion_message, update_discussion_message etc. remain unchanged)
     @router.put("/{discussion_id}/messages/{message_id}/grade", response_model=MessageOutput)
     async def grade_discussion_message(discussion_id: str, message_id: str, grade_update: MessageGradeUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         username = current_user.username
@@ -211,6 +210,8 @@ def build_message_router(router: APIRouter):
         # Use the message object's toggle functionality to respect grouping/packs logic
         try:
             msg.toggle_image_activation(image_index)
+            # CRITICAL FIX: Commit changes to persist active/inactive state
+            discussion_obj.commit()
         except IndexError:
             raise HTTPException(status_code=404, detail="Image index out of bounds.")
         except Exception as e:
@@ -449,6 +450,13 @@ def build_message_router(router: APIRouter):
         filename = f"message_{message_id[:8]}.{export_format}"
         media_type = "application/octet-stream"
         file_content = b''
+        
+        # --- NEW: Gather Attached Images ---
+        attached_images_b64 = []
+        if message.images:
+            for img in message.images:
+                # Images are usually stored as base64 in the message object
+                attached_images_b64.append(img)
 
         try:
             if export_format == 'txt':
@@ -461,12 +469,12 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'html':
                 media_type = "text/html"
-                html_content = md2_to_html(content)  # markdown2 with extras
-                file_content = html_wrapper(html_content, title="Message Export")
+                html_content = md2_to_html(content)  # markdown2
+                file_content = html_wrapper(html_content, title="Export")  # consistent HTML shell
 
             elif export_format == 'pdf':
                 media_type = "application/pdf"
-                file_content = md_to_pdf_bytes(content)  # preserves headings/lists/code/images/tables
+                file_content = md_to_pdf_bytes(content, extra_images=attached_images_b64)
 
             elif export_format == 'docx':
                 media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -475,7 +483,8 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'pptx':
                 media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                file_content = md_to_pptx_bytes(content)  # Markdown slides via mdtopptx
+                # Pass attached images to PPTX generator
+                file_content = md_to_pptx_bytes(content, extra_images=attached_images_b64)
 
             elif export_format == 'xlsx':
                 media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -522,14 +531,12 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'rtf':
                 media_type = "application/rtf"
-                from bs4 import BeautifulSoup
                 text = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
                 rtf = r"{\rtf1\ansi " + text.replace("\\", r"\\").replace("{", r"\{").replace("}", r"\}").replace("\n", r"\par ") + "}"
                 file_content = rtf.encode("utf-8", errors="ignore")
 
             elif export_format in ['tex', 'latex']:
                 media_type = "application/x-tex"
-                from bs4 import BeautifulSoup
                 text = BeautifulSoup(md2_to_html(content), "html.parser").get_text()
                 def esc(t: str) -> str:
                     rep = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}

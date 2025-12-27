@@ -6,10 +6,11 @@ import json
 import re
 import shutil
 import uuid
+import types
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, List, Optional, Tuple, Union
 import traceback
 import threading
 import asyncio
@@ -68,6 +69,7 @@ from backend.session import (get_current_active_user,
 from backend.task_manager import task_manager, Task
 from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
+from backend.tasks.image_generation_tasks import _generate_slides_task
 
 def _sanitize_b64(data: str) -> str:
     """Removes data URI scheme if present to return raw base64."""
@@ -131,6 +133,168 @@ def resize_base64_image(b64_str: str, max_width: int = -1, max_height: int = -1)
         print(f"Error resizing/compressing image: {e}")
         # Return original (sanitized) on error
         return _sanitize_b64(b64_str)
+
+def build_image_dicts(images_b64):
+    """Helper to convert list of b64 strings/urls into structured dicts for export."""
+    if not images_b64: return []
+    res = []
+    for img in images_b64:
+        if isinstance(img, str):
+            if img.startswith("http"):
+                res.append({'type': 'url', 'data': img})
+            else:
+                 res.append({'type': 'base64', 'data': _sanitize_b64(img)})
+        elif isinstance(img, dict) and 'data' in img:
+             # Handle already structured dicts if present
+             data = img['data']
+             if data.startswith("http"):
+                res.append({'type': 'url', 'data': data})
+             else:
+                res.append({'type': 'base64', 'data': _sanitize_b64(data)})
+    return res
+
+def patched_export(self, format_type: str, branch_tip_id: Optional[str] = None, max_allowed_tokens: Optional[int] = None, suppress_system_prompt=False) -> Union[List[Dict], str]:
+    """
+    Patched export method to prevent image duplication in system prompt.
+    Only includes global discussion gallery images in the system prompt, not message-specific images.
+    """
+    branch_tip_id = branch_tip_id or self.active_branch_id
+    if not branch_tip_id and format_type in ["lollms_text", "openai_chat", "ollama_chat", "markdown"]:
+        if format_type in ["lollms_text", "markdown"]:
+            return ""
+        else:
+            return []
+
+    branch = self.get_branch(branch_tip_id)
+    
+    # Combine system prompt and data zones
+    system_prompt_part = (self._system_prompt or "").strip()
+    data_zone_part = self.get_full_data_zone() 
+    full_system_prompt = ""
+
+    if not suppress_system_prompt:
+        if system_prompt_part and data_zone_part:
+            full_system_prompt = f"{system_prompt_part}\n\n{data_zone_part}"
+        elif system_prompt_part:
+            full_system_prompt = system_prompt_part
+        else:
+            full_system_prompt = data_zone_part
+
+    participants = self.participants or {}
+
+    def get_full_content(msg) -> str:
+        return (msg.content or "").strip()
+
+    # --- NATIVE LOLLMS_TEXT FORMAT ---
+    if format_type == "lollms_text":
+        final_prompt_parts = []
+        message_parts = [] 
+        current_tokens = 0
+        messages_to_render = branch
+
+        summary_text = ""
+        if self.pruning_summary and self.pruning_point_id:
+            pruning_index = -1
+            for i, msg in enumerate(branch):
+                if msg.id == self.pruning_point_id:
+                    pruning_index = i
+                    break
+            if pruning_index != -1:
+                messages_to_render = branch[pruning_index:]
+                summary_text = f"!@>system:\n--- Conversation Summary ---\n{self.pruning_summary.strip()}\n"
+
+        sys_msg_text = ""
+        if full_system_prompt:
+            sys_msg_text = f"!@>system:\n{full_system_prompt.strip()}\n"
+            sys_tokens = self.lollmsClient.count_tokens(sys_msg_text)
+            if max_allowed_tokens is None or sys_tokens <= max_allowed_tokens:
+                final_prompt_parts.append(sys_msg_text)
+                current_tokens += sys_tokens
+
+        if summary_text:
+            summary_tokens = self.lollmsClient.count_tokens(summary_text)
+            if max_allowed_tokens is None or current_tokens + summary_tokens <= max_allowed_tokens:
+                final_prompt_parts.append(summary_text)
+                current_tokens += summary_tokens
+
+        for msg in reversed(messages_to_render):
+            sender_str = msg.sender.replace(':', '').replace('!@>', '')
+            content = get_full_content(msg)
+            
+            active_images = msg.get_active_images()
+            if active_images:
+                content += f"\n({len(active_images)} image(s) attached)"
+
+            msg_text = f"!@>{sender_str}:\n{content}\n"
+            msg_tokens = self.lollmsClient.count_tokens(msg_text)
+
+            if max_allowed_tokens is not None and current_tokens + msg_tokens > max_allowed_tokens:
+                break
+
+            message_parts.insert(0, msg_text)
+            current_tokens += msg_tokens
+
+        final_prompt_parts.extend(message_parts)
+        return "".join(final_prompt_parts).strip()
+
+    # --- OPENAI & OLLAMA CHAT FORMATS ---
+    messages = []
+    
+    # Handle system message
+    # Ensure only text is sent in system prompt to avoid redundancy
+    if full_system_prompt:
+        if format_type == "openai_chat":
+            messages.append({"role": "system", "content": full_system_prompt})
+        elif format_type == "ollama_chat":
+            messages.append({"role": "system", "content": full_system_prompt})
+        elif format_type == "markdown":
+             messages.append(f"system: {full_system_prompt}\n")
+        else:
+             messages.append({"role": "system", "content": full_system_prompt})
+
+    for msg in branch:
+        if msg.sender_type == 'user':
+            role = participants.get(msg.sender, "user")
+        else:
+            role = participants.get(msg.sender, "assistant")
+
+        content = get_full_content(msg)
+        active_images_b64 = msg.get_active_images()
+        images = build_image_dicts(active_images_b64)
+
+        if format_type == "openai_chat":
+            if images:
+                content_parts = [{"type": "text", "text": content}] if content else []
+                for img in images:
+                    img_data = img['data']
+                    url = f"data:image/jpeg;base64,{img_data}" if img['type'] == 'base64' else img_data
+                    content_parts.append({"type": "image_url", "image_url": {"url": url, "detail": "auto"}})
+                messages.append({"role": role, "content": content_parts})
+            else:
+                messages.append({"role": role, "content": content})
+
+        elif format_type == "ollama_chat":
+            message_dict = {"role": role, "content": content}
+            
+            base64_images = [img['data'] for img in images if img['type'] == 'base64']
+            if base64_images:
+                message_dict["images"] = base64_images
+            messages.append(message_dict)
+
+        elif format_type == "markdown":
+            markdown_line = f"**{role.capitalize()}**: {content}\n"
+            if images:
+                for img in images:
+                    img_data = img['data']
+                    url = f"![Image](data:image/jpeg;base64,{img_data})" if img['type'] == 'base64' else f"![Image]({img_data})"
+                    markdown_line += f"\n{url}\n"
+            messages.append(markdown_line)
+
+        else:
+            raise ValueError(f"Unsupported export format_type: {format_type}")
+
+    return "\n".join(messages) if format_type == "markdown" else messages
+
 
 def process_memory_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool]:
     """
@@ -222,6 +386,8 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
     if not matches:
         return text, [], [], []
 
+    error_messages = []
+
     try:
         lc = build_lollms_client_from_params(
             username=user.username,
@@ -229,15 +395,20 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
             load_tti=True
         )
         if not lc.tti:
-            print("WARNING: TTI binding not available for image generation tag.")
-            return text, [], [], []
+            # Explicit warning if TTI not available, stripping tags so user sees the text but knows why no image
+            cleaned_text = pattern.sub('', text).strip()
+            cleaned_text += "\n\n> **System Warning:** Image generation was requested but no Text-to-Image (TTI) engine is active. Please configure a TTI binding in settings."
+            return cleaned_text, [], [], []
+            
     except Exception as e:
         print(f"TTI Client Init Error: {e}")
-        return text, [], [], []
+        cleaned_text = pattern.sub('', text).strip()
+        cleaned_text += f"\n\n> **System Error:** Failed to initialize image generation: {e}"
+        return cleaned_text, [], [], []
 
     images_b64 = []
     generation_infos = []
-    generated_groups = [] # To store grouping info
+    generated_groups = []
     
     current_image_count = 0
 
@@ -281,7 +452,10 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
                     })
                     group_indices.append(current_image_count)
                     current_image_count += 1
+                else:
+                    error_messages.append(f"Generator returned no data for prompt: {prompt[:20]}...")
             except Exception as e:
+                error_messages.append(f"Generation failed: {str(e)}")
                 print(f"Image generation failed for prompt '{prompt}': {e}")
         
         if group_indices:
@@ -296,15 +470,73 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
             payload = {"type": "step_end", "content": "Image generation step complete.", "id": None}
             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
 
-    # Replace/Remove tags
-    new_text = text
-    for match in reversed(matches):
-        start, end = match.span()
-        new_text = new_text[:start] + "" + new_text[end:]
+    # CLEANUP: Remove tags
+    cleaned_text = pattern.sub('', text).strip()
+    
+    if error_messages:
+        cleaned_text += "\n\n> **Generation Errors:**\n" + "\n".join([f"> - {msg}" for msg in error_messages])
 
-    return new_text, images_b64, generation_infos, generated_groups
+    return cleaned_text, images_b64, generation_infos, generated_groups
 
-def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
+def process_slide_generation_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None) -> Tuple[str, bool]:
+    """
+    Parses <generate_slides> tags and triggers the slide generation task.
+    Returns: (cleaned_text, task_triggered_boolean)
+    """
+    # Pattern: <generate_slides width="1024" height="768" n="5" style="cinematic">prompt</generate_slides>
+    pattern = re.compile(r'<generate_slides\b([^>]*)>(.*?)</generate_slides>', re.DOTALL | re.IGNORECASE)
+    
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return text, False
+
+    task_triggered = False
+
+    for match in matches:
+        attr_str = match.group(1)
+        prompt = match.group(2).strip()
+        
+        width = 1024
+        height = 768 # Default slide size (4:3ish, or could be 16:9 like 1280x720)
+        count = 1
+        style = ""
+        
+        # Parse attributes
+        width_match = re.search(r'width="(\d+)"', attr_str)
+        if width_match: width = int(width_match.group(1))
+        
+        height_match = re.search(r'height="(\d+)"', attr_str)
+        if height_match: height = int(height_match.group(1))
+        
+        count_match = re.search(r'n="(\d+)"', attr_str)
+        if count_match: count = int(count_match.group(1))
+        
+        style_match = re.search(r'style="([^"]*)"', attr_str)
+        if style_match: style = style_match.group(1)
+
+        # Trigger background task
+        try:
+            task_manager.submit_task(
+                name=f"Generating Slides: {prompt[:30]}...",
+                target=_generate_slides_task,
+                args=(user.username, discussion_obj.id, prompt, width, height, count, style),
+                description=f"Creating {count} slide images for: '{prompt[:50]}...'",
+                owner_username=user.username
+            )
+            task_triggered = True
+            
+            if main_loop and stream_queue:
+                payload = {"type": "info", "content": f"Started slide generation task for '{prompt}'."}
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
+                
+        except Exception as e:
+             print(f"Failed to start slide generation task: {e}")
+
+    # Remove tags from text
+    cleaned_text = pattern.sub('', text).strip()
+    return cleaned_text, task_triggered
+
+def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None, current_turn_images: List[str] = None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
     """
     Parses <edit_image> tags to edit previously generated images.
     Returns: (cleaned_text, list_of_base64_images, list_of_image_metadata, list_of_groups)
@@ -316,6 +548,8 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
     if not matches:
         return text, [], [], []
 
+    error_messages = []
+
     try:
         lc = build_lollms_client_from_params(
             username=user.username,
@@ -323,25 +557,43 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
             load_tti=True
         )
         if not lc.tti:
-            print("WARNING: TTI binding not available for image editing.")
-            return text, [], [], []
+            # Warning if TTI missing
+            cleaned_text = pattern.sub('', text).strip()
+            cleaned_text += "\n\n> **System Warning:** Image editing was requested but no Text-to-Image (TTI) engine is currently active. Please configure a TTI binding in settings."
+            return cleaned_text, [], [], []
+            
     except Exception as e:
         print(f"TTI Client Init Error: {e}")
-        return text, [], [], []
+        cleaned_text = pattern.sub('', text).strip()
+        cleaned_text += f"\n\n> **System Error:** Failed to initialize image editor: {e}"
+        return cleaned_text, [], [], []
 
     images_b64 = []
     generation_infos = []
     generated_groups = []
     current_image_count = 0
 
-    # Retrieve all available images from the discussion to find the source
-    # discussion_obj.get_discussion_images() returns metadata [{data: b64, active: bool, ...}]
-    # We want base64 data for editing.
-    all_discussion_images = discussion_obj.get_discussion_images()
+    # [FIX] Robustly gather all images in chronological order
+    all_available_images = []
     
-    # Filter to only active images? Usually "context" means active images.
-    # Let's assume we can reference any active image in the history.
-    active_images_data = [img['data'] for img in all_discussion_images if img.get('active', True)]
+    # 1. Load historical messages if needed to ensure we have the images
+    if not discussion_obj.messages:
+        discussion_obj.load_messages()
+    
+    # 2. Iterate chronologically through all messages
+    for msg in discussion_obj.messages:
+        # Check for images in 'images' list or 'image_references'
+        # lollms_client usually stores as list of b64 strings in `images`
+        msg_images = msg.get_active_images() # Returns list of b64 strings
+        for img in msg_images:
+            all_available_images.append(_sanitize_b64(img))
+            
+    # 3. Append current turn images (if any were uploaded this turn and passed in)
+    if current_turn_images:
+        for img in current_turn_images:
+            all_available_images.append(_sanitize_b64(img))
+            
+    # print(f"DEBUG: Found {len(all_available_images)} total images for editing context.")
 
     for match in matches:
         attr_str = match.group(1)
@@ -359,48 +611,63 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
             elif key == 'width': width = int(val)
             elif key == 'height': height = int(val)
 
-        # Resolve source image
+        # Resolve source image using collected chronological list
         source_image_b64 = None
         try:
+            # Indices are 0-based for absolute, or negative for relative to end
             if source_index < 0:
-                # Relative indexing from end
-                if abs(source_index) <= len(active_images_data):
-                    source_image_b64 = active_images_data[len(active_images_data) + source_index]
+                # e.g. -1 is last image, -2 is second to last
+                final_idx = len(all_available_images) + source_index
+                if 0 <= final_idx < len(all_available_images):
+                    source_image_b64 = all_available_images[final_idx]
             else:
-                # Absolute indexing
-                if source_index < len(active_images_data):
-                    source_image_b64 = active_images_data[source_index]
-        except Exception:
-            pass
+                if source_index < len(all_available_images):
+                    source_image_b64 = all_available_images[source_index]
+        except Exception as e:
+            print(f"Error resolving index {source_index}: {e}")
 
         if not source_image_b64:
-            print(f"WARNING: Could not find source image at index {source_index} for editing.")
+            error_messages.append(f"Could not find source image at index {source_index} for editing. (Total images: {len(all_available_images)})")
             continue
 
-        # Strip data URI prefix if present
-        source_image_b64 = _sanitize_b64(source_image_b64)
+        # [FIX] Infer dimensions from source image if missing, to prevent 'NoneType' division errors
+        if width is None or height is None:
+            try:
+                img_data = base64.b64decode(source_image_b64)
+                with Image.open(io.BytesIO(img_data)) as img:
+                    if width is None: width = img.width
+                    if height is None: height = img.height
+            except Exception as e:
+                print(f"Error extracting dimensions from source image: {e}")
+                # Fallback to defaults if image is corrupted or undecodable
+                if width is None: width = 1024
+                if height is None: height = 1024
 
         if main_loop and stream_queue:
             payload = {"type": "step_start", "content": f"Editing image: {prompt[:30]}..."}
             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
 
         try:
-            edit_kwargs = {
-                "base_image_b64": source_image_b64,
-                "prompt": prompt,
-                "strength": strength,
-                "width": width,
-                "height": height
-            }
-            # Clean None values
-            edit_kwargs = {k: v for k, v in edit_kwargs.items() if v is not None}
-
+            # Check for correct edit method signature
             if hasattr(lc.tti, 'edit_image'):
-                image_bytes = lc.tti.edit_image(**edit_kwargs)
+                # Correct signature: images, prompt, ...
+                image_bytes = lc.tti.edit_image(
+                    images=source_image_b64,
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    strength=strength
+                )
             else:
-                # Fallback: img2img via generate
-                 # This depends on specific binding implementation
-                image_bytes = lc.tti.generate_image(image=source_image_b64, **edit_kwargs)
+                # Fallback: img2img via generate_image (uses 'image' kwarg)
+                # This depends on specific binding implementation details
+                image_bytes = lc.tti.generate_image(
+                    image=source_image_b64,
+                    prompt=prompt,
+                    width=width,
+                    height=height,
+                    strength=strength
+                )
 
             if image_bytes:
                 b64 = base64.b64encode(image_bytes).decode('utf-8')
@@ -423,23 +690,23 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
                 
                 current_image_count += 1
             else:
-                print("TTI edit returned no data.")
+                error_messages.append("TTI edit returned no data.")
 
         except Exception as e:
-            print(f"Image editing failed: {e}")
+            error_messages.append(f"Image editing failed: {str(e)}")
             trace_exception(e)
         
         if main_loop and stream_queue:
             payload = {"type": "step_end", "content": "Image editing complete.", "id": None}
             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
 
-    # Clean text
-    new_text = text
-    for match in reversed(matches):
-        start, end = match.span()
-        new_text = new_text[:start] + "" + new_text[end:]
+    # CLEANUP: Remove tags if successful
+    cleaned_text = pattern.sub('', text).strip()
+    
+    if error_messages:
+        cleaned_text += "\n\n> **Editing Errors:**\n" + "\n".join([f"> - {msg}" for msg in error_messages])
 
-    return new_text, images_b64, generation_infos, generated_groups
+    return cleaned_text, images_b64, generation_infos, generated_groups
 
 
 def build_llm_generation_router(router: APIRouter):
@@ -456,6 +723,16 @@ def build_llm_generation_router(router: APIRouter):
         discussion_obj, owner_username, permission, owner_db_user = await get_discussion_and_owner_for_request(
             discussion_id, current_user, db, 'interact'
         )
+
+        # [FIX] Apply monkey-patch to prevent duplicate images in system prompt
+        discussion_obj.export = types.MethodType(patched_export, discussion_obj)
+        
+        # [FIX] Force switch branch for regeneration
+        if is_resend and parent_message_id:
+             try:
+                discussion_obj.switch_to_branch(parent_message_id)
+             except Exception as e:
+                print(f"Error switching branch for regeneration: {e}")
 
         user_model_full = current_user.lollms_model_name
         binding_alias = None
@@ -581,6 +858,17 @@ def build_llm_generation_router(router: APIRouter):
                 "- `height` (optional): Image height in pixels (e.g., 1024, 768).\n"
                 "- `n` (optional): Number of variants to generate (max 10).\n"
                 "Example: `<generate_image width=\"1216\" height=\"832\" n=\"2\">A majestic lion in the savannah at sunset, photorealistic style</generate_image>`"
+            )
+            
+            # --- NEW: Slide Generation Instruction ---
+            preamble_parts.append(
+                "## Slide Show Generation Instructions\n"
+                "To generate a coherent set of slides (images) for a presentation, use the tag `<generate_slides width=\"W\" height=\"H\" n=\"N\" style=\"STYLE\">prompt</generate_slides>`.\n"
+                "- `width`/`height`: Dimensions (default 1024x768).\n"
+                "- `n`: Number of slides to generate.\n"
+                "- `style`: Artistic style to apply to all slides (e.g., 'corporate', 'watercolor', 'cinematic').\n"
+                "The prompt should describe the overall theme or content of the slides.\n"
+                "Example: `<generate_slides width=\"1280\" height=\"720\" n=\"5\" style=\"minimalist vector art\">A pitch deck for a futuristic coffee shop robot</generate_slides>`"
             )
 
         if owner_db_user.image_editing_enabled:
@@ -731,7 +1019,7 @@ def build_llm_generation_router(router: APIRouter):
                                 b64_data = base64.b64encode((assets_path / persistent_filename).read_bytes()).decode('utf-8')
                                 images_for_message.append(b64_data)
 
-                    all_input_images = active_discussion_images_raw + images_for_message
+                    all_input_images = images_for_message # Fix: Do not append discussion images to prompt. They are part of system context via export.
 
                     # --- RESIZE AND COMPRESS LOGIC ---
                     # Check user settings for max dimensions
@@ -746,8 +1034,10 @@ def build_llm_generation_router(router: APIRouter):
                         all_input_images = resized_images
                     # -------------------------
 
+                    # FIX: Pass add_user_message=not is_resend to prevent duplication on regeneration
+                    # FIX: Pass generation_tip_id which was set correctly above
                     result = discussion_obj.chat(
-                        branch_tip_id=parent_message_id,
+                        branch_tip_id=parent_message_id, # This is the parent to branch from
                         user_message=prompt, 
                         personality=active_personality, 
                         use_mcps=combined_mcps, 
@@ -760,6 +1050,7 @@ def build_llm_generation_router(router: APIRouter):
                         debug=SERVER_CONFIG.get("debug", False),
                         user_name=current_user.username,
                         user_icon=current_user.icon,
+                        add_user_message=not is_resend, 
 
                         think=owner_db_user.reasoning_activation,
                         reasoning_effort=owner_db_user.reasoning_effort,
@@ -797,27 +1088,25 @@ def build_llm_generation_router(router: APIRouter):
                         if owner_db_user.image_generation_enabled:
                             db_img = next(get_db())
                             try:
+                                # Standard Image Generation
                                 processed_text, generated_images, generation_meta, generated_groups = process_image_generation_tags(ai_message_obj.content, owner_db_user, db_img, discussion_obj, main_loop, stream_queue)
+                                
+                                # Slides Generation
+                                processed_text_slides, slide_task_triggered = process_slide_generation_tags(processed_text, owner_db_user, db_img, discussion_obj, main_loop, stream_queue)
+                                
                                 if generated_images:
                                     current_images = ai_message_obj.images or []
                                     start_index_for_meta = len(current_images)
                                     
-                                    current_images.extend(generated_images)
-                                    ai_message_obj.images = current_images 
-                                    
-                                    # Ensure active_images array is consistent and defaults to active
-                                    if not ai_message_obj.active_images:
-                                        ai_message_obj.active_images = [True] * len(current_images)
-                                    else:
-                                        ai_message_obj.active_images.extend([True] * len(generated_images))
-                                    
-                                    # Use add_image_pack method if available or manual
+                                    # Use add_image_pack method to handle image appending and metadata
                                     should_activate = owner_db_user.activate_generated_images
                                     if hasattr(ai_message_obj, 'add_image_pack'):
-                                        ai_message_obj.add_image_pack(generated_images, group_type="generated", active_by_default=should_activate)
+                                        # Use the first prompt from the generation batch as title for the pack
+                                        title = generation_meta[0]['prompt'] if generation_meta else "Generated Images"
+                                        ai_message_obj.add_image_pack(generated_images, group_type="generated", active_by_default=should_activate, title=title)
                                     
-                                    if processed_text != ai_message_obj.content:
-                                        ai_message_obj.content = processed_text
+                                    if processed_text_slides != ai_message_obj.content:
+                                        ai_message_obj.content = processed_text_slides
                                     
                                     existing_metadata = ai_message_obj.metadata or {}
                                     existing_gen_infos = existing_metadata.get("generated_image_infos", [])
@@ -828,20 +1117,27 @@ def build_llm_generation_router(router: APIRouter):
                                     
                                     ai_message_obj.set_metadata_item("generated_image_infos", existing_gen_infos, discussion_obj)
                                     
-                                    existing_groups = existing_metadata.get("image_generation_groups", [])
-                                    
-                                    for group in generated_groups:
-                                        group['indices'] = [idx + start_index_for_meta for idx in group['indices']]
-                                        existing_groups.append(group)
-                                    
-                                    ai_message_obj.set_metadata_item("image_generation_groups", existing_groups, discussion_obj)
-
                                     discussion_obj.commit()
 
                                     manager.send_personal_message_sync({
                                         "type": "notification",
                                         "data": {"message": f"Generated {len(generated_images)} image(s).", "type": "success", "duration": 3000}
                                     }, current_user.id)
+                                    
+                                if slide_task_triggered:
+                                     # Slide generation is async in background task. 
+                                     # The task completion will add images to a NEW message or update this one if implemented.
+                                     # Currently _generate_slides_task adds to a NEW message.
+                                     # Just update content to remove tags.
+                                    if processed_text_slides != ai_message_obj.content:
+                                        ai_message_obj.content = processed_text_slides
+                                        discussion_obj.commit()
+                                
+                                # If processed_text differs, update the content (this handles stripping tags even if no images were generated but errors were appended)
+                                if processed_text != ai_message_obj.content:
+                                    ai_message_obj.content = processed_text
+                                    discussion_obj.commit()
+
                             except Exception as e:
                                 print(f"Error processing image tags: {e}")
                                 trace_exception(e)
@@ -852,22 +1148,22 @@ def build_llm_generation_router(router: APIRouter):
                         if owner_db_user.image_editing_enabled:
                             db_img_edit = next(get_db())
                             try:
-                                processed_text, edited_images, edit_meta, edit_groups = process_image_editing_tags(ai_message_obj.content, owner_db_user, db_img_edit, discussion_obj, main_loop, stream_queue)
+                                processed_text, edited_images, edit_meta, edit_groups = process_image_editing_tags(
+                                    ai_message_obj.content, 
+                                    owner_db_user, 
+                                    db_img_edit, 
+                                    discussion_obj, 
+                                    main_loop, 
+                                    stream_queue,
+                                    current_turn_images=all_input_images
+                                )
                                 if edited_images:
                                     current_images = ai_message_obj.images or []
                                     start_index = len(current_images)
                                     
-                                    current_images.extend(edited_images)
-                                    ai_message_obj.images = current_images
-                                    
-                                    # Default active
-                                    if not ai_message_obj.active_images:
-                                        ai_message_obj.active_images = [True] * len(current_images)
-                                    else:
-                                        ai_message_obj.active_images.extend([True] * len(edited_images))
-
                                     if hasattr(ai_message_obj, 'add_image_pack'):
-                                        ai_message_obj.add_image_pack(edited_images, group_type="generated", active_by_default=True)
+                                        title = edit_meta[0]['prompt'] if edit_meta else "Edited Images"
+                                        ai_message_obj.add_image_pack(edited_images, group_type="generated", active_by_default=True, title=title)
                                     
                                     if processed_text != ai_message_obj.content:
                                         ai_message_obj.content = processed_text
@@ -881,19 +1177,18 @@ def build_llm_generation_router(router: APIRouter):
                                     
                                     ai_message_obj.set_metadata_item("generated_image_infos", existing_gen_infos, discussion_obj)
 
-                                    existing_groups = existing_metadata.get("image_generation_groups", [])
-                                    for group in edit_groups:
-                                        group['indices'] = [idx + start_index for idx in group['indices']]
-                                        existing_groups.append(group)
-                                    
-                                    ai_message_obj.set_metadata_item("image_generation_groups", existing_groups, discussion_obj)
-
                                     discussion_obj.commit()
 
                                     manager.send_personal_message_sync({
                                         "type": "notification",
                                         "data": {"message": f"Edited {len(edited_images)} image(s).", "type": "success", "duration": 3000}
                                     }, current_user.id)
+                                
+                                # If processed_text differs, update the content (this handles stripping tags even if no images were generated but errors were appended)
+                                if processed_text != ai_message_obj.content:
+                                    ai_message_obj.content = processed_text
+                                    discussion_obj.commit()
+                                    
                             except Exception as e:
                                 print(f"Error processing image editing tags: {e}")
                                 trace_exception(e)

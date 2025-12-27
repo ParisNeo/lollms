@@ -1,4 +1,4 @@
-# [UPDATE] backend/session.py
+# backend/session.py
 import json
 import traceback
 import datetime
@@ -281,6 +281,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             image_generation_enabled=db_user.image_generation_enabled,
             image_generation_system_prompt=db_user.image_generation_system_prompt,
             image_annotation_enabled=db_user.image_annotation_enabled,
+            image_editing_enabled=db_user.image_editing_enabled,
+            slide_maker_enabled=db_user.slide_maker_enabled,
             activate_generated_images=db_user.activate_generated_images,
             note_generation_enabled=db_user.note_generation_enabled,
             memory_enabled=db_user.memory_enabled,
@@ -858,4 +860,3 @@ def get_user_notebook_assets_path(username: str, notebook_id: str) -> Path:
     path = get_user_data_root(username) / NOTEBOOK_ASSETS_DIR_NAME / secure_filename(notebook_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
-

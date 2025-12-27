@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/ui/MessageContentRenderer/MessageContentRenderer.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../../services/markdownParser';
@@ -7,6 +8,10 @@ import IconThinking from '../../../assets/icons/IconThinking.vue';
 import IconFileText from '../../../assets/icons/IconFileText.vue';
 import AuthenticatedImage from '../AuthenticatedImage.vue';
 import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
+import IconPhoto from '../../../assets/icons/IconPhoto.vue';
+import IconPencil from '../../../assets/icons/IconPencil.vue';
+import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
+import IconPresentationChartBar from '../../../assets/icons/IconPresentationChartBar.vue';
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -21,7 +26,6 @@ const messageContentRef = ref(null);
 
 // --- Math Rendering ---
 function renderMath() {
-  // Defensive check: ensure the ref is still attached to the DOM
   if (messageContentRef.value && messageContentRef.value.isConnected && window.renderMathInElement) {
     try {
       window.renderMathInElement(messageContentRef.value, {
@@ -67,14 +71,17 @@ const parsedMarkdown = (content) => {
   return html;
 };
 
+// Enhanced parser to handle additional tags like <edit_image>, <generate_image>, and <generate_slides>
 const parsedStreamingContent = computed(() => {
     if (!props.content) return '';
     let content = props.content;
-    const openTagIndex = content.lastIndexOf('<annotate>');
-    const closeTagIndex = content.lastIndexOf('</annotate>');
     
-    if (openTagIndex > -1 && openTagIndex > closeTagIndex) {
-        const before = content.substring(0, openTagIndex);
+    // Check for streaming annotation blocks
+    const openAnnTagIndex = content.lastIndexOf('<annotate>');
+    const closeAnnTagIndex = content.lastIndexOf('</annotate>');
+    
+    if (openAnnTagIndex > -1 && openAnnTagIndex > closeAnnTagIndex) {
+        const before = content.substring(0, openAnnTagIndex);
         const spinnerHtml = `<div class="flex items-center gap-2 my-4 p-3 bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg text-sm font-semibold text-blue-800 dark:text-blue-200">
             <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
             <span>Annotating image...</span>
@@ -82,6 +89,24 @@ const parsedStreamingContent = computed(() => {
         return parsedMarkdown(before) + spinnerHtml;
     }
     
+    // Check for streaming generation/editing blocks
+    // Added 'generate_slides' to the regex
+    const activeGenBlock = content.match(/<(generate_image|edit_image|generate_slides)[^>]*>(?!.*?<\/\1>)/s);
+    if (activeGenBlock) {
+         // Show a loading indicator if we are in the middle of a generation tag
+         let tagType = 'Processing';
+         if (activeGenBlock[1] === 'edit_image') tagType = 'Editing image';
+         else if (activeGenBlock[1] === 'generate_image') tagType = 'Generating image';
+         else if (activeGenBlock[1] === 'generate_slides') tagType = 'Generating slides';
+
+         const before = content.substring(0, activeGenBlock.index);
+         const spinnerHtml = `<div class="flex items-center gap-2 my-4 p-3 bg-purple-50 dark:bg-gray-900/40 border border-purple-200 dark:border-purple-800/30 rounded-lg text-sm font-semibold text-purple-800 dark:text-purple-200">
+            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            <span>${tagType}...</span>
+        </div>`;
+        return parsedMarkdown(before) + spinnerHtml;
+    }
+
     return parsedMarkdown(content);
 });
 
@@ -89,7 +114,10 @@ const messageParts = computed(() => {
     if (!props.content || props.isStreaming) return [];
     const parts = [];
     const content = props.content;
-    const specialBlockRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))/g;
+    
+    // Regex to split by special blocks: <think>, <annotate>, <generate_image>, <edit_image>, <generate_slides>
+    const specialBlockRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))/g;
+    
     let lastIndex = 0;
     let match;
 
@@ -98,28 +126,35 @@ const messageParts = computed(() => {
             parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
         }
 
-        if (match[1]) { // Captured a <think> block
+        if (match[1]) { // <think>
             const thinkContent = match[1].replace(/<think>|<\/think>/g, '').trim();
             if (thinkContent) {
                 parts.push({ type: 'think', content: thinkContent });
             }
-        } else if (match[2]) { // Captured an <annotate> block
+        } else if (match[2]) { // <annotate>
             let annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
-            
-            // --- FIX: Robustly extract JSON block and ignore surrounding backticks or commentary ---
             const jsonMatch = annotateContent.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-            if (jsonMatch) {
-                annotateContent = jsonMatch[0];
-            }
+            if (jsonMatch) annotateContent = jsonMatch[0];
             
             if (annotateContent) {
                 try {
                     parts.push({ type: 'annotate', annotations: JSON.parse(annotateContent) });
                 } catch (e) {
-                    console.error("Failed to parse annotation JSON:", e);
-                    parts.push({ type: 'content', content: `[Invalid annotation data: ${annotateContent}]` });
+                    parts.push({ type: 'content', content: `[Invalid annotation data]` });
                 }
             }
+        } else if (match[3]) { // <generate_image>
+            const fullTag = match[3];
+            const promptContent = fullTag.replace(/<generate_image[^>]*>|<\/generate_image>/g, '').trim();
+            parts.push({ type: 'image_tool', mode: 'generate', prompt: promptContent, raw: fullTag });
+        } else if (match[4]) { // <edit_image>
+            const fullTag = match[4];
+            const promptContent = fullTag.replace(/<edit_image[^>]*>|<\/edit_image>/g, '').trim();
+            parts.push({ type: 'image_tool', mode: 'edit', prompt: promptContent, raw: fullTag });
+        } else if (match[5]) { // <generate_slides>
+            const fullTag = match[5];
+            const promptContent = fullTag.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
+            parts.push({ type: 'image_tool', mode: 'slides', prompt: promptContent, raw: fullTag });
         }
         
         lastIndex = match.index + match[0].length;
@@ -169,12 +204,9 @@ const simpleHash = str => {
 
 function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayWidth) {
     if (!Array.isArray(annotations) || !ctx) return;
-
     annotations.forEach(ann => {
         const { box, point, polygon, class: oldLabel, label: newLabel, display } = ann;
-
         const scaleFactor = displayWidth > 0 ? naturalWidth / displayWidth : 1;
-        
         const color = display?.border_color || '#FF0000';
         const lineWidth = (display?.border_width || 2) * scaleFactor;
         const fillOpacity = display?.fill_opacity !== undefined ? display?.fill_opacity : 0.1;
@@ -198,19 +230,17 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
             ctx.fillText(text, x + padding, y - padding);
         };
 
-        if (box && box.length === 4) { // Bounding Box
+        if (box && box.length === 4) {
             const [x1, y1, x2, y2] = box;
             const absX = x1 * naturalWidth;
             const absY = y1 * naturalHeight;
             const absW = (x2 - x1) * naturalWidth;
             const absH = (y2 - y1) * naturalHeight;
-
             if (showBorder) ctx.strokeRect(absX, absY, absW, absH);
             ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
             ctx.fillRect(absX, absY, absW, absH);
             drawLabel(absX, absY);
-
-        } else if (polygon && Array.isArray(polygon) && polygon.length > 1) { // Polygon
+        } else if (polygon && Array.isArray(polygon) && polygon.length > 1) {
             ctx.beginPath();
             polygon.forEach((p, i) => {
                 if (i === 0) ctx.moveTo(p[0] * naturalWidth, p[1] * naturalHeight);
@@ -221,8 +251,7 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
             ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
             ctx.fill();
             drawLabel(polygon[0][0] * naturalWidth, polygon[0][1] * naturalHeight);
-
-        } else if (point && point.length === 2) { // Point
+        } else if (point && point.length === 2) {
             const [x, y] = point;
             const absX = x * naturalWidth;
             const absY = y * naturalHeight;
@@ -261,30 +290,21 @@ async function downloadAnnotatedImage(annotations, event) {
 function onImageLoad(event, annotations) {
     const img = event.target;
     if (!img || img.tagName !== 'IMG') return;
-
     const tryDrawing = () => {
         const container = img.closest('.annotated-image-container');
         if (!container) return;
         const canvas = container.querySelector('canvas');
         if (!canvas) return;
-
         const { naturalWidth, naturalHeight } = img;
         const { clientWidth: containerWidth, clientHeight: containerHeight } = container;
-
-        if (naturalWidth === 0 || containerWidth === 0 || containerHeight === 0) {
-            return;
-        }
-
+        if (naturalWidth === 0 || containerWidth === 0 || containerHeight === 0) return;
         canvas.width = naturalWidth;
         canvas.height = naturalHeight;
         const ctx = canvas.getContext('2d');
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
         drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, img.clientWidth);
-
         const imgAspectRatio = naturalWidth / naturalHeight;
         const containerAspectRatio = containerWidth / containerHeight;
-
         if (imgAspectRatio > containerAspectRatio) {
             const scaledHeight = containerWidth / imgAspectRatio;
             const verticalMargin = (containerHeight - scaledHeight) / 2;
@@ -305,8 +325,9 @@ function onImageLoad(event, annotations) {
       <div v-if="isStreaming" v-html="parsedStreamingContent"></div>
       <template v-else>
         <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
+          
+          <!-- Standard Content -->
           <template v-if="part.type === 'content'">
-            <!-- ADDED unique key to each token part -->
             <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
               <details v-else-if="token.type === 'document'" class="document-block my-4">
@@ -321,6 +342,8 @@ function onImageLoad(event, annotations) {
               <div v-else v-html="parsedMarkdown(token.raw)"></div>
             </template>
           </template>
+
+          <!-- Thinking Block -->
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
             <summary class="think-summary">
               <IconThinking class="h-5 w-5 flex-shrink-0" />
@@ -328,6 +351,27 @@ function onImageLoad(event, annotations) {
             </summary>
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
+
+          <!-- Image Tool Call (Generation / Editing / Slides) - Rendered as a nice block -->
+          <div v-else-if="part.type === 'image_tool'" class="my-4 p-3 rounded-lg border dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+             <div class="flex items-center gap-2 mb-2">
+                 <div class="p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                     <IconPencil v-if="part.mode === 'edit'" class="w-4 h-4" />
+                     <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-4 h-4" />
+                     <IconPhoto v-else class="w-4 h-4" />
+                 </div>
+                 <span class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                     <template v-if="part.mode === 'edit'">Edit Request</template>
+                     <template v-else-if="part.mode === 'slides'">Slides Request</template>
+                     <template v-else>Generation Request</template>
+                 </span>
+             </div>
+             <div class="text-sm font-medium text-gray-800 dark:text-gray-200 italic">
+                 "{{ part.prompt }}"
+             </div>
+          </div>
+
+          <!-- Annotation Block -->
           <template v-else-if="part.type === 'annotate'">
             <div class="annotated-image-container relative my-4 group">
                 <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" @load="onImageLoad($event, part.annotations)"/>
@@ -340,6 +384,7 @@ function onImageLoad(event, annotations) {
                 </div>
             </div>
           </template>
+
         </template>
       </template>
     </div>

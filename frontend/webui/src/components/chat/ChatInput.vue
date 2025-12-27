@@ -36,6 +36,9 @@ import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
+import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
+import IconThinking from '../../assets/icons/IconThinking.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -136,6 +139,103 @@ function toggleMcpTool(toolId) {
     else current.add(toolId);
     mcpToolSelection.value = Array.from(current);
 }
+
+// --- Active Features Badges ---
+const activeFeatures = computed(() => {
+    const features = [];
+    
+    // RAG
+    if (ragStoreSelection.value.length > 0) {
+        features.push({ 
+            id: 'rag', 
+            icon: IconDatabase, 
+            label: 'RAG', 
+            colorClass: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
+            title: `${ragStoreSelection.value.length} Data Store(s) Active`
+        });
+    }
+
+    // Tools
+    if (mcpToolSelection.value.length > 0) {
+        features.push({ 
+            id: 'tools', 
+            icon: IconMcp, 
+            label: 'Tools', 
+            colorClass: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800',
+            title: `${mcpToolSelection.value.length} Tool(s) Active`
+        });
+    }
+
+    // Memory
+    if (user.value?.memory_enabled) {
+        features.push({
+            id: 'memory',
+            icon: IconThinking,
+            label: 'Memory',
+            colorClass: 'text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800',
+            title: 'Long-Term Memory Active'
+        });
+    }
+
+    // Vision
+    if (currentModelVisionSupport.value) {
+        features.push({
+            id: 'vision',
+            icon: IconEye,
+            label: 'Vision',
+            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+            title: 'Vision Supported'
+        });
+    }
+
+    // Image Gen
+    if (user.value?.image_generation_enabled) {
+        features.push({
+            id: 'img_gen',
+            icon: IconPhoto,
+            label: 'ImgGen',
+            colorClass: 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800',
+            title: 'Image Generation Enabled'
+        });
+    }
+
+    // Image Edit
+    if (user.value?.image_editing_enabled) {
+        features.push({
+            id: 'img_edit',
+            icon: IconPencil,
+            label: 'ImgEdit',
+            colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
+            title: 'Image Editing Enabled'
+        });
+    }
+
+    // Slide Maker
+    if (user.value?.slide_maker_enabled) {
+        features.push({
+            id: 'slides',
+            icon: IconPresentationChartBar,
+            label: 'Slides',
+            colorClass: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
+            title: 'Slide Maker Enabled'
+        });
+    }
+
+    // Audio (TTS/STT)
+    if (user.value?.tts_binding_model_name || user.value?.stt_binding_model_name) {
+        features.push({
+            id: 'audio',
+            icon: IconMicrophone,
+            label: 'Audio',
+            colorClass: 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-800',
+            title: 'Audio Features Enabled'
+        });
+    }
+    
+    return features;
+});
+
+const showHeaderRow = computed(() => showContextBar.value || activeFeatures.value.length > 0);
 
 // --- Image & File Handling ---
 function openStagedImageViewer(startIndex) {
@@ -389,28 +489,42 @@ onUnmounted(() => {
             <p>Model lacks vision support. Your uploaded images will be ignored.</p>
         </div>
 
-        <!-- Context Bar -->
-        <div v-if="showContextBar" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700">
+        <!-- Context Bar / Feature Badges Row -->
+        <div v-if="showHeaderRow" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700 overflow-x-auto no-scrollbar">
              <div class="max-w-4xl mx-auto flex items-center gap-3">
-                <div class="flex items-center gap-1 text-gray-500"><IconToken class="w-3.5 h-3.5" /><span class="text-[10px] font-black uppercase tracking-tight">Context</span></div>
-                <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 bg-gray-200 dark:bg-gray-700', progressBorderColorClass]">
-                    <div v-for="part in contextParts" :key="part.label" :class="[part.colorClass, 'h-full transition-all duration-500 ease-out']" :style="{ width: `${getPercentage(part.value)}%` }" :title="`${part.title}: ${part.value} tokens`"></div>
+                
+                <!-- Context Bar Section -->
+                <template v-if="showContextBar">
+                    <div class="flex items-center gap-1 text-gray-500 flex-shrink-0">
+                        <IconToken class="w-3.5 h-3.5" />
+                        <span class="text-[10px] font-black uppercase tracking-tight hidden sm:inline">Context</span>
+                    </div>
+                    <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 bg-gray-200 dark:bg-gray-700', progressBorderColorClass]">
+                        <div v-for="part in contextParts" :key="part.label" :class="[part.colorClass, 'h-full transition-all duration-500 ease-out']" :style="{ width: `${getPercentage(part.value)}%` }" :title="`${part.title}: ${part.value} tokens`"></div>
+                    </div>
+                    <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap flex-shrink-0">
+                        <span>{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
+                    </div>
+                </template>
+                <div v-else class="flex-grow"></div> <!-- Spacer if no context bar -->
+
+                <!-- Divider if both exist -->
+                <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 flex-shrink-0" v-if="showContextBar && activeFeatures.length > 0"></div>
+
+                <!-- Feature Badges -->
+                <div class="flex items-center gap-1.5 flex-shrink-0" v-if="activeFeatures.length > 0">
+                    <div v-for="feat in activeFeatures" :key="feat.id" 
+                         :class="['flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-help', feat.colorClass]"
+                         :title="feat.title">
+                        <component :is="feat.icon" class="w-3 h-3" />
+                        <span class="hidden md:inline">{{ feat.label }}</span>
+                    </div>
                 </div>
-                <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap"><span>{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span></div>
+
             </div>
         </div>
 
         <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
-            <!-- Active Tools Badges -->
-            <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="flex flex-wrap gap-2 animate-in fade-in slide-in-from-bottom-1">
-                <span v-if="ragStoreSelection.length > 0" class="tool-badge bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-300 border border-green-200 dark:border-green-800">
-                    <IconDatabase class="w-3 h-3" /> {{ ragStoreSelection.length }} RAG ACTIVE
-                </span>
-                <span v-if="mcpToolSelection.length > 0" class="tool-badge bg-purple-50 text-purple-700 dark:bg-purple-900/20 dark:text-purple-300 border border-purple-200 dark:border-purple-800">
-                    <IconMcp class="w-3 h-3" /> {{ mcpToolSelection.length }} TOOLS ACTIVE
-                </span>
-            </div>
-
             <!-- Attached Previews (User uploads only) -->
             <div v-if="stagedImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
                 <div v-for="(img, index) in stagedImages" :key="`staged-img-${index}`" 
@@ -515,5 +629,6 @@ onUnmounted(() => {
 .menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
 textarea { scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent; }
 </style>

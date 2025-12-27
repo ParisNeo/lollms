@@ -1,3 +1,7 @@
+# [PARTIAL UPDATE] backend/db/migration.py - Only showing relevant part
+# ... (imports)
+
+# ... (inside run_schema_migrations_and_bootstrap function)
 import json
 import re
 import shutil
@@ -506,7 +510,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
     if inspector.has_table("users"):
         user_columns_db = [col['name'] for col in inspector.get_columns('users')]
-
+        
         if 'external_id' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN external_id VARCHAR"))
@@ -521,6 +525,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
         
+        if 'slide_maker_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN slide_maker_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
         # --- Migration for new fields ---
         if 'note_generation_enabled' not in user_columns_db:
             try:
@@ -1112,3 +1122,4 @@ def _migrate_user_data_folders(connection):
                     try: shutil.move(str(old_path), str(new_path))
                     except Exception: pass
     except Exception: pass
+

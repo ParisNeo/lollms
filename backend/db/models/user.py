@@ -73,6 +73,7 @@ class User(Base):
     image_generation_system_prompt = Column(Text, nullable=True)
     image_annotation_enabled = Column(Boolean, default=False, nullable=False)
     image_editing_enabled = Column(Boolean, default=False, nullable=False)
+    slide_maker_enabled = Column(Boolean, default=False, nullable=False) # NEW
     
     # NEW: Toggle for auto-activating generated images
     activate_generated_images = Column(Boolean, default=False, nullable=False)

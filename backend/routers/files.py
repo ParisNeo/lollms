@@ -407,7 +407,15 @@ def html_to_docx_bytes(html: str) -> bytes:
 
     bio = io.BytesIO(); doc.save(bio); return bio.getvalue()
 
-def md_to_pdf_bytes(md_text: str, toc_level: int = 3) -> bytes:
+def md_to_pdf_bytes(md_text: str, toc_level: int = 3, extra_images: List[str] = None) -> bytes:
+    # If extra images (base64) are provided, append them as image markdown
+    if extra_images:
+        for img_b64 in extra_images:
+            # Simple sanitize just in case
+            if "base64," in img_b64:
+                img_b64 = img_b64.split("base64,")[1]
+            md_text += f"\n\n![](data:image/png;base64,{img_b64})\n"
+
     pdf = MarkdownPdf(toc_level=toc_level)
     pdf.add_section(Section(md_text))
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
@@ -419,7 +427,7 @@ def md_to_pdf_bytes(md_text: str, toc_level: int = 3) -> bytes:
     except Exception: pass
     return data
 
-def md_to_pptx_bytes(md_text: str) -> bytes:
+def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
     """
     Robust Markdown to PowerPoint converter with improved text chunking and image support.
     
@@ -427,6 +435,7 @@ def md_to_pptx_bytes(md_text: str) -> bytes:
     2. Removes image tags from text to process separately.
     3. Splits remaining text into logical chunks (headers, paragraphs) to fit slides.
     4. Creates separate slides for images.
+    5. Adds any extra_images provided separately as slides.
     """
     prs = Presentation()
     
@@ -508,13 +517,6 @@ def md_to_pptx_bytes(md_text: str) -> bytes:
 
     # --- Logic: Create Slides ---
     
-    # 1. Image Slides (If any exist, we put them first or interspersed? 
-    # Current request: "use those images as the slides". We'll put them first for visibility, 
-    # or if text refers to them, interspersing is hard without complex parsing.
-    # Let's add them at the end of the presentation to not obscure the intro text, OR
-    # if the text is empty, just images.
-    # A safe bet for "slide deck" generation is Intro -> Text Content -> Images (Appendix/Gallery).
-    
     # 3. Intelligent Text Chunking
     chunks = []
     
@@ -581,10 +583,20 @@ def md_to_pptx_bytes(md_text: str) -> bytes:
     for chunk in chunks:
         add_content_slide(chunk['title'], chunk['body'])
 
-    # Add Image Slides
+    # Add Image Slides (from Markdown)
     for img_src in found_images:
         add_image_slide(img_src)
-        
+    
+    # Add Extra Images as Slides (from generated/uploaded packs)
+    if extra_images:
+        for img_b64 in extra_images:
+            # Ensure proper data URI format
+            if "base64," in img_b64:
+                src = img_b64
+            else:
+                src = f"data:image/png;base64,{img_b64}"
+            add_image_slide(src)
+
     # If no content at all, add a placeholder
     if len(prs.slides) == 0:
         add_title_slide("Empty Presentation")
