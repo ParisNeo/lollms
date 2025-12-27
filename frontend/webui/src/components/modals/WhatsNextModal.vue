@@ -68,29 +68,29 @@ function handleClose() {
                 We believe in ethical AI usage that empowers individuals while respecting legal and moral standards.
             </p>
 
-            <h4 class="text-lg font-bold mt-4">Terms of Use</h4>
-            <p>By using this platform, you agree to the following conditions:</p>
-            
-            <ul class="list-disc pl-5 space-y-2">
-                <li>
-                    <strong>Legal Compliance:</strong> You must respect the legislation of your country of residence at all times while using this software.
-                </li>
-                <li>
-                    <strong>EU AI Act:</strong> If you are located in the European Union, you acknowledge and agree to adhere to all obligations set forth in the EU AI Act, 
-                    particularly regarding transparency, data governance, and prohibited AI practices.
-                </li>
-                <li>
-                    <strong>Prohibited Content:</strong> You strictly agree NOT to use this product for the generation or dissemination of:
-                    <ul class="list-circle pl-5 mt-1">
-                        <li>Disinformation, fake news, or misleading content intended to deceive.</li>
-                        <li>Hate speech, harassment, or content promoting violence.</li>
-                        <li>Any material that violates applicable laws or regulations.</li>
-                    </ul>
-                </li>
-                <li>
-                    <strong>Responsibility:</strong> You are solely responsible for the content you generate and how you use it. The developers of LoLLMs assume no liability for misuse of the platform.
-                </li>
-            </ul>
+            <h4 class="text-lg font-bold mt-4">Terms of Use & Legal Compliance</h4>
+            <div class="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg border border-gray-200 dark:border-gray-700">
+                <p class="font-semibold text-red-600 dark:text-red-400 mb-2">By continuing, you strictly agree to the following:</p>
+                <ul class="list-disc pl-5 space-y-2">
+                    <li>
+                        <strong>Respect Legislation:</strong> You must strictly adhere to the laws and regulations of your country of residence at all times while using this software.
+                    </li>
+                    <li>
+                        <strong>EU AI Act Compliance:</strong> If you are within the European Union, you acknowledge and agree to comply with all obligations under the EU AI Act, including transparency requirements and prohibitions on unacceptable risk AI practices.
+                    </li>
+                    <li>
+                        <strong>Prohibited Activities:</strong> You agree <strong>NOT</strong> to use this platform for:
+                        <ul class="list-circle pl-5 mt-1 text-xs">
+                            <li>Generating or spreading disinformation, fake news, or deepfakes intended to deceive.</li>
+                            <li>Engaging in illegal acts, cybercrime, or promoting violence/hate speech.</li>
+                            <li>Harassing or harming others.</li>
+                        </ul>
+                    </li>
+                    <li>
+                        <strong>Liability:</strong> You accept full responsibility for all content generated and actions performed using this tool. The creators of LoLLMs disclaim all liability for misuse.
+                    </li>
+                </ul>
+            </div>
         </div>
         
         <div class="flex justify-end pt-4 border-t dark:border-gray-700">
