@@ -1,36 +1,43 @@
 # Expert & Developer Guide
 
-For power users, developers, and prompt engineers.
+This section is for power users, developers, and prompt engineers who want to unlock the full potential of LoLLMs through bindings, APIs, and custom scripting.
 
-## 1. Managing Bindings
+## 1. Advanced Binding Configuration
+Bindings are the core connectivity layer of LoLLMs.
 
-Bindings connect LoLLMs to the underlying AI engines.
-*   **Changing Models**: Go to **Settings > Bindings**. You can switch the active model for a binding (e.g., change from `llama3-8b` to `mistral-7b`).
-*   **Parameters**: Fine-tune generation parameters like `Temperature`, `Top-K`, `Top-P`, and `Context Size`.
+- **Context Size Optimization**: Increasing context size allows the AI to remember more of a long conversation but consumes significantly more VRAM. 
+    - *Expert Tip*: Use **Quantized Models (GGUF)** with llama.cpp to fit larger contexts into consumer hardware.
+- **Stop Sequences**: Define custom strings (like `User:`) to prevent the AI from generating both sides of a conversation.
+- **Repeat Penalty**: Fine-tune the `Penalty Alpha` and `Repeat Last N` to prevent the AI from becoming repetitive in long creative writing sessions.
 
-## 2. The Zoos
+## 2. The Zoos & Package Management
+The "Zoo" system is LoLLMs' built-in package manager.
 
-The "Zoo" system allows installing new capabilities.
-*   **Models Zoo**: Download generic GGUF models from HuggingFace or other sources.
-*   **Personalities Zoo**: Install community-created personalities with specialized prompts and tools.
-*   **Apps Zoo**: Install server-side extensions (e.g., a simplified UI, a specific workflow tool).
+- **Personality Zoo**: Beyond simple personas, many "personalities" are full Python scripts.
+    - **Lollms Coder**: Can execute code to verify its own solutions.
+    - **Internet Researcher**: Uses DuckDuckGo and Scraper tools autonomously.
+- **Apps Zoo**: These are independent web applications that run on top of LoLLMs. For example, a dedicated "Resume Reviewer" or "Email Drafter".
+- **MCP Zoo**: Connect to **Model Context Protocol** servers. This allows models to access your local file system, run shell commands, or query external databases safely.
 
-## 3. API Access
+## 3. Professional API Access
+LoLLMs serves a professional-grade REST API.
 
-LoLLMs provides a REST API compatible with OpenAI libraries.
-1.  Go to **Settings > API Keys**.
-2.  Generate a new API Key.
-3.  Endpoint: `http://your-server:9642/v1`.
-4.  You can use this with tools like AutoGen, LangChain, or standard OpenAI client libraries.
+### Authentication
+Every request must include your API Key:
+`Authorization: Bearer lollms_your_key_here`
 
-## 4. Scripting & Tools
+### Compatibility Layers
+1.  **OpenAI V1**: Reachable at `/v1`. Compatible with standard OpenAI libraries.
+2.  **Ollama**: Reachable at `/ollama/v1`.
+3.  **LoLLMs Native**: Reachable at `/api/lollms/v1`. Use this for advanced features like:
+    - `tokenize`: Get precise token counts.
+    - `long_context_process`: Automatically handle documents larger than the model's window.
 
-*   **Python Code Execution**: Some personalities (like "Lollms Coder") can write and execute Python code in a sandboxed environment on the server.
-*   **MCPs (Model Context Protocol)**: LoLLMs supports MCP, allowing you to connect external tools (like database access, web search) that the AI can invoke autonomously.
+## 4. Custom Personalities & Scripting
+You can create your own personality by defining a `config.yaml` and an optional `processor.py`.
 
-## 5. Custom Personalities
+- **System Prompt**: Ground the model in a specific set of rules.
+- **Processors**: Use Python to intercept the user's message before it reaches the LLM, or post-process the LLM's output to format it into JSON, CSV, or code.
 
-You can create your own personality:
-1.  Go to **Settings > Personalities**.
-2.  Click **+** to create new.
-3.  Define the `System Prompt`, initial message, and even attach python scripts for complex logic.
+---
+*Visit the [GitHub Wiki](https://github.com/ParisNeo/lollms/wiki) for deep-dive technical documentation and community scripts.*

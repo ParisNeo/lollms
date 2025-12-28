@@ -1,39 +1,19 @@
+<!-- frontend/webui/src/views/HelpView.vue -->
 <script setup>
 import { ref, onMounted, computed, watch, nextTick } from 'vue';
-import { useRoute, useRouter } from 'vue-router'; // Import useRoute and useRouter
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import IconBookOpen from '../assets/icons/IconBookOpen.vue';
 import IconMagnifyingGlass from '../assets/icons/IconMagnifyingGlass.vue';
 import IconXMark from '../assets/icons/IconXMark.vue';
+import IconChevronRight from '../assets/icons/IconChevronRight.vue';
+import IconInfo from '../assets/icons/IconInfo.vue';
+import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
 import apiClient from '../services/api';
 import { marked } from 'marked';
-import hljs from 'highlight.js'; // Assuming you have highlight.js installed
-import 'highlight.js/styles/github-dark.css'; // Or your preferred theme
-
-// Configure marked to allow section IDs for smooth scrolling
-marked.setOptions({
-    gfm: true,
-    breaks: true,
-    // Add custom renderer to include IDs for headings
-    highlight: function(code, lang) {
-        const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-        return hljs.highlight(code, { language }).value;
-    }
-});
-
-// Extend markdown renderer for heading IDs
-const renderer = {
-    heading(text, level, raw) {
-        const escapedText = text.toLowerCase().replace(/[^\w]+/g, '-');
-        return `
-            <h${level} id="${escapedText}">
-                ${text}
-            </h${level}>`;
-    }
-};
-marked.use({ renderer });
-
+import hljs from 'highlight.js';
+import 'highlight.js/styles/github-dark.css';
 
 const route = useRoute();
 const router = useRouter();
@@ -41,73 +21,85 @@ const authStore = useAuthStore();
 
 const userUiLevel = computed(() => authStore.user?.user_ui_level || 0);
 
-const helpIndexMarkdown = ref(''); // Raw markdown for the index
-const parsedHelpIndex = ref([]);    // Structured index for navigation
-const helpContent = ref('');        // Current topic's markdown content
-const isLoadingContent = ref(true); // Loading state for the main content area
-const isLoadingIndex = ref(true);   // Loading state for the sidebar index
-const searchQuery = ref('');       // Search query for the sidebar topics
-const currentTopicFilename = ref(null); // The filename of the currently displayed topic
-const currentSectionId = ref(null); // The ID of the section to scroll to
-
-// Scrollable content area reference for scrolling to sections
+const helpIndex = ref([]);
+const helpContentHtml = ref('');
+const isLoadingContent = ref(true);
+const isLoadingIndex = ref(true);
+const searchQuery = ref('');
+const currentTopic = ref(null);
 const mainContentAreaRef = ref(null);
 
-// Helper to strip markdown bolding from text for display in the sidebar
-function stripMarkdownBold(text) {
-    return text.replace(/\*\*(.*?)\*\*/g, '$1');
-}
+// --- Robust Marked Configuration ---
+// Signature handles both v13 token objects and standard positional arguments
+marked.use({
+    renderer: {
+        heading(arg1, arg2, arg3) {
+            let text = "";
+            let depth = 1;
 
-const filteredTopics = computed(() => {
-    if (!parsedHelpIndex.value) return [];
-    const query = searchQuery.value.toLowerCase();
-    
-    // Filter groups and items based on search query
-    const filtered = parsedHelpIndex.value.map(group => {
-        // Filter items within each group
-        const filteredItems = group.items.filter(item => {
-            const titleMatches = stripMarkdownBold(item.title).toLowerCase().includes(query);
-            const descriptionMatches = item.description && item.description.toLowerCase().includes(query);
-            return titleMatches || descriptionMatches;
-        });
+            if (arg1 && typeof arg1 === 'object') {
+                // Version 13+ Token Object path
+                text = arg1.text || "";
+                depth = arg1.depth || 1;
+            } else {
+                // Positional arguments path
+                text = arg1 || "";
+                depth = arg2 || 1;
+            }
 
-        // Check if group title itself matches if no items in it match
-        const groupTitleMatches = stripMarkdownBold(group.title).toLowerCase().includes(query);
+            const id = text.toLowerCase().replace(/[^\w]+/g, '-');
+            return `
+                <h${depth} id="${id}" class="scroll-mt-24 group flex items-center mb-6 mt-12 font-black tracking-tight text-gray-900 dark:text-white">
+                    ${text}
+                    <a href="#${id}" class="ml-3 opacity-0 group-hover:opacity-100 text-blue-500 transition-opacity text-base font-normal no-underline">#</a>
+                </h${depth}>`;
+        },
+        code(arg1, arg2) {
+            let code = "";
+            let language = "plaintext";
 
-        if (filteredItems.length > 0 || groupTitleMatches) {
-            return {
-                ...group,
-                items: filteredItems
-            };
+            if (arg1 && typeof arg1 === 'object') {
+                code = arg1.text || "";
+                language = arg1.lang || "plaintext";
+            } else {
+                code = arg1 || "";
+                language = arg2 || "plaintext";
+            }
+
+            const validLanguage = hljs.getLanguage(language) ? language : 'plaintext';
+            const highlighted = hljs.highlight(code, { language: validLanguage }).value;
+            return `<pre class="hljs language-${validLanguage} rounded-2xl p-6 my-6 border border-gray-200 dark:border-gray-800 shadow-xl overflow-x-auto"><code>${highlighted}</code></pre>`;
         }
-        return null;
-    }).filter(group => group !== null); // Remove nulls (groups with no matching content)
-
-    return filtered;
+    },
+    gfm: true,
+    breaks: true
 });
 
+// --- Helpers ---
 
-// Function to parse the help_index.md into a structured array
-function parseHelpIndexMarkdown(markdown) {
-    const lines = markdown.split('\n');
+function getDefaultFilename(level) {
+    if (level >= 4) return 'level_4_expert.md';
+    if (level >= 2) return 'level_2_intermediate.md';
+    return 'level_0_beginner.md';
+}
+
+function parseIndex(markdown) {
     const sections = [];
     let currentSection = null;
+    const lines = markdown.split('\n');
 
     lines.forEach(line => {
-        if (line.startsWith('### ')) { // Section heading
-            currentSection = {
-                title: stripMarkdownBold(line.substring(4).trim()), // Strip bold for display
-                items: []
-            };
+        if (line.startsWith('### ')) {
+            currentSection = { title: line.replace('### ', '').trim(), items: [] };
             sections.push(currentSection);
-        } else if (line.startsWith('*   [')) { // List item (link)
-            const match = line.match(/\*   \[\*\*(.*?)\*\*\]\(help\/([^\)#]+)(?:#([^\)]+))?\)\s*-\s*(.*)/); // Match title (bold), filename, optional section, and description
+        } else if (line.trim().startsWith('*')) {
+            const match = line.match(/\[\*\*(.*?)\*\*\]\s*\((.*?\.md)(?:#(.*))?\)\s*-\s*(.*)/);
             if (match && currentSection) {
                 currentSection.items.push({
-                    title: stripMarkdownBold(match[1]), // Strip bold for display
+                    title: match[1],
                     filename: match[2],
                     sectionId: match[3] || null,
-                    description: (match[4] || '').trim()
+                    description: match[4]
                 });
             }
         }
@@ -115,264 +107,213 @@ function parseHelpIndexMarkdown(markdown) {
     return sections;
 }
 
-// Function to fetch a specific help topic's content
-async function fetchHelpTopicContent(filename, sectionId = null) {
+const filteredIndex = computed(() => {
+    if (!searchQuery.value) return helpIndex.value;
+    const q = searchQuery.value.toLowerCase();
+    return helpIndex.value.map(section => ({
+        ...section,
+        items: section.items.filter(i => 
+            i.title.toLowerCase().includes(q) || 
+            (i.description && i.description.toLowerCase().includes(q))
+        )
+    })).filter(s => s.items.length > 0);
+});
+
+// --- Actions ---
+
+async function fetchTopic(filename, sectionId = null) {
+    if (!filename) return;
     isLoadingContent.value = true;
-    
-    // Update route with query params only if not already there,
-    // or if we are actively selecting a new topic/section.
-    const currentRouteTopic = route.query.topic;
-    const currentRouteSection = route.query.section;
-
-    if (searchQuery.value) {
-        // If searching, always go through the search endpoint and don't update route.query.topic directly
-        // The helpContent will be search results.
-        router.replace({ query: { search: searchQuery.value } });
-    } else if (filename && (filename !== currentRouteTopic || sectionId !== currentRouteSection)) {
-        router.replace({ query: { topic: filename, section: sectionId } });
-    } else if (!filename && !searchQuery.value && currentRouteTopic) {
-        // Clear route query if no filename and no search and there's a topic in route
-        router.replace({ query: {} });
-    }
-
-
     try {
-        let response;
-        if (searchQuery.value) { // If search is active, fetch search results
-            response = await apiClient.get(`/api/help/search`, { params: { query: searchQuery.value } });
-            currentTopicFilename.value = null; // Indicate we're in search results mode
-            currentSectionId.value = null;
-        } else { // Otherwise, fetch specific topic
-            response = await apiClient.get(`/api/help/topic`, { params: { topic_filename: filename } });
-            currentTopicFilename.value = filename; // Update current topic being viewed
-            currentSectionId.value = sectionId; // Store section ID for scrolling
-        }
-        
-        helpContent.value = marked.parse(response.data);
-
-        // Scroll to section after content is rendered
-        nextTick(() => {
-            if (sectionId && mainContentAreaRef.value) {
-                const targetElement = mainContentAreaRef.value.querySelector(`#${sectionId.toLowerCase().replace(/[^\w]+/g, '-')}`);
-                if (targetElement) {
-                    targetElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }
-            } else {
-                // If no section or coming from search, scroll to top
-                if (mainContentAreaRef.value) {
-                    mainContentAreaRef.value.scrollTo({ top: 0, behavior: 'smooth' });
-                }
-            }
+        const res = await apiClient.get('/api/help/topic', { 
+            params: { topic_filename: filename } 
         });
-
-    } catch (error) {
-        helpContent.value = `<p class="text-red-500 dark:text-red-400">Failed to load help content: ${error.response?.data?.detail || error.message || 'Unknown error'}</p>`;
-        console.error("Error fetching help topic:", error);
+        
+        helpContentHtml.value = await marked.parse(res.data);
+        currentTopic.value = filename;
+        
+        await nextTick();
+        if (sectionId) {
+            const el = document.getElementById(sectionId.toLowerCase().replace(/[^\w]+/g, '-'));
+            if (el) el.scrollIntoView({ behavior: 'smooth' });
+        } else {
+            mainContentAreaRef.value?.scrollTo({ top: 0 });
+        }
+    } catch (e) {
+        console.error("Documentation fetch error:", e);
+        const detail = e.response?.data?.detail || e.message;
+        helpContentHtml.value = `
+            <div class="p-8 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-2xl border border-red-100 dark:border-red-800 flex flex-col items-center text-center">
+                <h3 class="text-xl font-black mb-2">Failed to load content</h3>
+                <p class="max-w-md text-sm opacity-80 mb-4 font-mono">${filename}</p>
+                <div class="bg-white/50 dark:bg-black/20 p-4 rounded-xl font-mono text-xs mb-6 w-full max-w-sm text-left border dark:border-gray-700">
+                    ${detail}
+                </div>
+                <button onclick="location.reload()" class="btn btn-primary px-6 py-2 rounded-xl shadow-lg">Retry Connection</button>
+            </div>`;
     } finally {
         isLoadingContent.value = false;
     }
 }
 
-// Initial load: Fetch index and then the default/route-specified topic
+async function handleSearch() {
+    if (!searchQuery.value.trim()) return;
+    isLoadingContent.value = true;
+    try {
+        const res = await apiClient.get('/api/help/search', { params: { query: searchQuery.value } });
+        helpContentHtml.value = await marked.parse(res.data);
+        currentTopic.value = 'search';
+    } finally {
+        isLoadingContent.value = false;
+    }
+}
+
+function selectTopic(item) {
+    searchQuery.value = '';
+    router.push({ query: { topic: item.filename, section: item.sectionId } });
+}
+
+// --- Lifecycle ---
+
 onMounted(async () => {
     isLoadingIndex.value = true;
     try {
-        const indexResponse = await apiClient.get('/api/help/index');
-        helpIndexMarkdown.value = indexResponse.data;
-        parsedHelpIndex.value = parseHelpIndexMarkdown(indexResponse.data);
-    } catch (error) {
-        console.error("Error fetching help index:", error);
-        parsedHelpIndex.value = [];
+        const res = await apiClient.get('/api/help/index');
+        helpIndex.value = parseIndex(res.data);
+    } catch (e) {
+        console.error("Index load failed:", e);
     } finally {
         isLoadingIndex.value = false;
+    }
 
-        // After index is loaded, determine initial content to show
-        if (route.query.search) {
-            searchQuery.value = route.query.search;
-            fetchHelpTopicContent(null, null); // Trigger search
-        } else if (route.query.topic) {
-            fetchHelpTopicContent(route.query.topic, route.query.section);
-        } else {
-            // Default topic if no specific query or search active
-            const defaultFilename = `level_${userUiLevel.value}_beginner.md`; // Level-based default
-            fetchHelpTopicContent(defaultFilename);
-        }
+    const topic = route.query.topic || getDefaultFilename(userUiLevel.value);
+    fetchTopic(topic, route.query.section);
+});
+
+watch(() => route.query.topic, (newTopic) => {
+    if (newTopic && newTopic !== currentTopic.value) {
+        fetchTopic(newTopic, route.query.section);
     }
 });
 
-// Watch route for topic/section/search changes and fetch content
-watch(route, (newRoute) => {
-    // Only react to route changes if it's external (not triggered by selectTopic/searchQuery watch)
-    if (newRoute.query.topic !== currentTopicFilename.value || 
-        newRoute.query.section !== currentSectionId.value ||
-        newRoute.query.search !== searchQuery.value) {
-        
-        if (newRoute.query.search) {
-            searchQuery.value = newRoute.query.search;
-        } else {
-            searchQuery.value = ''; // Clear search if topic is selected
-        }
-
-        if (newRoute.query.topic) {
-            fetchHelpTopicContent(newRoute.query.topic, newRoute.query.section);
-        } else if (!newRoute.query.search) {
-            // If no topic and no search, load default
-            const defaultFilename = `level_${userUiLevel.value}_beginner.md`;
-            fetchHelpTopicContent(defaultFilename);
-        }
-    }
-}, { deep: true }); // Deep watch for nested query changes
-
-// Watch searchQuery to trigger search or revert to topic view
-watch(searchQuery, (newQuery) => {
-    if (newQuery) {
-        // Push search query to URL without filename
-        router.replace({ query: { search: newQuery } }).catch(()=>{}); // Catch navigation errors
-        fetchHelpTopicContent(null, null); // Trigger search
-    } else {
-        // If search query is cleared, revert to showing the current topic or default
-        if (currentTopicFilename.value) {
-            router.replace({ query: { topic: currentTopicFilename.value, section: currentSectionId.value } }).catch(()=>{});
-            fetchHelpTopicContent(currentTopicFilename.value, currentSectionId.value);
-        } else {
-            // If no topic was previously selected, load the level-based default
-            router.replace({ query: {} }).catch(()=>{});
-            const defaultFilename = `level_${userUiLevel.value}_beginner.md`;
-            fetchHelpTopicContent(defaultFilename);
-        }
+watch(searchQuery, (newVal) => {
+    if (!newVal && currentTopic.value === 'search') {
+        fetchTopic(getDefaultFilename(userUiLevel.value));
     }
 });
-
-// Update router URL when a topic is selected in the sidebar
-function selectTopic(item) {
-    searchQuery.value = ''; // Clear search when selecting a topic
-    router.push({ query: { topic: item.filename, section: item.sectionId } });
-}
 </script>
 
 <template>
-  <PageViewLayout title="Contextual Help" :title-icon="IconBookOpen">
+  <PageViewLayout title="Documentation & Help" :title-icon="IconBookOpen">
     <template #sidebar>
-      <div class="px-3 py-2.5 text-sm font-medium text-gray-500 dark:text-gray-400">
-        Your Current UI Level: <strong class="text-gray-800 dark:text-gray-200">{{ userUiLevel }}</strong>
-        <span v-if="authStore.isAdmin" class="text-red-500 dark:text-red-400 ml-1">(Admin)</span>
-      </div>
-      <p class="px-3 py-2.5 text-xs text-gray-400 dark:text-gray-500">
-        The content displayed here is tailored to your current UI experience level and admin status.
-      </p>
-
-      <div class="relative px-3 mb-4">
-        <input 
-          type="text" 
-          v-model="searchQuery" 
-          placeholder="Search help..."
-          class="w-full rounded-md border-gray-300 bg-gray-100 dark:border-gray-600 dark:bg-gray-700/50 py-2 pl-10 pr-10 text-sm focus:border-blue-500 focus:ring-blue-500"
-        />
-        <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-6">
-          <IconMagnifyingGlass class="h-4 w-4 text-gray-400" />
+        <!-- User Context Info -->
+        <div class="px-3 mb-6">
+            <div class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800 shadow-sm transition-all hover:shadow-md">
+                <div class="flex items-center gap-2 mb-2">
+                    <IconInfo class="w-3.5 h-3.5 text-blue-500" />
+                    <p class="text-[10px] font-black uppercase tracking-widest text-blue-600 dark:text-blue-400">Your Perspective</p>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                    <p class="text-sm font-bold text-gray-800 dark:text-gray-100">
+                        Level {{ userUiLevel }} Access
+                    </p>
+                    <span v-if="authStore.isAdmin" class="text-[9px] bg-red-500 text-white px-2 py-0.5 rounded-full font-black uppercase tracking-tighter shadow-sm">Admin</span>
+                </div>
+            </div>
         </div>
-        <button v-if="searchQuery" @click="searchQuery = ''" class="absolute inset-y-0 right-0 flex items-center pr-3" title="Clear search">
-          <IconXMark class="h-4 w-4 text-gray-400 hover:text-gray-600" />
-        </button>
-      </div>
 
-      <div v-if="isLoadingIndex" class="px-3 py-5 text-center">
-        <p class="text-gray-500 dark:text-gray-400">Loading help index...</p>
-      </div>
-      <div v-else-if="filteredTopics.length === 0" class="px-3 py-5 text-center">
-        <p class="text-gray-500 dark:text-gray-400">No topics found matching your search.</p>
-      </div>
-      <ul v-else class="space-y-1">
-        <li v-for="group in filteredTopics" :key="group.title">
-            <h3 class="px-3 py-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">{{ group.title }}</h3>
-            <ul class="ml-2 border-l border-gray-300 dark:border-gray-600">
-                <li v-for="item in group.items" :key="item.filename + (item.sectionId || '')">
-                    <button 
-                        @click="selectTopic(item)"
-                        class="w-full text-left flex flex-col px-3 py-2.5 rounded-lg text-sm font-medium transition-colors"
-                        :class="{
-                            'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': currentTopicFilename === item.filename && (!item.sectionId || currentSectionId === item.sectionId) && !searchQuery,
-                            'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700': !(currentTopicFilename === item.filename && (!item.sectionId || currentSectionId === item.sectionId) && !searchQuery)
-                        }"
-                    >
-                        <span>{{ item.title }}</span>
-                        <span v-if="item.description" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ item.description }}</span>
-                    </button>
-                </li>
-            </ul>
-        </li>
-      </ul>
+        <!-- Search Bar -->
+        <div class="px-3 mb-6">
+            <div class="relative group">
+                <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                    <IconMagnifyingGlass class="h-4 w-4 text-gray-400 group-focus-within:text-blue-500 transition-colors" />
+                </div>
+                <input 
+                    type="text" 
+                    v-model="searchQuery" 
+                    @keyup.enter="handleSearch"
+                    placeholder="Search documentation..."
+                    class="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-2xl py-2.5 pl-10 pr-10 text-sm focus:ring-2 focus:ring-blue-500 transition-all shadow-inner"
+                />
+                <button v-if="searchQuery" @click="searchQuery = ''" class="absolute inset-y-0 right-0 pr-3.5 flex items-center group/btn">
+                    <IconXMark class="h-4 w-4 text-gray-400 group-hover/btn:text-red-500 transition-colors" />
+                </button>
+            </div>
+        </div>
+
+        <!-- Topic List -->
+        <div class="flex-grow overflow-y-auto px-1 custom-scrollbar">
+            <div v-if="isLoadingIndex" class="space-y-4 p-4 animate-pulse">
+                <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
+                <div class="h-12 bg-gray-100 dark:bg-gray-800 rounded-xl"></div>
+                <div class="h-12 bg-gray-100 dark:bg-gray-800 rounded-xl"></div>
+            </div>
+            
+            <div v-else class="space-y-6 pb-10">
+                <div v-for="section in filteredIndex" :key="section.title">
+                    <h4 class="px-4 text-[10px] font-black uppercase tracking-[0.25em] text-gray-400 dark:text-gray-500 mb-3">{{ section.title }}</h4>
+                    <div class="space-y-1.5 px-1">
+                        <button 
+                            v-for="item in section.items" 
+                            :key="item.title"
+                            @click="selectTopic(item)"
+                            class="w-full text-left px-3.5 py-3 rounded-xl transition-all group relative overflow-hidden flex flex-col gap-0.5 border border-transparent"
+                            :class="currentTopic === item.filename ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20 border-blue-500' : 'text-gray-600 dark:text-gray-400 hover:bg-white dark:hover:bg-gray-800 hover:border-gray-200 dark:hover:border-gray-700 hover:shadow-sm'"
+                        >
+                            <div class="flex items-center justify-between">
+                                <span class="font-bold text-sm truncate">{{ item.title }}</span>
+                                <IconChevronRight class="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 transition-all transform group-hover:translate-x-0.5" />
+                            </div>
+                            <p v-if="item.description" class="text-[10px] line-clamp-1 opacity-70 group-hover:opacity-100">{{ item.description }}</p>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </template>
+
     <template #main>
-      <div v-if="isLoadingContent" class="text-center py-10">
-        <p class="text-gray-500 dark:text-gray-400">Loading help content...</p>
-      </div>
-      <div v-else ref="mainContentAreaRef" class="prose dark:prose-invert max-w-none text-gray-800 dark:text-gray-100">
-        <div v-html="helpContent"></div>
-      </div>
+        <div ref="mainContentAreaRef" class="h-full overflow-y-auto custom-scrollbar bg-white dark:bg-gray-900 selection:bg-blue-100 dark:selection:bg-blue-900">
+            <div class="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16">
+                <div v-if="isLoadingContent" class="flex flex-col items-center justify-center py-24">
+                    <IconAnimateSpin class="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                    <p class="text-gray-500 font-medium tracking-widest uppercase text-xs">Retrieving Documentation</p>
+                </div>
+                <article v-else class="prose prose-blue dark:prose-invert max-w-none 
+                    prose-headings:font-black prose-headings:tracking-tight
+                    prose-h1:text-5xl prose-h1:mb-10 prose-h1:pb-8 prose-h1:border-b-2 dark:prose-h1:border-gray-800
+                    prose-h2:text-2xl prose-h2:mt-16 prose-h2:mb-8 prose-h2:pb-2 prose-h2:border-b dark:prose-h2:border-gray-800
+                    prose-h3:text-xl prose-h3:mt-10 prose-h3:mb-6
+                    prose-a:text-blue-600 dark:prose-a:text-blue-400 prose-a:no-underline hover:prose-a:underline
+                    prose-pre:bg-gray-950 prose-pre:border prose-pre:border-gray-800 prose-pre:rounded-2xl prose-pre:shadow-2xl prose-pre:p-6
+                    prose-img:rounded-3xl prose-img:shadow-2xl prose-img:border dark:prose-img:border-gray-800
+                    prose-code:text-blue-600 dark:prose-code:text-blue-400 prose-code:bg-blue-50 dark:prose-code:bg-blue-900/30 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:font-mono prose-code:before:content-[''] prose-code:after:content-['']
+                    animate-fade-in">
+                    <div v-html="helpContentHtml"></div>
+                </article>
+
+                <!-- Footer -->
+                <div class="mt-24 pt-10 border-t dark:border-gray-800 flex flex-col sm:flex-row justify-between items-center gap-6 text-[10px] font-black uppercase tracking-[0.25em] text-gray-400">
+                    <p>© ParisNeo 2025 · Core System Docs</p>
+                    <div class="flex gap-8">
+                        <a href="https://github.com/ParisNeo/lollms" target="_blank" class="hover:text-blue-500 transition-all flex items-center gap-2 group">GitHub</a>
+                        <a href="https://discord.gg/Mub9p6XF" target="_blank" class="hover:text-blue-500 transition-all flex items-center gap-2 group">Discord</a>
+                    </div>
+                </div>
+            </div>
+        </div>
     </template>
   </PageViewLayout>
 </template>
 
-<style>
-/* Basic styling for markdown content, adjust as needed */
-.prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
-    border-bottom: 1px solid theme('colors.gray.200');
-    padding-bottom: 0.3em;
-    margin-top: 1.5em;
-    margin-bottom: 1em;
-    font-weight: 600;
-    line-height: 1.25;
+<style scoped>
+.animate-fade-in {
+    animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
-.prose h1 { font-size: 2.25em; }
-.prose h2 { font-size: 1.75em; }
-.prose h3 { font-size: 1.5em; }
-.prose p { margin-bottom: 1em; line-height: 1.6; }
-.prose ul, .prose ol { margin-bottom: 1em; padding-left: 1.5em; }
-.prose li { margin-bottom: 0.5em; }
-.prose code { 
-    background-color: theme('colors.gray.200'); 
-    color: theme('colors.gray.800'); 
-    padding: 0.2em 0.4em; 
-    border-radius: 3px; 
-    font-size: 0.875em;
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(15px); }
+    to { opacity: 1; transform: translateY(0); }
 }
-.prose pre {
-    background-color: theme('colors.gray.800');
-    color: theme('colors.gray.100');
-    padding: 1em;
-    border-radius: 5px;
-    overflow-x: auto;
-}
-.prose a { color: theme('colors.blue.600'); text-decoration: underline; }
-.prose a:hover { color: theme('colors.blue.500'); }
-
-/* Dark mode adjustments */
-.prose.dark .prose h1, .prose.dark .prose h2, .prose.dark .prose h3, .prose.dark .prose h4, .prose.dark .prose h5, .prose.dark .prose h6 {
-    border-bottom-color: theme('colors.gray.700');
-}
-.prose.dark .prose code {
-    background-color: theme('colors.gray.700');
-    color: theme('colors.gray.200');
-}
-.prose.dark .prose pre {
-    background-color: theme('colors.gray.900');
-    color: theme('colors.gray.100');
-}
-.prose.dark .prose a { color: theme('colors.blue.400'); }
-.prose.dark .prose a:hover { color: theme('colors.blue.300'); }
-
-/* Image styling within markdown */
-.prose img {
-    max-width: 100%;
-    height: auto;
-    display: block; /* Ensures it takes full width of its container, no extra space below */
-    margin: 1em auto; /* Center images within the prose block */
-    border-radius: 8px; /* Slightly rounded corners for images */
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Subtle shadow */
-}
-
-.prose.dark img {
-    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Darker shadow for dark mode */
-}
+.custom-scrollbar::-webkit-scrollbar { width: 5px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-200 dark:bg-gray-700 rounded-full; }
 </style>

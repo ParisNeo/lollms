@@ -1,5 +1,7 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
+import apiClient from '../services/api';
+
 
 export const useUiStore = defineStore('ui', {
   state: () => ({
@@ -121,6 +123,32 @@ export const useUiStore = defineStore('ui', {
         if (this.modalStack.length > 0) {
             const closedModalName = this.modalStack.pop();
             delete this.modalProps[closedModalName];
+        }
+    },
+    // Version Check & Changelog Logic
+    async checkVersionUpdates() {
+        try {
+            const res = await apiClient.get('/api/public/version');
+            const currentVer = res.data.version;
+            appVersion.value = currentVer;
+
+            const lastSeenVer = localStorage.getItem('lollms_last_seen_version');
+            
+            // Only show for major/minor updates, not patch levels if preferred, 
+            // but here we check for any version change
+            if (lastSeenVer !== currentVer) {
+                const changelogRes = await apiClient.get('/api/public/changelog', { params: { version: currentVer } });
+                
+                // Open a "What's New" modal (using WhatsNextModal as a template or a new one)
+                openModal('whatsNext', { 
+                    isUpdate: true, 
+                    changelog: changelogRes.data 
+                });
+                
+                localStorage.setItem('lollms_last_seen_version', currentVer);
+            }
+        } catch (e) {
+            console.error("Version check failed", e);
         }
     },
 

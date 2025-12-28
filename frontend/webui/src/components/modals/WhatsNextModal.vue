@@ -25,10 +25,15 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const router = useRouter();
 
+const isAdmin = computed(() => authStore.isAdmin);
+const modalData = computed(() => uiStore.modalData(modalName));
+const isUpdate = computed(() => !!modalData.value?.isUpdate);
+const changelog = computed(() => modalData.value?.changelog);
+
+
 const modalName = 'whatsNext';
 const currentStep = ref(1);
 
-const isAdmin = computed(() => authStore.isAdmin);
 
 // --- Steps Definition ---
 const adminSteps = [
@@ -69,31 +74,52 @@ function prevStep() {
 
 async function finalizeSetup() {
     try {
-        await authStore.updateUserPreferences({ first_login_done: true });
+        if (!isUpdate.value) {
+            await authStore.updateUserPreferences({ first_login_done: true });
+        }
         uiStore.closeModal(modalName);
         
-        if (isAdmin.value) {
-            router.push({ name: 'Admin' });
-        } else {
-            router.push({ name: 'Home' });
+        if (!isUpdate.value) {
+            if (isAdmin.value) {
+                router.push({ name: 'Admin' });
+            } else {
+                router.push({ name: 'Home' });
+            }
         }
     } catch (e) {
         console.error("Failed to update user profile:", e);
         uiStore.closeModal(modalName);
-    }
+    }    
 }
 </script>
 
 <template>
   <GenericModal
     :modal-name="modalName"
-    :title="steps[currentStep-1].title"
+    :title="isUpdate ? `What's New in v${changelog?.version || ''}` : steps[currentStep-1].title"
     :allow-overlay-close="false"
     :show-close-button="false"
     max-width-class="max-w-5xl"
   >
     <template #body>
       <div class="min-h-[500px] flex flex-col justify-between p-2">
+        <!-- ==================== UPDATE VIEW (Changelog) ==================== -->
+        <div v-if="isUpdate && changelog" class="space-y-6 animate-fade-in">
+            <div class="bg-blue-600 rounded-2xl p-8 text-white shadow-lg mb-6">
+                <h3 class="text-3xl font-black tracking-tight">{{ changelog.title }}</h3>
+                <p class="mt-2 opacity-80 font-medium">A new chapter for LoLLMs has arrived.</p>
+            </div>
+            
+            <div class="prose dark:prose-invert max-w-none p-6 border rounded-2xl dark:border-gray-700 bg-white dark:bg-gray-900 shadow-sm overflow-y-auto max-h-[400px] custom-scrollbar">
+                <MessageContentRenderer :content="changelog.content" />
+            </div>
+            
+            <div class="mt-auto pt-6 flex justify-end">
+                <button @click="finalizeSetup" class="btn btn-primary px-10 py-3 rounded-2xl shadow-xl">
+                    Let's Explore
+                </button>
+            </div>
+        </div>
           
         <!-- ==================== STEP 1: ENHANCED MISSION & TERMS ==================== -->
         <div v-if="currentStep === 1" class="space-y-8 animate-fade-in">

@@ -1,36 +1,37 @@
 # Intermediate Guide
 
-Once you are comfortable with basic chatting, explore these powerful features.
+This guide covers advanced features like **RAG (Retrieval Augmented Generation)**, **Image Editing**, and **Social Connectivity**.
 
 ## 1. Data Stores (RAG)
+RAG allows the AI to "read" your local documents (PDFs, Word docs, Text files) and answer questions based *only* on that data.
 
-"Retrieval Augmented Generation" (RAG) allows the AI to read your documents.
+### How to use RAG:
+1.  **Navigate** to the **Data Stores** view (Database icon).
+2.  **Create** a new Data Store and give it a name.
+3.  **Upload** your files. LoLLMs will "vectorize" (index) them.
+4.  **In Chat**: In the discussion settings or personality settings, "Mount" your Data Store.
+5.  **Query**: Ask questions like "According to the uploaded PDF, what is our target for Q4?"
 
-1.  Go to the **Data Stores** view (Database icon).
-2.  Create a new Data Store.
-3.  Upload PDF, TXT, or DOCX files.
-4.  **Mounting**: In your chat settings or personality settings, select this Data Store. The AI can now answer questions based on those documents.
+## 2. Image Generation & Editing
+If your administrator has configured a **TTI (Text-to-Image)** binding, you can generate art directly in LoLLMs.
 
-## 2. Image Generation
+- **Direct Generation**: Simply ask the AI to "Generate a picture of a futuristic city."
+- **Image Studio**: Access this from the user menu for advanced control. You can perform **In-painting** (editing parts of an image) or **Out-painting** (expanding an image).
+- **Vision Models**: Use vision-capable models to describe images you upload.
 
-If the server has an image generation engine (TTI) enabled:
-*   Ask the AI to "Draw a picture of..." or "Generate an image of...".
-*   In **Image Studio**, you can use specialized tools to edit or generate images with more control.
+## 3. Social & Messaging
+LoLLMs is a multi-user platform. You can interact with others on the same server.
 
-## 3. Social Features
+- **Friends**: Search for users and send friend requests. Once accepted, you can send **Direct Messages (DMs)**.
+- **Sharing**: You can share a specific AI discussion with a friend so they can read or continue the conversation.
+- **Public Feed**: Share your best generations or discussions to the server-wide feed for others to see and like.
 
-*   **Friends**: Add other users on the server as friends to send Direct Messages (DM).
-*   **Social Feed**: Share your interesting AI discussions or images with the community.
+## 4. Discussion Management
+- **Cloning**: Use the "Clone" button in the sidebar to create a duplicate of a chat. This is useful for "branching" a conversation into two different directions.
+- **Auto-Title**: Enable this in settings to let the AI automatically rename your chats based on the first few messages.
 
-## 4. Personal Profile
+---
 
-Go to **Settings > Account** to:
-*   Change your Avatar.
-*   Update your password.
-*   Set a "Personal Information" note that the AI will always know about you (e.g., "I am a Python developer").
-
-## 5. Exporting
-
-You can export your discussions to save them offline:
-*   **Formats**: JSON, Markdown, or Plain Text.
-*   **Location**: Look for the export button in the discussion header.
+## Examples
+- **Example 1**: Create a Data Store with 50 research papers. Use the "Researcher" personality to summarize common themes across all of them.
+- **Example 2**: Use the "DALL-E" binding to generate a logo, then use the "Image Editor" to change the colors of a specific part.

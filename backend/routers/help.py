@@ -1,159 +1,149 @@
 # backend/routers/help.py
 import os
-import re # NEW IMPORT for stripping markdown
+import re
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from typing import List, Dict
+
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import PlainTextResponse
+
 from backend.models import UserAuthDetails
 from backend.session import get_current_active_user
-from typing import List, Dict
+from backend.config import PROJECT_ROOT
 
 help_router = APIRouter(prefix="/api/help", tags=["Help & Documentation"])
 
-HELP_DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "markdown" / "help"
+# Robust path resolution
+HELP_DOCS_DIR = (PROJECT_ROOT / "docs" / "markdown" / "help").resolve()
 HELP_INDEX_FILE = HELP_DOCS_DIR / "help_index.md"
-ADMIN_HELP_FILE = HELP_DOCS_DIR / "admin_specific_help.md" # New constant for admin file
+ADMIN_HELP_FILE = HELP_DOCS_DIR / "admin_specific_help.md"
 
-@help_router.get("/keywords", response_model=List[Dict[str, str]])
-async def get_data_zone_keywords():
-    """
-    Returns a list of available dynamic keywords for use in data zones.
-    """
-    return [
-        {"keyword": "{{date}}", "description": "The current server date (e.g., 2025-07-23)."},
-        {"keyword": "{{time}}", "description": "The current server time (e.g., 23:06:51)."},
-        {"keyword": "{{datetime}}", "description": "The current server date and time."},
-        {"keyword": "{{user_name}}", "description": "Your registered username."},
-    ]
+# --- DEFAULT CONTENT FOR BOOTSTRAPPING ---
+DEFAULT_HELP_CONTENT = {
+    "help_index.md": """# LoLLMs Help Center
+Welcome to the Documentation Portal. LoLLMs is a multi-modal AI orchestration platform.
+
+### 🚀 Getting Started
+*   [**Beginner's Guide**](level_0_beginner.md) - The basics of chatting and basic settings.
+*   [**Understanding Personalities**](level_0_beginner.md#personalities) - How to use AI personas.
+
+### 🛠️ Core Features
+*   [**Intermediate Guide**](level_2_intermediate.md) - RAG (Data Stores), Image Generation, and Social.
+
+### ⚡ Power Usage
+*   [**Expert Guide**](level_4_expert.md) - For developers. Bindings, Models, and APIs.
+
+### 🛡️ Administration
+*   [**Administrator Guide**](admin_specific_help.md) - Server management and security.
+""",
+    "level_0_beginner.md": """# Beginner's Guide to LoLLMs
+Welcome! This guide covers the basics.
+## 1. The Main Chat
+Type your questions at the bottom. Click the square icon to stop generation.
+## 2. Personalities
+Click the personality name in the top header to change behavior.
+""",
+    "level_2_intermediate.md": """# Intermediate Guide
+## 1. Data Stores (RAG)
+Go to **Data Stores** to upload PDFs. Then 'Mount' the store in your chat.
+## 2. Image Generation
+Ask the AI to "Draw a picture of..." if a TTI engine is configured.
+""",
+    "level_4_expert.md": """# Expert & Developer Guide
+## 1. Managing Bindings
+Increase Context Size in Settings > Bindings to remember longer chats.
+## 2. API Access
+LoLLMs is OpenAI-compatible. Use your API Key at `http://[IP]:9642/v1`.
+""",
+    "admin_specific_help.md": """# Administrator Guide
+## 1. Dashboard
+Monitor hardware usage and terminate processes directly.
+## 2. Security
+Enable HTTPS in **Settings > Server Settings**.
+"""
+}
+
+def ensure_help_files():
+    """Bootstraps the help directory if files are missing."""
+    if not HELP_DOCS_DIR.exists():
+        HELP_DOCS_DIR.mkdir(parents=True, exist_ok=True)
+    for filename, content in DEFAULT_HELP_CONTENT.items():
+        file_path = HELP_DOCS_DIR / filename
+        if not file_path.exists():
+            file_path.write_text(content, encoding="utf-8")
+            print(f"INFO [Help]: Bootstrapped {filename}")
+
+ensure_help_files()
 
 def _get_markdown_content(file_path: Path) -> str:
-    """Helper to safely read a markdown file."""
     if not file_path.is_file():
         return ""
     try:
         return file_path.read_text(encoding="utf-8")
-    except Exception:
-        return f"Error reading help file: {file_path.name}"
+    except Exception as e:
+        print(f"ERROR [Help]: Failed to read {file_path}: {e}")
+        return f"Error reading help file: {str(e)}"
+
+@help_router.get("/keywords", response_model=List[Dict[str, str]])
+async def get_data_zone_keywords():
+    return [
+        {"keyword": "{{date}}", "description": "Current date (YYYY-MM-DD)."},
+        {"keyword": "{{time}}", "description": "Current time (HH:MM:SS)."},
+        {"keyword": "{{user_name}}", "description": "Your username."},
+    ]
 
 @help_router.get("/index", response_class=PlainTextResponse)
 async def get_help_index():
-    """
-    Returns the markdown content of the help_index.md file,
-    which lists available help topics and their associated files/sections.
-    """
     if not HELP_INDEX_FILE.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Help index file not found.")
-    
+        raise HTTPException(status_code=404, detail="Index file missing.")
     return _get_markdown_content(HELP_INDEX_FILE)
 
 @help_router.get("/topic", response_class=PlainTextResponse)
 async def get_help_topic_content(
-    topic_filename: str = Query(..., description="Filename of the help topic (e.g., 'level_0_beginner.md')"),
-    section_id: str = Query(None, description="Optional section ID within the topic to highlight or link to"),
+    topic_filename: str = Query(..., description="Filename of the help topic"),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Returns the markdown content for a specific help topic file.
-    Dynamically appends admin-specific help if the user is an admin.
-    """
-    # Prevent path traversal vulnerabilities
-    if ".." in topic_filename or "/" in topic_filename or "\\" in topic_filename:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid topic filename.")
-
-    # Determine which files are accessible based on user's role/level
-    allowed_files = set()
-    if HELP_INDEX_FILE.is_file():
-        index_content = _get_markdown_content(HELP_INDEX_FILE)
-        for line in index_content.splitlines():
-            if line.strip().startswith("- [") and "](help/" in line:
-                # Extract filename from markdown link format - [Title](help/filename.md#section)
-                match = re.search(r'\]\(help\/([^\)#]+)', line) # Simpler regex to get filename
-                if match:
-                    allowed_files.add(match.group(1))
-
-    # Explicitly allow level-based files (as they are the base content)
-    allowed_files.add("level_0_beginner.md")
-    allowed_files.add("level_2_intermediate.md")
-    allowed_files.add("level_4_expert.md")
+    if not topic_filename.endswith(".md"):
+        topic_filename += ".md"
     
-    # admin_specific_help.md is *not* in allowed_files because it's not a standalone topic
-    # but appended dynamically.
+    # Secure filename
+    safe_filename = os.path.basename(topic_filename)
+    target_path = (HELP_DOCS_DIR / safe_filename).resolve()
 
-    if topic_filename not in allowed_files:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access to this help topic is forbidden.")
+    # Unauthorized access check
+    if not str(target_path).startswith(str(HELP_DOCS_DIR)):
+        raise HTTPException(status_code=403, detail="Unauthorized.")
 
-    file_path = HELP_DOCS_DIR / topic_filename
-    if not file_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Help topic file not found.")
+    if not target_path.is_file():
+        print(f"ERROR [Help]: File not found at {target_path}")
+        raise HTTPException(status_code=404, detail=f"File '{safe_filename}' not found.")
 
-    base_content = _get_markdown_content(file_path)
+    content = _get_markdown_content(target_path)
     
-    # Dynamically append admin-specific help if user is admin
-    if current_user.is_admin:
-        admin_content = _get_markdown_content(ADMIN_HELP_FILE)
-        if admin_content:
-            base_content += f"\n\n---\n\n{admin_content}" # Add a separator
+    if current_user.is_admin and safe_filename != "admin_specific_help.md":
+        if ADMIN_HELP_FILE.is_file():
+            content += f"\n\n---\n\n{_get_markdown_content(ADMIN_HELP_FILE)}"
 
-    return PlainTextResponse(base_content, media_type="text/markdown")
+    return PlainTextResponse(content, media_type="text/markdown")
 
 @help_router.get("/search", response_class=PlainTextResponse)
 async def search_help_topics(
-    query: str = Query(..., min_length=2, description="Search query for help topics"),
+    query: str = Query(..., min_length=2),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Searches through help topics and returns a combined markdown document with relevant sections.
-    """
-    search_results_content = "# Search Results\n\n"
-    
-    # Files to search (controlled by role/level for relevance and combining admin content)
-    files_to_search_base = []
-    
-    # Base level files
-    files_to_search_base.append("level_0_beginner.md")
-    if current_user.user_ui_level >= 2:
-        files_to_search_base.append("level_2_intermediate.md")
-    if current_user.user_ui_level >= 4:
-        files_to_search_base.append("level_4_expert.md")
-    
-    found_any = False
-    
-    for filename in set(files_to_search_base): # Use set to avoid duplicates
-        file_path = HELP_DOCS_DIR / filename
-        if file_path.is_file():
-            content = _get_markdown_content(file_path)
-            
-            # Add admin-specific content if this is a top-level help file and user is admin
-            if current_user.is_admin and filename == f"level_{current_user.user_ui_level}_expert.md": # Or whichever is the highest level base file
-                 admin_content = _get_markdown_content(ADMIN_HELP_FILE)
-                 if admin_content:
-                    content += f"\n\n---\n\n{admin_content}"
+    results = [f"# Search Results: {query}\n"]
+    searchable = ["level_0_beginner.md", "level_2_intermediate.md", "level_4_expert.md"]
+    if current_user.is_admin: searchable.append("admin_specific_help.md")
 
-            # Simple substring search (can be improved with regex/indexing for production)
-            # This logic attempts to find full sections relevant to the query
-            
-            # Using regex to capture headings and their content
-            # This regex captures sections starting with any level of heading and ending before the next heading or end of string.
-            # It also handles potential '---' separators for combining content.
-            sections_regex = re.compile(r'^(#+ .*?)(?:\n(.*?))?(?=\n#+ |\n---|$)', re.DOTALL | re.MULTILINE)
-            
-            matches = sections_regex.findall(content)
-            
-            relevant_sections = []
-            
-            for heading_line, section_body in matches:
-                full_section_text = heading_line + "\n" + section_body if section_body else heading_line
-                if query.lower() in full_section_text.lower():
-                    # Preserve original heading level by just joining them
-                    relevant_sections.append(full_section_text.strip())
-
-            if relevant_sections:
-                # Add a sub-heading indicating which original file these results came from
-                search_results_content += f"## From '{filename.replace('.md', '').replace('_', ' ').title()}'\n\n"
-                search_results_content += "\n\n---\n\n".join(relevant_sections) + "\n\n"
-                found_any = True
-    
-    if not found_any:
-        search_results_content += "No results found for your query. Please try a different search term."
-
-    return PlainTextResponse(search_results_content, media_type="text/markdown")
+    found = False
+    for filename in searchable:
+        path = HELP_DOCS_DIR / filename
+        if not path.is_file(): continue
+        content = _get_markdown_content(path)
+        sections = re.split(r'\n(?=# )', content)
+        for section in sections:
+            if query.lower() in section.lower():
+                results.append(f"## Found in {filename.replace('.md','').title()}\n")
+                results.append(section.strip() + "\n\n---\n")
+                found = True
+    return "\n".join(results) if found else "No results found."
