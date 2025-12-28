@@ -1,4 +1,4 @@
-# LoLLMs - v2.0.1 "Restart"
+# LoLLMs - v2.1.0 "Restart"
 
 One tool to rule them all!
 

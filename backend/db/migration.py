@@ -244,7 +244,9 @@ def _bootstrap_lollms_user(connection):
                     force_ai_response_language, share_personal_info_with_llm, note_generation_enabled,
                     memory_enabled, auto_memory_enabled,
                     default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status,
-                    max_image_width, max_image_height
+                    max_image_width, max_image_height,
+                    slide_maker_enabled, activate_generated_images, compress_images, image_compression_quality,
+                    web_search_enabled, web_search_deep_analysis
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
@@ -256,7 +258,9 @@ def _bootstrap_lollms_user(connection):
                     :force_ai_response_language, :share_personal_info_with_llm, :note_generation_enabled,
                     :memory_enabled, :auto_memory_enabled,
                     :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status,
-                    -1, -1
+                    -1, -1,
+                    :slide_maker_enabled, :activate_generated_images, :compress_images, :image_compression_quality,
+                    :web_search_enabled, :web_search_deep_analysis
                 )
             """),
             {
@@ -289,7 +293,13 @@ def _bootstrap_lollms_user(connection):
                 "default_rag_chunk_size": 1024,
                 "default_rag_chunk_overlap": 256,
                 "default_rag_metadata_mode": "none",
-                "status": "active"
+                "status": "active",
+                "slide_maker_enabled": False,
+                "activate_generated_images": False,
+                "compress_images": False,
+                "image_compression_quality": 85,
+                "web_search_enabled": False,
+                "web_search_deep_analysis": False
             }
         )
         connection.commit()
