@@ -18,39 +18,3 @@ data_dir = "data"  # For user-specific discussion files and SafeStore DBs
 database_url = "sqlite:///./data/app_main.db" # Central SQLite DB for users and app settings
 secret_key = "a_very_secret_key_for_flask_sessions_or_jwt" # For session/token use
 access_token_expires_minutes = 44640 # How many minutes the access token stays alive after last use (44640 = 1 month)
-
-# --- IMPORTANT ---
-# This section is now used ONLY for the very first startup to create an initial
-# LLM binding in the database. After the first run, all binding configurations
-# are managed exclusively through the Admin Panel in the web UI.
-# Any changes made to this section after the first run will have NO EFFECT.
-# New bindings will use the default parameters provided by their 'description.yaml'.
-[lollms_client_defaults] # Global defaults, can be overridden by user settings in DB
-binding_name = "llamacpp" # Example: "ollama", "openai", "lollms", "transformers", "litellm", "gemini"
-default_model_name = "llava-v1.6-mistral-7b.Q3_K_XS.gguf" # Example: "phi3:latest" for ollama, "gpt-4o-mini" for openai
-
-[safe_store_defaults] # Global defaults
-cache_folder = "data/cache/safestore"
-chunk_size = 2096 # characters (as safestore make no assumptions about the LLM)
-chunk_overlap = 150 # characters (as safestore make no assumptions about the LLM)
-# Default vectorizer if not set per user. Users can override this.
-global_default_vectorizer = "st:all-MiniLM-L6-v2" # Example Sentence Transformer model
-# Global encryption key for user SafeStores.
-# For per-user encryption keys, you'd store them encrypted in the UserDB (not implemented here).
-# If set, requires 'safe_store[encryption]' -> 'cryptography' to be installed.
-encryption_key = "my_super_secret_safe_store_key_CHANGE_ME" # Or null/remove to disable encryption
-
-[tti_settings]
-# Default TTI (Text-to-Image) binding to use for the "Generate Image" feature.
-# Make sure you have configured this binding in your global lollms settings
-# or provided necessary API keys as environment variables (e.g., OPENAI_API_KEY).
-binding_name = "dalle" 
-# You can add binding-specific configurations here if needed.
-# For DALL-E, you can specify the model.
-binding_config = { model_name = "dall-e-3" }
-
-[redis]
-host = "localhost"
-port = 6379
-db = 0
-# password = "your_redis_password" # Uncomment if needed

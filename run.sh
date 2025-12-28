@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ================================================================
-#   LOLLMs – Installer & Runner (Restored & Enhanced)
+#   LOLLMs – Installer & Runner
 # ================================================================
 
 VENV_DIR="venv"
@@ -41,8 +41,6 @@ RESET_MODE=0
 RESET_USER=""
 RESET_PASS=""
 
-# Use a standard loop to detect flags
-# We don't shift here because we want to pass "$@" to main.py later
 for ((i=1; i<=$#; i++)); do
     arg="${!i}"
     if [ "$arg" == "--update" ]; then
@@ -118,14 +116,39 @@ if [ "$RESET_MODE" -eq 1 ]; then
     exit 0
 fi
 
-# --- 6. Final Execution ---
-if [ ! -f ".env" ] && [ -f ".env.example" ]; then
-    cp ".env.example" ".env"
+# --- 6. Environment Setup & Secret Key Prompt ---
+if [ ! -f ".env" ]; then
+    if [ -f ".env.example" ]; then
+        print_info "Configuring '.env' file for the first time..."
+        cp ".env.example" ".env"
+        
+        echo -e "\n${COLOR_HEADER}============================================================${COLOR_RESET}"
+        echo -e "${COLOR_HEADER}                SECURITY CONFIGURATION                      ${COLOR_RESET}"
+        echo -e "${COLOR_HEADER}============================================================${COLOR_RESET}"
+        echo "A SECRET_KEY is required to secure user sessions and tokens."
+        
+        # Read with a timeout/default check to be automation friendly
+        read -p "Enter a random secret string (or press Enter to auto-generate): " user_secret || true
+        
+        if [ -z "$user_secret" ]; then
+            print_info "Generating secure random key..."
+            if command -v openssl >/dev/null 2>&1; then
+                user_secret=$(openssl rand -hex 32)
+            else
+                user_secret=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
+            fi
+        fi
+        
+        echo "SECRET_KEY=$user_secret" >> .env
+        print_success "Security key configured in .env."
+        echo -e "${COLOR_HEADER}============================================================${COLOR_RESET}\n"
+    fi
 fi
 
+# --- 7. Final Execution ---
 export PYTHONPATH="$(pwd)"
 export PYTHONUNBUFFERED=1
 
 print_info "Launching LOLLMs with arguments: $*"
-# Use exec to hand over the process to python, ensuring signals (Ctrl+C) are handled correctly
+# Use exec to hand over the process to python
 exec python3 "$MAIN_SCRIPT" "$@"

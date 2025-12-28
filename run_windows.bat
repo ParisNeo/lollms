@@ -22,8 +22,6 @@ for %%x in (%*) do (
     if "%%x"=="--update" set UPDATE_ONLY=1
     if "%%x"=="--reset-password" (
         set IS_RESET=1
-        :: We capture the next two arguments via a separate call because 
-        :: batch loops don't support easy index-based access
     )
 )
 
@@ -56,7 +54,6 @@ if not exist "%VENV_DIR%\Scripts\activate.bat" (
 
 :: --- 3. PASSWORD RESET INTERCEPT ---
 if "%IS_RESET%"=="1" (
-    :: Robustly find the user and pass
     set foundFlag=0
     for %%a in (%*) do (
         if "!foundFlag!"=="2" set RESET_PASS=%%a& set foundFlag=3
@@ -91,13 +88,11 @@ if "%UPDATE_ONLY%"=="1" (
         echo [INFO] Fetching latest updates from git...
         git fetch --all --tags
         
-        :: Check if we are on a branch
         git symbol-ref -q HEAD >nul 2>nul
         if !errorlevel! equ 0 (
             echo [INFO] Updating current branch...
             git pull
         ) else (
-            :: Find latest tag
             for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0 2^>nul') do set LATEST_TAG=%%i
             if defined LATEST_TAG (
                 echo [INFO] Updating to latest tag: !LATEST_TAG!...
@@ -115,11 +110,30 @@ if "%UPDATE_ONLY%"=="1" (
     )
 )
 
-:: --- 5. ENVIRONMENT SETUP ---
+:: --- 5. ENVIRONMENT SETUP & SECRET KEY PROMPT ---
 if not exist ".env" (
     if exist ".env.example" (
-        echo [INFO] Creating .env from example...
+        echo [INFO] Configuring '.env' file for the first time...
         copy .env.example .env >nul
+        
+        echo.
+        echo ============================================================
+        echo                SECURITY CONFIGURATION
+        echo ============================================================
+        echo A SECRET_KEY is required to secure user sessions and tokens.
+        set /p USER_SECRET="Enter a random secret string (or press Enter to auto-generate): "
+        
+        if "!USER_SECRET!"=="" (
+            echo [INFO] Generating secure random key...
+            for /f "delims=" %%i in ('powershell -command "[guid]::NewGuid().ToString() + [guid]::NewGuid().ToString()"') do set USER_SECRET=%%i
+        )
+        
+        :: Append or replace key in .env
+        :: We use a temporary file to avoid complex batch string replacement
+        echo SECRET_KEY=!USER_SECRET!>>.env
+        echo [SUCCESS] Security key configured in .env.
+        echo ============================================================
+        echo.
     )
 )
 
