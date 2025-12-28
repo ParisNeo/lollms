@@ -1,4 +1,4 @@
-# LoLLMs - v1.0.2 "Nebula"
+# LoLLMs - v2.0.1 "Restart"
 
 One tool to rule them all!
 

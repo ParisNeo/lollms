@@ -93,6 +93,7 @@ const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
 // We no longer preview the global discussion gallery here.
 const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
+const isGoogleSearchConfigured = computed(() => !!user.value?.google_api_key && !!user.value?.google_cse_id);
 
 // --- Context Bar Logic ---
 const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
@@ -154,6 +155,10 @@ function toggleMcpTool(toolId) {
 }
 
 function toggleWebSearch() {
+    if (!isGoogleSearchConfigured.value) {
+        uiStore.addNotification("Google Web Search is not configured. Please add your API Key in Settings > User Context.", "error");
+        return;
+    }
     isWebSearchActive.value = !isWebSearchActive.value;
 }
 
@@ -199,7 +204,7 @@ const activeFeatures = computed(() => {
             icon: IconGlobeAlt,
             label: 'Web',
             colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
-            title: 'Web Search Active'
+            title: 'Web Search Active. AI can search the internet.'
         });
     }
 
@@ -208,9 +213,11 @@ const activeFeatures = computed(() => {
         features.push({
             id: 'memory',
             icon: IconThinking,
-            label: 'Memory',
+            label: user.value.auto_memory_enabled ? 'Memory (Auto)' : 'Memory',
             colorClass: 'text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800',
-            title: 'Long-Term Memory Active'
+            title: user.value.auto_memory_enabled 
+                ? 'Long-Term Memory Active. AI can automatically save new memories.' 
+                : 'Long-Term Memory Active. Use <new_memory> tags to save.'
         });
     }
 
@@ -221,7 +228,7 @@ const activeFeatures = computed(() => {
             icon: IconEye,
             label: 'Vision',
             colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
-            title: 'Vision Supported'
+            title: 'Vision Supported. AI can see attached images.'
         });
     }
 
@@ -232,7 +239,7 @@ const activeFeatures = computed(() => {
             icon: IconPhoto,
             label: 'ImgGen',
             colorClass: 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800',
-            title: 'Image Generation Enabled'
+            title: 'Image Generation Enabled. AI can create images.'
         });
     }
 
@@ -243,7 +250,7 @@ const activeFeatures = computed(() => {
             icon: IconPencil,
             label: 'ImgEdit',
             colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
-            title: 'Image Editing Enabled'
+            title: 'Image Editing Enabled. AI can modify existing images.'
         });
     }
 
@@ -254,7 +261,7 @@ const activeFeatures = computed(() => {
             icon: IconPresentationChartBar,
             label: 'Slides',
             colorClass: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
-            title: 'Slide Maker Enabled'
+            title: 'Slide Maker Enabled. AI can generate presentations.'
         });
     }
 
@@ -265,7 +272,7 @@ const activeFeatures = computed(() => {
             icon: IconMicrophone,
             label: 'Audio',
             colorClass: 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-800',
-            title: 'Audio Features Enabled'
+            title: 'Audio Features (TTS/STT) Enabled.'
         });
     }
     
@@ -599,13 +606,32 @@ onUnmounted(() => {
                         <DropdownSubmenu title="Context Options" icon="cog" collection="ui">
                              <div class="p-1 min-w-[200px]">
                                 <!-- Web Search Toggle -->
-                                <button @click.stop="toggleWebSearch" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleWebSearch" class="menu-item flex justify-between items-center group/item" :class="{'opacity-50 cursor-not-allowed': !isGoogleSearchConfigured}">
                                     <span class="flex items-center gap-2">
                                         <IconGlobeAlt class="w-4 h-4 text-blue-500" />
                                         <span>Web Search</span>
                                     </span>
                                     <IconCheckCircle v-if="isWebSearchActive" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                
+                                <!-- Memory Master Toggle -->
+                                <button @click.stop="toggleUserPref('memory_enabled', user.memory_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconThinking class="w-4 h-4 text-teal-500" />
+                                        <span>Memory</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.memory_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Auto-Memory Sub-Toggle (Only visible if Memory is enabled) -->
+                                <button v-if="user?.memory_enabled" @click.stop="toggleUserPref('auto_memory_enabled', user.auto_memory_enabled)" class="menu-item flex justify-between items-center group/item pl-8 text-xs">
+                                    <span class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                                        <span>↳ Auto Save</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.auto_memory_enabled" class="w-3.5 h-3.5 text-green-500" />
+                                    <IconCircle v-else class="w-3.5 h-3.5 text-gray-400" />
                                 </button>
                                 
                                 <!-- Image Generation Toggle -->
@@ -625,16 +651,6 @@ onUnmounted(() => {
                                         <span>Image Edit</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.image_editing_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                
-                                <!-- Memory Toggle -->
-                                <button @click.stop="toggleUserPref('memory_enabled', user.memory_enabled)" class="menu-item flex justify-between items-center group/item">
-                                    <span class="flex items-center gap-2">
-                                        <IconThinking class="w-4 h-4 text-teal-500" />
-                                        <span>Memory</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.memory_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
                              </div>

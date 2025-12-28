@@ -1,6 +1,7 @@
 # lollms/scripts/setup_wizard.py
 import sys
 from pathlib import Path
+import traceback
 
 # Setup PYTHONPATH to allow imports from backend
 project_root = Path(__file__).resolve().parent.parent
@@ -9,6 +10,19 @@ sys.path.insert(0, str(project_root))
 try:
     from backend.db import session as db_session_module
     from backend.db.base import Base
+    
+    # Import all models to ensure they are registered in SQLAlchemy metadata
+    # before create_all is called. This prevents NoReferencedTableError for
+    # foreign keys defined in Base (like user_group_link).
+    from backend.db.models import (
+        user, group, personality, config, service, 
+        social, dm, discussion, discussion_group, 
+        memory, note, notebook, image, voice, 
+        fun_fact, news, broadcast, api_key, 
+        connections, datastore, db_task, email_marketing, 
+        friends, prompt
+    )
+
     from backend.db.models.user import User
     from backend.security import get_password_hash
     from backend.config import INITIAL_ADMIN_USER_CONFIG, APP_DB_URL
@@ -32,6 +46,7 @@ class ASCIIColors:
 
 def get_db_session():
     db_session_module.init_database(APP_DB_URL)
+    # Ensure all tables are created
     Base.metadata.create_all(bind=db_session_module.engine)
     return db_session_module.SessionLocal()
 
@@ -61,8 +76,9 @@ def main_wizard():
 
     print("\nInitializing system database and creating administrator account...")
 
-    db = get_db_session()
+    db = None
     try:
+        db = get_db_session()
         create_admin_if_not_exists(db)
         
         print("\n" + ASCIIColors.green("Installation completed successfully!"))
@@ -89,9 +105,11 @@ def main_wizard():
         
     except Exception as e:
         print(ASCIIColors.red(f"\n[ERROR] Setup failed: {e}"))
+        traceback.print_exc()
         sys.exit(1)
     finally:
-        db.close()
+        if db:
+            db.close()
 
 if __name__ == "__main__":
     main_wizard()

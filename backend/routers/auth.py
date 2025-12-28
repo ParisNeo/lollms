@@ -20,7 +20,7 @@ from pydantic import BaseModel
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import LLMBinding as DBLLMBinding
+from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
 from backend.models.user import (
     UserCreatePublic,
     UserPublic,
@@ -375,6 +375,9 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
     is_active_on_creation = (registration_mode == "direct")
     user_status = "active" if is_active_on_creation else "pending_admin_validation"
     
+    # Check for active TTI binding to set default image generation capability
+    has_active_tti = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).first() is not None
+
     new_user = DBUser(
         username=user_data.username,
         email=user_data.email,
@@ -386,9 +389,10 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
         llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
-        first_login_done=False, # Ensure Terms of Use are shown
+        first_login_done=False, # CHANGED to False so the Terms modal appears
         user_ui_level=settings.get("default_user_ui_level", 0),
-        auto_title=settings.get("default_auto_title", False)
+        auto_title=settings.get("default_auto_title", False),
+        image_generation_enabled=has_active_tti # Auto-enable image generation if TTI backend exists
     )
 
     try:
