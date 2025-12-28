@@ -17,7 +17,6 @@ const LogsAndAnalysis = defineAsyncComponent(() => import('./LogsAndAnalysis.vue
 const Operations = defineAsyncComponent(() => import('./Operations.vue'));
 
 const UserTable = defineAsyncComponent(() => import('./UserTable.vue'));
-const ServerSettings = defineAsyncComponent(() => import('./ServerSettings.vue'));
 // GlobalSettings REMOVED as it is now merged into ServerSettings
 
 const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBindingsSettings.vue'));
@@ -49,7 +48,6 @@ const tabs = [
     { id: 'gpu_load', component: GPULoad },
     { id: 'logs_analysis', component: LogsAndAnalysis },
     { id: 'operations', component: Operations },
-    { id: 'server_settings', component: ServerSettings },
     { id: 'users', component: UserTable },
     { id: 'tasks', component: TaskManager },
     { id: 'llm_bindings', component: LLMBindingsSettings },

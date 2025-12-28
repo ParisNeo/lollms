@@ -2,146 +2,137 @@
 setlocal enabledelayedexpansion
 
 :: ==================================================================
-:: LOLLMs - Windows Runner
+:: LOLLMs - Windows Runner & Installer
 :: ==================================================================
-:: This script installs necessary components if they are missing,
-:: then starts the application server.
 
 set VENV_DIR=venv
 set REQUIREMENTS_FILE=requirements.txt
 set PYTHON_EXECUTABLE=python
 
-:: --- 0. ARGUMENT PARSING ---
+:: --- 0. ARGUMENT PRE-PARSING ---
 set UPDATE_ONLY=0
+set IS_RESET=0
+set RESET_USER=
+set RESET_PASS=
+
+:: Iterate through arguments to find our special flags
+set argCount=0
 for %%x in (%*) do (
+    set /a argCount+=1
     if "%%x"=="--update" set UPDATE_ONLY=1
-)
-
-:: --- 1. UPDATE LOGIC ---
-if "%UPDATE_ONLY%"=="1" (
-    echo [INFO] Update flag detected. Starting repository update...
-    
-    if not exist ".git" (
-        echo [ERROR] Not a git repository. Update aborted.
-        pause
-        exit /b 1
+    if "%%x"=="--reset-password" (
+        set IS_RESET=1
+        :: We capture the next two arguments via a separate call because 
+        :: batch loops don't support easy index-based access
     )
-
-    echo [INFO] Fetching latest updates from git...
-    git fetch --all --tags
-    
-    :: Check if we are on a branch
-    git symbol-ref -q HEAD >nul 2>nul
-    if !errorlevel! equ 0 (
-        echo [INFO] Updating current branch...
-        git pull
-    ) else (
-        :: Find latest tag
-        for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0 2^>nul') do set LATEST_TAG=%%i
-        if defined LATEST_TAG (
-            echo [INFO] Updating to latest tag: !LATEST_TAG!...
-            git checkout !LATEST_TAG!
-        ) else (
-            echo [WARNING] Not on a branch and no tags found. Performing simple pull.
-            git pull
-        )
-    )
-
-    :: Ensure venv exists
-    if not exist "%VENV_DIR%\Scripts\activate.bat" (
-        echo [INFO] Creating virtual environment...
-        %PYTHON_EXECUTABLE% -m venv %VENV_DIR%
-    )
-
-    echo [INFO] Installing/Updating dependencies...
-    call .\%VENV_DIR%\Scripts\activate.bat
-    pip install --no-cache-dir -r %REQUIREMENTS_FILE%
-    
-    echo [SUCCESS] Update complete!
-    echo To start the application, run: run_windows.bat
-    exit /b 0
 )
 
 :: --- 1. PRE-CHECKS ---
 echo [INFO] Checking for Python installation...
 where %PYTHON_EXECUTABLE% >nul 2>nul
 if %errorlevel% neq 0 (
-    echo [ERROR] Python not found. Please install Python 3.10 or higher and ensure it's in your PATH.
+    echo [ERROR] Python not found. Please install Python 3.10 or higher.
     pause
     exit /b 1
 )
-echo [SUCCESS] Python found.
 
-:: --- 2. SETUP OR START ---
+:: --- 2. VENV SETUP ---
 if not exist "%VENV_DIR%\Scripts\activate.bat" (
-    echo [INFO] Virtual environment not found. Starting setup...
-
-    :: --- 2a. Create Virtual Environment ---
-    echo [INFO] [1/2] Creating Python virtual environment...
+    echo [INFO] Virtual environment not found. Creating...
     %PYTHON_EXECUTABLE% -m venv %VENV_DIR%
     if %errorlevel% neq 0 (
         echo [ERROR] Failed to create virtual environment.
         pause
         exit /b 1
     )
-    echo [SUCCESS] Virtual environment created.
-
-    :: Activate
     call .\%VENV_DIR%\Scripts\activate.bat
-
-    :: --- 2b. Install Dependencies ---
-    echo [INFO] [2/2] Installing dependencies from %REQUIREMENTS_FILE%...
+    echo [INFO] Installing dependencies...
+    python -m pip install --upgrade pip
     pip install --no-cache-dir -r %REQUIREMENTS_FILE%
-    if %errorlevel% neq 0 (
-        echo [ERROR] Failed to install required packages.
+    echo [SUCCESS] Initial setup complete!
+) else (
+    call .\%VENV_DIR%\Scripts\activate.bat
+)
+
+:: --- 3. PASSWORD RESET INTERCEPT ---
+if "%IS_RESET%"=="1" (
+    :: Robustly find the user and pass
+    set foundFlag=0
+    for %%a in (%*) do (
+        if "!foundFlag!"=="2" set RESET_PASS=%%a& set foundFlag=3
+        if "!foundFlag!"=="1" set RESET_USER=%%a& set foundFlag=2
+        if "%%a"=="--reset-password" set foundFlag=1
+    )
+
+    if "!RESET_USER!"=="" (
+        echo [ERROR] Missing username for password reset.
+        echo Usage: run_windows.bat --reset-password ^<username^> ^<new_password^>
         pause
         exit /b 1
     )
-    echo [SUCCESS] Dependencies installed.
-    echo.
-    echo [SUCCESS] Setup complete!
-    echo.
+    if "!RESET_PASS!"=="" (
+        echo [ERROR] Missing new password for password reset.
+        echo Usage: run_windows.bat --reset-password ^<username^> ^<new_password^>
+        pause
+        exit /b 1
+    )
 
-) else (
-    echo [INFO] Virtual environment found. Activating...
-    call .\%VENV_DIR%\Scripts\activate.bat
+    echo [INFO] Running Password Reset Tool for user: !RESET_USER!
+    set PYTHONPATH=.
+    python reset_password.py "!RESET_USER!" "!RESET_PASS!"
+    pause
+    exit /b 0
 )
 
-:: --- 3. CHECK FOR .env FILE ---
+:: --- 4. UPDATE LOGIC ---
+if "%UPDATE_ONLY%"=="1" (
+    echo [INFO] Starting repository update...
+    if exist ".git" (
+        echo [INFO] Fetching latest updates from git...
+        git fetch --all --tags
+        
+        :: Check if we are on a branch
+        git symbol-ref -q HEAD >nul 2>nul
+        if !errorlevel! equ 0 (
+            echo [INFO] Updating current branch...
+            git pull
+        ) else (
+            :: Find latest tag
+            for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0 2^>nul') do set LATEST_TAG=%%i
+            if defined LATEST_TAG (
+                echo [INFO] Updating to latest tag: !LATEST_TAG!...
+                git checkout !LATEST_TAG!
+            ) else (
+                git pull
+            )
+        )
+        echo [INFO] Updating dependencies...
+        pip install --upgrade pip
+        pip install --no-cache-dir -r %REQUIREMENTS_FILE%
+        echo [SUCCESS] Update complete!
+    ) else (
+        echo [WARNING] Not a git repository. Cannot auto-update code.
+    )
+)
+
+:: --- 5. ENVIRONMENT SETUP ---
 if not exist ".env" (
     if exist ".env.example" (
-        echo [INFO] '.env' file not found. Creating from '.env.example'...
+        echo [INFO] Creating .env from example...
         copy .env.example .env >nul
-        echo [SUCCESS] '.env' file created. You may want to edit it for custom configurations.
-        echo.
-    ) else (
-        echo [WARNING] '.env' and '.env.example' files not found. The application might use default settings.
-        echo.
     )
 )
 
-:: --- 4. START THE SERVER ---
-echo [INFO] Setting Python Path...
+:: --- 6. EXECUTION ---
+echo [INFO] Starting LOLLMs...
 set PYTHONPATH=.
+set PYTHONUNBUFFERED=1
 
-set PORT_TO_USE=9642
-if exist ".env" (
-    for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
-        set "line=%%a"
-        for /f "tokens=* delims= " %%k in ("!line!") do set "trimmed_key=%%k"
-        if /i "!trimmed_key!"=="SERVER_PORT" (
-            set "val=%%~b"
-            for /f "tokens=* delims= " %%v in ("!val!") do set "PORT_TO_USE=%%v"
-        )
-    )
+:: Pass ALL original arguments to main.py
+python main.py %*
+
+if %errorlevel% neq 0 (
+    echo.
+    echo [INFO] Application exited with code %errorlevel%.
+    pause
 )
-
-echo [INFO] Starting LOLLMs Server on port !PORT_TO_USE!...
-echo To stop the server, simply close this window or press Ctrl+C.
-echo.
-
-%PYTHON_EXECUTABLE% main.py
-
-echo [INFO] Server has been stopped.
-pause
-exit /b 0

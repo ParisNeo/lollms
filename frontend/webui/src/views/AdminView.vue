@@ -53,7 +53,6 @@ const sections = [
   { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
   { type: 'link', id: 'services_mgmt', name: 'Services & Usage', icon: markRaw(IconServer) },
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
-  { type: 'link', id: 'server_settings', name: 'Server Settings', icon: markRaw(IconServer) },
   { type: 'divider', label: 'Content' },
   { type: 'link', id: 'news_management', name: 'News Articles', icon: markRaw(IconFileText) },
   { type: 'link', id: 'rss_feeds', name: 'RSS Feeds', icon: markRaw(IconGlobeAlt) },

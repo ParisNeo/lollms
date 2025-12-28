@@ -75,7 +75,8 @@ _migrate_toml_to_env_if_needed()
 load_dotenv(env_path, override=True)
 
 # --- Application Version ---
-APP_VERSION = "1.7.0"
+APP_VERSION = "2.1.0"
+TAG_NAME = "Restart"
 LOCALS_DIR = PROJECT_ROOT / "frontend" / "webui" / "public" / "locals"
 
 # --- Configuration Loading from Environment ---
@@ -85,9 +86,6 @@ workers_count = get_env_var("SERVER_WORKERS", cpu_count(), int)
 # Reverting the Windows worker cap to allow multiple workers, relying on the 'spawn' fix in main.py
 # if os.name == 'nt' and workers_count > 1:
 #     print("WARNING: Capping SERVER_WORKERS to 1 on Windows to prevent WinError 10022 (Invalid argument).")
-
-# Force workers number to 1
-# workers_count = 1
 
 SERVER_CONFIG = {
     "host": get_env_var("SERVER_HOST", "0.0.0.0"),
