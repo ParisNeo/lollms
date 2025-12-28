@@ -1,7 +1,8 @@
 # Changelog
 
 
-## [Unreleased]
+#
+- feat(frontend): purge obsolete UI asset bundles and update index.html# [Unreleased]
 
 - chore: clean up generated UI assets and update index.html
 #

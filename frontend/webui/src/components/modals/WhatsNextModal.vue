@@ -213,7 +213,7 @@ async function finalizeSetup() {
                     </div>
                     <div class="p-4 border rounded-xl dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-sm">
                         <span class="font-bold text-lg mb-1 block text-green-600 dark:text-green-400">RAG Binding</span>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Connect a Vector Database (like FAISS or LanceDB) to let AI read your documents.</p>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">Connect a Vector Database (using SafeStore) to let AI read your documents.</p>
                     </div>
                     <div class="p-4 border rounded-xl dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-sm">
                         <span class="font-bold text-lg mb-1 block text-pink-600 dark:text-pink-400">Audio Bindings</span>
