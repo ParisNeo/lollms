@@ -16,8 +16,10 @@ import IconMessage from '../../assets/icons/IconMessage.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue'; 
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue'; 
 import IconFingerPrint from '../../assets/icons/IconFingerPrint.vue';
-import IconShieldCheck from '../../assets/icons/IconCheckCircle.vue'; // Placeholder for shield
+import IconShieldCheck from '../../assets/icons/IconCheckCircle.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
+import IconDatabase from '../../assets/icons/IconDatabase.vue';
+import IconMcp from '../../assets/icons/IconMcp.vue';
 
 const uiStore = useUiStore();
 const authStore = useAuthStore();
@@ -103,17 +105,17 @@ async function finalizeSetup() {
                         <div class="p-3 bg-white/10 rounded-xl backdrop-blur-md">
                             <IconGlobeAlt class="w-8 h-8 text-blue-200" />
                         </div>
-                        <h3 class="text-2xl font-black tracking-tight">The Vision of ParisNeo</h3>
+                        <h3 class="text-2xl font-black tracking-tight">The Vision Behind LoLLMs</h3>
                     </div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
                         <div class="space-y-4 text-blue-50">
                             <p class="text-lg font-medium leading-relaxed">
-                                LoLLMs (Lord of Large Language Models) was created to be the ultimate bridge between humanity and AI.
+                                I created LoLLMs (Lord of Large Language Models) to be the ultimate bridge between humanity and AI.
                             </p>
                             <p class="text-sm opacity-90 leading-relaxed">
-                                Our mission is to <strong>democratize AI access</strong> by providing a unified, privacy-first ecosystem. 
-                                We believe that AI shouldn't be a black box controlled by a few giants, but a tool that runs locally, 
-                                respecting your data and your freedom.
+                                My mission is to <strong>democratize AI access</strong> by providing a unified, privacy-first ecosystem. 
+                                I believe that AI shouldn't be a black box controlled by a few giants, but a tool that runs locally, 
+                                respecting your data and your freedom. While I developed this tool, it is open for contributions to grow further.
                             </p>
                         </div>
                         <div class="bg-black/20 backdrop-blur-sm rounded-xl p-5 border border-white/10 space-y-3">
@@ -122,7 +124,7 @@ async function finalizeSetup() {
                                 "The 'Lord' in LoLLMs is not about authority, but about <strong>orchestration</strong>. It is the hub that connects 
                                 all models—text, image, and sound—into a single, seamless intelligent flow that you control entirely."
                             </p>
-                            <p class="text-xs font-bold text-right text-blue-200">— ParisNeo, Lead Developer</p>
+                            <p class="text-xs font-bold text-right text-blue-200">— ParisNeo, Creator</p>
                         </div>
                     </div>
                 </div>
@@ -142,7 +144,7 @@ async function finalizeSetup() {
                         <div class="space-y-4">
                             <section>
                                 <h5 class="text-blue-600 dark:text-blue-400 font-bold m-0">1. Global Compliance</h5>
-                                <p class="m-0">Users are strictly required to adhere to the laws of their jurisdiction. LoLLMs provides the tools, but you provide the intent.</p>
+                                <p class="m-0">Users are strictly required to adhere to the laws of their jurisdiction. I provide the tools, but you provide the intent.</p>
                             </section>
                             <section>
                                 <h5 class="text-blue-600 dark:text-blue-400 font-bold m-0">2. EU AI Act & Transparency</h5>
@@ -150,11 +152,11 @@ async function finalizeSetup() {
                             </section>
                             <section>
                                 <h5 class="text-blue-600 dark:text-blue-400 font-bold m-0">3. Ethics in Content</h5>
-                                <p class="m-0">Generation of disinformation, hate speech, or content promoting illegal acts is strictly prohibited. loLLMs is built to empower, not to harm.</p>
+                                <p class="m-0">Generation of disinformation, hate speech, or content promoting illegal acts is strictly prohibited. LoLLMs is built to empower, not to harm.</p>
                             </section>
                             <section>
                                 <h5 class="text-blue-600 dark:text-blue-400 font-bold m-0">4. Privacy & Data</h5>
-                                <p class="m-0">LoLLMs is designed for local execution. While we provide connectivity to cloud services, your primary safety lies in keeping your data on your hardware.</p>
+                                <p class="m-0">LoLLMs is designed for local execution. While I provide connectivity to cloud services, your primary safety lies in keeping your data on your hardware.</p>
                             </section>
                         </div>
                     </div>
@@ -278,37 +280,68 @@ async function finalizeSetup() {
                 <p class="text-center text-xs text-gray-500">Configure this in <strong>Settings > User Context</strong>.</p>
             </div>
 
-            <!-- Step 5: Services -->
+            <!-- Step 5: Connect & Serve -->
             <div v-if="currentStep === 5" class="space-y-8 animate-fade-in px-4">
                  <div class="text-center">
                     <div class="inline-flex p-4 bg-indigo-100 dark:bg-indigo-900/30 rounded-full text-indigo-600 mb-4 shadow-sm">
                         <IconServer class="w-12 h-12" />
                     </div>
-                    <h3 class="text-xl font-bold mb-2">Connect & Serve</h3>
-                    <p class="text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
-                        LoLLMs is essentially an AI Server. You can expose your models to other applications.
+                    <h3 class="text-xl font-bold mb-2">The Orchestration Hub</h3>
+                    <p class="text-gray-600 dark:text-gray-300 max-w-3xl mx-auto leading-relaxed">
+                        I designed LoLLMs to be more than just a chat interface. It is a powerful backend that can serve AI functionality to your entire workflow.
                     </p>
                 </div>
                 
-                <div class="bg-gray-50 dark:bg-gray-800 p-6 rounded-xl border dark:border-gray-700 space-y-4">
-                    <div class="flex items-start gap-4">
-                        <div class="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">OpenAI</div>
-                        <div class="text-sm">
-                            Compatible with any app that supports OpenAI (VSCode extensions, AutoGen, etc.).
-                            <br><code class="text-xs text-indigo-500">http://localhost:9642/v1</code>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- Standard Compatibility -->
+                    <div class="bg-gray-50 dark:bg-gray-800 p-5 rounded-2xl border dark:border-gray-700 space-y-3">
+                        <div class="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
+                            <IconCpuChip class="w-5 h-5" />
+                            <h4 class="font-black text-xs uppercase tracking-widest">Compatibility Layers</h4>
                         </div>
+                        <ul class="text-xs space-y-2 opacity-80">
+                            <li>• <strong>OpenAI V1</strong>: Use any app that expects OpenAI endpoints.</li>
+                            <li>• <strong>Ollama V1</strong>: Perfect for local LLM ecosystems.</li>
+                            <li class="mt-2 p-2 bg-gray-200 dark:bg-gray-900 rounded font-mono text-[10px]">http://localhost:9642/v1</li>
+                        </ul>
                     </div>
-                    <div class="flex items-start gap-4">
-                         <div class="font-mono text-xs bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded">Ollama</div>
-                        <div class="text-sm">
-                             Compatible with apps expecting Ollama endpoints.
-                             <br><code class="text-xs text-indigo-500">http://localhost:9642/ollama/v1</code>
+
+                    <!-- Native LoLLMs API -->
+                    <div class="bg-blue-50 dark:bg-blue-900/20 p-5 rounded-2xl border border-blue-100 dark:border-blue-800 space-y-3">
+                         <div class="flex items-center gap-2 text-blue-600 dark:text-blue-400">
+                            <IconServer class="w-5 h-5" />
+                            <h4 class="font-black text-xs uppercase tracking-widest">LoLLMs Native API</h4>
                         </div>
+                        <p class="text-xs leading-relaxed">I have implemented specialized endpoints for advanced control:</p>
+                        <ul class="text-xs space-y-1">
+                            <li>• <strong>/v1/lollms</strong>: Access the raw orchestrator power.</li>
+                            <li>• <strong>Tokenizer</strong>: Precise token counts and debugging.</li>
+                            <li>• <strong>Long Context</strong>: Programmatic access to massive documents.</li>
+                        </ul>
+                    </div>
+
+                    <!-- MCP Section -->
+                    <div class="bg-purple-50 dark:bg-purple-900/20 p-5 rounded-2xl border border-purple-100 dark:border-purple-800 space-y-3">
+                         <div class="flex items-center gap-2 text-purple-600 dark:text-purple-400">
+                            <IconMcp class="w-5 h-5" />
+                            <h4 class="font-black text-xs uppercase tracking-widest">MCP Bridge</h4>
+                        </div>
+                        <p class="text-xs leading-relaxed">LoLLMs acts as both an <strong>MCP Host and Client</strong>. I have made it possible to connect tools like Google Search, Browser Automation, and Python Scripting to <em>any</em> model you have mounted.</p>
+                    </div>
+
+                    <!-- RAG & DataStores -->
+                    <div class="bg-green-50 dark:bg-green-900/20 p-5 rounded-2xl border border-green-100 dark:border-green-800 space-y-3">
+                         <div class="flex items-center gap-2 text-green-600 dark:text-green-400">
+                            <IconDatabase class="w-5 h-5" />
+                            <h4 class="font-black text-xs uppercase tracking-widest">Programmatic RAG</h4>
+                        </div>
+                        <p class="text-xs leading-relaxed">Manage your <strong>DataStores</strong> via API. You can programmatically upload documents, scrape URLs, and perform semantic searches to build custom knowledge applications.</p>
                     </div>
                 </div>
-                <p class="text-center text-sm text-gray-500">
-                    Manage API Keys in <strong>Settings > API Keys</strong> to secure these endpoints.
-                </p>
+
+                <div class="p-3 text-center bg-gray-100 dark:bg-gray-800/50 rounded-xl text-[11px] text-gray-500">
+                    Secure your integrations with <strong>API Keys</strong> in settings. I recommend using the native endpoints for the best performance.
+                </div>
             </div>
 
              <!-- Step 6: Finish -->

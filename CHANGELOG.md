@@ -1,5 +1,9 @@
 # Changelog
 
+
+## [Unreleased]
+
+- chore: clean up generated UI assets and update index.html
 #
 - feat: clean up default vectorizer and legacy config sections# [Unreleased]
 
