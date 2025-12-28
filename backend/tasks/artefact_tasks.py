@@ -32,7 +32,7 @@ def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str
         task.log(f"Scraping URL hierarchy...")
         scraper = ScrapeMaster(url)
         # ScrapeMaster supports depth for crawling
-        markdown_content = scraper.scrape_markdown() # TODO add depth when scrapemaster is updated 
+        markdown_content = scraper.scrape_markdown(max_depth = depth) # TODO add depth when scrapemaster is updated 
         task.set_progress(50)
 
         if not markdown_content or not markdown_content.strip():

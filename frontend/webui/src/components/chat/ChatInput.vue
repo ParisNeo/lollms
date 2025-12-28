@@ -92,6 +92,7 @@ const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
 // REQUIREMENT: Separate generated images from user uploads. 
 // We no longer preview the global discussion gallery here.
 const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
+const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 // --- Context Bar Logic ---
 const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
@@ -154,6 +155,15 @@ function toggleMcpTool(toolId) {
 
 function toggleWebSearch() {
     isWebSearchActive.value = !isWebSearchActive.value;
+}
+
+// Function to toggle global user preferences from the menu shortcut
+async function toggleUserPref(key, currentValue) {
+    try {
+        await authStore.updateUserPreferences({ [key]: !currentValue }, false); // false = silent update (no toast)
+    } catch (e) {
+        console.error("Failed to toggle preference:", e);
+    }
 }
 
 // --- Active Features Badges ---
@@ -445,7 +455,8 @@ async function handleSendMessage() {
             prompt: text, 
             image_server_paths: [], // Handled inside store by actual file objects if needed
             localImageUrls: localPreviews,
-            image_files: imagesToUpload
+            image_files: imagesToUpload,
+            webSearchEnabled: isWebSearchActive.value
         });
     } catch(err) {
         console.error("SendMessage failed:", err);
@@ -587,12 +598,43 @@ onUnmounted(() => {
                         <!-- NEW Context Options Submenu -->
                         <DropdownSubmenu title="Context Options" icon="cog" collection="ui">
                              <div class="p-1 min-w-[200px]">
+                                <!-- Web Search Toggle -->
                                 <button @click.stop="toggleWebSearch" class="menu-item flex justify-between items-center group/item">
                                     <span class="flex items-center gap-2">
                                         <IconGlobeAlt class="w-4 h-4 text-blue-500" />
                                         <span>Web Search</span>
                                     </span>
                                     <IconCheckCircle v-if="isWebSearchActive" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                
+                                <!-- Image Generation Toggle -->
+                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_generation_enabled', user.image_generation_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconPhoto class="w-4 h-4 text-pink-500" />
+                                        <span>Image Gen</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.image_generation_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                
+                                <!-- Image Editing Toggle -->
+                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_editing_enabled', user.image_editing_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconPencil class="w-4 h-4 text-indigo-500" />
+                                        <span>Image Edit</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.image_editing_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                
+                                <!-- Memory Toggle -->
+                                <button @click.stop="toggleUserPref('memory_enabled', user.memory_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconThinking class="w-4 h-4 text-teal-500" />
+                                        <span>Memory</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.memory_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
                              </div>
