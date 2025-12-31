@@ -57,6 +57,7 @@ const generationState = computed(() => dStoreRefs.generationState?.value || { st
 const activeDiscussionContextStatus = computed(() => dStoreRefs.activeDiscussionContextStatus?.value || null);
 const dataZonesTokensFromContext = computed(() => dStoreRefs.dataZonesTokensFromContext?.value || 0);
 const currentModelVisionSupport = computed(() => dStoreRefs.currentModelVisionSupport?.value ?? true);
+const activeAiTasks = computed(() => dStoreRefs.activeAiTasks?.value || {});
 
 const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
 const { lollmsPrompts, userPromptsByCategory } = storeToRefs(promptsStore);
@@ -138,6 +139,11 @@ const ragStoreSelection = computed({
 const mcpToolSelection = computed({
     get: () => activeDiscussion.value?.active_tools || [],
     set: (newIds) => { if (activeDiscussion.value) discussionsStore.updateDiscussionMcps({ discussionId: activeDiscussion.value.id, mcp_tool_ids: newIds }); }
+});
+
+const currentActiveTask = computed(() => {
+    if (!activeDiscussion.value) return null;
+    return activeAiTasks.value[activeDiscussion.value.id];
 });
 
 function toggleRagStore(storeId) {
@@ -262,6 +268,17 @@ const activeFeatures = computed(() => {
             label: 'Slides',
             colorClass: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
             title: 'Slide Maker Enabled. AI can generate presentations.'
+        });
+    }
+
+    // Note Generation
+    if (user.value?.note_generation_enabled) {
+        features.push({
+            id: 'notes',
+            icon: IconFileText,
+            label: 'Notes',
+            colorClass: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800',
+            title: 'Note Generation Enabled. AI can create notes.'
         });
     }
 
@@ -488,7 +505,9 @@ async function fetchInputTokenCount(text) {
     try {
         const response = await apiClient.post('/api/discussions/tokenize', { text });
         inputTokenCount.value = response.data.tokens;
-    } catch (error) {}
+    } catch (error) {
+        // Suppress
+    }
 }
 
 function handleStopGeneration() {
@@ -606,7 +625,12 @@ onUnmounted(() => {
                         <DropdownSubmenu title="Context Options" icon="cog" collection="ui">
                              <div class="p-1 min-w-[200px]">
                                 <!-- Web Search Toggle -->
-                                <button @click.stop="toggleWebSearch" class="menu-item flex justify-between items-center group/item" :class="{'opacity-50 cursor-not-allowed': !isGoogleSearchConfigured}">
+                                <button 
+                                    @click.stop="toggleWebSearch" 
+                                    class="menu-item flex justify-between items-center group/item" 
+                                    :class="{'opacity-50 cursor-not-allowed': !isGoogleSearchConfigured}"
+                                    :title="!isGoogleSearchConfigured ? 'Requires Google API Key & CSE ID in Settings > User Context' : 'Enable Web Search'"
+                                >
                                     <span class="flex items-center gap-2">
                                         <IconGlobeAlt class="w-4 h-4 text-blue-500" />
                                         <span>Web Search</span>
@@ -653,6 +677,27 @@ onUnmounted(() => {
                                     <IconCheckCircle v-if="user?.image_editing_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
+
+                                <!-- Slide Maker Toggle -->
+                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('slide_maker_enabled', user.slide_maker_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconPresentationChartBar class="w-4 h-4 text-orange-500" />
+                                        <span>Slide Maker</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.slide_maker_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Note Generation Toggle -->
+                                <button @click.stop="toggleUserPref('note_generation_enabled', user.note_generation_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconFileText class="w-4 h-4 text-gray-500" />
+                                        <span>Notes Gen</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.note_generation_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
                              </div>
                         </DropdownSubmenu>
 
@@ -701,9 +746,10 @@ onUnmounted(() => {
                     ></textarea>
                     
                     <!-- Status Overlay -->
-                    <div v-if="generationInProgress" class="absolute inset-0 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none animate-pulse">
+                    <div v-if="generationInProgress || currentActiveTask" class="absolute inset-0 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none">
                          <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500" /> 
-                         <span>{{ generationState.details || 'Thinking...' }}</span>
+                         <span v-if="currentActiveTask">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>
+                         <span v-else>{{ generationState.details || 'Thinking...' }}</span>
                     </div>
                 </div>
 

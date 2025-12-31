@@ -23,7 +23,7 @@ export function useDiscussionMessages(state, stores, getActions) {
         if (currentDiscussionId.value === discussion_id) {
             const processedMsg = processSingleMessage(message);
             
-            // REQUIREMENT: Check if message exists to update the gallery/state instead of appending a duplicate
+            // Check if message exists to update the gallery/state instead of appending a duplicate
             const existingIndex = messages.value.findIndex(m => m.id === processedMsg.id);
             if (existingIndex !== -1) {
                 // Update in place to trigger reactivity in MessageBubble
@@ -50,18 +50,37 @@ export function useDiscussionMessages(state, stores, getActions) {
         }
     }
 
-    async function toggleImageActivation({ messageId, imageIndex }) {
-        if (!currentDiscussionId.value) return;
+    async function toggleImageActivation({ messageId, imageIndex, active }) {
+        if (!currentDiscussionId.value) {
+            console.error("toggleImageActivation failed: No active discussion ID.");
+            uiStore.addNotification("System Error: No active discussion context found.", "error");
+            return;
+        }
+        
+        console.log(`[useDiscussionMessages] Toggling image: Msg=${messageId}, Idx=${imageIndex}, Active=${active}`);
+
         try {
             // Backend now handles deactivating others when one is selected (Single active variant)
-            const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/images/${imageIndex}/toggle`);
+            // Sending explicit state 'active' via body
+            const response = await apiClient.put(
+                `/api/discussions/${currentDiscussionId.value}/messages/${messageId}/images/${imageIndex}/toggle`,
+                { active }
+            );
             const updatedMessage = processSingleMessage(response.data);
+            
             const index = messages.value.findIndex(m => m.id === messageId);
-            if (index !== -1) messages.value[index] = updatedMessage;
+            if (index !== -1) {
+                // FORCE REACTIVITY: splice creates a new array reference internally or notifies watchers
+                messages.value.splice(index, 1, updatedMessage);
+                console.log(`[useDiscussionMessages] Updated message ${messageId} locally with new active_images:`, updatedMessage.active_images);
+            } else {
+                console.warn(`[useDiscussionMessages] Message ${messageId} not found in local store list.`);
+            }
             
             // Refresh context status because changing active images changes token count
             await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch (error) {
+            console.error("Toggle Image Activation failed:", error);
             uiStore.addNotification('Failed to toggle image status.', 'error');
         }
     }
@@ -119,7 +138,7 @@ export function useDiscussionMessages(state, stores, getActions) {
             const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, payload);
             const updatedMessage = processSingleMessage(response.data);
             const index = messages.value.findIndex(m => m.id === messageId);
-            if (index !== -1) messages.value[index] = updatedMessage;
+            if (index !== -1) messages.value.splice(index, 1, updatedMessage);
             uiStore.addNotification('Message updated.', 'success');
             await getActions().fetchContextStatus(currentDiscussionId.value);
         } catch (e) {
@@ -129,10 +148,21 @@ export function useDiscussionMessages(state, stores, getActions) {
 
     async function deleteMessage({ messageId }) {
         if (!currentDiscussionId.value) return;
+
+        // --- Handle Local/Temporary Messages (Failed generations) ---
+        if (typeof messageId === 'string' && messageId.startsWith('temp-')) {
+            const index = messages.value.findIndex(m => m.id === messageId);
+            if (index !== -1) {
+                messages.value.splice(index, 1);
+                uiStore.addNotification('Temporary message removed.', 'success');
+            }
+            return;
+        }
+
         const discussionId = currentDiscussionId.value;
         try {
             await apiClient.delete(`/api/discussions/${discussionId}/messages/${messageId}`);
-            // Re-select to rebuild the branch history correctly
+            // Re-select to rebuild the branch history correctly from backend
             await getActions().selectDiscussion(discussionId, null, true); 
             uiStore.addNotification('Message and branch deleted.', 'success');
         } catch (error) {

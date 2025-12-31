@@ -145,7 +145,7 @@
                                         <input 
                                             v-if="['str', 'int', 'float'].includes(param.type)"
                                             :type="param.type === 'str' ? 'text' : 'number'"
-                                            :step="param.type === 'float' ? '0.1' : '1'"
+                                            :step="param.type === 'float' ? '0.01' : '1'"
                                             :id="`param-${param.name}`"
                                             v-model="form[param.name]"
                                             class="input-field mt-1"

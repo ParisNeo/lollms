@@ -408,10 +408,29 @@ def html_to_docx_bytes(html: str) -> bytes:
     bio = io.BytesIO(); doc.save(bio); return bio.getvalue()
 
 def md_to_pdf_bytes(md_text: str, toc_level: int = 3, extra_images: List[str] = None) -> bytes:
-    # If extra images (base64) are provided, append them as image markdown
+    # Special Handling: If text is empty/minimal but we have images, treat as image-only PDF (slideshow style)
+    if (not md_text or not md_text.strip()) and extra_images and len(extra_images) > 0:
+        pdf = MarkdownPdf(toc_level=0)
+        # Create a page for each image
+        for img_b64 in extra_images:
+             if "base64," in img_b64: img_b64 = img_b64.split("base64,")[1]
+             # Markdown PDF handles images via markdown syntax
+             # We add a page break between images
+             section_content = f"![](data:image/png;base64,{img_b64})\n"
+             pdf.add_section(Section(section_content, toc=False))
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
+            out_path = tf.name
+        pdf.save(out_path)
+        with open(out_path, "rb") as f:
+            data = f.read()
+        try: os.unlink(out_path)
+        except Exception: pass
+        return data
+
+    # Default Behavior: Append extra images at the end
     if extra_images:
         for img_b64 in extra_images:
-            # Simple sanitize just in case
             if "base64," in img_b64:
                 img_b64 = img_b64.split("base64,")[1]
             md_text += f"\n\n![](data:image/png;base64,{img_b64})\n"
@@ -431,22 +450,10 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
     """
     Robust Markdown to PowerPoint converter with improved text chunking and image support.
     
-    1. Extracts images embedded in markdown (e.g. ![alt](data:image...)).
-    2. Removes image tags from text to process separately.
-    3. Splits remaining text into logical chunks (headers, paragraphs) to fit slides.
-    4. Creates separate slides for images.
-    5. Adds any extra_images provided separately as slides.
+    SPECIAL MODE: If md_text is empty and extra_images are provided (e.g. Generated Slideshow), 
+    create a pure image slide deck.
     """
     prs = Presentation()
-    
-    # 1. Extract Images
-    # Regex to find markdown images: ![alt](url)
-    image_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
-    found_images = image_pattern.findall(md_text)
-    
-    # 2. Clean Text
-    # Remove image tags to leave only text for chunking
-    clean_text = image_pattern.sub('', md_text).strip()
     
     # --- Helper: Add Title Slide ---
     def add_title_slide(title, subtitle=""):
@@ -463,7 +470,6 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
         slide.shapes.title.text = title
         
         # Basic markdown cleanup for body
-        # Convert bullets
         clean_body = body_text.replace('* ', '• ').replace('- ', '• ')
         
         tf = slide.placeholders[1].text_frame
@@ -515,7 +521,31 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
                 try: os.unlink(tmp_path)
                 except: pass
 
-    # --- Logic: Create Slides ---
+    # --- Check for Image-Only Mode (Slideshow Generation) ---
+    is_image_only_mode = (not md_text or not md_text.strip()) and extra_images and len(extra_images) > 0
+
+    if is_image_only_mode:
+        add_title_slide("Generated Slideshow", "AI Generated Presentation")
+        for img_b64 in extra_images:
+            # Ensure proper data URI format
+            if "base64," in img_b64:
+                src = img_b64
+            else:
+                src = f"data:image/png;base64,{img_b64}"
+            add_image_slide(src)
+            
+        bio = io.BytesIO()
+        prs.save(bio)
+        return bio.getvalue()
+
+    # --- Standard Markdown Processing ---
+    
+    # 1. Extract Images
+    image_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
+    found_images = image_pattern.findall(md_text)
+    
+    # 2. Clean Text
+    clean_text = image_pattern.sub('', md_text).strip()
     
     # 3. Intelligent Text Chunking
     chunks = []
@@ -528,7 +558,6 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
         
         # Split by Headers (#)
         header_parts = re.split(r'\n(#+ )', '\n' + segment)
-        # header_parts will look like ['', '# ', 'Title', '## ', 'Subtitle...', ...]
         
         current_title = "Slide"
         current_body = ""
@@ -562,7 +591,6 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
         
         if current_body.strip():
             # Check length of body
-            # PPTX slide fits roughly 600-800 chars comfortably depending on font size
             MAX_CHARS = 700
             if len(current_body) > MAX_CHARS:
                 # Split by paragraphs
@@ -587,10 +615,9 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
     for img_src in found_images:
         add_image_slide(img_src)
     
-    # Add Extra Images as Slides (from generated/uploaded packs)
+    # Add Extra Images as Slides (from generated/uploaded packs) - APPENDED
     if extra_images:
         for img_b64 in extra_images:
-            # Ensure proper data URI format
             if "base64," in img_b64:
                 src = img_b64
             else:

@@ -93,3 +93,6 @@ pyzipper==0.3.6
 duckduckgo-search==5.3.0
 arxiv==2.1.0
 google-api-python-client==2.118.0
+
+# New Wikipedia Library
+wikipedia==1.4.0

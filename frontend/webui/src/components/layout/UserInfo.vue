@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import { useDataStore } from '../../stores/data';
@@ -21,10 +22,13 @@ import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconSquares2x2 from '../../assets/icons/IconSquares2x2.vue';
+import IconMessage from '../../assets/icons/IconMessage.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
+const route = useRoute();
+const router = useRouter();
 
 const isMenuOpen = ref(false);
 const activeSubMenu = ref(null); // null, 'apps', 'studios'
@@ -34,6 +38,13 @@ const user = computed(() => authStore.user);
 const isAdmin = computed(() => authStore.isAdmin);
 const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
+
+// Highlight Logic
+const isDiscussionActive = computed(() => route.path === '/' && uiStore.mainView === 'chat');
+const isNotebooksActive = computed(() => route.path.startsWith('/notebooks'));
+const isImageStudioActive = computed(() => route.path.startsWith('/image-studio'));
+const isVoicesStudioActive = computed(() => route.path.startsWith('/voices-studio'));
+const isDataStoresActive = computed(() => route.path.startsWith('/datastores'));
 
 const runningApps = computed(() => {
     const allServices = [...dataStore.userApps, ...dataStore.systemApps];
@@ -55,6 +66,12 @@ function closeMenu() {
 function handleLogout() {
   authStore.logout();
   closeMenu();
+}
+
+function openDiscussionStudio() {
+    router.push('/');
+    uiStore.setMainView('chat');
+    closeMenu();
 }
 
 const vOnClickOutside = {
@@ -189,7 +206,16 @@ const vOnClickOutside = {
                             </button>
                             <div class="px-4 py-2 text-[10px] font-black uppercase text-gray-400 tracking-widest border-b dark:border-gray-700 mb-1">Studios</div>
                             
-                            <router-link to="/notebooks" @click="closeMenu" class="menu-item flex items-center gap-3">
+                            <!-- Discussion Studio -->
+                            <button @click="openDiscussionStudio" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isDiscussionActive}">
+                                <IconMessage class="h-5 w-5 text-indigo-500" />
+                                <div class="flex flex-col text-left">
+                                    <span class="font-bold">Discussion Studio</span>
+                                    <span class="text-[10px] opacity-60">Chat & Generation</span>
+                                </div>
+                            </button>
+
+                            <router-link to="/notebooks" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isNotebooksActive}">
                                 <IconServer class="h-5 w-5 text-blue-500" />
                                 <div class="flex flex-col">
                                     <span class="font-bold">Notebook Studio</span>
@@ -197,7 +223,7 @@ const vOnClickOutside = {
                                 </div>
                             </router-link>
 
-                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item flex items-center gap-3">
+                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isImageStudioActive}">
                                 <IconPhoto class="h-5 w-5 text-purple-500" />
                                 <div class="flex flex-col">
                                     <span class="font-bold">Image Studio</span>
@@ -205,7 +231,7 @@ const vOnClickOutside = {
                                 </div>
                             </router-link>
 
-                            <router-link v-if="isTtsConfigured" to="/voices-studio" @click="closeMenu" class="menu-item flex items-center gap-3">
+                            <router-link v-if="isTtsConfigured" to="/voices-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isVoicesStudioActive}">
                                 <IconMicrophone class="h-5 w-5 text-pink-500" />
                                 <div class="flex flex-col">
                                     <span class="font-bold">Voices Studio</span>
@@ -213,7 +239,7 @@ const vOnClickOutside = {
                                 </div>
                             </router-link>
 
-                            <router-link to="/datastores" @click="closeMenu" class="menu-item flex items-center gap-3">
+                            <router-link to="/datastores" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isDataStoresActive}">
                                 <IconDatabase class="h-5 w-5 text-green-500" />
                                 <div class="flex flex-col">
                                     <span class="font-bold">Data Studio</span>

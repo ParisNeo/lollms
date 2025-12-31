@@ -77,10 +77,7 @@ try:
 except ImportError:
     google_build = None
 
-try:
-    from scrapemaster import ScrapeMaster
-except ImportError:
-    ScrapeMaster = None
+from scrapemaster import ScrapeMaster
 
 def _sanitize_b64(data: str) -> str:
     """Removes data URI scheme if present to return raw base64."""
@@ -163,148 +160,6 @@ def build_image_dicts(images_b64):
              else:
                 res.append({'type': 'base64', 'data': _sanitize_b64(data)})
     return res
-
-def patched_export(self, format_type: str, branch_tip_id: Optional[str] = None, max_allowed_tokens: Optional[int] = None, suppress_system_prompt=False) -> Union[List[Dict], str]:
-    """
-    Patched export method to prevent image duplication in system prompt.
-    Only includes global discussion gallery images in the system prompt, not message-specific images.
-    """
-    branch_tip_id = branch_tip_id or self.active_branch_id
-    if not branch_tip_id and format_type in ["lollms_text", "openai_chat", "ollama_chat", "markdown"]:
-        if format_type in ["lollms_text", "markdown"]:
-            return ""
-        else:
-            return []
-
-    branch = self.get_branch(branch_tip_id)
-    
-    # Combine system prompt and data zones
-    system_prompt_part = (self._system_prompt or "").strip()
-    data_zone_part = self.get_full_data_zone() 
-    full_system_prompt = ""
-
-    if not suppress_system_prompt:
-        if system_prompt_part and data_zone_part:
-            full_system_prompt = f"{system_prompt_part}\n\n{data_zone_part}"
-        elif system_prompt_part:
-            full_system_prompt = system_prompt_part
-        else:
-            full_system_prompt = data_zone_part
-
-    participants = self.participants or {}
-
-    def get_full_content(msg) -> str:
-        return (msg.content or "").strip()
-
-    # --- NATIVE LOLLMS_TEXT FORMAT ---
-    if format_type == "lollms_text":
-        final_prompt_parts = []
-        message_parts = [] 
-        current_tokens = 0
-        messages_to_render = branch
-
-        summary_text = ""
-        if self.pruning_summary and self.pruning_point_id:
-            pruning_index = -1
-            for i, msg in enumerate(branch):
-                if msg.id == self.pruning_point_id:
-                    pruning_index = i
-                    break
-            if pruning_index != -1:
-                messages_to_render = branch[pruning_index:]
-                summary_text = f"!@>system:\n--- Conversation Summary ---\n{self.pruning_summary.strip()}\n"
-
-        sys_msg_text = ""
-        if full_system_prompt:
-            sys_msg_text = f"!@>system:\n{full_system_prompt.strip()}\n"
-            sys_tokens = self.lollmsClient.count_tokens(sys_msg_text)
-            if max_allowed_tokens is None or sys_tokens <= max_allowed_tokens:
-                final_prompt_parts.append(sys_msg_text)
-                current_tokens += sys_tokens
-
-        if summary_text:
-            summary_tokens = self.lollmsClient.count_tokens(summary_text)
-            if max_allowed_tokens is None or current_tokens + summary_tokens <= max_allowed_tokens:
-                final_prompt_parts.append(summary_text)
-                current_tokens += summary_tokens
-
-        for msg in reversed(messages_to_render):
-            sender_str = msg.sender.replace(':', '').replace('!@>', '')
-            content = get_full_content(msg)
-            
-            active_images = msg.get_active_images()
-            if active_images:
-                content += f"\n({len(active_images)} image(s) attached)"
-
-            msg_text = f"!@>{sender_str}:\n{content}\n"
-            msg_tokens = self.lollmsClient.count_tokens(msg_text)
-
-            if max_allowed_tokens is not None and current_tokens + msg_tokens > max_allowed_tokens:
-                break
-
-            message_parts.insert(0, msg_text)
-            current_tokens += msg_tokens
-
-        final_prompt_parts.extend(message_parts)
-        return "".join(final_prompt_parts).strip()
-
-    # --- OPENAI & OLLAMA CHAT FORMATS ---
-    messages = []
-    
-    # Handle system message
-    # Ensure only text is sent in system prompt to avoid redundancy
-    if full_system_prompt:
-        if format_type == "openai_chat":
-            messages.append({"role": "system", "content": full_system_prompt})
-        elif format_type == "ollama_chat":
-            messages.append({"role": "system", "content": full_system_prompt})
-        elif format_type == "markdown":
-             messages.append(f"system: {full_system_prompt}\n")
-        else:
-             messages.append({"role": "system", "content": full_system_prompt})
-
-    for msg in branch:
-        if msg.sender_type == 'user':
-            role = participants.get(msg.sender, "user")
-        else:
-            role = participants.get(msg.sender, "assistant")
-
-        content = get_full_content(msg)
-        active_images_b64 = msg.get_active_images()
-        images = build_image_dicts(active_images_b64)
-
-        if format_type == "openai_chat":
-            if images:
-                content_parts = [{"type": "text", "text": content}] if content else []
-                for img in images:
-                    img_data = img['data']
-                    url = f"data:image/jpeg;base64,{img_data}" if img['type'] == 'base64' else img_data
-                    content_parts.append({"type": "image_url", "image_url": {"url": url, "detail": "auto"}})
-                messages.append({"role": role, "content": content_parts})
-            else:
-                messages.append({"role": role, "content": content})
-
-        elif format_type == "ollama_chat":
-            message_dict = {"role": role, "content": content}
-            
-            base64_images = [img['data'] for img in images if img['type'] == 'base64']
-            if base64_images:
-                message_dict["images"] = base64_images
-            messages.append(message_dict)
-
-        elif format_type == "markdown":
-            markdown_line = f"**{role.capitalize()}**: {content}\n"
-            if images:
-                for img in images:
-                    img_data = img['data']
-                    url = f"![Image](data:image/jpeg;base64,{img_data})" if img['type'] == 'base64' else f"![Image]({img_data})"
-                    markdown_line += f"\n{url}\n"
-            messages.append(markdown_line)
-
-        else:
-            raise ValueError(f"Unsupported export format_type: {format_type}")
-
-    return "\n".join(messages) if format_type == "markdown" else messages
 
 
 def process_memory_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool]:
@@ -406,16 +261,12 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
             load_tti=True
         )
         if not lc.tti:
-            # Explicit warning if TTI not available, stripping tags so user sees the text but knows why no image
-            cleaned_text = pattern.sub('', text).strip()
-            cleaned_text += "\n\n> **System Warning:** Image generation was requested but no Text-to-Image (TTI) engine is active. Please configure a TTI binding in settings."
-            return cleaned_text, [], [], []
+            # Explicit warning if TTI not available, but preserve original tag for user info
+            return text, [], [], []
             
     except Exception as e:
         print(f"TTI Client Init Error: {e}")
-        cleaned_text = pattern.sub('', text).strip()
-        cleaned_text += f"\n\n> **System Error:** Failed to initialize image generation: {e}"
-        return cleaned_text, [], [], []
+        return text, [], [], []
 
     images_b64 = []
     generation_infos = []
@@ -481,71 +332,67 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
             payload = {"type": "step_end", "content": "Image generation step complete.", "id": None}
             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
 
-    # CLEANUP: Remove tags
-    cleaned_text = pattern.sub('', text).strip()
-    
-    if error_messages:
-        cleaned_text += "\n\n> **Generation Errors:**\n" + "\n".join([f"> - {msg}" for msg in error_messages])
+    # Important: Return original text to preserve tags in chat history
+    return text, images_b64, generation_infos, generated_groups
 
-    return cleaned_text, images_b64, generation_infos, generated_groups
-
-def process_slide_generation_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None) -> Tuple[str, bool]:
+def process_slide_generation_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, message_id: str, main_loop=None, stream_queue=None) -> Tuple[str, Optional[str]]:
     """
-    Parses <generate_slides> tags and triggers the slide generation task.
-    Returns: (cleaned_text, task_triggered_boolean)
+    Parses <generate_slides> tags, extracting inner <Slide> contents or raw prompt, and triggers the slide generation task.
+    Returns: (cleaned_text, task_id) where task_id is the ID of the background task if one was triggered, else None.
     """
-    # Pattern: <generate_slides width="1024" height="768" n="5" style="cinematic">prompt</generate_slides>
-    pattern = re.compile(r'<generate_slides\b([^>]*)>(.*?)</generate_slides>', re.DOTALL | re.IGNORECASE)
+    # Regex to capture the whole block including attributes
+    # Pattern: <generate_slides attr="val"> ... <Slide>desc</Slide> ... </generate_slides>
+    block_pattern = re.compile(r'<generate_slides\b([^>]*)>(.*?)</generate_slides>', re.DOTALL | re.IGNORECASE)
+    slide_pattern = re.compile(r'<Slide>(.*?)</Slide>', re.DOTALL | re.IGNORECASE)
     
-    matches = list(pattern.finditer(text))
+    matches = list(block_pattern.finditer(text))
     if not matches:
-        return text, False
+        return text, None
 
-    task_triggered = False
+    triggered_task_id = None
 
     for match in matches:
         attr_str = match.group(1)
-        prompt = match.group(2).strip()
+        content_str = match.group(2)
         
         width = 1024
-        height = 768 # Default slide size (4:3ish, or could be 16:9 like 1280x720)
-        count = 1
-        style = ""
+        height = 768
         
-        # Parse attributes
+        # Parse attributes from the parent tag
         width_match = re.search(r'width="(\d+)"', attr_str)
         if width_match: width = int(width_match.group(1))
         
         height_match = re.search(r'height="(\d+)"', attr_str)
         if height_match: height = int(height_match.group(1))
         
-        count_match = re.search(r'n="(\d+)"', attr_str)
-        if count_match: count = int(count_match.group(1))
+        # Extract individual slide prompts if present
+        slides = [m.group(1).strip() for m in slide_pattern.finditer(content_str) if m.group(1).strip()]
         
-        style_match = re.search(r'style="([^"]*)"', attr_str)
-        if style_match: style = style_match.group(1)
-
-        # Trigger background task
-        try:
-            task_manager.submit_task(
-                name=f"Generating Slides: {prompt[:30]}...",
-                target=_generate_slides_task,
-                args=(user.username, discussion_obj.id, prompt, width, height, count, style),
-                description=f"Creating {count} slide images for: '{prompt[:50]}...'",
-                owner_username=user.username
-            )
-            task_triggered = True
-            
-            if main_loop and stream_queue:
-                payload = {"type": "info", "content": f"Started slide generation task for '{prompt}'."}
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
+        # If no explicit slides found, use the inner text as the "topic" prompt
+        final_slides_arg = slides if slides else content_str.strip()
+        
+        if final_slides_arg:
+            try:
+                task_description = f"Creating {len(slides)} slides..." if slides else f"Planning slides for topic: {final_slides_arg[:30]}..."
                 
-        except Exception as e:
-             print(f"Failed to start slide generation task: {e}")
+                new_task = task_manager.submit_task(
+                    name=f"Generating Slides",
+                    target=_generate_slides_task,
+                    args=(user.username, discussion_obj.id, message_id, final_slides_arg, width, height),
+                    description=task_description,
+                    owner_username=user.username
+                )
+                triggered_task_id = new_task.id
+                
+                if main_loop and stream_queue:
+                    payload = {"type": "info", "content": "Started slide generation task."}
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
+                    
+            except Exception as e:
+                 print(f"Failed to start slide generation task: {e}")
 
-    # Remove tags from text
-    cleaned_text = pattern.sub('', text).strip()
-    return cleaned_text, task_triggered
+    # Return original text to preserve tags
+    return text, triggered_task_id
 
 def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None, current_turn_images: List[str] = None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
     """
@@ -568,16 +415,12 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
             load_tti=True
         )
         if not lc.tti:
-            # Warning if TTI missing
-            cleaned_text = pattern.sub('', text).strip()
-            cleaned_text += "\n\n> **System Warning:** Image editing was requested but no Text-to-Image (TTI) engine is currently active. Please configure a TTI binding in settings."
-            return cleaned_text, [], [], []
+             # Preserve tags
+            return text, [], [], []
             
     except Exception as e:
         print(f"TTI Client Init Error: {e}")
-        cleaned_text = pattern.sub('', text).strip()
-        cleaned_text += f"\n\n> **System Error:** Failed to initialize image editor: {e}"
-        return cleaned_text, [], [], []
+        return text, [], [], []
 
     images_b64 = []
     generation_infos = []
@@ -603,8 +446,6 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
     if current_turn_images:
         for img in current_turn_images:
             all_available_images.append(_sanitize_b64(img))
-            
-    # print(f"DEBUG: Found {len(all_available_images)} total images for editing context.")
 
     for match in matches:
         attr_str = match.group(1)
@@ -711,13 +552,8 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
             payload = {"type": "step_end", "content": "Image editing complete.", "id": None}
             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
 
-    # CLEANUP: Remove tags if successful
-    cleaned_text = pattern.sub('', text).strip()
-    
-    if error_messages:
-        cleaned_text += "\n\n> **Editing Errors:**\n" + "\n".join([f"> - {msg}" for msg in error_messages])
-
-    return cleaned_text, images_b64, generation_infos, generated_groups
+    # Important: Return original text to preserve tags
+    return text, images_b64, generation_infos, generated_groups
 
 def perform_google_search(query: str, api_key: str, cse_id: str) -> List[Dict[str, str]]:
     """Performs a Google Custom Search and returns a list of results."""
@@ -748,16 +584,6 @@ def build_llm_generation_router(router: APIRouter):
         discussion_obj, owner_username, permission, owner_db_user = await get_discussion_and_owner_for_request(
             discussion_id, current_user, db, 'interact'
         )
-
-        # [FIX] Apply monkey-patch to prevent duplicate images in system prompt
-        discussion_obj.export = types.MethodType(patched_export, discussion_obj)
-        
-        # [FIX] Force switch branch for regeneration
-        if is_resend and parent_message_id:
-             try:
-                discussion_obj.switch_to_branch(parent_message_id)
-             except Exception as e:
-                print(f"Error switching branch for regeneration: {e}")
 
         user_model_full = current_user.lollms_model_name
         binding_alias = None
@@ -888,12 +714,15 @@ def build_llm_generation_router(router: APIRouter):
             # --- NEW: Slide Generation Instruction ---
             preamble_parts.append(
                 "## Slide Show Generation Instructions\n"
-                "To generate a coherent set of slides (images) for a presentation, use the tag `<generate_slides width=\"W\" height=\"H\" n=\"N\" style=\"STYLE\">prompt</generate_slides>`.\n"
-                "- `width`/`height`: Dimensions (default 1024x768).\n"
-                "- `n`: Number of slides to generate.\n"
-                "- `style`: Artistic style to apply to all slides (e.g., 'corporate', 'watercolor', 'cinematic').\n"
-                "The prompt should describe the overall theme or content of the slides.\n"
-                "Example: `<generate_slides width=\"1280\" height=\"720\" n=\"5\" style=\"minimalist vector art\">A pitch deck for a futuristic coffee shop robot</generate_slides>`"
+                "To generate a coherent set of slides (images) for a presentation, use the `<generate_slides>` tag.\n"
+                "Inside this tag, provide a list of `<Slide>` tags, each containing a description of the slide's visual content.\n"
+                "Attributes `width` and `height` can be set on the parent tag (default 1024x768).\n"
+                "Example:\n"
+                "<generate_slides width=\"1280\" height=\"720\">\n"
+                "  <Slide>Title slide: A futuristic coffee shop robot, cinematic style</Slide>\n"
+                "  <Slide>A diagram of the robot's internal components</Slide>\n"
+                "  <Slide>Customers enjoying coffee served by the robot</Slide>\n"
+                "</generate_slides>"
             )
 
         if owner_db_user.image_editing_enabled:
@@ -1085,13 +914,12 @@ def build_llm_generation_router(router: APIRouter):
                                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "info", "content": f"Searching web for: {query}"}) + "\n")
                                         
                                         # Perform Search
-                                        from backend.tasks.social_tasks import perform_google_search
                                         results = perform_google_search(query, owner_db_user.google_api_key, owner_db_user.google_cse_id)
                                         
                                         if results:
                                             # Optional: Deep Analysis (Scraping)
                                             scraped_content = []
-                                            if owner_db_user.web_search_deep_analysis and ScrapeMaster:
+                                            if owner_db_user.web_search_deep_analysis:
                                                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "info", "content": "Analyzing search results..."}) + "\n")
                                                 scraper = ScrapeMaster()
                                                 for res in results[:2]: # Limit deep read to top 2
@@ -1134,7 +962,7 @@ def build_llm_generation_router(router: APIRouter):
                     # FIX: Pass add_user_message=not is_resend to prevent duplication on regeneration
                     # FIX: Pass generation_tip_id which was set correctly above
                     result = discussion_obj.chat(
-                        branch_tip_id=parent_message_id, # This is the parent to branch from
+                        branch_tip_id= parent_message_id if is_resend else None, # This is the parent to branch from
                         user_message=final_user_message, 
                         personality=active_personality, 
                         use_mcps=combined_mcps, 
@@ -1194,7 +1022,7 @@ def build_llm_generation_router(router: APIRouter):
                                 processed_text, generated_images, generation_meta, generated_groups = process_image_generation_tags(ai_message_obj.content, owner_db_user, db_img, discussion_obj, main_loop, stream_queue)
                                 
                                 # Slides Generation
-                                processed_text_slides, slide_task_triggered = process_slide_generation_tags(processed_text, owner_db_user, db_img, discussion_obj, main_loop, stream_queue)
+                                processed_text_slides, slide_task_id = process_slide_generation_tags(processed_text, owner_db_user, db_img, discussion_obj, ai_message_obj.id, main_loop, stream_queue)
                                 
                                 if generated_images:
                                     current_images = ai_message_obj.images or []
@@ -1226,19 +1054,15 @@ def build_llm_generation_router(router: APIRouter):
                                         "data": {"message": f"Generated {len(generated_images)} image(s).", "type": "success", "duration": 3000}
                                     }, current_user.id)
                                     
-                                if slide_task_triggered:
-                                     # Slide generation is async in background task. 
-                                     # The task completion will add images to a NEW message or update this one if implemented.
-                                     # Currently _generate_slides_task adds to a NEW message.
-                                     # Just update content to remove tags.
-                                    if processed_text_slides != ai_message_obj.content:
-                                        ai_message_obj.content = processed_text_slides
-                                        discussion_obj.commit()
-                                
-                                # If processed_text differs, update the content (this handles stripping tags even if no images were generated but errors were appended)
-                                if processed_text != ai_message_obj.content:
-                                    ai_message_obj.content = processed_text
+                                if slide_task_id:
+                                    # Attach task ID to message metadata so UI can show progress bar
+                                    ai_message_obj.set_metadata_item('active_task_id', slide_task_id, discussion_obj)
                                     discussion_obj.commit()
+                                
+                                # Similar logic for image generation: keep tags?
+                                # User: "First, for image generation, image edit and slide show generation, ALWAYS keep the original tag in the message."
+                                # So we skip updating content with processed_text too.
+                                pass 
 
                             except Exception as e:
                                 print(f"Error processing image tags: {e}")
@@ -1267,8 +1091,9 @@ def build_llm_generation_router(router: APIRouter):
                                         title = edit_meta[0]['prompt'] if edit_meta else "Edited Images"
                                         ai_message_obj.add_image_pack(edited_images, group_type="generated", active_by_default=True, title=title)
                                     
-                                    if processed_text != ai_message_obj.content:
-                                        ai_message_obj.content = processed_text
+                                    # Skip content update to keep tags
+                                    # if processed_text != ai_message_obj.content:
+                                    #    ai_message_obj.content = processed_text
 
                                     existing_metadata = ai_message_obj.metadata or {}
                                     existing_gen_infos = existing_metadata.get("generated_image_infos", [])
@@ -1286,10 +1111,7 @@ def build_llm_generation_router(router: APIRouter):
                                         "data": {"message": f"Edited {len(edited_images)} image(s).", "type": "success", "duration": 3000}
                                     }, current_user.id)
                                 
-                                # If processed_text differs, update the content (this handles stripping tags even if no images were generated but errors were appended)
-                                if processed_text != ai_message_obj.content:
-                                    ai_message_obj.content = processed_text
-                                    discussion_obj.commit()
+                                # Skip content update to keep tags
                                     
                             except Exception as e:
                                 print(f"Error processing image editing tags: {e}")

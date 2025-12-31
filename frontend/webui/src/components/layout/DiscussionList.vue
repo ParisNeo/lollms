@@ -1,10 +1,10 @@
 <script setup>
 import { computed, ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router'; // Import router
+import { useRouter } from 'vue-router'; 
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useNotesStore } from '../../stores/notes';
-import { useNotebookStore } from '../../stores/notebooks'; // Import notebook store
-import { useDataStore } from '../../stores/data'; // Import data store
+import { useNotebookStore } from '../../stores/notebooks'; 
+import { useDataStore } from '../../stores/data'; 
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import { storeToRefs } from 'pinia';
@@ -164,14 +164,10 @@ async function handleNewItem() {
     } else if (activeTab.value === 'notes') {
         notesStore.createNote({ title: 'New Note', content: '', group_id: notesStore.activeGroupId });
     } else if (activeTab.value === 'notebooks') {
-        const newNotebook = await notebookStore.createNotebook();
-        if (newNotebook) {
-            openNotebook(newNotebook);
-        }
+        // [FIXED] Open the wizard instead of creating directly
+        uiStore.openModal('notebookWizard');
     } else if (activeTab.value === 'data') {
-        // Navigate to Data Studio and trigger the new form
         await router.push('/datastores');
-        // A small delay to ensure the view is mounted before the next tick
         setTimeout(() => {
             const event = new CustomEvent('lollms:open-new-datastore');
             window.dispatchEvent(event);
@@ -185,8 +181,6 @@ async function openNotebook(notebook) {
 }
 
 async function openDataStore(store) {
-    // Navigate to Data Studio and trigger selection
-    // Pass the store ID as a query parameter so the view can pick it up
     await router.push({ path: '/datastores', query: { storeId: store.id } });
 }
 
@@ -419,7 +413,10 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                          @click="openNotebook(nb)">
                         <div class="flex items-center gap-3 min-w-0">
                             <IconServer class="w-4 h-4 flex-shrink-0 text-purple-500" />
-                            <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ nb.title }}</span>
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ nb.title }}</span>
+                                <span class="text-[10px] text-gray-500 uppercase">{{ nb.type.replace('_', ' ') }}</span>
+                            </div>
                         </div>
                         <button @click.stop="handleDeleteNotebook(nb)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity" title="Delete Notebook">
                             <IconTrash class="w-4 h-4" />

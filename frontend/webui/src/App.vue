@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, watch, ref } from 'vue';
+import { computed, onMounted, watch, ref, defineAsyncComponent } from 'vue';
 import { useRoute } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useAuthStore } from './stores/auth';
@@ -16,6 +16,12 @@ import AudioPlayer from './components/chat/AudioPlayer.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ModalContainer from './components/modals/ModalContainer.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
+
+// Async Modals
+const SlideshowModal = defineAsyncComponent(() => import('./components/modals/SlideshowModal.vue'));
+const CommandOutputModal = defineAsyncComponent(() => import('./components/modals/CommandOutputModal.vue'));
+// NEW: Make Notebook Wizard globally available
+const NotebookWizardModal = defineAsyncComponent(() => import('./components/modals/NotebookWizardModal.vue'));
 
 // UI Components
 import MessageContentRenderer from './components/ui/MessageContentRenderer/MessageContentRenderer.vue';
@@ -212,6 +218,9 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     <!-- Global Overlays -->
     <ModalContainer />
     <ImageViewerModal />
+    <SlideshowModal />
+    <CommandOutputModal />
+    <NotebookWizardModal /> <!-- ADDED GLOBALLY -->
     <NotificationPanel /><AudioPlayer />
   </div>
 </template>

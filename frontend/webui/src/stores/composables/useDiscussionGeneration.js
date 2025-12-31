@@ -39,7 +39,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
             return;
         }
 
-        // --- NEW: Handle Image Uploads ---
+        // --- Handle Image Uploads ---
         let uploadedPaths = [];
         if (payload.image_files && payload.image_files.length > 0) {
             try {
@@ -78,19 +78,23 @@ export function useDiscussionGeneration(state, stores, getActions) {
         
         promptLoadedArtefacts.value.clear();
         activeGenerationAbortController = new AbortController();
+        
+        // Determine parent ID: Use explicit payload ID if present, otherwise last message in list
         const lastMessage = messages.value.length > 0 ? messages.value[messages.value.length - 1] : null;
+        const parentId = payload.parent_message_id || (lastMessage ? lastMessage.id : null);
         
         const tempUserMessage = {
             id: `temp-user-${Date.now()}`, sender: authStore.user.username,
             sender_type: 'user', content: payload.prompt,
             localImageUrls: payload.localImageUrls || [],
             created_at: new Date().toISOString(),
-            parent_message_id: lastMessage ? lastMessage.id : null
+            parent_message_id: parentId
         };
         const tempAiMessage = {
             id: `temp-ai-${Date.now()}`, sender: activePersonality.value?.name || 'assistant', sender_type: 'assistant',
             content: '', isStreaming: true, created_at: new Date().toISOString(),
-            events: []
+            events: [],
+            parent_message_id: payload.is_resend ? parentId : tempUserMessage.id // Ensure temp AI message has correct parent link locally
         };
 
         if (!payload.is_resend) {
@@ -108,9 +112,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
         // Pass web search flag
         formData.append('web_search_enabled', payload.webSearchEnabled ? 'true' : 'false');
 
-        // For regeneration (resend), we need to ensure the backend branches from the correct message.
-        if (lastMessage) {
-            formData.append('parent_message_id', lastMessage.id);
+        // Pass explicit parent ID to backend to ensure correct branching
+        if (parentId) {
+            formData.append('parent_message_id', parentId);
         }
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
@@ -185,7 +189,18 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
                     const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
                     if (aiMsgIndex !== -1 && finalData.ai_message) {
-                        messages.value.splice(aiMsgIndex, 1, processSingleMessage(finalData.ai_message));
+                        const processedAiMsg = processSingleMessage(finalData.ai_message);
+                        messages.value.splice(aiMsgIndex, 1, processedAiMsg);
+                        
+                        // NEW: Check if the AI message has triggered a background task (like slides)
+                        // and register it as active for UI blocking logic
+                        if (processedAiMsg.metadata && processedAiMsg.metadata.active_task_id) {
+                            state.activeAiTasks.value[currentDiscussionId.value] = { 
+                                type: 'background_generation', 
+                                taskId: processedAiMsg.metadata.active_task_id 
+                            };
+                            console.log(`[Frontend] Registered active background task ${processedAiMsg.metadata.active_task_id} for discussion ${currentDiscussionId.value}`);
+                        }
                     }
                     break;
                 }
@@ -239,15 +254,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
             if (error.name !== 'AbortError') {
                 console.error("Chat fetch failed:", error);
                 uiStore.addNotification('An error occurred during generation.', 'error');
-                
-                // Cleanup temp messages on failure
-                const aiMessageIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
-                if (aiMessageIndex > -1) messages.value.splice(aiMessageIndex, 1);
-                
-                if (!payload.is_resend) {
-                    const userMessageIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
-                    if (userMessageIndex > -1) messages.value.splice(userMessageIndex, 1);
-                }
             }
         } finally {
             if (messageToUpdate) messageToUpdate.isStreaming = false;
@@ -255,7 +261,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
             generationState.value = { status: 'idle', details: '' };
             activeGenerationAbortController = null;
             
-            // CRITICAL FIX: Ensure persistence and UI sync by refreshing data zones after generation
             if (currentDiscussionId.value) {
                 await getActions().refreshDataZones(currentDiscussionId.value);
             }
@@ -281,18 +286,53 @@ export function useDiscussionGeneration(state, stores, getActions) {
         uiStore.addNotification('Generation stopped.', 'info');
     }
 
-    async function initiateBranch(userMessageToResend) {
-        if (!state.activeDiscussion.value || generationInProgress.value || !userMessageToResend || userMessageToResend.sender_type !== 'user') return;
+    async function initiateBranch(message) {
+        if (!state.activeDiscussion.value || generationInProgress.value || !message) return;
+        
+        let targetMessage = message;
+        
+        // Handle Assistant Message: Automatically find parent (User Message) to regenerate
+        if (targetMessage.sender_type !== 'user') {
+            if (targetMessage.parent_message_id) {
+                const parent = messages.value.find(m => m.id === targetMessage.parent_message_id);
+                if (parent) {
+                    targetMessage = parent;
+                } else {
+                    uiStore.addNotification('Cannot regenerate: Parent message not found locally.', 'error');
+                    return;
+                }
+            } else {
+                // Fallback: Search backwards in list if parent_id is missing (legacy/broken state)
+                const idx = messages.value.findIndex(m => m.id === targetMessage.id);
+                let found = false;
+                for (let i = idx - 1; i >= 0; i--) {
+                    if (messages.value[i].sender_type === 'user') {
+                        targetMessage = messages.value[i];
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    uiStore.addNotification('Cannot regenerate: No preceding user message found.', 'error');
+                    return;
+                }
+            }
+        }
+        
+        // At this point targetMessage MUST be a USER message
+        
         try {
-            await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: userMessageToResend.id });
-            const promptIndex = messages.value.findIndex(m => m.id === userMessageToResend.id);
+            await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: targetMessage.id });
+            const promptIndex = messages.value.findIndex(m => m.id === targetMessage.id);
             if (promptIndex > -1) messages.value = messages.value.slice(0, promptIndex + 1);
             else { await getActions().selectDiscussion(currentDiscussionId.value); return; }
+            
             await sendMessage({
-                prompt: userMessageToResend.content,
-                image_server_paths: userMessageToResend.server_image_paths || [],
-                localImageUrls: userMessageToResend.image_references || [],
+                prompt: targetMessage.content,
+                image_server_paths: targetMessage.server_image_paths || [],
+                localImageUrls: targetMessage.image_references || [],
                 is_resend: true,
+                parent_message_id: targetMessage.id
             });
         } catch(error) {
             console.error("Failed to start new branch:", error);

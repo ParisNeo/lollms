@@ -1091,8 +1091,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
     if not inspector.has_table("notes"):
         Note.__table__.create(connection)
-        connection.commit()
-
+        connection.commit()    
     if not inspector.has_table("notebooks"):
         try:
             Notebook.__table__.create(connection)
@@ -1107,13 +1106,23 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'tabs' not in notebook_columns:
             try:
                 connection.execute(text("ALTER TABLE notebooks ADD COLUMN tabs JSON"))
-                # Initialize tabs with existing content if any
                 connection.execute(text("UPDATE notebooks SET tabs = '[]' WHERE tabs IS NULL"))
                 connection.commit()
                 print("INFO: Added 'tabs' column to 'notebooks' table.")
             except Exception as e:
                 print(f"WARNING: Failed to add 'tabs' column to notebooks table: {e}")
                 connection.rollback()
+        
+        # NEW: Check for 'type' column in notebooks
+        if 'type' not in notebook_columns:
+            try:
+                connection.execute(text("ALTER TABLE notebooks ADD COLUMN type VARCHAR DEFAULT 'generic'"))
+                connection.commit()
+                print("INFO: Added 'type' column to 'notebooks' table.")
+            except Exception as e:
+                print(f"WARNING: Failed to add 'type' column to notebooks table: {e}")
+                connection.rollback()
+
     connection.commit()
 
 

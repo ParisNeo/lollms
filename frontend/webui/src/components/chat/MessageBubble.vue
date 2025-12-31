@@ -45,6 +45,7 @@ import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 import IconMagnifyingGlass from '../../assets/icons/IconMagnifyingGlass.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../assets/icons/IconCircle.vue';
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue'; 
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -209,25 +210,48 @@ const imageGroups = computed(() => {
     const handledIndices = new Set();
     const resultGroups = [];
 
+    // Temporary storage for slide items to group them
+    let currentSlideGroup = null;
+
     // 1. Process defined groups
     metaGroups.forEach((g, idx) => {
         const groupIndices = g.indices.filter(i => i < images.length);
         if (groupIndices.length > 0) {
             groupIndices.forEach(i => handledIndices.add(i));
-            resultGroups.push({
-                id: g.id || `gen_group_${idx}`,
-                title: g.prompt || (g.type === 'upload' ? `Image Pack ${idx + 1}` : `Image Generation ${idx + 1}`),
-                type: g.type || 'generated',
-                indices: groupIndices,
-                images: groupIndices.map(i => images[i])
-            });
+
+            if (g.type === 'slide_item') {
+                if (!currentSlideGroup) {
+                    currentSlideGroup = {
+                        id: `slideshow_${idx}`,
+                        title: "Generated Slideshow",
+                        type: 'slideshow',
+                        indices: [],
+                        images: []
+                    };
+                    resultGroups.push(currentSlideGroup);
+                }
+                currentSlideGroup.indices.push(...groupIndices);
+                currentSlideGroup.images.push(...groupIndices.map(i => images[i]));
+            } else {
+                // If we encounter a non-slide group, close the slide group sequence (if order matters in array)
+                // However, logic here pushes to resultGroups immediately if new, so just resetting ref works.
+                currentSlideGroup = null;
+
+                resultGroups.push({
+                    id: g.id || `gen_group_${idx}`,
+                    title: g.prompt || g.title || (g.type === 'upload' ? `Image Pack ${idx + 1}` : `Image Generation ${idx + 1}`),
+                    type: g.type || 'generated',
+                    indices: groupIndices,
+                    images: groupIndices.map(i => images[i])
+                });
+            }
         }
     });
 
     // 2. Collect leftover images as distinct "User Upload" packs if they aren't grouped
     const leftoverIndices = images.map((_, i) => i).filter(i => !handledIndices.has(i));
     if (leftoverIndices.length > 0) {
-        // [UPDATE] Create a SEPARATE group for each leftover image so they stack vertically
+        // Create a SEPARATE group for each leftover image so they stack vertically
         leftoverIndices.forEach((imgIndex, i) => {
             resultGroups.push({
                 id: `upload_${imgIndex}`,
@@ -250,10 +274,17 @@ const isImageActive = (index) => {
 };
 
 const toggleImage = (index) => {
-    if (areActionsDisabled.value) return;
+    if (areActionsDisabled.value) {
+        return;
+    }
+    
+    const currentState = isImageActive(index);
+    const desiredState = !currentState;
+    
     discussionsStore.toggleImageActivation({
         messageId: props.message.id,
-        imageIndex: index
+        imageIndex: index,
+        active: desiredState
     });
 };
 
@@ -264,7 +295,34 @@ function openImageViewer(index) {
     });
 }
 
-function canRegenerateImage(index) {
+function openSlideshow(group) {
+    // NEW: Open specific slideshow modal
+    const slides = group.images.map((src, i) => ({ 
+        src, 
+        prompt: `Slide ${i + 1}`,
+        id: `slide_${i}`
+    }));
+    
+    uiStore.openSlideshow({
+        slides: slides,
+        startIndex: 0,
+        title: group.title,
+        messageId: props.message.id
+    });
+}
+
+function handleImageClick(group, index) {
+    if (group.type === 'slideshow' || group.type === 'slide_item') {
+        openSlideshow(group);
+    } else {
+        openImageViewer(index);
+    }
+}
+
+function canRegenerateImage(index, groupType) {
+    // [UPDATED] Allow regeneration for slides too
+    if (groupType === 'slideshow' || groupType === 'slide_item') return true;
+    
     const infos = props.message.metadata?.generated_image_infos || [];
     return infos.some(info => info.index === index);
 }
@@ -445,18 +503,23 @@ async function handleDelete() { const confirmed = await uiStore.showConfirmation
 function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.message.id, change }); }
 function handleExportCode() { discussionsStore.exportMessageCodeToZip({ content: props.message.content, title: discussionsStore.activeDiscussion?.title || 'discussion' }); }
 function handleBuildNewDiscussion(event) { event.stopPropagation(); discussionsStore.createDiscussionFromMessage({ discussionId: discussionsStore.currentDiscussionId, messageId: props.message.id }); }
+
 function handleBranchOrRegenerate() {
-    let messageToBranchFrom = props.message.sender_type === 'user' ? props.message : null;
-    if (!messageToBranchFrom) {
-        const currentMessageIndex = discussionsStore.activeMessages.findIndex(m => m.id === props.message.id);
-        for (let i = currentMessageIndex - 1; i >= 0; i--) {
-            const prevMsg = discussionsStore.activeMessages[i];
-            if (prevMsg?.sender_type === 'user') { messageToBranchFrom = prevMsg; break; }
-        }
-    }
-    if (messageToBranchFrom) discussionsStore.initiateBranch(messageToBranchFrom);
-    else uiStore.addNotification('Could not find a valid user prompt to regenerate from.', 'error');
+    discussionsStore.initiateBranch(props.message);
 }
+
+// NEW: Function to handle regeneration requests from the renderer tags
+function handleTagRegeneration(part) {
+    if (areActionsDisabled.value) return;
+    
+    discussionsStore.triggerTagGeneration({
+        messageId: props.message.id,
+        tagContent: part.prompt,
+        tagType: part.mode, 
+        rawTag: part.raw
+    });
+}
+
 function showSourceDetails(source) { uiStore.openModal('sourceViewer', { ...source }); }
 function openAllSourcesSearch() { uiStore.openModal('allSourcesSearch', { sources: props.message.sources }); }
 function getSimilarityColor(score) { if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600'; if (score >= 80) return 'bg-green-500'; if (score >= 50) return 'bg-yellow-500'; return 'bg-red-500'; }
@@ -506,6 +569,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             :has-images="allImages.length > 0"
                             :last-user-image="lastUserImage"
                             :message-id="message.id"
+                            @regenerate="handleTagRegeneration"
                         />
 
                         <!-- Centralized Image Zone with Gallery Underneath -->
@@ -521,17 +585,23 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                 </div>
                                 
                                 <!-- Export Actions (NEW) -->
-                                <div class="flex gap-2 my-1" v-if="group.type === 'slideshow'">
+                                <div class="flex gap-2 my-1" v-if="group.type === 'slideshow' || group.type === 'slide_item'">
                                      <button @click="handleExport('pptx')" class="btn btn-secondary btn-xs flex items-center gap-1">
                                         <IconArrowDownTray class="w-3 h-3"/> Download PPTX
                                      </button>
                                      <button @click="handleExport('pdf')" class="btn btn-secondary btn-xs flex items-center gap-1">
                                         <IconArrowDownTray class="w-3 h-3"/> Download PDF
                                      </button>
+                                     <button @click.stop="openSlideshow(group)" class="btn btn-primary btn-xs flex items-center gap-1">
+                                        <IconPlayCircle class="w-3 h-3"/> Play Slideshow
+                                     </button>
                                 </div>
 
                                 <!-- Main Image Display for this Group -->
-                                <div v-if="group.images.length > 0" class="main-image-viewport relative aspect-video sm:aspect-square max-h-[500px] w-full rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 dark:border-gray-700 shadow-lg group/viewport transition-all duration-300">
+                                <div v-if="group.images.length > 0" 
+                                     class="main-image-viewport relative aspect-video sm:aspect-square max-h-[500px] w-full rounded-2xl overflow-hidden bg-gray-100 dark:bg-gray-900 border-2 shadow-lg group/viewport transition-all duration-300"
+                                     :class="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'border-red-500' : 'border-transparent dark:border-gray-700'"
+                                >
                                     
                                     <!-- Spinner Overlay for Regenerating -->
                                     <div v-if="isRegenerating(group.id)" class="absolute inset-0 z-20 bg-white/60 dark:bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
@@ -539,37 +609,45 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                         <span class="text-sm font-bold text-gray-800 dark:text-gray-200">Generating variation...</span>
                                     </div>
 
-                                    <AuthenticatedImage 
-                                        :src="allImages[selectedViewIndices[group.id] ?? group.indices[0]]" 
-                                        class="w-full h-full object-contain"
-                                    />
+                                    <!-- Handle click on image -->
+                                    <div @click.stop="handleImageClick(group, selectedViewIndices[group.id] ?? group.indices[0])" class="w-full h-full cursor-pointer">
+                                        <AuthenticatedImage 
+                                            :src="allImages[selectedViewIndices[group.id] ?? group.indices[0]]" 
+                                            class="w-full h-full object-contain"
+                                        />
+                                    </div>
 
                                     <!-- Viewport Controls Overlay -->
-                                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/viewport:opacity-100 transition-opacity flex items-center justify-center gap-3 z-10">
-                                        <button @click.stop="openImageViewer(selectedViewIndices[group.id] ?? group.indices[0])" class="p-3 bg-white/20 hover:bg-white/40 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90" title="Full Screen">
+                                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover/viewport:opacity-100 transition-opacity flex items-center justify-center gap-3 z-10 pointer-events-none">
+                                        <!-- Need pointer-events-auto on buttons to ensure they are clickable over the container -->
+                                        <button @click.stop="handleImageClick(group, selectedViewIndices[group.id] ?? group.indices[0])" class="pointer-events-auto p-3 bg-white/20 hover:bg-white/40 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90" title="Full Screen">
                                             <IconMaximize class="w-6 h-6" />
                                         </button>
                                         
                                         <!-- Visibility Toggle -->
-                                        <button @click.stop="toggleImage(selectedViewIndices[group.id] ?? group.indices[0])" class="p-3 bg-white/20 hover:bg-white/40 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90" :title="isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'Deactivate (Hide from LLM)' : 'Activate (Show to LLM)'">
+                                        <button @click.stop="toggleImage(selectedViewIndices[group.id] ?? group.indices[0])" 
+                                                :disabled="areActionsDisabled"
+                                                class="pointer-events-auto p-3 bg-white/20 hover:bg-white/40 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90 disabled:opacity-50 disabled:cursor-not-allowed" 
+                                                :title="isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'Deactivate (Hide from LLM)' : 'Activate (Show to LLM)'">
                                             <IconEye v-if="isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="w-6 h-6" />
-                                            <IconEyeOff v-else class="w-6 h-6" />
+                                            <IconEyeOff v-else class="w-6 h-6 text-red-300" />
                                         </button>
 
                                         <!-- Regenerate (Only for generated) -->
-                                        <button v-if="group.type === 'generated' && canRegenerateImage(selectedViewIndices[group.id] ?? group.indices[0])" 
+                                        <button v-if="(group.type === 'generated' || group.type === 'slideshow' || group.type === 'slide_item') && canRegenerateImage(selectedViewIndices[group.id] ?? group.indices[0], group.type)" 
                                                 @click.stop="handleRegenerateImage(selectedViewIndices[group.id] ?? group.indices[0])" 
-                                                class="p-3 bg-white/20 hover:bg-green-500/80 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90" 
+                                                class="pointer-events-auto p-3 bg-white/20 hover:bg-green-500/80 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90 disabled:opacity-50" 
+                                                :disabled="areActionsDisabled"
                                                 title="Regenerate another iteration">
                                             <IconRefresh class="w-6 h-6" />
                                         </button>
                                     </div>
 
-                                    <!-- Visibility Status Badge (Replaced Grayscale with Eye-Off Overlay) -->
-                                    <div v-if="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="absolute inset-0 z-10 flex items-center justify-center bg-black/20 backdrop-blur-[2px] pointer-events-none">
-                                         <div class="px-4 py-2 bg-black/70 rounded-full text-white flex items-center gap-2 shadow-xl border border-white/20">
-                                             <IconEyeOff class="w-6 h-6 text-red-400" />
-                                             <span class="font-bold uppercase tracking-widest text-xs">Inactive</span>
+                                    <!-- Visibility Status Badge (Discrete) -->
+                                    <div v-if="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="absolute top-3 right-3 z-10 pointer-events-none">
+                                         <div class="px-2 py-1 bg-red-500/90 text-white rounded flex items-center gap-1.5 shadow-sm backdrop-blur-md">
+                                             <IconEyeOff class="w-3 h-3" />
+                                             <span class="font-bold uppercase tracking-widest text-[9px]">Inactive</span>
                                          </div>
                                     </div>
                                 </div>
@@ -579,14 +657,17 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                     <div v-for="(imgSrc, idx) in group.images" 
                                          :key="`${group.id}-thumb-${idx}`"
                                          class="relative w-16 h-16 sm:w-20 sm:h-20 shrink-0 rounded-xl overflow-hidden border-2 transition-all duration-200 cursor-pointer shadow-sm"
-                                         :class="(selectedViewIndices[group.id] ?? group.indices[0]) === group.indices[idx] ? 'border-blue-500 scale-105 shadow-md' : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600'"
+                                         :class="[
+                                            (selectedViewIndices[group.id] ?? group.indices[0]) === group.indices[idx] ? 'border-blue-500 scale-105 shadow-md' : 'border-transparent hover:border-gray-300 dark:hover:border-gray-600',
+                                            !isImageActive(group.indices[idx]) ? 'border-red-500' : ''
+                                         ]"
                                          @click.stop="selectView(group.id, group.indices[idx])"
                                     >
                                         <AuthenticatedImage :src="allImages[group.indices[idx]]" class="w-full h-full object-cover" />
                                         
                                         <!-- Mini Status Indicators -->
-                                        <div v-if="!isImageActive(group.indices[idx])" class="absolute inset-0 bg-black/40 flex items-center justify-center">
-                                            <IconEyeOff class="w-4 h-4 text-white opacity-80" />
+                                        <div v-if="!isImageActive(group.indices[idx])" class="absolute top-0 right-0 p-1 bg-red-500/90 rounded-bl-lg">
+                                            <IconEyeOff class="w-3 h-3 text-white" />
                                         </div>
                                         <div v-else-if="isImageActive(group.indices[idx])" class="absolute top-0.5 right-0.5 bg-green-500 text-white rounded-full p-0.5 shadow-sm">
                                             <IconCheckCircle class="w-3 h-3" />

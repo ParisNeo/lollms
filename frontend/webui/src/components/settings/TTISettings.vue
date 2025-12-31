@@ -252,19 +252,25 @@ onMounted(() => {
                         <div v-for="param in modelConfigurableParameters" :key="param.name">
                             <label :for="`tti-param-${param.name}`" class="block text-sm font-medium capitalize">{{ param.name.replace(/_/g, ' ') }}</label>
                             <p v-if="param.description" class="text-xs text-gray-500 dark:text-gray-400 mb-1">{{param.description}}</p>
+                            
+                            <!-- Selection Input -->
                             <select v-if="param.options && param.options.length > 0" :id="`tti-param-${param.name}`" v-model="form[param.name]" class="input-field mt-1">
                                 <option v-for="option in param.options" :key="option" :value="option">{{ option }}</option>
                             </select>
+                            
+                            <!-- Numeric Input with Float support -->
                             <input 
-                                v-else-if="['str', 'int', 'float'].includes(param.type)"
-                                :type="param.type === 'str' ? 'text' : 'number'"
-                                :step="param.type === 'float' ? '0.01' : '1'"
+                                v-else-if="['str', 'int', 'float'].includes((param.type || '').toLowerCase())"
+                                :type="(param.type || '').toLowerCase() === 'str' ? 'text' : 'number'"
+                                :step="(param.type || '').toLowerCase() === 'float' ? 'any' : '1'"
                                 :id="`tti-param-${param.name}`"
                                 v-model="form[param.name]"
                                 class="input-field mt-1"
                                 :placeholder="`Default: ${param.default}`"
                             />
-                             <div v-else-if="param.type === 'bool'" class="mt-1">
+                            
+                            <!-- Boolean Toggle -->
+                             <div v-else-if="(param.type || '').toLowerCase() === 'bool'" class="mt-1">
                                 <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>

@@ -59,12 +59,9 @@ def build_discussions_router():
     build_llm_generation_router(router)
     build_tti_generation_router(router)
     build_tts_router(router)
-    build_stt_router(router) # Add this line
+    build_stt_router(router)
     build_discussion_sharing_router(router)
     build_utils_router(router)
-
-    build_tts_router(router)
-    build_discussion_sharing_router(router)
 
     @router.get("", response_model=List[DiscussionInfo])
     async def list_all_discussions(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DiscussionInfo]:

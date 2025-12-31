@@ -1,4 +1,4 @@
-# backend/routers/discussion.py
+# backend/routers/discussion/generation/tti.py
 # Standard Library Imports
 import base64
 import io
@@ -40,7 +40,7 @@ from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
 from backend.discussion import get_user_discussion, get_user_discussion_manager
-from backend.tasks.image_generation_tasks import _generate_image_task
+from backend.tasks.image_generation_tasks import _generate_image_task, _generate_slides_task, _image_studio_edit_task
 from backend.tasks.utils import _to_task_info   
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
@@ -92,3 +92,62 @@ def build_tti_generation_router(router: APIRouter):
             owner_username=current_user.username
         )
         return db_task
+
+    @router.post("/{discussion_id}/messages/{message_id}/trigger_tag", response_model=TaskInfo, status_code=202)
+    def trigger_message_tag_generation(
+        discussion_id: str,
+        message_id: str,
+        tag_content: str = Form(...),
+        tag_type: str = Form(...), # generate, slides, edit
+        width: int = Form(1024),
+        height: int = Form(1024),
+        num_images: int = Form(1),
+        current_user: UserAuthDetails = Depends(get_current_active_user)
+    ):
+        """
+        Manually triggers a generation task based on a tag found in a message.
+        """
+        discussion = get_user_discussion(current_user.username, discussion_id)
+        if not discussion:
+            raise HTTPException(status_code=404, detail="Discussion not found")
+        
+        msg = discussion.get_message(message_id)
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        task = None
+        
+        if tag_type == 'slides':
+            task = task_manager.submit_task(
+                name="Generating Slides (Regenerate)",
+                target=_generate_slides_task,
+                args=(current_user.username, discussion_id, message_id, tag_content, width, height, num_images),
+                description=f"Regenerating slides for: {tag_content[:30]}...",
+                owner_username=current_user.username
+            )
+        elif tag_type == 'generate':
+            task = task_manager.submit_task(
+                name="Generating Image (Regenerate)",
+                target=_generate_image_task,
+                # Note: _generate_image_task creates a NEW message usually. 
+                # Ideally we might want to append to THIS message if regenerating from tag?
+                # The existing task logic adds a new message. For 'regenerate tag', adding a new message 
+                # might be confusing if the tag is in the middle of history.
+                # However, changing that logic is complex. We will stick to the existing task 
+                # which adds a new message with the result, effectively 'responding' to the tag click.
+                args=(current_user.username, discussion_id, tag_content, "", width, height, {}, msg.id),
+                description=f"Regenerating image for: {tag_content[:30]}...",
+                owner_username=current_user.username
+            )
+        elif tag_type == 'edit':
+             # For edit, we need source image.
+             # This simple endpoint assumes the tag context implies using the previous image in history.
+             # Finding that image is tricky without more context.
+             # For now, we return 501 Not Implemented or try best effort if we can resolve source.
+             # _image_studio_edit_task requires specific request_data structure.
+             pass
+
+        if not task:
+             raise HTTPException(status_code=400, detail=f"Unsupported tag type or configuration for regeneration: {tag_type}")
+
+        return task

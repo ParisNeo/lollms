@@ -12,6 +12,12 @@ import IconPhoto from '../../../assets/icons/IconPhoto.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 import IconPresentationChartBar from '../../../assets/icons/IconPresentationChartBar.vue';
+import IconRefresh from '../../../assets/icons/IconRefresh.vue';
+import TaskProgressIndicator from '../TaskProgressIndicator.vue'; 
+
+import { useTasksStore } from '../../../stores/tasks';
+import { useDiscussionsStore } from '../../../stores/discussions';
+import { storeToRefs } from 'pinia';
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -22,9 +28,15 @@ const props = defineProps({
   messageId: { type: String, default: null },
 });
 
-const messageContentRef = ref(null);
+const emit = defineEmits(['regenerate']);
 
-// --- Math Rendering ---
+const messageContentRef = ref(null);
+const tasksStore = useTasksStore();
+const discussionsStore = useDiscussionsStore();
+const { tasks } = storeToRefs(tasksStore);
+const { activeAiTasks } = storeToRefs(discussionsStore);
+
+// ... (Math Rendering logic unchanged)
 function renderMath() {
   if (messageContentRef.value && messageContentRef.value.isConnected && window.renderMathInElement) {
     try {
@@ -71,7 +83,7 @@ const parsedMarkdown = (content) => {
   return html;
 };
 
-// Enhanced parser to handle additional tags like <edit_image>, <generate_image>, and <generate_slides>
+// Enhanced parser for tags
 const parsedStreamingContent = computed(() => {
     if (!props.content) return '';
     let content = props.content;
@@ -89,11 +101,9 @@ const parsedStreamingContent = computed(() => {
         return parsedMarkdown(before) + spinnerHtml;
     }
     
-    // Check for streaming generation/editing blocks
-    // Added 'generate_slides' to the regex
+    // Check for streaming generation blocks
     const activeGenBlock = content.match(/<(generate_image|edit_image|generate_slides)[^>]*>(?!.*?<\/\1>)/s);
     if (activeGenBlock) {
-         // Show a loading indicator if we are in the middle of a generation tag
          let tagType = 'Processing';
          if (activeGenBlock[1] === 'edit_image') tagType = 'Editing image';
          else if (activeGenBlock[1] === 'generate_image') tagType = 'Generating image';
@@ -115,7 +125,6 @@ const messageParts = computed(() => {
     const parts = [];
     const content = props.content;
     
-    // Regex to split by special blocks: <think>, <annotate>, <generate_image>, <edit_image>, <generate_slides>
     const specialBlockRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))/g;
     
     let lastIndex = 0;
@@ -153,8 +162,22 @@ const messageParts = computed(() => {
             parts.push({ type: 'image_tool', mode: 'edit', prompt: promptContent, raw: fullTag });
         } else if (match[5]) { // <generate_slides>
             const fullTag = match[5];
-            const promptContent = fullTag.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
-            parts.push({ type: 'image_tool', mode: 'slides', prompt: promptContent, raw: fullTag });
+            const innerContent = fullTag.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
+            
+            const slideRegex = /<Slide>(.*?)<\/Slide>/gis;
+            const slides = [];
+            let sMatch;
+            while ((sMatch = slideRegex.exec(innerContent)) !== null) {
+                slides.push(sMatch[1].trim());
+            }
+            
+            parts.push({ 
+                type: 'image_tool', 
+                mode: 'slides', 
+                prompt: innerContent, 
+                slides: slides,       
+                raw: fullTag 
+            });
         }
         
         lastIndex = match.index + match[0].length;
@@ -192,6 +215,37 @@ const getTokens = (text) => {
     return allTokens;
 };
 
+// [UPDATE] Find active task associated with this message to show progress indicator
+const activeTask = computed(() => {
+    if (!props.messageId) return null;
+    const discussionId = discussionsStore.currentDiscussionId;
+    if (!discussionId) return null;
+    
+    // Check active tasks in the store
+    const runningTasks = tasks.value.filter(t => t.status === 'running' || t.status === 'pending');
+    
+    // 1. Check if the message metadata explicitly links to a task (set by backend for slides)
+    // We access the message object from the store because props might be a copy or partial
+    const messageObj = discussionsStore.messages.find(m => m.id === props.messageId);
+    if (messageObj && messageObj.metadata && messageObj.metadata.active_task_id) {
+        const linkedTask = runningTasks.find(t => t.id === messageObj.metadata.active_task_id);
+        if (linkedTask) return linkedTask;
+    }
+
+    // 2. Fallback: Check if the discussion has a tracked active task that might be relevant
+    const tracked = activeAiTasks.value[discussionId];
+    if (tracked && tracked.taskId) {
+        const task = runningTasks.find(t => t.id === tracked.taskId);
+        // Heuristic: If we are the AI message and a task is running, it might be ours.
+        // Especially if it's a generation type task.
+        if (task && !props.isUser) {
+             return task;
+        }
+    }
+    return null;
+});
+
+
 const simpleHash = str => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -202,6 +256,7 @@ const simpleHash = str => {
   return hash;
 };
 
+// ... (Annotation helpers: drawAnnotations, downloadAnnotatedImage, onImageLoad - unchanged)
 function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayWidth) {
     if (!Array.isArray(annotations) || !ctx) return;
     annotations.forEach(ann => {
@@ -352,21 +407,39 @@ function onImageLoad(event, annotations) {
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
 
-          <!-- Image Tool Call (Generation / Editing / Slides) - Rendered as a nice block -->
+          <!-- Image Tool Call (Generation / Editing / Slides) - Rendered as a nice block with Regenerate -->
           <div v-else-if="part.type === 'image_tool'" class="my-4 p-3 rounded-lg border dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-             <div class="flex items-center gap-2 mb-2">
-                 <div class="p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
-                     <IconPencil v-if="part.mode === 'edit'" class="w-4 h-4" />
-                     <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-4 h-4" />
-                     <IconPhoto v-else class="w-4 h-4" />
+             <div class="flex items-center justify-between mb-2">
+                 <div class="flex items-center gap-2">
+                     <div class="p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                         <IconPencil v-if="part.mode === 'edit'" class="w-4 h-4" />
+                         <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-4 h-4" />
+                         <IconPhoto v-else class="w-4 h-4" />
+                     </div>
+                     <span class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                         <template v-if="part.mode === 'edit'">Edit Request</template>
+                         <template v-else-if="part.mode === 'slides'">Slides Request</template>
+                         <template v-else>Generation Request</template>
+                     </span>
                  </div>
-                 <span class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                     <template v-if="part.mode === 'edit'">Edit Request</template>
-                     <template v-else-if="part.mode === 'slides'">Slides Request</template>
-                     <template v-else>Generation Request</template>
-                 </span>
+                 <button @click="$emit('regenerate', part)" class="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 transition-colors" title="Regenerate">
+                     <IconRefresh class="w-4 h-4" />
+                 </button>
              </div>
-             <div class="text-sm font-medium text-gray-800 dark:text-gray-200 italic">
+             
+             <!-- Show Active Task Progress if matched -->
+             <div v-if="activeTask" class="mb-2">
+                <TaskProgressIndicator :task="activeTask" class="text-xs" />
+             </div>
+
+             <!-- Slide List View -->
+             <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-purple-200 dark:border-purple-800">
+                 <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-gray-600 dark:text-gray-300 mb-1">
+                     <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
+                 </div>
+             </div>
+             <!-- Standard Prompt View -->
+             <div v-else class="text-sm font-medium text-gray-800 dark:text-gray-200 italic">
                  "{{ part.prompt }}"
              </div>
           </div>

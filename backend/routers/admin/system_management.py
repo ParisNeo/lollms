@@ -1,7 +1,9 @@
-# [UPDATE] backend/routers/admin/system_management.py
+# backend/routers/admin/system_management.py
 import sys
+import os
 import asyncio
 import statistics
+import subprocess
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,7 +30,7 @@ from backend.task_manager import task_manager, Task
 from backend.utils import get_local_ip_addresses
 from backend.tasks.system_tasks import _create_backup_task, _analyze_logs_task, _prune_old_tasks_task
 from backend.settings import settings
-from ascii_colors import trace_exception
+from ascii_colors import trace_exception, ASCIIColors
 
 system_management_router = APIRouter()
 
@@ -443,3 +445,66 @@ async def trigger_manual_task_pruning(current_admin: UserAuthDetails = Depends(g
         owner_username=current_admin.username
     )
     return db_task
+
+# --- Update and Reboot Endpoints (Service Compatible) ---
+
+@system_management_router.post("/system/reboot")
+async def reboot_server(current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+    """
+    Signals the wrapper script (run.sh or run_windows.bat) to restart the application.
+    This works by creating a 'restart' flag if needed, or simply exiting the process.
+    The wrapper script loop will detect the exit and restart the process.
+    """
+    try:
+        ASCIIColors.yellow("Initiating Server Reboot (Service/Loop Mode)...")
+        
+        # We don't strictly need a file for a simple restart if the loop is infinite,
+        # but the flag is good practice to distinguish intentional restarts from crashes.
+        # However, to keep it compatible with simple loops, just exiting 0 is often enough.
+        
+        def delayed_exit():
+            import time
+            time.sleep(1)
+            ASCIIColors.red("Exiting process for reboot.")
+            # Exit with code 0 to indicate clean shutdown to wrapper
+            os._exit(0)
+            
+        import threading
+        threading.Thread(target=delayed_exit, daemon=True).start()
+
+        return {"message": "Server is rebooting..."}
+
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to initiate reboot: {str(e)}")
+
+
+@system_management_router.post("/system/update")
+async def update_server(current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+    """
+    Signals the wrapper script to perform an update before restarting.
+    Creates an 'update_request.flag' file in the root directory.
+    The run.sh/run_windows.bat script checks for this file on loop iteration.
+    """
+    try:
+        ASCIIColors.yellow("Initiating Server Update (Service/Loop Mode)...")
+        
+        # Create flag file
+        flag_path = PROJECT_ROOT / "update_request.flag"
+        with open(flag_path, 'w') as f:
+            f.write("update_requested")
+            
+        def delayed_exit():
+            import time
+            time.sleep(1)
+            ASCIIColors.red("Exiting process for update sequence.")
+            os._exit(0) # Exit to let wrapper handle the update
+            
+        import threading
+        threading.Thread(target=delayed_exit, daemon=True).start()
+
+        return {"message": "Server is restarting to apply updates."}
+
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to initiate update: {str(e)}")

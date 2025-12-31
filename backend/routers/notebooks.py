@@ -1,30 +1,25 @@
-import shutil
+# backend/routers/notebooks.py
 import uuid
-import datetime
 import json
-import base64
-from typing import List, Optional, Dict
+import shutil
+import re
+from datetime import datetime
+from typing import List, Optional, Dict, Any
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body, Response
+from fastapi.responses import FileResponse 
 from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
+from pydantic import BaseModel
+from werkzeug.utils import secure_filename
 
 from backend.db import get_db
-from backend.db.models.notebook import Notebook
-from backend.db.models.user import User as DBUser
-from backend.db.models.config import TTIBinding as DBTTIBinding
+from backend.db.models.notebook import Notebook as DBNotebook
 from backend.models import UserAuthDetails, TaskInfo
-from backend.session import get_current_active_user, get_user_notebook_assets_path, get_user_lollms_client, build_lollms_client_from_params
-from backend.task_manager import task_manager, Task
-from backend.routers.files import extract_text_from_file_bytes
-
-# Import ScrapeMaster for scraping
-try:
-    from scrapemaster import ScrapeMaster
-except ImportError:
-    ScrapeMaster = None
+from backend.session import get_current_active_user, get_user_notebook_assets_path, get_user_lollms_client
+from backend.task_manager import task_manager
+from ascii_colors import trace_exception
+from backend.tasks.notebook_tasks import _process_notebook_task, _ingest_notebook_sources_task, _convert_file_with_docling_task
 
 router = APIRouter(
     prefix="/api/notebooks",
@@ -32,698 +27,476 @@ router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
-# --- Pydantic Models ---
+# ... (Pydantic Models remain same) ...
+class StructureItem(BaseModel):
+    title: str
+    type: str = "markdown" 
+    content: Optional[str] = ""
+
 class NotebookCreate(BaseModel):
     title: str
     content: Optional[str] = ""
+    type: Optional[str] = "generic"
+    structure: Optional[List[StructureItem]] = None 
+    initialPrompt: Optional[str] = None
+    urls: Optional[List[str]] = None
+    youtube_urls: Optional[List[str]] = None
+    raw_text: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None 
 
 class NotebookUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
-    artefacts: Optional[List[dict]] = None
-    tabs: Optional[List[dict]] = None
+    artefacts: Optional[List[Dict[str, Any]]] = None
+    tabs: Optional[List[Dict[str, Any]]] = None
 
-class NotebookPublic(BaseModel):
+class NotebookResponse(BaseModel):
     id: str
     title: str
     content: str
-    artefacts: List[dict]
-    tabs: List[dict]
-    created_at: str
-    updated_at: str
-    
-    class Config:
-        from_attributes = True
+    type: str
+    artefacts: List[Dict[str, Any]]
+    tabs: List[Dict[str, Any]]
+    created_at: datetime
+    updated_at: datetime
+    class Config: from_attributes = True
 
-class ScrapeRequest(BaseModel):
-    url: str
+class GenerateStructureRequest(BaseModel):
+    type: str
+    prompt: str
+    urls: Optional[List[str]] = []
+    files: Optional[List[Any]] = [] 
 
-class ArtefactCreate(BaseModel):
+class GenerateTitleResponse(BaseModel):
     title: str
-    content: str
 
 class ProcessRequest(BaseModel):
     prompt: str
-    input_tab_ids: List[str] = []
-    output_type: str = 'text' # 'text', 'images', 'presentation', 'story_structure', 'story_chapter'
-
-# --- Helper: Context Builder ---
-def _build_story_context(nb: Notebook, input_tab_ids: List[str], current_step: str):
-    """
-    Smart context builder for story mode.
-    Always includes the first tab (Structure) if it exists.
-    """
-    context = ""
-    tabs = nb.tabs or []
-    
-    # 1. Always include Structure (Assume Tab 0 is structure/manifest)
-    if tabs and len(tabs) > 0:
-        # If the user explicitly selected tabs, respect that, but verify structure is there
-        structure_tab = tabs[0] 
-        context += f"### STORY BIBLE / STRUCTURE\n{structure_tab.get('content', '')}\n\n"
-
-    # 2. Add specifically selected inputs (e.g., previous chapter)
-    for tab_id in input_tab_ids:
-        # Skip if it's the structure tab we already added
-        if tabs and tabs[0]['id'] == tab_id: continue
-        
-        tab = next((t for t in tabs if t['id'] == tab_id), None)
-        if tab:
-            context += f"### REFERENCE MATERIAL ({tab.get('title')})\n{tab.get('content', '')}\n\n"
-            
-    return context
-
-# --- Helper: Agentic Tag Processor ---
-def _handle_agentic_tags(text_chunk: str, username: str, db: Session, artefacts: List[dict]) -> str:
-    """
-    Parses <ScanForInfos> tags, performs RAG/Search, and returns the result to be injected.
-    """
-    # Regex for case-insensitive tag
-    pattern = re.compile(r'<ScanForInfos>(.*?)</ScanForInfos>', re.IGNORECASE | re.DOTALL)
-    match = pattern.search(text_chunk)
-    
-    if match:
-        query = match.group(1).strip()
-        print(f"Agentic Trigger: Scanning for '{query}'...")
-        
-        # Perform RAG on Artefacts
-        found_info = []
-        
-        # Simple text search in loaded artefacts for now
-        for art in artefacts:
-            if art.get('is_loaded') and query.lower() in art.get('content', '').lower():
-                # Extract a snippet
-                content = art.get('content', '')
-                idx = content.lower().find(query.lower())
-                start = max(0, idx - 200)
-                end = min(len(content), idx + 500)
-                snippet = content[start:end]
-                found_info.append(f"Source '{art['filename']}': ...{snippet}...")
-        
-        if not found_info:
-            return f"\n[System Agent]: Scanned sources for '{query}' but found no direct text matches. Continue based on general knowledge.\n"
-        
-        return f"\n[System Agent]: Found info for '{query}':\n" + "\n".join(found_info) + "\n"
-
-    return ""
-
-# --- Tasks ---
-
-def _notebook_process_task(task: Task, username: str, notebook_id: str, prompt: str, input_tab_ids: List[str], output_type: str):
-    task.log(f"Starting notebook processing (Mode: {output_type})...")
-    
-    with task.db_session_factory() as db:
-        nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
-        if not nb:
-            raise ValueError("Notebook not found")
-        
-        # --- Pre-computation Setup ---
-        lc = get_user_lollms_client(username)
-        current_tabs = list(nb.tabs) if nb.tabs else []
-        
-        # Auto-Title Check
-        if nb.title == "New Research":
-            task.log("Auto-generating notebook title...")
-            try:
-                title_prompt = f"Generate a short, concise, and descriptive title (max 6 words) for a research notebook based on this user instruction: '{prompt}'. Return ONLY the title text, no quotes or explanations."
-                raw_title = lc.generate_text(title_prompt, max_new_tokens=50)
-                new_title = lc.remove_thinking_blocks(raw_title).strip().strip('"').strip("'")
-                
-                if new_title and len(new_title) > 2:
-                    nb.title = new_title
-                    task.log(f"Notebook renamed to: {new_title}")
-            except Exception as e:
-                task.log(f"Failed to auto-generate title: {e}", "WARNING")
-
-        # --- Create Output Tab Immediately ---
-        # This allows the frontend to switch to it and show the spinner
-        output_tab_id = str(uuid.uuid4())
-        timestamp = datetime.datetime.now().strftime('%H:%M')
-        
-        # Determine tab type and initial title
-        tab_type = "markdown"
-        tab_title = f"Output {timestamp}"
-        
-        if output_type == 'images':
-            tab_type = "gallery"
-            tab_title = "Generated Images"
-        elif output_type == 'presentation':
-            tab_type = "slides"
-            tab_title = "Presentation"
-        elif output_type == 'story_structure':
-            tab_type = "markdown"
-            tab_title = "Story Bible"
-        elif output_type == 'story_chapter':
-            tab_type = "markdown"
-            tab_title = f"Chapter {len(current_tabs)}" # Will fix index later if needed
-
-        new_tab = {
-            "id": output_tab_id,
-            "title": tab_title,
-            "type": tab_type,
-            "content": "", # Empty initially
-            "images": []
-        }
-        
-        # Insert or Append based on mode
-        if output_type == 'story_structure':
-             # If structure already exists, we might want to update it, but for now let's prepend/replace
-            if current_tabs and current_tabs[0]['title'] in ['Main', 'Structure', 'Story Bible', 'New Research']:
-                current_tabs[0] = new_tab # Replace first tab
-            else:
-                current_tabs.insert(0, new_tab)
-        else:
-            current_tabs.append(new_tab)
-            
-        nb.tabs = current_tabs
-        flag_modified(nb, "tabs")
-        db.commit() # Commit so frontend sees the new tab
-        
-        task.log(f"Created new tab '{tab_title}'. Processing content...")
-
-        # --- Build Context ---
-        context = ""
-        # From Artefacts
-        if nb.artefacts:
-            for art in nb.artefacts:
-                if art.get("is_loaded"):
-                    context += f"\n\n--- Source: {art.get('filename')} ---\n{art.get('content','')}\n--- End Source ---\n"
-        
-        # From Tabs
-        input_tabs_content = ""
-        if output_type != 'story_chapter': 
-            for tab_id in input_tab_ids:
-                tab = next((t for t in current_tabs if t['id'] == tab_id), None)
-                if tab and tab.get('type') == 'markdown':
-                    input_tabs_content += f"\n\n--- Input Tab: {tab.get('title')} ---\n{tab.get('content', '')}\n--- End Input Tab ---\n"
-            full_context = f"{context}\n{input_tabs_content}"
-        else:
-            # Story chapter uses special context builder
-            full_context = context 
-
-        # --- Generation Logic ---
-
-        if output_type == 'images':
-            task.set_progress(10)
-            task.log("Generating image prompts...")
-            
-            prompt_generation_prompt = f"""
-[CONTEXT]
-{full_context}
-
-[INSTRUCTION]
-{prompt}
-Based on the context and instruction, generate a list of detailed image prompts to visualize the content.
-Return ONLY a valid JSON list of strings. Example: ["A futuristic city", "A robot in a garden"]
-"""
-            raw_json_prompts = lc.generate_text(prompt_generation_prompt, max_new_tokens=1024)
-            json_prompts = lc.remove_thinking_blocks(raw_json_prompts)
-            
-            prompts_list = []
-            try:
-                prompts_list = json.loads(json_prompts)
-                if not isinstance(prompts_list, list): raise ValueError
-            except:
-                # Fallback extraction
-                start = json_prompts.find('[')
-                end = json_prompts.rfind(']') + 1
-                if start != -1 and end != -1:
-                    try: prompts_list = json.loads(json_prompts[start:end])
-                    except: prompts_list = [prompt]
-                else:
-                    prompts_list = [prompt]
-            
-            task.log(f"Generated {len(prompts_list)} prompts. Starting image generation...")
-            
-            # Re-init client with TTI
-            user_db = db.query(DBUser).filter(DBUser.username == username).first()
-            tti_binding_alias = None
-            tti_model_name = None
-            if user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name:
-                tti_binding_alias, tti_model_name = user_db.tti_binding_model_name.split('/', 1)
-            else:
-                def_bind = db.query(DBTTIBinding).filter(DBTTIBinding.is_active==True).first()
-                if def_bind: tti_binding_alias = def_bind.alias
-
-            tti_client = build_lollms_client_from_params(username=username, tti_binding_alias=tti_binding_alias, tti_model_name=tti_model_name, load_llm=False, load_tti=True)
-            
-            if not tti_client.tti:
-                 task.log("No TTI binding available.", "ERROR")
-                 return
-
-            generated_images = []
-            assets_path = get_user_notebook_assets_path(username, notebook_id)
-            assets_path.mkdir(parents=True, exist_ok=True)
-
-            for i, p in enumerate(prompts_list):
-                if task.cancellation_event.is_set(): break
-                task.log(f"Generating image {i+1}/{len(prompts_list)}: {p[:30]}...")
-                try:
-                    img_bytes = tti_client.tti.generate_image(prompt=p, width=1024, height=1024)
-                    if img_bytes:
-                        fname = f"gen_{uuid.uuid4().hex}.png"
-                        with open(assets_path / fname, "wb") as f:
-                            f.write(img_bytes)
-                        generated_images.append({
-                            "path": f"/user_data/users/{username}/notebook_assets/{notebook_id}/{fname}", 
-                            "prompt": p
-                        })
-                except Exception as e:
-                    task.log(f"Failed to generate image for '{p}': {e}", "ERROR")
-                
-                # Update tab content progressively (images list)
-                new_tab["images"] = generated_images
-                new_tab["content"] = f"Generating images... ({i+1}/{len(prompts_list)})"
-                
-                # We need to find the tab in the current object from DB to update it
-                # Since we modified the list locally, let's re-assign to be safe or modify object in place if attached
-                # Safe approach: locate by ID
-                for t in nb.tabs:
-                    if t['id'] == output_tab_id:
-                        t['images'] = generated_images
-                        t['content'] = f"Generated {len(generated_images)} images."
-                        break
-                flag_modified(nb, "tabs")
-                db.commit()
-                
-                task.set_progress(10 + int(90 * (i + 1) / len(prompts_list)))
-
-        elif output_type == 'presentation':
-            task.set_progress(10)
-            task.log("Generating presentation outline...")
-            
-            slide_prompt = f"""
-[CONTEXT]
-{full_context}
-
-[INSTRUCTION]
-{prompt}
-Create a presentation based on the context and instruction.
-Output the content in Markdown format, where each slide is separated by "---".
-Each slide should have a title (## Title) and bullet points.
-"""     
-            def callback(chunk, msg_type=None, params=None, **kwargs):
-                if task.cancellation_event.is_set(): return False
-                return True
-
-            slides_md_raw = lc.generate_text(slide_prompt, streaming_callback=callback)
-            slides_md = lc.remove_thinking_blocks(slides_md_raw)
-            
-            # Update Tab
-            for t in nb.tabs:
-                if t['id'] == output_tab_id:
-                    t['content'] = slides_md
-                    break
-            flag_modified(nb, "tabs")
-            db.commit()
-
-        elif output_type == 'story_structure':
-            task.set_progress(10)
-            task.log("Building Story Structure...")
-            
-            full_prompt = f"""
-[SOURCES]
-{full_context}
-
-[USER IDEA]
-{prompt}
-
-[TASK]
-Create a comprehensive Story Bible and Structure. 
-Include:
-1. Title & Logline
-2. Themes & Tone
-3. Character Profiles (Protagonist, Antagonist, Supporting)
-4. World Building Rules
-5. High-Level Plot Outline (Chapter by Chapter list)
-
-Format as Markdown.
-"""
-            generated_raw = lc.generate_text(full_prompt)
-            generated = lc.remove_thinking_blocks(generated_raw)
-            
-            for t in nb.tabs:
-                if t['id'] == output_tab_id:
-                    t['content'] = generated
-                    break
-            flag_modified(nb, "tabs")
-            db.commit()
-
-        elif output_type == 'story_chapter':
-            task.set_progress(10)
-            task.log("Writing Chapter...")
-            
-            story_context = _build_story_context(nb, input_tab_ids, "Drafting")
-            
-            full_prompt = f"""
-{story_context}
-
-[TASK]
-Write the next chapter or the specific scene described below.
-Adhere strictly to the Tone and Character Voices defined in the Story Bible.
-Use the Reference Material provided for continuity.
-
-[INSTRUCTION]
-{prompt}
-
-[AGENTIC TOOLS]
-If you need to check specific details from the source documents, write: <ScanForInfos>search query</ScanForInfos>
-"""
-            
-            final_chapter_text = ""
-            
-            # Callback to update DB progressively? 
-            # Doing DB updates on every token is too heavy. 
-            # We will update every chunk or loop.
-            
-            MAX_LOOPS = 3
-            current_prompt = full_prompt
-            
-            for loop in range(MAX_LOOPS):
-                task.log(f"Generation Loop {loop+1}/{MAX_LOOPS}")
-                
-                segment_raw = lc.generate_text(current_prompt)
-                segment = lc.remove_thinking_blocks(segment_raw)
-                
-                agent_info = _handle_agentic_tags(segment, username, db, nb.artefacts)
-                
-                final_chapter_text += segment
-                
-                # Progressive Update
-                for t in nb.tabs:
-                    if t['id'] == output_tab_id:
-                        t['content'] = final_chapter_text
-                        break
-                flag_modified(nb, "tabs")
-                db.commit()
-
-                if agent_info:
-                    task.log("Agent info found, injecting and continuing...")
-                    final_chapter_text += f"\n\n> *System Info: {agent_info.strip()}*\n\n"
-                    current_prompt = f"{story_context}\n\n[PREVIOUSLY WROTE]\n{final_chapter_text}\n\n[NEW INFO]\n{agent_info}\n\n[INSTRUCTION]\nContinue writing based on the new info."
-                else:
-                    break 
-            
-        else: # Default Text
-            task.set_progress(10)
-            task.log("Generating text...")
-            
-            full_prompt = f"""
-[CONTEXT]
-{full_context}
-
-[INSTRUCTION]
-{prompt}
-"""
-            def callback(chunk, msg_type=None, params=None, **kwargs):
-                if task.cancellation_event.is_set(): return False
-                return True
-
-            generated_text_raw = lc.generate_text(full_prompt, streaming_callback=callback)
-            generated_text = lc.remove_thinking_blocks(generated_text_raw)
-            
-            for t in nb.tabs:
-                if t['id'] == output_tab_id:
-                    t['content'] = generated_text
-                    break
-            flag_modified(nb, "tabs")
-            db.commit()
-
-        task.log("Notebook updated.")
-        
-    task.set_progress(100)
-    return {"notebook_id": notebook_id}
-
-def _notebook_scrape_task(task: Task, username: str, notebook_id: str, url: str):
-    if ScrapeMaster is None:
-        raise ImportError("ScrapeMaster is not installed.")
-        
-    task.log(f"Scraping URL: {url}")
-    task.set_progress(10)
-    
-    try:
-        scraper = ScrapeMaster(url)
-        content = scraper.scrape()
-        
-        if not content:
-            raise ValueError("No content extracted from URL.")
-            
-        task.set_progress(80)
-        task.log("Content extracted. Saving to notebook...")
-        
-        with task.db_session_factory() as db:
-            nb = db.query(Notebook).filter(Notebook.id == notebook_id).first()
-            if not nb:
-                raise ValueError("Notebook not found")
-            
-            current_artefacts = list(nb.artefacts) if nb.artefacts else []
-            filename = f"Scrape: {url}"
-            current_artefacts = [a for a in current_artefacts if a['filename'] != filename]
-            
-            current_artefacts.append({
-                "filename": filename,
-                "content": content,
-                "type": "url",
-                "is_loaded": True,
-                "source": url
-            })
-            
-            nb.artefacts = current_artefacts
-            flag_modified(nb, "artefacts")
-            db.commit()
-            
-        task.set_progress(100)
-        task.log("Scrape successful.")
-        return {"notebook_id": notebook_id, "filename": filename}
-        
-    except Exception as e:
-        task.log(f"Scraping failed: {e}", "ERROR")
-        raise e
+    input_tab_ids: List[str]
+    output_type: str
+    target_tab_id: Optional[str] = None
 
 # --- Endpoints ---
 
-@router.get("", response_model=List[NotebookPublic])
-def list_notebooks(db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
-    notebooks = db.query(Notebook).filter(Notebook.owner_user_id == current_user.id).order_by(Notebook.updated_at.desc()).all()
-    return [
-        {
-            "id": n.id,
-            "title": n.title,
-            "content": n.content or "",
-            "artefacts": n.artefacts or [],
-            "tabs": n.tabs or [],
-            "created_at": n.created_at.isoformat(),
-            "updated_at": n.updated_at.isoformat() if n.updated_at else n.created_at.isoformat()
-        } for n in notebooks
-    ]
+@router.get("", response_model=List[NotebookResponse])
+def get_notebooks(
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(DBNotebook).filter(DBNotebook.owner_user_id == current_user.id).order_by(DBNotebook.updated_at.desc()).all()
 
-@router.post("", response_model=NotebookPublic)
-def create_notebook(data: NotebookCreate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
-    initial_tab = {
-        "id": str(uuid.uuid4()),
-        "title": "Main",
-        "type": "markdown",
-        "content": data.content or "",
-        "images": []
-    }
+@router.post("", response_model=NotebookResponse)
+def create_notebook(
+    payload: NotebookCreate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    initial_tabs = []
     
-    nb = Notebook(
-        title=data.title,
-        content=data.content,
+    if payload.structure:
+        for item in payload.structure:
+            initial_tabs.append({
+                "id": str(uuid.uuid4()),
+                "title": item.title,
+                "type": item.type,
+                "content": item.content,
+                "images": []
+            })
+    
+    if not initial_tabs:
+         initial_tabs.append({
+            "id": str(uuid.uuid4()),
+            "title": "Main",
+            "type": "markdown",
+            "content": payload.initialPrompt or "",
+            "images": []
+        })
+
+    content_to_store = payload.content
+    if payload.metadata:
+        try:
+            content_obj = { "text": payload.content, "metadata": payload.metadata }
+            content_to_store = json.dumps(content_obj)
+        except: pass
+
+    initial_artefacts = []
+    if payload.raw_text:
+        initial_artefacts.append({
+            "filename": "Initial Notes",
+            "content": payload.raw_text,
+            "type": "text",
+            "is_loaded": True
+        })
+
+    new_notebook = DBNotebook(
+        title=payload.title,
+        content=content_to_store,
+        type=payload.type,
         owner_user_id=current_user.id,
-        artefacts=[],
-        tabs=[initial_tab]
+        tabs=initial_tabs,
+        artefacts=initial_artefacts
     )
-    db.add(nb)
+    db.add(new_notebook)
     db.commit()
-    db.refresh(nb)
-    return {
-            "id": nb.id,
-            "title": nb.title,
-            "content": nb.content or "",
-            "artefacts": nb.artefacts or [],
-            "tabs": nb.tabs or [],
-            "created_at": nb.created_at.isoformat(),
-            "updated_at": nb.updated_at.isoformat() if nb.updated_at else nb.created_at.isoformat()
-        }
+    db.refresh(new_notebook)
+    
+    # Trigger background ingestion for URLs
+    if (payload.urls and len(payload.urls) > 0) or (payload.youtube_urls and len(payload.youtube_urls) > 0):
+        task_manager.submit_task(
+            name=f"Notebook {new_notebook.id}: Ingest Sources",
+            target=_ingest_notebook_sources_task,
+            args=(current_user.username, new_notebook.id, payload.urls or [], payload.youtube_urls or []),
+            description="Scraping web and YouTube sources...",
+            owner_username=current_user.username
+        )
 
-@router.put("/{notebook_id}", response_model=NotebookPublic)
-def update_notebook(notebook_id: str, data: NotebookUpdate, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id, Notebook.owner_user_id == current_user.id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
+    return new_notebook
+
+@router.put("/{notebook_id}", response_model=NotebookResponse)
+def update_notebook(
+    notebook_id: str,
+    payload: NotebookUpdate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
     
-    if data.title is not None: nb.title = data.title
-    if data.content is not None: nb.content = data.content
-    if data.artefacts is not None: 
-        nb.artefacts = data.artefacts
-        flag_modified(nb, "artefacts")
-    if data.tabs is not None:
-        nb.tabs = data.tabs
-        flag_modified(nb, "tabs")
+    if payload.title is not None: notebook.title = payload.title
+    if payload.content is not None: notebook.content = payload.content
+    if payload.artefacts is not None: notebook.artefacts = payload.artefacts
+    if payload.tabs is not None: notebook.tabs = payload.tabs
     
+    notebook.updated_at = datetime.now()
     db.commit()
-    db.refresh(nb)
-    return {
-            "id": nb.id,
-            "title": nb.title,
-            "content": nb.content or "",
-            "artefacts": nb.artefacts or [],
-            "tabs": nb.tabs or [],
-            "created_at": nb.created_at.isoformat(),
-            "updated_at": nb.updated_at.isoformat() if nb.updated_at else nb.created_at.isoformat()
-        }
+    db.refresh(notebook)
+    return notebook
 
 @router.delete("/{notebook_id}")
-def delete_notebook(notebook_id: str, db: Session = Depends(get_db), current_user: UserAuthDetails = Depends(get_current_active_user)):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id, Notebook.owner_user_id == current_user.id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
+def delete_notebook(
+    notebook_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
     
     assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
     if assets_path.exists():
-        shutil.rmtree(assets_path)
-
-    db.delete(nb)
+        shutil.rmtree(assets_path, ignore_errors=True)
+        
+    db.delete(notebook)
     db.commit()
-    return {"message": "Deleted"}
+    return {"message": "Notebook deleted."}
 
-@router.post("/{notebook_id}/upload")
-async def upload_to_notebook(
-    notebook_id: str,
-    file: UploadFile = File(...),
-    db: Session = Depends(get_db),
+@router.post("/structure", response_model=List[StructureItem])
+def generate_notebook_structure(
+    request: GenerateStructureRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id, Notebook.owner_user_id == current_user.id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
+    lc = get_user_lollms_client(current_user.username)
+    system_prompt = "You are a helpful AI assistant that structures documents and projects."
+    prompt = f"""Create a structure for a '{request.type}' notebook based on this request: "{request.prompt}".
+    Return a JSON list of objects. Each object must have:
+    - "title": string
+    - "type": string (one of: 'markdown', 'gallery', 'slides')
+    - "content": string (Optional initial content)
+    Example output: [{{"title": "Intro", "type": "markdown", "content": "# Intro"}}]
+    """
+    try:
+        response_text = lc.generate_text(prompt, system_prompt=system_prompt, max_new_tokens=1024, temperature=0.7)
+        try:
+            import re
+            match = re.search(r'\[.*\]', response_text, re.DOTALL)
+            json_str = match.group(0) if match else response_text
+            structure_data = json.loads(json_str)
+            return [StructureItem(**item) for item in structure_data]
+        except json.JSONDecodeError:
+            return [StructureItem(title="Generated Plan", content=response_text)]
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
+
+@router.post("/{notebook_id}/upload")
+async def upload_notebook_source(
+    notebook_id: str,
+    file: UploadFile = File(...),
+    use_docling: bool = Form(False),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
 
     assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
     assets_path.mkdir(parents=True, exist_ok=True)
     
-    file_path = assets_path / file.filename
-    content_bytes = await file.read()
+    safe_filename = secure_filename(file.filename)
+    file_path = assets_path / safe_filename
     
-    with open(file_path, "wb") as f:
-        f.write(content_bytes)
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
         
-    text_content, _ = extract_text_from_file_bytes(content_bytes, file.filename)
+    content = ""
+    is_text = False
+    try:
+        if file_path.suffix.lower() in ['.txt', '.md', '.py', '.js', '.json', '.html', '.css', '.c', '.cpp', '.h', '.hpp']:
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
+            is_text = True
+    except: pass
+        
+    if is_text:
+        new_artefact = {
+            "filename": safe_filename,
+            "content": content,
+            "type": "text",
+            "is_loaded": True
+        }
+        current_artefacts = list(notebook.artefacts)
+        current_artefacts = [a for a in current_artefacts if a['filename'] != safe_filename]
+        current_artefacts.append(new_artefact)
+        notebook.artefacts = current_artefacts
+        db.commit()
+    elif use_docling:
+        # Trigger Docling conversion task
+        task_manager.submit_task(
+            name=f"Notebook {notebook_id}: Convert {safe_filename}",
+            target=_convert_file_with_docling_task,
+            args=(current_user.username, notebook_id, str(file_path), safe_filename),
+            description=f"Converting {safe_filename} to markdown...",
+            owner_username=current_user.username
+        )
     
-    current_artefacts = list(nb.artefacts) if nb.artefacts else []
-    current_artefacts = [a for a in current_artefacts if a['filename'] != file.filename]
-    
-    current_artefacts.append({
-        "filename": file.filename,
-        "content": text_content,
-        "type": "file",
-        "is_loaded": True
-    })
-    
-    nb.artefacts = current_artefacts
-    flag_modified(nb, "artefacts")
-    db.commit()
-    
-    return {"message": "Uploaded", "filename": file.filename}
+    return {"filename": safe_filename}
+
 
 @router.post("/{notebook_id}/artefact")
-async def create_notebook_artefact(
+def create_text_artefact(
     notebook_id: str,
-    artefact: ArtefactCreate,
-    db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    payload: Dict[str, str], 
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id, Notebook.owner_user_id == current_user.id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
-
-    current_artefacts = list(nb.artefacts) if nb.artefacts else []
-    current_artefacts = [a for a in current_artefacts if a['filename'] != artefact.title]
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
+        
+    title = secure_filename(payload.get('title', 'untitled.txt'))
+    content = payload.get('content', '')
     
-    current_artefacts.append({
-        "filename": artefact.title,
-        "content": artefact.content,
+    assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
+    assets_path.mkdir(parents=True, exist_ok=True)
+    (assets_path / title).write_text(content, encoding='utf-8')
+    
+    new_artefact = {
+        "filename": title,
+        "content": content,
         "type": "text",
         "is_loaded": True
-    })
+    }
     
-    nb.artefacts = current_artefacts
-    flag_modified(nb, "artefacts")
+    current_artefacts = list(notebook.artefacts)
+    current_artefacts = [a for a in current_artefacts if a['filename'] != title]
+    current_artefacts.append(new_artefact)
+    notebook.artefacts = current_artefacts
     db.commit()
-    
-    return {"message": "Artefact created", "filename": artefact.title}
+    return {"filename": title}
 
-@router.post("/{notebook_id}/scrape", response_model=TaskInfo)
-async def scrape_url_to_notebook(
+@router.post("/{notebook_id}/generate_title", response_model=GenerateTitleResponse)
+def generate_notebook_title(
     notebook_id: str,
-    request: ScrapeRequest,
-    db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id, Notebook.owner_user_id == current_user.id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
+    
+    context = ""
+    for tab in notebook.tabs:
+        context += f"Tab: {tab.get('title')}\n{tab.get('content', '')[:500]}\n\n"
+    
+    if not context.strip():
+        return {"title": "Untitled Notebook"}
 
-    task = task_manager.submit_task(
-        name=f"Scrape URL: {request.url}",
-        target=_notebook_scrape_task,
-        args=(current_user.username, notebook_id, request.url),
-        description=f"Scraping content for notebook: {nb.title}",
-        owner_username=current_user.username
-    )
-    return task
-
-@router.post("/{notebook_id}/process")
-async def process_notebook(
-    notebook_id: str,
-    request: ProcessRequest,
-    db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user)
-):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id, Notebook.owner_user_id == current_user.id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
-
-    task = task_manager.submit_task(
-        name=f"Process Notebook: {nb.title}",
-        target=_notebook_process_task,
-        args=(current_user.username, notebook_id, request.prompt, request.input_tab_ids, request.output_type),
-        description=f"AI processing notebook ({request.output_type})",
-        owner_username=current_user.username
-    )
-    return task
-
-@router.post("/{notebook_id}/generate_title")
-async def generate_notebook_title(
-    notebook_id: str,
-    db: Session = Depends(get_db),
-    current_user: UserAuthDetails = Depends(get_current_active_user)
-):
-    nb = db.query(Notebook).filter(Notebook.id == notebook_id, Notebook.owner_user_id == current_user.id).first()
-    if not nb:
-        raise HTTPException(status_code=404, detail="Notebook not found")
-    
-    content_snippet = (nb.content or "")[:500]
-    tabs_snippet = ""
-    if nb.tabs:
-        for tab in nb.tabs[:3]: 
-            tabs_snippet += f"Tab: {tab.get('title','')}\n{tab.get('content','v')[:200]}\n"
-            
-    prompt = f"""Generate a short, concise, and descriptive title (max 6 words) for this research notebook based on these snippets:
-    
-    {content_snippet}
-    
-    {tabs_snippet}
-    
-    Return ONLY the title text, no quotes."""
-    
     lc = get_user_lollms_client(current_user.username)
-    raw_title = lc.generate_text(prompt, max_new_tokens=50)
-    new_title = lc.remove_thinking_blocks(raw_title).strip().strip('"').strip("'")
-    
-    if new_title:
-        nb.title = new_title
+    prompt = f"Generate a short, descriptive title (max 5 words) for a notebook containing the following content:\n\n{context}"
+    try:
+        title = lc.generate_text(prompt, max_new_tokens=20).strip().strip('"')
+        notebook.title = title
         db.commit()
-        return {"title": new_title}
-    else:
-        raise HTTPException(status_code=500, detail="Failed to generate title")
+        return {"title": title}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Title generation failed: {e}")
+
+@router.post("/{notebook_id}/process", response_model=TaskInfo)
+def process_notebook_ai(
+    notebook_id: str,
+    payload: ProcessRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
+
+    task_name = f"Notebook {notebook_id} Process: {payload.output_type}"
+    
+    task = task_manager.submit_task(
+        name=task_name,
+        target=_process_notebook_task,
+        args=(current_user.username, notebook_id, payload.prompt, payload.input_tab_ids, payload.output_type, payload.target_tab_id),
+        description=f"Processing notebook with action: {payload.output_type}",
+        owner_username=current_user.username
+    )
+    return task
+
+@router.post("/{notebook_id}/scrape")
+def scrape_url_to_notebook(
+    notebook_id: str,
+    payload: Dict[str, str],
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    from backend.tasks.notebook_tasks import _ingest_notebook_sources_task
+    task = task_manager.submit_task(
+        name=f"Notebook {notebook_id}: Scrape URL",
+        target=_ingest_notebook_sources_task,
+        args=(current_user.username, notebook_id, [payload['url']], []),
+        owner_username=current_user.username
+    )
+    return task
+
+@router.get("/{notebook_id}/export")
+def export_notebook(
+    notebook_id: str,
+    format: str = "json",
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
+
+    if format == "json":
+        data = {
+            "title": notebook.title,
+            "type": notebook.type,
+            "content": notebook.content,
+            "tabs": notebook.tabs,
+            "artefacts": notebook.artefacts
+        }
+        return Response(content=json.dumps(data, indent=2), media_type="application/json", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.json"})
+    
+    elif format == "pptx":
+        try:
+            from pptx import Presentation
+            from pptx.util import Inches as PptxInches
+            import io
+            
+            prs = Presentation()
+            assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
+            
+            # --- Check Metadata for Slide Mode ---
+            nb_metadata = {}
+            try:
+                loaded_content = json.loads(notebook.content)
+                if isinstance(loaded_content, dict) and 'metadata' in loaded_content:
+                    nb_metadata = loaded_content['metadata']
+            except: pass
+            
+            slide_mode = nb_metadata.get('slide_mode', 'hybrid')
+
+            for tab in notebook.tabs:
+                if tab['type'] == 'slides':
+                    try:
+                        content_obj = json.loads(tab['content'])
+                        slides_data = content_obj.get('slides_data', [])
+                        
+                        for s in slides_data:
+                            # Resolve Image
+                            img_path_local = None
+                            selected_img = None
+                            if s.get('images') and len(s.get('images')) > 0:
+                                idx = s.get('selected_image_index', 0)
+                                if idx < len(s['images']):
+                                    selected_img = s['images'][idx]
+                                    if selected_img and selected_img.get('path'):
+                                        # Convert /api/notebooks/{id}/assets/{filename} -> local path
+                                        filename = Path(selected_img['path']).name
+                                        local_file = assets_path / filename
+                                        if local_file.exists():
+                                            img_path_local = str(local_file)
+
+                            # Layout Selection
+                            if slide_mode == 'image_only':
+                                # Blank slide filled with image
+                                slide_layout = prs.slide_layouts[6] # Blank
+                                slide = prs.slides.add_slide(slide_layout)
+                                
+                                if img_path_local:
+                                    # Add picture covering entire slide
+                                    slide_width = prs.slide_width
+                                    slide_height = prs.slide_height
+                                    # Insert image
+                                    pic = slide.shapes.add_picture(img_path_local, 0, 0, width=slide_width, height=slide_height)
+                                    
+                                    # Crop if needed to fill aspect ratio
+                                    # python-pptx doesn't auto-crop easily, but resizing to fill is mostly what we want for "image only"
+                                else:
+                                    # Fallback text if no image found
+                                    txBox = slide.shapes.add_textbox(PptxInches(1), PptxInches(1), PptxInches(8), PptxInches(5))
+                                    tf = txBox.text_frame
+                                    tf.text = s.get('title', 'Untitled') + "\n(Image missing)"
+
+                            else:
+                                # Standard Hybrid/Text
+                                layout_type = s.get('layout', 'TitleBody')
+                                slide_layout = prs.slide_layouts[1] # Title and Content
+                                slide = prs.slides.add_slide(slide_layout)
+                                
+                                if slide.shapes.title: slide.shapes.title.text = s.get('title', '')
+                                if len(slide.placeholders) > 1:
+                                    if img_path_local:
+                                        # If there's an image, use it in the placeholder if possible, or add separately
+                                        # Simple logic: add image to right side, text to left? 
+                                        # Or just use placeholder for text and add image floating.
+                                        slide.placeholders[1].text = "\n".join(s.get('bullets', []))
+                                        
+                                        # Add image smaller
+                                        slide.shapes.add_picture(img_path_local, PptxInches(5), PptxInches(2), width=PptxInches(4))
+                                    else:
+                                        slide.placeholders[1].text_frame.text = "\n".join(s.get('bullets', []))
+
+                    except Exception as e:
+                        print(f"Slide export error: {e}")
+                        trace_exception(e)
+            
+            ppt_io = io.BytesIO()
+            prs.save(ppt_io)
+            ppt_io.seek(0)
+            return Response(content=ppt_io.getvalue(), media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.pptx"})
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"PPTX export failed: {e}")
+
+    raise HTTPException(status_code=400, detail="Unsupported format.")
+
+@router.get("/{notebook_id}/assets/{filename}")
+def get_notebook_asset(
+    notebook_id: str,
+    filename: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Serves a specific asset (image/file) from a notebook's storage.
+    """
+    assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
+    file_path = assets_path / filename
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Asset not found.")
+        
+    return FileResponse(file_path)

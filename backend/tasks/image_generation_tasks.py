@@ -3,7 +3,7 @@ import base64
 import uuid
 import json
 import re
-from typing import Optional
+from typing import Optional, List, Union
 import traceback
 import datetime
 from pathlib import Path
@@ -137,143 +137,138 @@ def _generate_image_task(task: Task, username: str, discussion_id: str, prompt: 
         trace_exception(e)
         raise e
 
-def _generate_slides_task(task: Task, username: str, discussion_id: str, prompt: str, width: int, height: int, count: int, style: str):
-    task.log(f"Starting slide generation (n={count})...")
+def _generate_slides_task(task: Task, username: str, discussion_id: str, message_id: str, slides_or_topic: Union[List[str], str], width: int, height: int, count: int = 5, style: str = ""):
+    """
+    Generates a set of slides.
+    """
+    task.log(f"Starting slide generation...")
     task.set_progress(5)
 
     try:
-        # Load LLM (for planning) and TTI (for generation)
-        lc = build_lollms_client_from_params(
-            username=username,
-            load_llm=True, 
-            load_tti=True
-        )
-        
-        if not lc.tti:
-            raise Exception("No active TTI binding found.")
+        lc = build_lollms_client_from_params(username=username, load_llm=True, load_tti=True)
+        if not lc.tti: raise Exception("No active TTI binding found.")
 
-        # --- Step 1: AI Planning Phase ---
-        task.log("Planning slide content with AI...")
-        
-        system_prompt = "You are an expert presentation designer. Break down the user's topic into specific, visual image generation prompts for slides."
-        planning_prompt = f"""Topic: {prompt}
+        prompts_list = []
+        if isinstance(slides_or_topic, list):
+            prompts_list = slides_or_topic
+            count = len(prompts_list)
+            task.log(f"Using {count} provided slide descriptions directly.")
+        else:
+            prompt = slides_or_topic
+            task.log("Planning slide content with AI...")
+            
+            # [MODIFIED] Enhanced prompts to restrict text generation and provide structure
+            system_prompt = "You are an expert presentation designer. Break down the user's topic into specific, visual image generation prompts for slides. Keep descriptions concise and focused on visual elements, avoiding excessive text."
+            planning_prompt = f"""Topic: {prompt}
 Number of slides: {count}
 Art Style: {style}
 
 Requirements:
 1. Create exactly {count} distinct prompts.
-2. The first prompt must be for a Title Slide.
-3. The remaining {count-1} prompts must be for Content Slides covering different key aspects of the topic.
-4. Each prompt must describe the **visual imagery** of the slide (e.g., "A portrait of Alan Turing with code in the background", "A diagram of the Enigma machine").
-5. Do NOT simply repeat "Slide 1", "Slide 2".
-6. Do NOT request a grid or collage. Describe ONE single slide image per prompt.
-7. Output strictly a JSON list of strings.
-
-Example Output format:
-[
-  "Title slide: A cinematic poster of [Topic] with bold typography, [Style] style",
-  "A detailed diagram of [Concept 1], [Style] style",
-  "A scene depicting [Event], [Style] style"
-]
+2. Each prompt must describe the VISUAL CONTENT of the slide (e.g., "A futuristic city skyline with flying cars").
+3. Do NOT include slide titles or body text in the prompt unless it's text visually embedded in the image (e.g. a neon sign).
+4. Output strictly a JSON list of strings.
+Example: ["A close up of a robot hand holding a flower", "Wide shot of a mars colony"]
 """     
-        prompts_list = []
-        try:
-            # Use generate_text and try to parse JSON
-            planning_response = lc.generate_text(planning_prompt, system_prompt=system_prompt, max_new_tokens=1024, temperature=0.7)
-            
-            # Extract JSON list
-            json_match = re.search(r'\[.*\]', planning_response, re.DOTALL)
-            if json_match:
-                try:
-                    prompts_list = json.loads(json_match.group(0))
-                except json.JSONDecodeError:
-                    pass
-            
-            if not prompts_list:
-                # Fallback: Split by newlines if JSON fails
-                lines = [l.strip() for l in planning_response.split('\n') if l.strip() and not l.strip().startswith('[') and not l.strip().startswith(']')]
-                # Heuristic: filter out lines that look like reasoning
-                prompts_list = [l for l in lines if len(l) > 10][:count]
-                
-            # Sanity check list length
-            if len(prompts_list) < count:
-                # Fill with generic variations if not enough
-                current_len = len(prompts_list)
-                for i in range(count - current_len):
-                    prompts_list.append(f"Slide {current_len + i + 1} about {prompt}, {style} style")
-            
-            prompts_list = prompts_list[:count]
-            task.log(f"Plan generated: {len(prompts_list)} distinct slides.")
-            
-        except Exception as e:
-            task.log(f"Planning failed ({e}). Falling back to simple variations.", "WARNING")
-            prompts_list = [f"{prompt}, slide {i+1} visual, {style} style" for i in range(count)]
+            try:
+                planning_response = lc.generate_text(planning_prompt, system_prompt=system_prompt, max_new_tokens=1024, temperature=0.7)
+                clean_response = planning_response.strip()
+                if clean_response.startswith("```"):
+                    clean_response = clean_response.split('\n', 1)[1]
+                    if clean_response.endswith("```"): clean_response = clean_response.rsplit('\n', 1)[0]
+                json_match = re.search(r'\[.*\]', clean_response, re.DOTALL)
+                if json_match:
+                    try: prompts_list = json.loads(json_match.group(0))
+                    except json.JSONDecodeError: pass
+                if not prompts_list:
+                    prompts_list = [l.strip() for l in clean_response.split('\n') if l.strip() and len(l) > 10 and not l.strip().startswith('[')]
+                if len(prompts_list) < count:
+                    current_len = len(prompts_list)
+                    for i in range(count - current_len): prompts_list.append(f"{prompt}, slide {current_len + i + 1} visual, {style} style")
+                prompts_list = prompts_list[:count]
+                task.log(f"Plan generated: {len(prompts_list)} slides.")
+            except Exception as e:
+                task.log(f"Planning failed ({e}). Falling back.", "WARNING")
+                prompts_list = [f"{prompt}, slide {i+1} visual, {style} style" for i in range(count)]
 
-        # --- Step 2: Generation Phase ---
         discussion = get_user_discussion(username, discussion_id)
-        if not discussion:
-             raise Exception("Discussion not found.")
-             
+        if not discussion: raise Exception("Discussion not found.")
+        
+        target_message = discussion.get_message(message_id)
+        if not target_message:
+             task.log("Target message not found, creating new.", "WARNING")
+             target_message = discussion.add_message(sender="lollms_tti", content=f"Slides generated for: {slides_or_topic if isinstance(slides_or_topic, str) else 'Request'}", sender_type="assistant")
+
+        # FIX: Ensure we have a valid list to append to
+        if target_message.images is None:
+            target_message.images = []
+            
         generated_slides = []
         generation_infos = []
 
         for i, slide_prompt in enumerate(prompts_list):
-            if task.cancellation_event.is_set():
-                break
+            if task.cancellation_event.is_set(): break
             
-            # Ensure style is reinforced if not present (optional, but good for consistency)
             final_prompt = slide_prompt
-            if style and style.lower() not in slide_prompt.lower():
-                final_prompt = f"{slide_prompt}, {style} style"
+            if style and style.lower() not in slide_prompt.lower(): final_prompt = f"{slide_prompt}, {style} style"
 
-            task.log(f"Generating slide {i+1}/{count}...")
+            task.log(f"Generating slide {i+1}/{len(prompts_list)}...")
             
-            image_bytes = lc.tti.generate_image(
-                prompt=final_prompt,
-                width=width,
-                height=height
-            )
+            image_bytes = lc.tti.generate_image(prompt=final_prompt, width=width, height=height)
             
             if image_bytes:
                 b64 = base64.b64encode(image_bytes).decode('utf-8')
                 generated_slides.append(b64)
-                generation_infos.append({
-                    "index": i,
-                    "prompt": final_prompt,
-                    "width": width,
-                    "height": height
+                
+                # Explicitly re-assign image list to force persistence detection
+                current_images = list(target_message.images) if target_message.images else []
+                current_images.append(b64)
+                target_message.images = current_images
+                
+                # Sync active_images
+                current_active = list(target_message.active_images) if target_message.active_images else []
+                while len(current_active) < len(current_images):
+                    current_active.append(True)
+                target_message.active_images = current_active
+                
+                # Create Metadata for this specific slide
+                new_idx = len(target_message.images) - 1
+                generation_infos.append({"index": new_idx, "prompt": final_prompt, "width": width, "height": height})
+
+                # Manually manage image_groups to ensure correct typing
+                meta = target_message.metadata or {}
+                groups = list(meta.get("image_groups", [])) # Ensure list copy
+                groups.append({
+                    "type": "slide_item",
+                    "indices": [new_idx],
+                    "title": f"Slide {i+1}",
+                    "prompt": final_prompt
                 })
+                target_message.set_metadata_item("image_groups", groups, discussion)
+                
+                # Commit after each slide so frontend can see progress if it polls/refreshes
+                discussion.commit()
+            else:
+                 task.log(f"Failed to generate slide {i+1}", "ERROR")
             
-            task.set_progress(10 + int(90 * (i+1)/count))
-            
-        if not generated_slides:
-            raise Exception("No slides generated.")
-            
-        # Create a new message to hold the slides
-        # We join the prompts for the content text to show what was generated
-        prompts_summary = "\n".join([f"{i+1}. {p}" for i, p in enumerate(prompts_list)])
-        new_message = discussion.add_message(
-            sender="lollms_tti",
-            content=f"Generated {len(generated_slides)} slides based on your request.\n\n**Slide Plan:**\n{prompts_summary}",
-            sender_type="assistant"
-        )
-        
-        # Add as a "slideshow" pack
-        if hasattr(new_message, 'add_image_pack'):
-             new_message.add_image_pack(generated_slides, group_type="slideshow", title=f"Slides: {prompt[:20]}...")
-        else:
-             new_message.images = generated_slides
-             
-        new_message.set_metadata_item("generated_image_infos", generation_infos, discussion)
+            task.set_progress(10 + int(90 * (i+1)/len(prompts_list)))
+
+        if not generated_slides: raise Exception("No slides generated.")
+
+        # Update generated_image_infos
+        existing_infos = (target_message.metadata or {}).get("generated_image_infos", [])
+        target_message.set_metadata_item("generated_image_infos", existing_infos + generation_infos, discussion)
         discussion.commit()
         
         serialized_message = {
-            "id": new_message.id,
-            "sender": new_message.sender,
-            "content": new_message.content,
-            "image_references": [f"data:image/png;base64,{img}" for img in new_message.images],
-            "sender_type": new_message.sender_type,
-            "created_at": new_message.created_at.isoformat() if hasattr(new_message.created_at, 'isoformat') else str(new_message.created_at)
+            "id": target_message.id,
+            "sender": target_message.sender,
+            "content": target_message.content,
+            "image_references": [f"data:image/png;base64,{img}" for img in target_message.images or []],
+            "sender_type": target_message.sender_type,
+            "created_at": target_message.created_at.isoformat() if hasattr(target_message.created_at, 'isoformat') else str(target_message.created_at),
+            "metadata": target_message.metadata,
+            "active_images": getattr(target_message, 'active_images', [])
         }
 
         task.set_progress(100)

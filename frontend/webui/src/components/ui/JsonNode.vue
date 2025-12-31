@@ -1,119 +1,100 @@
 <script setup>
-import { ref, computed, defineAsyncComponent } from 'vue';
-
-// Use defineAsyncComponent for the recursive component to prevent infinite loops
-const JsonRenderer = defineAsyncComponent(() => import('./JsonRenderer.vue'));
+import { computed, ref } from 'vue';
 
 const props = defineProps({
-  itemKey: {
-    type: [String, Number],
-    required: true
-  },
-  itemValue: {
-    required: true
-  },
-  level: {
-    type: Number,
-    default: 0
-  }
+  name: { type: [String, Number], default: null },
+  value: { type: [Object, Array, String, Number, Boolean, null], default: null },
+  isLast: { type: Boolean, default: true },
+  initialDepth: { type: Number, default: 0 }
 });
 
-// State for expanding/collapsing this specific node.
-// Auto-expands the first two levels for a better initial view.
-const isExpanded = ref(props.level < 2);
+const isOpen = ref(false);
 
-// Helper function to check if a string is a base64 image
-const isBase64Image = (str) => {
-  return typeof str === 'string' && str.startsWith('data:image/') && str.includes(';base64,');
-};
+const isObject = computed(() => props.value !== null && typeof props.value === 'object' && !Array.isArray(props.value));
+const isArray = computed(() => Array.isArray(props.value));
+const isExpandable = computed(() => isObject.value || isArray.value);
 
-const valueType = computed(() => {
-  if (props.itemValue === null) return 'null';
-  if (Array.isArray(props.itemValue)) return 'array';
-  if (isBase64Image(props.itemValue)) return 'image';
-  if (typeof props.itemValue === 'object') return 'object';
-  return typeof props.itemValue;
-});
-
-// A node is collapsible if it's an object or array with content
-const isCollapsible = computed(() => {
-  return (valueType.value === 'object' && Object.keys(props.itemValue).length > 0) ||
-         (valueType.value === 'array' && props.itemValue.length > 0);
-});
-
-// Show a preview of the content when collapsed
-const collapsedPreview = computed(() => {
-    if (valueType.value === 'array') {
-        return `[... ${props.itemValue.length} items]`;
+const typeClass = computed(() => {
+    if (props.value === null) return 'text-gray-500 italic';
+    switch (typeof props.value) {
+        case 'string': return 'text-green-600 dark:text-green-400';
+        case 'number': return 'text-orange-600 dark:text-orange-400';
+        case 'boolean': return 'text-blue-600 dark:text-blue-400 font-bold';
+        default: return 'text-gray-700 dark:text-gray-300';
     }
-    if (valueType.value === 'object') {
-        return '{...}';
-    }
+});
+
+const formattedValue = computed(() => {
+    if (props.value === null) return 'null';
+    if (typeof props.value === 'string') return `"${props.value}"`;
+    return String(props.value);
+});
+
+const itemCount = computed(() => {
+    if (isObject.value) return Object.keys(props.value).length;
+    if (isArray.value) return props.value.length;
+    return 0;
+});
+
+const summary = computed(() => {
+    if (isArray.value) return `Array(${itemCount.value})`;
+    if (isObject.value) return `Object{${itemCount.value}}`;
     return '';
-})
+});
 
-function toggleExpansion() {
-  if (isCollapsible.value) {
-    isExpanded.value = !isExpanded.value;
-  }
+function toggle() {
+    isOpen.value = !isOpen.value;
 }
 </script>
 
 <template>
-  <div class="json-node">
-    <div class="flex items-start">
-      <!-- Key and Toggle Button -->
-      <div class="flex-shrink-0 flex items-center" style="min-width: 150px;">
-        <button v-if="isCollapsible" @click.prevent="toggleExpansion" class="w-6 h-6 mr-1 flex items-center justify-center text-gray-500 hover:bg-gray-200 dark:hover:bg-gray-600 rounded">
-          <span class="font-bold text-lg">{{ isExpanded ? '−' : '+' }}</span>
-        </button>
-        <span v-else class="w-6 h-6 mr-1 flex-shrink-0"></span> <!-- Placeholder for alignment -->
-        <strong class="text-gray-800 dark:text-gray-200 select-all break-all">{{ itemKey }}:</strong>
-      </div>
+  <div class="json-node font-mono text-xs sm:text-sm leading-relaxed">
+    <div class="flex items-start hover:bg-gray-50 dark:hover:bg-gray-800/50 rounded px-1 -ml-1 transition-colors">
+      <!-- Toggler -->
+      <button 
+        v-if="isExpandable" 
+        @click.stop="toggle" 
+        class="w-4 h-4 mt-0.5 mr-1 flex items-center justify-center text-gray-400 hover:text-blue-500 transition-colors focus:outline-none"
+      >
+        <span v-if="isOpen" class="text-[10px]">▼</span>
+        <span v-else class="text-[10px]">▶</span>
+      </button>
+      <span v-else class="w-4 h-4 mr-1 inline-block"></span> <!-- Spacer -->
 
-      <!-- Value -->
-      <div class="ml-2 flex-grow">
-        <!-- Render Collapsed Preview if not expanded -->
-        <span v-if="isCollapsible && !isExpanded" @click="toggleExpansion" class="text-gray-500 cursor-pointer hover:underline">
-          {{ collapsedPreview }}
+      <!-- Key -->
+      <span v-if="name !== null" class="mr-1.5 text-purple-700 dark:text-purple-400 font-medium select-text">
+        {{ name }}:
+      </span>
+
+      <!-- Value or Summary -->
+      <span v-if="!isExpandable" :class="['select-text break-all', typeClass]">
+        {{ formattedValue }}<span v-if="!isLast" class="text-gray-400">,</span>
+      </span>
+      
+      <span v-else class="text-gray-500 cursor-pointer select-none" @click="toggle">
+        <span v-if="isOpen" class="text-gray-400">{{ isArray ? '[' : '{' }}</span>
+        <span v-else class="italic opacity-80 hover:opacity-100 hover:text-blue-500 hover:underline decoration-dashed decoration-1 underline-offset-2 transition-all">
+          {{ isArray ? '[ ... ]' : '{ ... }' }} 
+          <span class="text-xs ml-1 opacity-70">{{ itemCount }} items</span>
         </span>
+      </span>
+    </div>
 
-        <!-- Render Expanded Content or Primitive Values -->
-        <template v-else>
-          <!-- Nested Object/Array -->
-          <JsonRenderer v-if="isCollapsible" :json="itemValue" :level="level + 1" />
-          
-          <!-- Base64 Image -->
-          <img v-else-if="valueType === 'image'" :src="itemValue" alt="Base64 Image" class="max-w-xs max-h-48 rounded-md border border-gray-200 dark:border-gray-700 mt-1" />
-
-          <!-- Boolean -->
-          <span v-else-if="valueType === 'boolean'"
-                :class="itemValue ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300' : 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300'"
-                class="px-2 py-0.5 text-xs font-semibold rounded-full">
-            {{ itemValue }}
-          </span>
-
-          <!-- Null -->
-          <span v-else-if="valueType === 'null'" class="text-gray-500 italic">null</span>
-
-          <!-- Empty Object/Array -->
-          <span v-else-if="valueType === 'object' || valueType === 'array'" class="text-gray-500 italic">
-            {{ valueType === 'object' ? '{} (empty object)' : '[] (empty array)' }}
-          </span>
-
-          <!-- String or Number -->
-          <span v-else class="text-gray-700 dark:text-gray-300 whitespace-pre-wrap break-words select-all">
-            {{ itemValue }}
-          </span>
-        </template>
+    <!-- Children -->
+    <div v-if="isExpandable && isOpen" class="pl-2 ml-2 border-l border-gray-200 dark:border-gray-700">
+      <template v-if="isArray">
+        <div v-for="(item, index) in value" :key="index">
+          <JsonNode :name="null" :value="item" :is-last="index === value.length - 1" :initial-depth="initialDepth + 1" />
+        </div>
+      </template>
+      <template v-else>
+        <div v-for="(val, key, index) in value" :key="key">
+          <JsonNode :name="key" :value="val" :is-last="index === Object.keys(value).length - 1" :initial-depth="initialDepth + 1" />
+        </div>
+      </template>
+      <div class="pl-2 text-gray-400 select-none">
+        {{ isArray ? ']' : '}' }}<span v-if="!isLast">,</span>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.json-node {
-    font-family: 'Courier New', Courier, monospace;
-    font-size: 0.875rem; /* 14px */
-}
-</style>

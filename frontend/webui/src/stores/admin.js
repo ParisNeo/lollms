@@ -36,11 +36,13 @@ const castSettingValue = (value, type) => {
     return value;
 };
 
+
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
     const { on } = useEventBus();
 
+    // ... (existing state refs)
     // Dashboard & Users
     const dashboardStats = ref(null);
     const isLoadingDashboardStats = ref(false);
@@ -133,6 +135,8 @@ export const useAdminStore = defineStore('admin', () => {
     watch(mcpFilters, (newFilters) => { localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(promptFilters, (newFilters) => { localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters)); }, { deep: true });
 
+    // ... (existing handlers)
+    
     async function handleTaskCompletion(task) {
         if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
         const taskName = (task.name || '').toLowerCase();
@@ -156,11 +160,16 @@ export const useAdminStore = defineStore('admin', () => {
         if (taskName.includes('content') && task.status === 'completed') {
             uiStore.addNotification('Moderation task completed.', 'success', 6000);
         }
+
+        if (taskName.includes('generate fun facts') && task.status === 'completed') {
+             uiStore.addNotification('Fun Facts Generated!', 'success');
+             fetchFunFacts(true);
+             fetchFunFactCategories(true);
+        }
     }
     on('task:completed', handleTaskCompletion);
 
-    // --- Actions ---
-
+    // ... (existing actions)
     async function forceAllUsersConfig(payload) {
         try {
             const res = await apiClient.post('/api/admin/system/force-all-users-config', payload);
@@ -204,7 +213,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
     async function killProcess(pid) { await apiClient.post('/api/admin/system/kill-process', { pid }); uiStore.addNotification(`Process ${pid} killed.`, 'success'); fetchSystemStatus(); }
-
+    
     async function fetchDashboardStats() { 
         isLoadingDashboardStats.value = true; 
         try { const response = await apiClient.get('/api/admin/stats'); dashboardStats.value = response.data; } 
@@ -224,7 +233,6 @@ export const useAdminStore = defineStore('admin', () => {
         catch (error) { globalGenerationStats.value = null; } 
         finally { isLoadingGlobalGenerationStats.value = false; } 
     }
-    
     async function fetchSystemStatus() { 
         isLoadingSystemStatus.value = true; 
         try { const response = await apiClient.get('/api/admin/system-status'); systemStatus.value = response.data; } 
@@ -249,7 +257,6 @@ export const useAdminStore = defineStore('admin', () => {
         catch (error) { console.error("Failed to fetch model usage stats:", error); modelUsageStats.value = []; } 
         finally { isLoadingModelUsageStats.value = false; } 
     }
-
     async function fetchGlobalSettings(force = false) { 
         if (!force && globalSettings.value.length > 0) return;
         isLoadingSettings.value = true; 
@@ -272,170 +279,101 @@ export const useAdminStore = defineStore('admin', () => {
         aiBotSettings.value = response.data; 
         uiStore.addNotification('AI Bot user settings updated.', 'success'); 
     }
-
-    async function fetchBindings(force = false) { 
-        if (!force && bindings.value.length > 0) return;
-        isLoadingBindings.value = true; 
-        try { const r = await apiClient.get('/api/admin/bindings'); bindings.value = r.data; } 
-        finally { isLoadingBindings.value = false; } 
-    }
-    async function fetchAvailableBindingTypes(force = false) { 
-        if (!force && availableBindingTypes.value.length > 0) return;
-        const r = await apiClient.get('/api/admin/bindings/available_types'); availableBindingTypes.value = r.data; 
-    }
+    
+    // ... (Bindings actions - keeping them concise to save space but they are same as before)
+    async function fetchBindings(force = false) { if (!force && bindings.value.length > 0) return; isLoadingBindings.value = true; try { const r = await apiClient.get('/api/admin/bindings'); bindings.value = r.data; } finally { isLoadingBindings.value = false; } }
+    async function fetchAvailableBindingTypes(force = false) { if (!force && availableBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/bindings/available_types'); availableBindingTypes.value = r.data; }
     async function addBinding(payload) { const r = await apiClient.post('/api/admin/bindings', payload); bindings.value.push(r.data); uiStore.addNotification(`Binding '${r.data.alias}' created.`, 'success'); }
     async function updateBinding(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; uiStore.addNotification(`Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteBinding(id) { await apiClient.delete(`/api/admin/bindings/${id}`); bindings.value = bindings.value.filter(b => b.id !== id); uiStore.addNotification('Binding deleted.', 'success'); }
-
-    async function fetchTtiBindings(force = false) { 
-        if (!force && ttiBindings.value.length > 0) return;
-        isLoadingTtiBindings.value = true; 
-        try { const r = await apiClient.get('/api/admin/tti-bindings'); ttiBindings.value = r.data; } 
-        finally { isLoadingTtiBindings.value = false; } 
-    }
-    async function fetchAvailableTtiBindingTypes(force = false) { 
-        if (!force && availableTtiBindingTypes.value.length > 0) return;
-        const r = await apiClient.get('/api/admin/tti-bindings/available_types'); availableTtiBindingTypes.value = r.data; 
-    }
+    
+    // TTI
+    async function fetchTtiBindings(force = false) { if (!force && ttiBindings.value.length > 0) return; isLoadingTtiBindings.value = true; try { const r = await apiClient.get('/api/admin/tti-bindings'); ttiBindings.value = r.data; } finally { isLoadingTtiBindings.value = false; } }
+    async function fetchAvailableTtiBindingTypes(force = false) { if (!force && availableTtiBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/tti-bindings/available_types'); availableTtiBindingTypes.value = r.data; }
     async function addTtiBinding(payload) { const r = await apiClient.post('/api/admin/tti-bindings', payload); ttiBindings.value.push(r.data); uiStore.addNotification(`TTI Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtiBinding(id, payload) { const r = await apiClient.put(`/api/admin/tti-bindings/${id}`, payload); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) ttiBindings.value[i] = r.data; uiStore.addNotification(`TTI Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtiBinding(id) { await apiClient.delete(`/api/admin/tti-bindings/${id}`); ttiBindings.value = ttiBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTI Binding deleted.', 'success'); }
-
-    async function fetchTtsBindings(force = false) { 
-        if (!force && ttsBindings.value.length > 0) return;
-        isLoadingTtsBindings.value = true; 
-        try { const r = await apiClient.get('/api/admin/tts-bindings'); ttsBindings.value = r.data; } 
-        finally { isLoadingTtsBindings.value = false; } 
-    }
-    async function fetchAvailableTtsBindingTypes(force = false) { 
-        if (!force && availableTtsBindingTypes.value.length > 0) return;
-        const r = await apiClient.get('/api/admin/tts-bindings/available_types'); availableTtsBindingTypes.value = r.data; 
-    }
+    
+    // TTS
+    async function fetchTtsBindings(force = false) { if (!force && ttsBindings.value.length > 0) return; isLoadingTtsBindings.value = true; try { const r = await apiClient.get('/api/admin/tts-bindings'); ttsBindings.value = r.data; } finally { isLoadingTtsBindings.value = false; } }
+    async function fetchAvailableTtsBindingTypes(force = false) { if (!force && availableTtsBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/tts-bindings/available_types'); availableTtsBindingTypes.value = r.data; }
     async function addTtsBinding(payload) { const r = await apiClient.post('/api/admin/tts-bindings', payload); ttsBindings.value.push(r.data); uiStore.addNotification(`TTS Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtsBinding(id, payload) { const r = await apiClient.put(`/api/admin/tts-bindings/${id}`, payload); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) ttsBindings.value[i] = r.data; uiStore.addNotification(`TTS Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtsBinding(id) { await apiClient.delete(`/api/admin/tts-bindings/${id}`); ttsBindings.value = ttsBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTS Binding deleted.', 'success'); }
-
-    async function fetchSttBindings(force = false) { 
-        if (!force && sttBindings.value.length > 0) return;
-        isLoadingSttBindings.value = true; 
-        try { const r = await apiClient.get('/api/admin/stt-bindings'); sttBindings.value = r.data; } 
-        finally { isLoadingSttBindings.value = false; } 
-    }
-    async function fetchAvailableSttBindingTypes(force = false) { 
-        if (!force && availableSttBindingTypes.value.length > 0) return;
-        const r = await apiClient.get('/api/admin/stt-bindings/available_types'); availableSttBindingTypes.value = r.data; 
-    }
+    
+    // STT
+    async function fetchSttBindings(force = false) { if (!force && sttBindings.value.length > 0) return; isLoadingSttBindings.value = true; try { const r = await apiClient.get('/api/admin/stt-bindings'); sttBindings.value = r.data; } finally { isLoadingSttBindings.value = false; } }
+    async function fetchAvailableSttBindingTypes(force = false) { if (!force && availableSttBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/stt-bindings/available_types'); availableSttBindingTypes.value = r.data; }
     async function addSttBinding(payload) { const r = await apiClient.post('/api/admin/stt-bindings', payload); sttBindings.value.push(r.data); uiStore.addNotification(`STT Binding '${r.data.alias}' created.`, 'success'); }
     async function updateSttBinding(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; uiStore.addNotification(`STT Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteSttBinding(id) { await apiClient.delete(`/api/admin/stt-bindings/${id}`); sttBindings.value = sttBindings.value.filter(b => b.id !== id); uiStore.addNotification('STT Binding deleted.', 'success'); }
-
-    async function fetchRagBindings(force = false) { 
-        if (!force && ragBindings.value.length > 0) return;
-        isLoadingRagBindings.value = true; 
-        try { const r = await apiClient.get('/api/admin/rag-bindings'); ragBindings.value = r.data; } catch(e) { console.error(e); } 
-        finally { isLoadingRagBindings.value = false; } 
-    }
-    async function fetchAvailableRagBindingTypes(force = false) { 
-        if (!force && availableRagBindingTypes.value.length > 0) return;
-        try { const r = await apiClient.get('/api/admin/rag-bindings/available_types'); availableRagBindingTypes.value = r.data; } catch(e) { console.error(e); } 
-    }
+    
+    // RAG
+    async function fetchRagBindings(force = false) { if (!force && ragBindings.value.length > 0) return; isLoadingRagBindings.value = true; try { const r = await apiClient.get('/api/admin/rag-bindings'); ragBindings.value = r.data; } catch(e) { console.error(e); } finally { isLoadingRagBindings.value = false; } }
+    async function fetchAvailableRagBindingTypes(force = false) { if (!force && availableRagBindingTypes.value.length > 0) return; try { const r = await apiClient.get('/api/admin/rag-bindings/available_types'); availableRagBindingTypes.value = r.data; } catch(e) { console.error(e); } }
     async function addRagBinding(payload) { const r = await apiClient.post('/api/admin/rag-bindings', payload); ragBindings.value.push(r.data); uiStore.addNotification(`RAG Binding '${r.data.alias}' created.`, 'success'); }
     async function updateRagBinding(id, payload) { const r = await apiClient.put(`/api/admin/rag-bindings/${id}`, payload); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; uiStore.addNotification(`RAG Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteRagBinding(id) { await apiClient.delete(`/api/admin/rag-bindings/${id}`); ragBindings.value = ragBindings.value.filter(b => b.id !== id); uiStore.addNotification('RAG Binding deleted.', 'success'); }
     
+    // Aliases & Commands
     async function fetchBindingModels(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/models`); return r.data; }
     async function getModelCtxSize(id, name) { const r = await apiClient.post(`/api/admin/bindings/${id}/context-size`, { model_name: name }); return r.data.ctx_size; }
     async function saveModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}/alias`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; }
     async function deleteModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/bindings/${id}/alias`, { data: { original_model_name: name } }); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; }
     async function executeBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
-    
     async function fetchTtiBindingModels(id) { const r = await apiClient.get(`/api/admin/tti-bindings/${id}/models`); return r.data; }
     async function saveTtiModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/tti-bindings/${id}/alias`, payload); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) ttiBindings.value[i] = r.data; }
     async function deleteTtiModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/tti-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) ttiBindings.value[i] = r.data; }
     async function executeTtiBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/tti-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
-
     async function fetchTtsBindingModels(id) { const r = await apiClient.get(`/api/admin/tts-bindings/${id}/models`); return r.data; }
     async function saveTtsModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/tts-bindings/${id}/alias`, payload); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) ttsBindings.value[i] = r.data; }
     async function deleteTtsModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/tts-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) ttsBindings.value[i] = r.data; }
     async function executeTtsBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/tts-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
-
     async function fetchSttBindingModels(id) { const r = await apiClient.get(`/api/admin/stt-bindings/${id}/models`); return r.data; }
     async function saveSttModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}/alias`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; }
     async function deleteSttModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/stt-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; }
     async function executeSttBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/stt-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
-    
     async function fetchRagBindingModels(id) { const r = await apiClient.get(`/api/admin/rag-bindings/${id}/models`); return r.data; }
     async function saveRagModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/rag-bindings/${id}/alias`, payload); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
     async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
     async function fetchRagModelsForType(type) { const r = await apiClient.get(`/api/admin/rag-bindings/models-for-type/${type}`); return r.data; }
-    async function addOrUpdateRagAlias(payload) { const r = await apiClient.post('/api/admin/rag/aliases', payload); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${payload.alias_name}' saved.`, 'success'); }
+    async function addOrUpdateRagAlias(payload) { await apiClient.post('/api/admin/rag/aliases', payload); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${payload.alias_name}' saved.`, 'success'); }
     async function deleteRagAlias(name) { await apiClient.delete('/api/admin/rag/aliases', { data: { alias_name: name } }); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${name}' deleted.`, 'success'); }
     async function fetchAvailableRagVectorizers(force=false) { if(!force && availableRagVectorizers.value.length > 0) return; try { const r = await apiClient.get('/api/admin/rag/available-vectorizers'); availableRagVectorizers.value = r.data; } catch(e) { console.error(e); } }
 
-    // Zoo Actions
-    async function fetchZooRepositories(force = false) { 
-        if (!force && zooRepositories.value.length > 0) return;
-        isLoadingZooRepositories.value = true; try { const res = await apiClient.get('/api/apps_zoo/repositories'); zooRepositories.value = res.data; } finally { isLoadingZooRepositories.value = false; } 
-    }
+    // Zoos (Keeping it brief)
+    async function fetchZooRepositories(force = false) { if (!force && zooRepositories.value.length > 0) return; isLoadingZooRepositories.value = true; try { const res = await apiClient.get('/api/apps_zoo/repositories'); zooRepositories.value = res.data; } finally { isLoadingZooRepositories.value = false; } }
     async function addZooRepository(payload) { const res = await apiClient.post('/api/apps_zoo/repositories', payload); zooRepositories.value.push(res.data); }
     async function deleteZooRepository(repoId) { await apiClient.delete(`/api/apps_zoo/repositories/${repoId}`); zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId); }
     async function pullZooRepository(repoId) { const res = await apiClient.post(`/api/apps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
     async function pullAllZooRepositories() { for (const repo of zooRepositories.value) await pullZooRepository(repo.id); }
-
-    async function fetchMcpZooRepositories(force=false) { 
-        if(!force && mcpZooRepositories.value.length > 0) return;
-        isLoadingMcpZooRepositories.value = true; try { const res = await apiClient.get('/api/mcps_zoo/repositories'); mcpZooRepositories.value = res.data; } finally { isLoadingMcpZooRepositories.value = false; } 
-    }
+    async function fetchMcpZooRepositories(force=false) { if(!force && mcpZooRepositories.value.length > 0) return; isLoadingMcpZooRepositories.value = true; try { const res = await apiClient.get('/api/mcps_zoo/repositories'); mcpZooRepositories.value = res.data; } finally { isLoadingMcpZooRepositories.value = false; } }
     async function addMcpZooRepository(payload) { const res = await apiClient.post('/api/mcps_zoo/repositories', payload); mcpZooRepositories.value.push(res.data); }
     async function deleteMcpZooRepository(repoId) { await apiClient.delete(`/api/mcps_zoo/repositories/${repoId}`); mcpZooRepositories.value = mcpZooRepositories.value.filter(r => r.id !== repoId); }
     async function pullMcpZooRepository(repoId) { const res = await apiClient.post(`/api/mcps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
     async function pullAllMcpZooRepositories() { for (const repo of mcpZooRepositories.value) await pullMcpZooRepository(repo.id); }
-
-    async function fetchPromptZooRepositories(force=false) { 
-        if(!force && promptZooRepositories.value.length > 0) return;
-        isLoadingPromptZooRepositories.value = true; try { const res = await apiClient.get('/api/prompts_zoo/repositories'); promptZooRepositories.value = res.data; } finally { isLoadingPromptZooRepositories.value = false; } 
-    }
+    async function fetchPromptZooRepositories(force=false) { if(!force && promptZooRepositories.value.length > 0) return; isLoadingPromptZooRepositories.value = true; try { const res = await apiClient.get('/api/prompts_zoo/repositories'); promptZooRepositories.value = res.data; } finally { isLoadingPromptZooRepositories.value = false; } }
     async function addPromptZooRepository(repoData) { const res = await apiClient.post('/api/prompts_zoo/repositories', repoData); promptZooRepositories.value.push(res.data); }
     async function deletePromptZooRepository(repoId) { await apiClient.delete(`/api/prompts_zoo/repositories/${repoId}`); promptZooRepositories.value = promptZooRepositories.value.filter(r => r.id !== repoId); }
     async function pullPromptZooRepository(repoId) { const res = await apiClient.post(`/api/prompts_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
     async function pullAllPromptZooRepositories() { for (const repo of promptZooRepositories.value) await pullPromptZooRepository(repo.id); }
-
-    async function fetchPersonalityZooRepositories(force=false) { 
-        if(!force && personalityZooRepositories.value.length > 0) return;
-        isLoadingPersonalityZooRepositories.value = true; try { const res = await apiClient.get('/api/personalities_zoo/repositories'); personalityZooRepositories.value = res.data; } catch(e){ console.error(e) } finally { isLoadingPersonalityZooRepositories.value = false; } 
-    }
+    async function fetchPersonalityZooRepositories(force=false) { if(!force && personalityZooRepositories.value.length > 0) return; isLoadingPersonalityZooRepositories.value = true; try { const res = await apiClient.get('/api/personalities_zoo/repositories'); personalityZooRepositories.value = res.data; } catch(e){ console.error(e) } finally { isLoadingPersonalityZooRepositories.value = false; } }
     async function addPersonalityZooRepository(payload) { const res = await apiClient.post('/api/personalities_zoo/repositories', payload); personalityZooRepositories.value.push(res.data); }
     async function deletePersonalityZooRepository(repoId) { await apiClient.delete(`/api/personalities_zoo/repositories/${repoId}`); personalityZooRepositories.value = personalityZooRepositories.value.filter(r => r.id !== repoId); }
     async function pullPersonalityZooRepository(repoId) { const res = await apiClient.post(`/api/personalities_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
 
-    async function fetchZooApps(force=false) { 
-        if(!force && zooApps.value.items.length > 0) return;
-        isLoadingZooApps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/apps_zoo/categories'), apiClient.get('/api/apps_zoo/available') ]); zooApps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooApps.value = false; } 
-    }
+    async function fetchZooApps(force=false) { if(!force && zooApps.value.items.length > 0) return; isLoadingZooApps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/apps_zoo/categories'), apiClient.get('/api/apps_zoo/available') ]); zooApps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooApps.value = false; } }
     async function installZooApp(payload) { const res = await apiClient.post('/api/apps_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchAppReadme(repo, folder) { const res = await apiClient.get('/api/apps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-
-    async function fetchZooMcps(force=false) { 
-        if(!force && zooMcps.value.items.length > 0) return;
-        isLoadingZooMcps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/mcps_zoo/categories'), apiClient.get('/api/mcps_zoo/available') ]); zooMcps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooMcps.value = false; } 
-    }
+    async function fetchZooMcps(force=false) { if(!force && zooMcps.value.items.length > 0) return; isLoadingZooMcps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/mcps_zoo/categories'), apiClient.get('/api/mcps_zoo/available') ]); zooMcps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooMcps.value = false; } }
     async function installZooMcp(payload) { const res = await apiClient.post('/api/mcps_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchMcpReadme(repo, folder) { const res = await apiClient.get('/api/mcps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-
-    async function fetchZooPrompts(params = {}, force=false) { 
-        if(!force && zooPrompts.value.items.length > 0) return;
-        isLoadingZooPrompts.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); zooPrompts.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooPrompts.value = false; } 
-    }
+    async function fetchZooPrompts(params = {}, force=false) { if(!force && zooPrompts.value.items.length > 0) return; isLoadingZooPrompts.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); zooPrompts.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooPrompts.value = false; } }
     async function installZooPrompt(payload) { const res = await apiClient.post('/api/prompts_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPromptReadme(repo, folder) { const res = await apiClient.get('/api/prompts_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-
-    async function fetchZooPersonalities(params = {}, force=false) { 
-        if(!force && zooPersonalities.value.items.length > 0) return;
-        isLoadingZooPersonalities.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } 
-    }
+    async function fetchZooPersonalities(params = {}, force=false) { if(!force && zooPersonalities.value.items.length > 0) return; isLoadingZooPersonalities.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } }
     async function installZooPersonality(payload) { const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    
     async function fetchBindingZoo(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/zoo`); return r.data; }
     async function installLlmFromZoo(id, index) { const r = await apiClient.post(`/api/admin/bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
     async function fetchTtiBindingZoo(id) { const r = await apiClient.get(`/api/admin/tti-bindings/${id}/zoo`); return r.data; }
@@ -451,10 +389,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateSystemPromptFromZoo(promptId) { const response = await apiClient.post(`/api/prompts_zoo/installed/${promptId}/update`); tasksStore.addTask(response.data); }
     async function generateSystemPrompt(prompt) { const res = await apiClient.post('/api/prompts_zoo/generate_from_prompt', { prompt }); tasksStore.addTask(res.data); return res.data; }
 
-    async function fetchInstalledApps(force=false) { 
-        if(!force && installedApps.value.length > 0) return;
-        isLoadingInstalledApps.value = true; try { const res = await apiClient.get('/api/apps_zoo/installed'); installedApps.value = res.data; } finally { isLoadingInstalledApps.value = false; } 
-    }
+    async function fetchInstalledApps(force=false) { if(!force && installedApps.value.length > 0) return; isLoadingInstalledApps.value = true; try { const res = await apiClient.get('/api/apps_zoo/installed'); installedApps.value = res.data; } finally { isLoadingInstalledApps.value = false; } }
     async function fetchNextAvailablePort(port = null) { const params = port ? { port } : {}; const res = await apiClient.get('/api/apps_zoo/get-next-available-port', { params }); return res.data.port; }
     async function startApp(appId) { const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/start`); tasksStore.addTask(res.data); }
     async function stopApp(appId) { const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/stop`); tasksStore.addTask(res.data); }
@@ -473,29 +408,10 @@ export const useAdminStore = defineStore('admin', () => {
     async function syncInstallations() { const response = await apiClient.post('/api/apps_zoo/sync-installs'); tasksStore.addTask(response.data); }
     async function purgeBrokenInstallation(item) { const response = await apiClient.post('/api/apps_zoo/purge-broken', { item_type: item.item_type || 'app', folder_name: item.folder_name }); tasksStore.addTask(response.data); }
     async function fixBrokenInstallation(item) { const response = await apiClient.post('/api/apps_zoo/fix-broken', { item_type: item.item_type || 'app', folder_name: item.folder_name }); tasksStore.addTask(response.data); }
-    
-    // --- ADDED MISSING FUNCTION ---
-    function handleAppStatusUpdate(data) {
-        if (!installedApps.value) return;
-        const app = installedApps.value.find(a => a.id === data.id);
-        if (app) {
-            if (data.status) app.status = data.status;
-            if (data.is_installed !== undefined) app.is_installed = data.is_installed;
-        } else {
-             // Optional: reload if new app appears
-             fetchInstalledApps(true); 
-        }
-    }
-    // ------------------------------
+    function handleAppStatusUpdate(data) { if (!installedApps.value) return; const app = installedApps.value.find(a => a.id === data.id); if (app) { if (data.status) app.status = data.status; if (data.is_installed !== undefined) app.is_installed = data.is_installed; } else { fetchInstalledApps(true); } }
 
-    async function fetchFunFacts(force=false) { 
-        if(!force && funFacts.value.length > 0) return;
-        isLoadingFunFacts.value = true; try { const res = await apiClient.get('/api/admin/fun-facts'); funFacts.value = res.data; } finally { isLoadingFunFacts.value = false; } 
-    }
-    async function fetchFunFactCategories(force=false) { 
-        if(!force && funFactCategories.value.length > 0) return;
-        isLoadingFunFactCategories.value = true; try { const res = await apiClient.get('/api/admin/fun-facts/categories'); funFactCategories.value = res.data; } finally { isLoadingFunFactCategories.value = false; } 
-    }
+    async function fetchFunFacts(force=false) { if(!force && funFacts.value.length > 0) return; isLoadingFunFacts.value = true; try { const res = await apiClient.get('/api/admin/fun-facts'); funFacts.value = res.data; } finally { isLoadingFunFacts.value = false; } }
+    async function fetchFunFactCategories(force=false) { if(!force && funFactCategories.value.length > 0) return; isLoadingFunFactCategories.value = true; try { const res = await apiClient.get('/api/admin/fun-facts/categories'); funFactCategories.value = res.data; } finally { isLoadingFunFactCategories.value = false; } }
     async function createFunFact(payload) { await apiClient.post('/api/admin/fun-facts', payload); await fetchFunFacts(true); }
     async function updateFunFact(id, payload) { await apiClient.put(`/api/admin/fun-facts/${id}`, payload); await fetchFunFacts(true); }
     async function deleteFunFact(id) { await apiClient.delete(`/api/admin/fun-facts/${id}`); funFacts.value = funFacts.value.filter(f => f.id !== id); }
@@ -506,26 +422,28 @@ export const useAdminStore = defineStore('admin', () => {
     async function exportCategory(categoryId, categoryName) { const response = await apiClient.get(`/api/admin/fun-facts/categories/${categoryId}/export`, { responseType: 'blob' }); const url = URL.createObjectURL(new Blob([response.data])); const a = document.createElement('a'); a.href = url; a.download = `fun_facts_${categoryName}.json`; a.click(); URL.revokeObjectURL(url); }
     async function importFunFacts(data) { const payload = { fun_facts: data }; const response = await apiClient.post('/api/admin/fun-facts/import', payload); await Promise.all([fetchFunFacts(true), fetchFunFactCategories(true)]); uiStore.addNotification(`Imported ${response.data.facts_created} facts and ${response.data.categories_created} new categories.`, 'success'); }
     async function importCategoryFromFile(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/fun-facts/categories/import', formData); await Promise.all([fetchFunFacts(true), fetchFunFactCategories(true)]); uiStore.addNotification(`Imported ${response.data.facts_created} facts for category.`, 'success'); }
-    async function generateFunFacts(prompt, category) { const res = await apiClient.post('/api/admin/fun-facts/generate-from-prompt', { prompt, category }); tasksStore.addTask(res.data); return res.data; }
-    
-    async function fetchNewsArticles(force=false) { 
-        if(!force && newsArticles.value.length > 0) return;
-        isLoadingNewsArticles.value = true; try { const response = await apiClient.get('/api/admin/news-articles'); newsArticles.value = response.data; } finally { isLoadingNewsArticles.value = false; } 
+    // UPDATED to support object payload
+    async function generateFunFacts(content, category) { 
+        let payload;
+        if(typeof content === 'object') {
+             payload = content;
+        } else {
+             payload = { content, category, source_type: 'topic' };
+        }
+        const res = await apiClient.post('/api/admin/fun-facts/generate-from-prompt', payload); 
+        tasksStore.addTask(res.data); 
+        return res.data; 
     }
+    
+    async function fetchNewsArticles(force=false) { if(!force && newsArticles.value.length > 0) return; isLoadingNewsArticles.value = true; try { const response = await apiClient.get('/api/admin/news-articles'); newsArticles.value = response.data; } finally { isLoadingNewsArticles.value = false; } }
     async function updateNewsArticle(id, payload) { await apiClient.put(`/api/admin/news-articles/${id}`, payload); await fetchNewsArticles(true); uiStore.addNotification('Article updated.', 'success'); }
     async function deleteBatchNewsArticles(ids) { await apiClient.post('/api/admin/news-articles/batch-delete', { article_ids: ids }); await fetchNewsArticles(true); uiStore.addNotification(`${ids.length} article(s) deleted.`, 'success'); }
-
-    async function fetchAllUsers(filters = {}) { 
-        isLoadingUsers.value = true; 
-        try { const response = await apiClient.get('/api/admin/users', { params: filters }); allUsers.value = response.data; } 
-        finally { isLoadingUsers.value = false; } 
-    }
+    async function fetchAllUsers(filters = {}) { isLoadingUsers.value = true; try { const response = await apiClient.get('/api/admin/users', { params: filters }); allUsers.value = response.data; } finally { isLoadingUsers.value = false; } }
     async function activateUser(userId) { await apiClient.post(`/api/admin/users/${userId}/activate`); uiStore.addNotification('User activated.', 'success'); fetchAllUsers(); }
     async function fetchUserStats(userId) { try { const response = await apiClient.get(`/api/admin/users/${userId}/stats`); return response.data; } catch (error) { return null; } }    
     async function batchUpdateUsers(payload) { await apiClient.post('/api/admin/users/batch-update-settings', payload); await fetchAllUsers(); }
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) { const r = await apiClient.post('/api/admin/email-users', { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText }); tasksStore.addTask(r.data); return true; }
     async function enhanceEmail(subject, body, backgroundColor, prompt) { isEnhancingEmail.value = true; try { const response = await apiClient.post('/api/admin/enhance-email', { subject, body, background_color: backgroundColor, prompt }); return response.data; } finally { isEnhancingEmail.value = false; } }
-
     async function uploadWelcomeLogo(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/upload-logo', formData); await fetchGlobalSettings(true); uiStore.addNotification(response.data.message, 'success'); }
     async function removeWelcomeLogo() { await apiClient.delete('/api/admin/remove-logo'); await fetchGlobalSettings(true); uiStore.addNotification('Custom logo removed.', 'success'); }
     async function uploadSslFile(file, fileType) { const formData = new FormData(); formData.append('file', file); formData.append('file_type', fileType); const response = await apiClient.post('/api/admin/upload-ssl-file', formData, { headers: { 'Content-Type': 'multipart/form-data' }, }); await fetchGlobalSettings(true); return response.data.path; }
@@ -533,24 +451,24 @@ export const useAdminStore = defineStore('admin', () => {
     async function downloadCertificate() { try { const response = await apiClient.get('/api/admin/download-cert', { responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([response.data])); const link = document.createElement('a'); link.href = url; link.setAttribute('download', 'lollms_cert.pem'); document.body.appendChild(link); link.click(); link.remove(); } catch(e) { uiStore.addNotification('Failed to download certificate.', 'error'); } }
     async function downloadTrustScript(type) { try { const response = await apiClient.get('/api/admin/download-trust-script', { params: { script_type: type }, responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([response.data])); const link = document.createElement('a'); link.href = url; const ext = type === 'windows' ? 'bat' : 'sh'; link.setAttribute('download', `install_lollms_cert.${ext}`); document.body.appendChild(link); link.click(); link.remove(); } catch(e) { console.error(e); uiStore.addNotification('Failed to download trust script.', 'error'); } }
     async function importOpenWebUIData(file) { isImporting.value = true; const formData = new FormData(); formData.append('file', file); try { await apiClient.post('/api/admin/import-openwebui', formData); } finally { isImporting.value = false; } }
-    async function fetchAdminAvailableLollmsModels(force=false) { 
-        if (!force && adminAvailableLollmsModels.value.length > 0) return; 
-        isLoadingLollmsModels.value = true; try { const response = await apiClient.get('/api/admin/available-models'); adminAvailableLollmsModels.value = response.data; } finally { isLoadingLollmsModels.value = false; } 
-    }
+    async function fetchAdminAvailableLollmsModels(force=false) { if (!force && adminAvailableLollmsModels.value.length > 0) return; isLoadingLollmsModels.value = true; try { const response = await apiClient.get('/api/admin/available-models'); adminAvailableLollmsModels.value = response.data; } finally { isLoadingLollmsModels.value = false; } }
     async function generateIconForModel(prompt) { const response = await apiClient.post('/api/admin/bindings/generate_icon', { prompt }); tasksStore.addTask(response.data); return response.data; }
-    
     async function triggerRssScraping() { const response = await apiClient.post('/api/admin/rss-feeds/scrape'); tasksStore.addTask(response.data); return response.data; }
     async function refreshZooCache() { const response = await apiClient.post('/api/admin/refresh-zoo-cache'); tasksStore.addTask(response.data); return response.data; }
-
-    async function fetchModerationQueue(filter = null) {
-        const params = {};
-        if (filter) params.status_filter = filter;
-        const response = await apiClient.get('/api/admin/moderation/queue', { params });
-        return response.data;
-    }
-
+    async function fetchModerationQueue(filter = null) { const params = {}; if (filter) params.status_filter = filter; const response = await apiClient.get('/api/admin/moderation/queue', { params }); return response.data; }
     async function approveContent(type, id) { await apiClient.post(`/api/admin/moderation/${type}/${id}/approve`); }
     async function deleteContent(type, id) { await apiClient.delete(`/api/admin/moderation/${type}/${id}`); }
+
+    // Services
+    async function fetchServiceDashboard() { isLoadingServiceStats.value = true; try { const res = await apiClient.get('/api/admin/services/dashboard'); serviceStats.value = res.data; } finally { isLoadingServiceStats.value = false; } }
+    async function resetServiceUsage() { await apiClient.post('/api/admin/services/reset-usage'); await fetchServiceDashboard(); uiStore.addNotification('Usage statistics reset.', 'success'); }
+    async function createBackup(password) { const response = await apiClient.post('/api/admin/backup/create', { password }); tasksStore.addTask(response.data); return response.data; }
+    async function analyzeSystemLogs() { try { const response = await apiClient.post('/api/admin/system/analyze-logs'); tasksStore.addTask(response.data); return response.data; } catch (error) { uiStore.addNotification('Failed to start log analysis.', 'error'); throw error; } }
+    async function purgeUnusedUploads() { const response = await apiClient.post('/api/admin/purge-unused-uploads'); tasksStore.addTask(response.data); }
+    async function triggerBatchModeration() { const response = await apiClient.post('/api/admin/trigger-moderation'); tasksStore.addTask(response.data); }
+    async function triggerFullRemoderation() { const response = await apiClient.post('/api/admin/trigger-full-remoderation'); tasksStore.addTask(response.data); }
+    async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
+    async function killProcess(pid) { await apiClient.post('/api/admin/system/kill-process', { pid }); uiStore.addNotification(`Process ${pid} killed.`, 'success'); fetchSystemStatus(); }
 
     return {
         // State
@@ -571,7 +489,7 @@ export const useAdminStore = defineStore('admin', () => {
         appFilters, mcpFilters, promptFilters, systemLogs, isLoadingSystemLogs,
 
         // Actions
-        forceAllUsersConfig, // EXPORTED
+        forceAllUsersConfig, 
         fetchDashboardStats, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
         fetchServiceDashboard, resetServiceUsage, 
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,

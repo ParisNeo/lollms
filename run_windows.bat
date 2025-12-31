@@ -2,12 +2,13 @@
 setlocal enabledelayedexpansion
 
 :: ==================================================================
-:: LOLLMs - Windows Runner & Installer
+:: LOLLMs - Windows Runner & Installer (Service Compatible)
 :: ==================================================================
 
 set VENV_DIR=venv
 set REQUIREMENTS_FILE=requirements.txt
 set PYTHON_EXECUTABLE=python
+set UPDATE_FLAG_FILE=update_request.flag
 
 :: --- 0. ARGUMENT PRE-PARSING ---
 set UPDATE_ONLY=0
@@ -16,13 +17,9 @@ set RESET_USER=
 set RESET_PASS=
 
 :: Iterate through arguments to find our special flags
-set argCount=0
 for %%x in (%*) do (
-    set /a argCount+=1
     if "%%x"=="--update" set UPDATE_ONLY=1
-    if "%%x"=="--reset-password" (
-        set IS_RESET=1
-    )
+    if "%%x"=="--reset-password" set IS_RESET=1
 )
 
 :: --- 1. PRE-CHECKS ---
@@ -60,93 +57,65 @@ if "%IS_RESET%"=="1" (
         if "!foundFlag!"=="1" set RESET_USER=%%a& set foundFlag=2
         if "%%a"=="--reset-password" set foundFlag=1
     )
-
     if "!RESET_USER!"=="" (
-        echo [ERROR] Missing username for password reset.
-        echo Usage: run_windows.bat --reset-password ^<username^> ^<new_password^>
+        echo [ERROR] Missing username. Usage: run_windows.bat --reset-password username newpass
         pause
         exit /b 1
     )
-    if "!RESET_PASS!"=="" (
-        echo [ERROR] Missing new password for password reset.
-        echo Usage: run_windows.bat --reset-password ^<username^> ^<new_password^>
-        pause
-        exit /b 1
-    )
-
-    echo [INFO] Running Password Reset Tool for user: !RESET_USER!
+    echo [INFO] Running Password Reset Tool...
     set PYTHONPATH=.
     python reset_password.py "!RESET_USER!" "!RESET_PASS!"
     pause
     exit /b 0
 )
 
-:: --- 4. UPDATE LOGIC ---
+:: --- 4. CLI UPDATE LOGIC ---
 if "%UPDATE_ONLY%"=="1" (
-    echo [INFO] Starting repository update...
-    if exist ".git" (
-        echo [INFO] Fetching latest updates from git...
-        git fetch --all --tags
-        
-        git symbol-ref -q HEAD >nul 2>nul
-        if !errorlevel! equ 0 (
-            echo [INFO] Updating current branch...
-            git pull
-        ) else (
-            for /f "tokens=*" %%i in ('git describe --tags --abbrev^=0 2^>nul') do set LATEST_TAG=%%i
-            if defined LATEST_TAG (
-                echo [INFO] Updating to latest tag: !LATEST_TAG!...
-                git checkout !LATEST_TAG!
-            ) else (
-                git pull
-            )
-        )
-        echo [INFO] Updating dependencies...
-        pip install --upgrade pip
-        pip install --no-cache-dir -r %REQUIREMENTS_FILE%
-        echo [SUCCESS] Update complete!
-    ) else (
-        echo [WARNING] Not a git repository. Cannot auto-update code.
-    )
+    call :RunUpdate
+    echo [SUCCESS] Update complete!
+    exit /b 0
 )
 
-:: --- 5. ENVIRONMENT SETUP & SECRET KEY PROMPT ---
+:: --- 5. CONFIG CHECK ---
 if not exist ".env" (
     if exist ".env.example" (
-        echo [INFO] Configuring '.env' file for the first time...
+        echo [INFO] Creating .env file...
         copy .env.example .env >nul
-        
-        echo.
-        echo ============================================================
-        echo                SECURITY CONFIGURATION
-        echo ============================================================
-        echo A SECRET_KEY is required to secure user sessions and tokens.
-        set /p USER_SECRET="Enter a random secret string (or press Enter to auto-generate): "
-        
-        if "!USER_SECRET!"=="" (
-            echo [INFO] Generating secure random key...
-            for /f "delims=" %%i in ('powershell -command "[guid]::NewGuid().ToString() + [guid]::NewGuid().ToString()"') do set USER_SECRET=%%i
-        )
-        
-        :: Append or replace key in .env
-        :: We use a temporary file to avoid complex batch string replacement
-        echo SECRET_KEY=!USER_SECRET!>>.env
-        echo [SUCCESS] Security key configured in .env.
-        echo ============================================================
-        echo.
+        echo SECRET_KEY=changeme>>.env
     )
 )
 
-:: --- 6. EXECUTION ---
+:: --- 6. MAIN EXECUTION LOOP ---
+:MainLoop
+echo [INFO] Checking for pending updates...
+
+if exist "%UPDATE_FLAG_FILE%" (
+    echo [INFO] Update flag found. Updating system...
+    call :RunUpdate
+    del "%UPDATE_FLAG_FILE%"
+    echo [INFO] Update finished. Restarting...
+)
+
 echo [INFO] Starting LOLLMs...
 set PYTHONPATH=.
 set PYTHONUNBUFFERED=1
 
-:: Pass ALL original arguments to main.py
+:: Run main.py. If it exits (reboot/update), we loop back.
 python main.py %*
 
-if %errorlevel% neq 0 (
-    echo.
-    echo [INFO] Application exited with code %errorlevel%.
-    pause
+echo [INFO] Application exited. Restarting in 2 seconds...
+timeout /t 2 /nobreak >nul
+goto MainLoop
+
+
+:: --- SUBROUTINE: UPDATE ---
+:RunUpdate
+if exist ".git" (
+    echo [INFO] Pulling from git...
+    git pull
+    echo [INFO] Updating requirements...
+    pip install --no-cache-dir -r %REQUIREMENTS_FILE%
+) else (
+    echo [WARNING] Not a git repo. Skipping code pull.
 )
+exit /b 0

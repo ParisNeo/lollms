@@ -3,20 +3,24 @@ import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../../stores/admin';
 import { useUiStore } from '../../../stores/ui';
+import { useTasksStore } from '../../../stores/tasks';
 import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconTerminal from '../../../assets/icons/ui/IconTerminal.vue';
-import GenericModal from '../../modals/GenericModal.vue';
 import IconMicrophone from '../../../assets/icons/IconMicrophone.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
+import IconPlayCircle from '../../../assets/icons/IconPlayCircle.vue';
+import JsonRenderer from '../../ui/JsonRenderer.vue';
 
 const BindingModelsManager = defineAsyncComponent(() => import('./BindingModelsManager.vue'));
 const BindingZoo = defineAsyncComponent(() => import('./BindingZoo.vue'));
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
+const tasksStore = useTasksStore();
 
 const { sttBindings, availableSttBindingTypes, isLoadingSttBindings, globalSettings } = storeToRefs(adminStore);
+const { tasks } = storeToRefs(tasksStore);
 
 const isFormVisible = ref(false);
 const editingBinding = ref(null);
@@ -26,12 +30,21 @@ const localSttModelDisplayMode = ref('mixed');
 const commandParams = ref({});
 const activeTab = ref('settings');
 
-const isCommandsModalVisible = ref(false);
-const activeBindingForCommands = ref(null);
-const activeBindingCommands = ref([]);
-const selectedCommand = ref(null);
-const modalCommandParams = ref({});
-const isExecutingCommand = ref(false);
+// Command execution tracking
+const currentCommandTaskId = ref(null);
+const lastExecutedCommandName = ref(null);
+const activeCommandResult = ref(null);
+
+const currentTask = computed(() => {
+    if (!currentCommandTaskId.value) return null;
+    return tasks.value.find(t => t.id === currentCommandTaskId.value);
+});
+
+watch(currentTask, (newTask) => {
+    if (newTask && newTask.status === 'completed') {
+        activeCommandResult.value = newTask.result;
+    }
+}, { deep: true });
 
 const getInitialFormState = () => ({
     id: null,
@@ -141,6 +154,11 @@ function showEditForm(binding) {
         commandParams.value = {};
     }
 
+    // Reset execution state
+    currentCommandTaskId.value = null;
+    activeCommandResult.value = null;
+    lastExecutedCommandName.value = null;
+
     isFormVisible.value = true;
     activeTab.value = 'settings';
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -214,47 +232,21 @@ function getBindingTitle(name) {
 }
 
 async function executeCommand(cmd, bindingId, params) {
+    currentCommandTaskId.value = null;
+    activeCommandResult.value = null;
+    lastExecutedCommandName.value = cmd.name;
+
     try {
         uiStore.addNotification(`Submitting command '${cmd.title || cmd.name}'...`, 'info');
-        const result = await adminStore.executeSttBindingCommand(bindingId, cmd.name, params);
-        if (result) {
-             uiStore.addNotification(`Task started: ${cmd.title || cmd.name}. Check Task Manager for progress.`, 'success', 5000);
-             return result;
+        const taskInfo = await adminStore.executeSttBindingCommand(bindingId, cmd.name, params);
+        if (taskInfo && taskInfo.id) {
+             currentCommandTaskId.value = taskInfo.id;
+             tasksStore.addTask(taskInfo);
+             uiStore.addNotification(`Task started: ${cmd.title || cmd.name}`, 'success');
         }
     } catch (e) {
         console.error(e);
         uiStore.addNotification(`Command submission failed: ${e.message}`, 'error');
-    }
-}
-
-function showCommands(binding) {
-    activeBindingForCommands.value = binding;
-    const bindingType = availableSttBindingTypes.value.find(b => b.binding_name === binding.name);
-    activeBindingCommands.value = bindingType ? (bindingType.commands || []) : [];
-    selectedCommand.value = null;
-    modalCommandParams.value = {};
-    isCommandsModalVisible.value = true;
-}
-
-function selectCommandInModal(cmd) {
-    selectedCommand.value = cmd;
-    modalCommandParams.value = {};
-    if(cmd.parameters) {
-        cmd.parameters.forEach(p => {
-             modalCommandParams.value[p.name] = p.default !== undefined ? p.default : '';
-        });
-    }
-}
-
-async function executeModalCommand() {
-    if (!selectedCommand.value || !activeBindingForCommands.value) return;
-    
-    isExecutingCommand.value = true;
-    try {
-        await executeCommand(selectedCommand.value, activeBindingForCommands.value.id, modalCommandParams.value);
-        isCommandsModalVisible.value = false;
-    } finally {
-        isExecutingCommand.value = false;
     }
 }
 </script>
@@ -264,10 +256,11 @@ async function executeModalCommand() {
         <div v-if="isFormVisible" class="bg-white dark:bg-gray-800 shadow-md rounded-lg p-6">
             <div class="flex justify-between items-center mb-4">
                 <h3 class="text-xl font-semibold">{{ isEditMode ? 'Edit STT Binding: ' + form.alias : 'Add New STT Binding' }}</h3>
-                <div v-if="isEditMode" class="flex gap-2 text-sm font-medium">
-                    <button @click="activeTab = 'settings'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'settings', 'text-gray-500 hover:text-gray-700': activeTab !== 'settings'}" class="px-3 py-2">Settings</button>
-                    <button @click="activeTab = 'zoo'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'zoo', 'text-gray-500 hover:text-gray-700': activeTab !== 'zoo'}" class="px-3 py-2">Models Zoo</button>
-                    <button @click="activeTab = 'models'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'models', 'text-gray-500 hover:text-gray-700': activeTab !== 'models'}" class="px-3 py-2">Installed Models</button>
+                <div v-if="isEditMode" class="flex gap-2 text-sm font-medium overflow-x-auto">
+                    <button @click="activeTab = 'settings'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'settings', 'text-gray-500 hover:text-gray-700': activeTab !== 'settings'}" class="px-3 py-2 whitespace-nowrap">Settings</button>
+                    <button @click="activeTab = 'commands'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'commands', 'text-gray-500 hover:text-gray-700': activeTab !== 'commands'}" class="px-3 py-2 whitespace-nowrap">Commands</button>
+                    <button @click="activeTab = 'zoo'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'zoo', 'text-gray-500 hover:text-gray-700': activeTab !== 'zoo'}" class="px-3 py-2 whitespace-nowrap">Models Zoo</button>
+                    <button @click="activeTab = 'models'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'models', 'text-gray-500 hover:text-gray-700': activeTab !== 'models'}" class="px-3 py-2 whitespace-nowrap">Installed Models</button>
                 </div>
             </div>
 
@@ -321,37 +314,6 @@ async function executeModalCommand() {
                         </div>
                     </div>
                     
-                    <div v-if="isEditMode && selectedBindingType && selectedBindingType.commands && selectedBindingType.commands.length > 0" class="mt-6 border-t dark:border-gray-700 pt-6">
-                        <h4 class="text-lg font-semibold mb-4">Binding Commands</h4>
-                        <div class="grid grid-cols-1 gap-4">
-                            <div v-for="cmd in selectedBindingType.commands" :key="cmd.name" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
-                                <div class="flex justify-between items-start mb-3">
-                                    <div>
-                                        <h5 class="font-bold text-md">{{ cmd.title || cmd.name }}</h5>
-                                        <p class="text-sm text-gray-600 dark:text-gray-400">{{ cmd.description }}</p>
-                                    </div>
-                                </div>
-                                
-                                <div v-if="cmd.parameters && cmd.parameters.length > 0" class="space-y-3 mb-4">
-                                    <div v-for="p in cmd.parameters" :key="p.name">
-                                        <label class="block text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">{{ p.name }}</label>
-                                        <input v-if="p.type !== 'bool'" type="text" v-model="commandParams[cmd.name][p.name]" class="input-field text-sm" :placeholder="p.default">
-                                        <div v-else class="flex items-center gap-2">
-                                            <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
-                                                <span :class="[commandParams[cmd.name][p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
-                                            </button>
-                                            <span class="text-sm">{{ p.description }}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <div class="flex justify-end">
-                                    <button type="button" @click="executeCommand(cmd, editingBinding.id, commandParams[cmd.name])" class="btn btn-primary btn-sm">Execute</button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
                     <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                         <span class="flex-grow flex flex-col"><span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span><span class="text-sm text-gray-500 dark:text-gray-400">If disabled, this STT service will not be available.</span></span>
                         <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
@@ -369,7 +331,87 @@ async function executeModalCommand() {
                 </form>
             </div>
             
-             <div v-else-if="activeTab === 'zoo'">
+             <!-- Commands Tab -->
+             <div v-else-if="activeTab === 'commands'" class="space-y-6">
+                <div v-if="selectedBindingType && selectedBindingType.commands && selectedBindingType.commands.length > 0">
+                    <div v-for="cmd in selectedBindingType.commands" :key="cmd.name" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600 mb-4">
+                         <!-- Command Header -->
+                         <div class="flex justify-between items-start mb-3">
+                            <div>
+                                <h5 class="font-bold text-md flex items-center gap-2">
+                                    <IconTerminal class="w-4 h-4 text-gray-500"/>
+                                    {{ cmd.title || cmd.name }}
+                                </h5>
+                                <p class="text-sm text-gray-600 dark:text-gray-400 mt-1">{{ cmd.description }}</p>
+                            </div>
+                            <button 
+                                type="button" 
+                                @click="executeCommand(cmd, editingBinding.id, commandParams[cmd.name])" 
+                                class="btn btn-primary btn-sm flex items-center gap-2"
+                                :disabled="currentTask && currentTask.status === 'running'"
+                            >
+                                <IconPlayCircle class="w-4 h-4" />
+                                Execute
+                            </button>
+                        </div>
+
+                        <!-- Parameters -->
+                        <div v-if="cmd.parameters && cmd.parameters.length > 0" class="space-y-3 mb-4 p-3 bg-white dark:bg-gray-800 rounded border dark:border-gray-700">
+                            <div v-for="p in cmd.parameters" :key="p.name">
+                                <label class="block text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">{{ p.name }}</label>
+                                <input v-if="p.type !== 'bool'" type="text" v-model="commandParams[cmd.name][p.name]" class="input-field text-sm" :placeholder="p.default">
+                                <div v-else class="flex items-center gap-2">
+                                     <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                        <span :class="[commandParams[cmd.name][p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                    </button>
+                                    <span class="text-sm text-gray-600 dark:text-gray-400">{{ p.description }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Progress Bar (If executing this command) -->
+                        <div v-if="currentTask && lastExecutedCommandName === cmd.name && (currentTask.status === 'running' || currentTask.status === 'pending')" class="mt-4">
+                             <div class="flex justify-between text-xs mb-1 font-semibold text-blue-600 dark:text-blue-400">
+                                <span>Executing...</span>
+                                <span>{{ currentTask.progress }}%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                                <div class="bg-blue-600 h-2 rounded-full transition-all duration-300 relative overflow-hidden" :style="{ width: currentTask.progress + '%' }">
+                                     <div class="absolute inset-0 bg-white/20 animate-[pulse_2s_cubic-bezier(0.4,0,0.6,1)_infinite]"></div>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-500 mt-1 truncate">{{ currentTask.description }}</p>
+                        </div>
+                        
+                        <!-- Result -->
+                         <div v-if="activeCommandResult && lastExecutedCommandName === cmd.name && currentTask && currentTask.status === 'completed'" class="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
+                            <h6 class="text-xs font-bold text-green-800 dark:text-green-300 mb-2 uppercase flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-green-500"></span> Success
+                            </h6>
+                            <div v-if="typeof activeCommandResult === 'object'">
+                                <JsonRenderer :json="activeCommandResult" />
+                            </div>
+                            <div v-else class="whitespace-pre-wrap text-sm text-gray-800 dark:text-gray-200 font-mono">
+                                {{ activeCommandResult }}
+                            </div>
+                        </div>
+                         <div v-if="currentTask && lastExecutedCommandName === cmd.name && (currentTask.status === 'failed' || currentTask.status === 'cancelled')" class="mt-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
+                            <h6 class="text-xs font-bold text-red-800 dark:text-red-300 mb-2 uppercase flex items-center gap-2">
+                                <span class="w-2 h-2 rounded-full bg-red-500"></span> {{ currentTask.status }}
+                            </h6>
+                            <p class="text-sm text-red-700 dark:text-red-400">{{ currentTask.error }}</p>
+                        </div>
+                    </div>
+                </div>
+                <div v-else class="text-center text-gray-500 py-8 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">
+                    No commands available for this binding type.
+                </div>
+                <div class="flex justify-end gap-3 mt-4">
+                    <button type="button" @click="hideForm" class="btn btn-secondary">Close</button>
+                </div>
+            </div>
+
+            <div v-else-if="activeTab === 'zoo'">
                 <BindingZoo :binding="editingBinding" binding-type="stt" />
                 <div class="flex justify-end gap-3 mt-4">
                      <button type="button" @click="hideForm" class="btn btn-secondary">Close</button>

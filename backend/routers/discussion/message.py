@@ -19,7 +19,7 @@ import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query,
-    UploadFile, status)
+    UploadFile, status, Body)
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                PlainTextResponse, StreamingResponse, Response)
@@ -34,6 +34,7 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from pptx import Presentation
 from pptx.util import Inches
+from bs4 import BeautifulSoup
 
 # Local Application Imports
 from backend.config import APP_VERSION, SERVER_CONFIG
@@ -85,6 +86,9 @@ message_grade_lock = threading.Lock()
 
 class RegenerateImageRequest(BaseModel):
     prompt: Optional[str] = None # Optional override, otherwise use stored
+
+class ToggleImageRequest(BaseModel):
+    active: Optional[bool] = None
 
 def build_message_router(router: APIRouter):
     @router.put("/{discussion_id}/messages/{message_id}/grade", response_model=MessageOutput)
@@ -173,7 +177,8 @@ def build_message_router(router: APIRouter):
         # 2. If new images were added, process them as packs
         if new_images_b64:
              for img in new_images_b64:
-                 target_message.add_image_pack([img], group_type="upload", active_by_default=True, title="User Upload")
+                 if hasattr(target_message, 'add_image_pack'):
+                     target_message.add_image_pack([img], group_type="upload", active_by_default=True, title="User Upload")
         
         discussion_obj.commit()
 
@@ -198,6 +203,7 @@ def build_message_router(router: APIRouter):
         discussion_id: str,
         message_id: str,
         image_index: int,
+        payload: ToggleImageRequest = Body(default=None),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
@@ -207,11 +213,15 @@ def build_message_router(router: APIRouter):
         if not msg:
             raise HTTPException(status_code=404, detail="Message not found.")
         
-        # Use the message object's toggle functionality to respect grouping/packs logic
         try:
-            msg.toggle_image_activation(image_index)
-            # CRITICAL FIX: Commit changes to persist active/inactive state
+            # Pass explicit active state if provided
+            active_arg = payload.active if payload else None
+            # The client library method updates internal state
+            msg.toggle_image_pack_activation(image_index, active=active_arg)
+            
+            # Persist changes
             discussion_obj.commit()
+            
         except IndexError:
             raise HTTPException(status_code=404, detail="Image index out of bounds.")
         except Exception as e:
@@ -225,6 +235,7 @@ def build_message_router(router: APIRouter):
         full_image_refs = [f"data:image/png;base64,{img}" for img in msg.images or []]
         msg_metadata = msg.metadata or {}
 
+        # Ensure we return the *updated* active_images list from the message object
         return MessageOutput(
             id=msg.id, sender=msg.sender, sender_type=msg.sender_type,
             content=msg.content, parent_message_id=msg.parent_id,
@@ -289,16 +300,8 @@ def build_message_router(router: APIRouter):
                 b64 = base64.b64encode(img_bytes).decode('utf-8')
                 
                 # Update message using the new method for adding packs
-                # This ensures consistent metadata updates and activation logic
-                msg_obj.add_image_pack([b64], group_type="generated", active_by_default=True, title=prompt)
-                
-                # We need to manually link the new image (which is now the last one)
-                # to the prompt metadata and potentially the group of the original image if we want to replace it logically
-                # However, add_image_pack creates a NEW group.
-                # If we want to ADD to an EXISTING group, we need custom logic here or rely on the frontend handling separate groups.
-                
-                # For simplicity in this task, let's assume regeneration creates a NEW variation in a NEW pack
-                # but we want it associated with the same metadata logic as the original request if possible.
+                if hasattr(msg_obj, 'add_image_pack'):
+                    msg_obj.add_image_pack([b64], group_type="generated", active_by_default=True, title=prompt)
                 
                 new_index = len(msg_obj.images) - 1
                 meta = msg_obj.metadata or {}
@@ -451,12 +454,32 @@ def build_message_router(router: APIRouter):
         media_type = "application/octet-stream"
         file_content = b''
         
-        # --- NEW: Gather Attached Images ---
-        attached_images_b64 = []
-        if message.images:
-            for img in message.images:
-                # Images are usually stored as base64 in the message object
-                attached_images_b64.append(img)
+        # --- Collect Images for Slide Export ---
+        # Prioritize 'slide_item' grouped images if present to export just the slideshow
+        slide_images_b64 = []
+        metadata = message.metadata or {}
+        image_groups = (metadata.get('image_generation_groups', []) + metadata.get('image_groups', []))
+        
+        all_images = message.images or []
+        
+        # Collect indices of images that are part of a slide_item pack
+        slide_indices = []
+        for grp in image_groups:
+            # FIX: Use dictionary access since metadata items are dicts after JSON deserialization
+            grp_type = grp.get('type')
+            if grp_type == 'slide_item':
+                slide_indices.extend(grp.get('indices', []))
+        
+        if len(slide_indices) > 0:
+             # Slideshow mode: only export slide images
+             for idx in slide_indices:
+                 if idx < len(all_images):
+                     slide_images_b64.append(all_images[idx])
+             # Clear text content to generate pure image presentation
+             content = "" 
+        else:
+             # Standard mode: attach all images
+             slide_images_b64 = all_images
 
         try:
             if export_format == 'txt':
@@ -474,7 +497,7 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'pdf':
                 media_type = "application/pdf"
-                file_content = md_to_pdf_bytes(content, extra_images=attached_images_b64)
+                file_content = md_to_pdf_bytes(content, extra_images=slide_images_b64)
 
             elif export_format == 'docx':
                 media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -483,8 +506,8 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'pptx':
                 media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-                # Pass attached images to PPTX generator
-                file_content = md_to_pptx_bytes(content, extra_images=attached_images_b64)
+                # Pass collected images (slides or attachments) to PPTX generator
+                file_content = md_to_pptx_bytes(content, extra_images=slide_images_b64)
 
             elif export_format == 'xlsx':
                 media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"

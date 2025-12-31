@@ -269,6 +269,42 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             uiStore.addNotification('Failed to toggle image status.', 'error');
         }
     }
+
+    // NEW ACTION
+    async function triggerTagGeneration({ messageId, tagContent, tagType, rawTag }) {
+        if (!currentDiscussionId.value) return;
+
+        // Simple parsing for width/height/n from rawTag if needed
+        let width = 1024;
+        let height = 1024;
+        let num_images = 1;
+        
+        if (rawTag) {
+            const wMatch = rawTag.match(/width="(\d+)"/);
+            const hMatch = rawTag.match(/height="(\d+)"/);
+            const nMatch = rawTag.match(/n="(\d+)"/);
+            if (wMatch) width = parseInt(wMatch[1]);
+            if (hMatch) height = parseInt(hMatch[1]);
+            if (nMatch) num_images = parseInt(nMatch[1]);
+        }
+
+        const formData = new FormData();
+        formData.append('tag_content', tagContent);
+        formData.append('tag_type', tagType);
+        formData.append('width', width);
+        formData.append('height', height);
+        formData.append('num_images', num_images);
+        
+        try {
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/trigger_tag`, formData);
+            const task = response.data;
+            tasksStore.addTask(task);
+            uiStore.addNotification(`Started ${tagType} regeneration task.`, 'info');
+        } catch (error) {
+            uiStore.addNotification('Failed to trigger generation.', 'error');
+            console.error(error);
+        }
+    }
     
     function $reset() {
         discussions.value = {};
@@ -318,6 +354,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         stopCurrentAudio,
         handleDiscussionImagesUpdated,
         toggleDiscussionImage,
+        triggerTagGeneration,
         $reset,
     };
 });

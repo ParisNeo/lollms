@@ -1,7 +1,9 @@
-# [UPDATE] backend/routers/admin/content_management.py
+# backend/routers/admin/content_management.py
 import json
 import shutil
 import uuid
+import asyncio
+import re
 from typing import List, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status
@@ -12,22 +14,44 @@ from pydantic import BaseModel
 from backend.db import get_db
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.fun_fact import FunFact as DBFunFact, FunFactCategory as DBFunFactCategory
+from backend.db.models.datastore import DataStore as DBDataStore
 from backend.models import (
     UserAuthDetails, TaskInfo, PromptCreate, PromptPublic, PromptUpdate,
     FunFactCategoryCreate, FunFactCategoryPublic, FunFactCategoryUpdate,
     FunFactCreate, FunFactPublic, FunFactUpdate,
     FunFactsImportRequest, FunFactExport, FunFactCategoryExport, FunFactCategoryImport
 )
-from backend.session import get_current_admin_user, get_user_temp_uploads_path, get_user_lollms_client
+from backend.session import get_current_admin_user, get_user_temp_uploads_path, get_user_lollms_client, get_safe_store_instance
 from backend.migration_utils import run_openwebui_migration
 from backend.zoo_cache import force_build_full_cache
 from backend.task_manager import task_manager, Task
+from backend.settings import settings
+from ascii_colors import trace_exception
+
+# --- Tool Imports ---
+try:
+    from duckduckgo_search import DDGS
+except ImportError:
+    DDGS = None
+
+try:
+    from scrapemaster import ScrapeMaster
+except ImportError:
+    ScrapeMaster = None
+
+try:
+    import wikipedia
+except ImportError:
+    wikipedia = None
 
 content_management_router = APIRouter()
 
 class GenerateFunFactsRequest(BaseModel):
-    prompt: str
+    source_type: str = "topic" # topic, text, url, search, datastore, wikipedia
+    content: str # The topic, raw text, url, search query, or prompt for datastore
     category: Optional[str] = None
+    n_facts: int = 5
+    datastore_id: Optional[str] = None
 
 def _refresh_zoo_cache_task(task: Task):
     task.log("Starting Zoo cache refresh.")
@@ -37,55 +61,271 @@ def _refresh_zoo_cache_task(task: Task):
     task.log("Zoo cache refresh completed.")
     return {"message": "Zoo cache refreshed successfully."}
 
-def _generate_fun_facts_task(task: Task, prompt: str, category: Optional[str], username: str):
+def _generate_fun_facts_task(task: Task, request_data: dict, username: str):
     task.log("Starting fun facts generation task...")
     
+    source_type = request_data.get('source_type', 'topic')
+    content_input = (request_data.get('content') or '').strip()
+    category_name = request_data.get('category')
+    n_facts = request_data.get('n_facts', 5)
+    datastore_id = request_data.get('datastore_id')
+
+    task.log(f"DEBUG: Input Content: '{content_input}'")
+    task.log(f"DEBUG: Initial Source Type: {source_type}")
+
     lc = get_user_lollms_client(username)
+    context_text = ""
+
+    # Auto-correction: If source is 'topic' but content looks like a URL, switch to 'url'
+    if source_type == 'topic' or source_type == 'url':
+        # Check specifically for Wikipedia URLs
+        if 'wikipedia.org/wiki/' in content_input:
+            task.log("Wikipedia URL detected. Switching to Wikipedia mode.", "INFO")
+            source_type = 'wikipedia'
+        elif source_type == 'topic' and re.search(r'^(https?://|www\.)', content_input, re.IGNORECASE):
+            task.log("URL pattern detected in topic field. Switching mode to URL scraping...", "INFO")
+            source_type = 'url'
+            if content_input.lower().startswith('www.'):
+                content_input = 'https://' + content_input
+                task.log(f"Normalized URL to: {content_input}")
+
+    # 1. Gather Context based on Source Type
     task.set_progress(10)
+    
+    try:
+        if source_type == 'topic':
+            # For pure topics, we don't provide context text, we ask AI to use internal knowledge
+            context_text = "" 
+            task.log(f"Generating based on internal knowledge for topic: {content_input}")
+            
+        elif source_type == 'text':
+            context_text = f"{content_input[:10000]}" # Truncate to avoid context overflow if huge
+            task.log("Generating based on provided text.")
 
-    generation_prompt = f"""
-Generate a list of interesting and verifiable fun facts about the following topic.
-The output must be a single, valid JSON object containing a single key "fun_facts", which is a list of strings.
-Each string in the list should be a single fun fact.
-Generate at least 5 facts.
+        elif source_type == 'wikipedia':
+            if not wikipedia:
+                error_msg = "Wikipedia library not installed. Please install 'wikipedia'."
+                task.log(error_msg, "ERROR")
+                raise ImportError(error_msg)
+            
+            task.log(f"Fetching Wikipedia content for: {content_input}")
+            try:
+                lang = "en"
+                title = content_input
+                
+                # Parse URL if provided
+                url_match = re.search(r'https?://(\w+)\.wikipedia\.org/wiki/(.+)', content_input)
+                if url_match:
+                    lang = url_match.group(1)
+                    # Decode URL encoding (e.g. Marie_Curie)
+                    title = url_match.group(2).replace('_', ' ')
+                    # Simple URL decode if needed (mostly handles %20, etc)
+                    try:
+                        from urllib.parse import unquote
+                        title = unquote(title)
+                    except: pass
+                    
+                task.log(f"Setting Wikipedia language to: {lang}")
+                wikipedia.set_lang(lang)
+                
+                try:
+                    # auto_suggest=False prevents it from guessing wrong pages for exact titles
+                    page = wikipedia.page(title, auto_suggest=False)
+                except wikipedia.exceptions.DisambiguationError as e:
+                    task.log(f"Ambiguous page '{title}'. Options: {e.options[:5]}...", "WARNING")
+                    # Fallback: pick the first option
+                    if e.options:
+                        first_opt = e.options[0]
+                        task.log(f"Selecting first option: {first_opt}")
+                        page = wikipedia.page(first_opt, auto_suggest=False)
+                    else:
+                        raise e
+                
+                context_text = page.content[:15000]
+                task.log(f"Retrieved Wikipedia page: '{page.title}'. Length: {len(context_text)} chars.")
+                
+                # If category wasn't provided, use the page title
+                if not category_name:
+                    category_name = page.title
 
-Topic:
----
-{prompt}
----
+            except Exception as e:
+                task.log(f"Wikipedia fetch failed: {e}", "ERROR")
+                raise e
 
-Return ONLY the JSON object.
+        elif source_type == 'url':
+            if not ScrapeMaster:
+                error_msg = "ScrapeMaster library is not installed. Cannot scrape URL."
+                task.log(error_msg, "ERROR")
+                raise ImportError(error_msg)
+                
+            task.log(f"Scraping URL: {content_input}")
+            try:
+                # Corrected usage based on feedback
+                scraper = ScrapeMaster(content_input, headless=True)
+                
+                # Trying scrape_markdown as suggested
+                try:
+                    scraped_content = scraper.scrape_markdown()
+                except AttributeError:
+                    task.log("scrape_markdown not found on ScrapeMaster, attempting fallback strategies...", "WARNING")
+                    # Fallback to scrape_all if scrape_markdown fails or doesn't exist
+                    res = scraper.scrape_all(max_depth=0, convert_to_markdown=True)
+                    scraped_content = res.get('markdown', '')
+
+                if not scraped_content or len(scraped_content.strip()) < 50:
+                    task.log("Scraping returned empty or too short content. Proceeding with URL as topic...", "WARNING")
+                    context_text = f"URL Topic: {content_input}"
+                else:
+                    context_text = scraped_content[:15000] # Increased limit
+                    task.log(f"URL scraped successfully ({len(context_text)} chars).")
+                    task.log(f"DEBUG: Scraped Content Snippet: {context_text[:200]}...", "INFO")
+
+            except Exception as e:
+                task.log(f"Scraping failed: {e}. Treating as topic.", "WARNING")
+                trace_exception(e)
+                context_text = f"Topic: {content_input}"
+
+        elif source_type == 'search':
+            if not DDGS:
+                error_msg = "DuckDuckGo Search library (duckduckgo-search) not installed."
+                task.log(error_msg, "ERROR")
+                raise ImportError(error_msg)
+                
+            task.log(f"Searching for: {content_input}")
+            try:
+                with DDGS() as ddgs:
+                    results = [r for r in ddgs.text(content_input, max_results=3)]
+                    if not results:
+                        task.log("No search results found.", "WARNING")
+                        context_text = f"Topic: {content_input}"
+                    else:
+                        formatted_results = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+                        context_text = formatted_results
+                        task.log(f"Search complete. Found {len(results)} results.")
+            except Exception as e:
+                task.log(f"Search failed: {e}", "ERROR")
+                context_text = f"Topic: {content_input}"
+
+        elif source_type == 'datastore':
+            if not datastore_id:
+                raise ValueError("Datastore ID required for datastore source.")
+            task.log(f"Querying DataStore...")
+            with task.db_session_factory() as db:
+                ss = get_safe_store_instance(username, datastore_id, db)
+                results = ss.query(content_input, top_k=3)
+                chunks = [r['chunk_text'] for r in results]
+                context_text = "\n---\n".join(chunks)
+            task.log("DataStore query complete.")
+
+    except Exception as e:
+        task.log(f"Error during context gathering: {e}", "ERROR")
+        trace_exception(e)
+        raise e
+
+    task.set_progress(40)
+
+    # 2. Construct Prompt & Schema
+    
+    # Define the JSON Schema for structured output
+    fun_facts_schema = {
+        "type": "object",
+        "properties": {
+            "category": {
+                "type": "string", 
+                "description": "A short category name for these facts (e.g. 'Science', 'History')."
+            },
+            "fun_facts": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": f"A list of exactly {n_facts} distinct, interesting facts."
+            }
+        },
+        "required": ["category", "fun_facts"]
+    }
+
+    # Strict instruction to enforce explicit naming in every fact
+    style_instruction = "CRITICAL: Each fact must be a standalone sentence that explicitly names the subject. Do NOT use pronouns like 'He', 'She', 'It', or 'They' to start the sentence or refer to the main subject. Instead, use the full name (e.g. 'Marie Curie' instead of 'She') in every single fact."
+
+    if context_text:
+        generation_prompt = f"""
+Based on the provided context, generate exactly {n_facts} interesting, unique, and verifiable fun facts.
+{style_instruction}
+If the context is insufficient, use your internal knowledge to supplement the facts, but prioritize the context.
+
+[CONTEXT START]
+{context_text}
+[CONTEXT END]
 """
-    if category:
-            generation_prompt += f'\nThe fun facts should relate to the category: "{category}"'
-    data = lc.generate_structured_content(generation_prompt,schema={'fun_facts':"a list of texts each one is a fun fact","category":"the category of the fun facts"}, max_tokens=1000, temperature=0.7, top_p=0.9, stop_sequences=None)
+    else:
+        generation_prompt = f"""
+Generate exactly {n_facts} interesting, unique, and verifiable fun facts about the topic: "{content_input}".
+{style_instruction}
+Use your internal knowledge to find the most surprising facts.
+"""
+
+    if category_name:
+         generation_prompt += f"\nThe category MUST be: '{category_name}'."
+    
+    task.log("Asking AI to generate structured facts...")
+    
+    try:
+        # Utilize generate_structured_content to handle JSON generation and parsing automatically
+        data = lc.generate_structured_content(
+            generation_prompt, 
+            schema=fun_facts_schema, 
+            max_tokens=2048, 
+            temperature=0.7
+        )
+        
+        # Extended logging for debugging
+        task.log(f"DEBUG: AI Raw Response Data: {json.dumps(data, indent=2)}")
+        
+    except Exception as e:
+        task.log(f"Structured generation error: {e}", "ERROR")
+        trace_exception(e)
+        raise
+
     task.set_progress(80)
 
+    # Validate output
+    if not data or not isinstance(data, dict):
+        raise ValueError(f"AI returned invalid data structure: {type(data)}. Expected dict.")
+    
+    facts_list = data.get("fun_facts", [])
+    suggested_category = data.get("category", category_name or "General")
+
+    if not facts_list:
+        raise ValueError("AI returned a valid structure but the 'fun_facts' list is empty.")
+
+    # Save to DB
     try:
-        facts_list = data.get("fun_facts", [])
-        category = data.get("category", category)
-
-        if not facts_list:
-            raise ValueError("AI did not return any facts.")
-
         with task.db_session_factory() as db:
-            category_name = category or "unknonwn"
-            db_category = db.query(DBFunFactCategory).filter(DBFunFactCategory.name == category_name).first()
+            final_category_name = category_name or suggested_category
+            
+            # Find or Create Category
+            db_category = db.query(DBFunFactCategory).filter(DBFunFactCategory.name == final_category_name).first()
             if not db_category:
-                db_category = DBFunFactCategory(name=category_name, is_active=True)
+                db_category = DBFunFactCategory(name=final_category_name, is_active=True)
                 db.add(db_category)
                 db.flush()
             
-            facts_to_add = [DBFunFact(content=fact_content, category_id=db_category.id) for fact_content in facts_list if fact_content.strip()]
-            db.add_all(facts_to_add)
-            db.commit()
-
-            task.set_progress(100)
-            task.log(f"Generated and saved {len(facts_to_add)} fun facts to category '{category_name}'.")
-            return {"facts_added": len(facts_to_add), "category": category_name}
+            facts_to_add = []
+            for fact_content in facts_list:
+                if fact_content and isinstance(fact_content, str) and fact_content.strip():
+                    facts_to_add.append(DBFunFact(content=fact_content.strip(), category_id=db_category.id))
+            
+            if facts_to_add:
+                db.add_all(facts_to_add)
+                db.commit()
+                task.set_progress(100)
+                task.log(f"Success! Saved {len(facts_to_add)} facts to category '{final_category_name}'.", "SUCCESS")
+                return {"facts_added": len(facts_to_add), "category": final_category_name}
+            else:
+                task.log("No valid facts strings were found in the response list.", "WARNING")
+                return {"facts_added": 0, "category": final_category_name}
 
     except Exception as e:
-        task.log(f"Failed to parse AI response or save fun facts. Error: {e}\nRaw Response: {response}", "ERROR")
+        task.log(f"Failed to save fun facts to DB. Error: {e}", "ERROR")
         raise
 
 @content_management_router.post("/refresh-zoo-cache", response_model=TaskInfo, status_code=202)
@@ -210,10 +450,11 @@ async def generate_fun_facts_from_prompt(
     request: GenerateFunFactsRequest,
     current_admin_user: UserAuthDetails = Depends(get_current_admin_user)
 ):
+    request_data = request.model_dump()
     return task_manager.submit_task(
-        name=f"Generate Fun Facts for '{request.prompt[:30]}...'",
+        name=f"Generate Fun Facts ({request.source_type})",
         target=_generate_fun_facts_task,
-        args=(request.prompt, request.category, current_admin_user.username),
+        args=(request_data, current_admin_user.username),
         owner_username=current_admin_user.username
     )
 

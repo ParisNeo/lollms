@@ -17,6 +17,14 @@ export const useUiStore = defineStore('ui', {
       imageList: [],
       startIndex: 0,
     },
+    // NEW: Slideshow State
+    slideshow: {
+        isOpen: false,
+        slides: [],
+        startIndex: 0,
+        title: '',
+        messageId: null
+    },
     confirmationOptions: {
         title: 'Are you sure?',
         message: 'This action cannot be undone.',
@@ -191,6 +199,27 @@ export const useUiStore = defineStore('ui', {
         setTimeout(() => {
             this.imageViewer.imageList = [];
             this.imageViewer.startIndex = 0;
+        }, 300);
+    },
+    
+    // NEW: Slideshow Actions
+    openSlideshow({ slides, startIndex = 0, title = 'Slideshow', messageId = null }) {
+        this.slideshow.slides = slides;
+        this.slideshow.startIndex = startIndex;
+        this.slideshow.title = title;
+        this.slideshow.messageId = messageId;
+        this.slideshow.isOpen = true;
+    },
+    
+    setSlideshowIndex(index) {
+        this.slideshow.startIndex = index;
+    },
+
+    closeSlideshow() {
+        this.slideshow.isOpen = false;
+        setTimeout(() => {
+            this.slideshow.slides = [];
+            this.slideshow.messageId = null;
         }, 300);
     },
 

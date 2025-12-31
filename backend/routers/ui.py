@@ -4,6 +4,7 @@ import mimetypes
 from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
@@ -129,6 +130,21 @@ async def get_fun_fact(db: Session = Depends(get_db)):
 STATIC_DIR = Path(__file__).parent.parent.parent / "frontend/dist"
 
 def add_ui_routes(app):
+    # 1. Mount Static Assets
+    # Using StaticFiles is significantly faster and handles large files/concurrency better
+    # than serving via a Python function. It also handles 404s correctly for missing assets.
+    
+    # Mount /ui_assets (Vite's default output directory in this project)
+    ui_assets_path = STATIC_DIR / "ui_assets"
+    if ui_assets_path.exists():
+        app.mount("/ui_assets", StaticFiles(directory=str(ui_assets_path)), name="ui_assets")
+
+    # Mount /assets (Legacy support or secondary assets)
+    assets_path = STATIC_DIR / "assets"
+    if assets_path.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+
+    # 2. Dynamic User Assets
     @app.get("/user_assets/logo", include_in_schema=False)
     async def get_custom_logo():
         logo_path = Path(APP_DATA_DIR) / "assets" / "logo.png"
@@ -136,56 +152,34 @@ def add_ui_routes(app):
             return FileResponse(str(logo_path))
         raise HTTPException(status_code=404, detail="Custom logo not found.")
 
+    # 3. SPA Catch-All
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_vue_app(full_path: str):
         # Resolve path against dist
         path = STATIC_DIR / full_path
+
+        # If it's a physical file in dist root (e.g. favicon.ico, robots.txt), serve it
+        if path.exists() and path.is_file():
+            media_type, _ = mimetypes.guess_type(path)
+            return FileResponse(path, media_type=media_type)
+
+        # Security: Do NOT serve index.html for missing assets (js, css, png, etc.)
+        # This prevents "Unexpected token <" errors in console when a JS file is missing
+        file_extensions = ('.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.wasm', '.json', '.woff', '.woff2', '.ttf', '.map')
+        if any(full_path.lower().endswith(ext) for ext in file_extensions):
+            raise HTTPException(status_code=404, detail="Asset not found")
         
-        # --- FIX: Handle asset aliases and ensure correct file resolution ---
-        # Vite production build typically puts everything in dist/assets
-        # If the request comes in for ui_assets/ or assets/, we verify the physical file.
-        if not path.exists() or not path.is_file():
-            if "assets" in full_path:
-                filename = full_path.split("/")[-1]
-                alt_path = STATIC_DIR / "assets" / filename
-                if alt_path.exists() and alt_path.is_file():
-                    path = alt_path
-        # ---------------------------------------------------------------------
-
-        try:
-            resolved_path = path.resolve()
-            resolved_static = STATIC_DIR.resolve()
+        # Fallback to index.html for Vue Router paths (e.g. /settings, /chat)
+        index_path = STATIC_DIR / "index.html"
+        if index_path.exists():
+            # IMPORTANT: Disable caching for index.html.
+            # This forces the browser to re-fetch index.html, which contains the 
+            # hashed references to the latest JS/CSS chunks (e.g., assets/index.a1b2c3d4.js).
+            # If index.html is cached, the browser might try to fetch OLD chunks that no longer exist.
+            response = FileResponse(index_path)
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
             
-            # Security: ensure file is inside the dist folder
-            # If the path is outside dist, or it doesn't exist:
-            if not str(resolved_path).startswith(str(resolved_static)) or not resolved_path.exists() or not resolved_path.is_file():
-                # If it's an asset request (has a file extension like .js, .css, .png),
-                # we must NOT return index.html because it causes MIME type errors in the browser.
-                # Instead, we return a proper 404.
-                file_extensions = ('.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.wasm', '.json', '.woff', '.woff2', '.ttf')
-                if any(full_path.lower().endswith(ext) for ext in file_extensions):
-                    raise HTTPException(status_code=404, detail="Asset not found")
-                
-                # Otherwise, it's likely a navigation route (like /settings or /image-studio),
-                # so we return the SPA entry point.
-                index_path = STATIC_DIR / "index.html"
-                if index_path.exists():
-                    return FileResponse(index_path)
-                raise HTTPException(status_code=404, detail="UI not found. Please build the frontend.")
-
-            # Serve the existing file
-            media_type, _ = mimetypes.guess_type(resolved_path)
-            if resolved_path.suffix == '.js':
-                media_type = 'application/javascript'
-            elif resolved_path.suffix == '.css':
-                media_type = 'text/css'
-            
-            return FileResponse(resolved_path, media_type=media_type)
-        except HTTPException:
-            raise
-        except Exception:
-            # Fallback to SPA entry point for non-file paths
-            index_path = STATIC_DIR / "index.html"
-            if index_path.exists():
-                return FileResponse(index_path)
-            raise HTTPException(status_code=404, detail="File not found")
+        raise HTTPException(status_code=404, detail="UI not found. Please build the frontend.")

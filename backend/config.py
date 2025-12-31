@@ -6,6 +6,7 @@ from pathlib import Path
 import toml
 from dotenv import load_dotenv
 from multiprocessing import cpu_count
+from ascii_colors import ASCIIColors
 
 # --- Helper Function for Type Casting ---
 def get_env_var(key, default, cast_type=str):
@@ -84,8 +85,9 @@ LOCALS_DIR = PROJECT_ROOT / "frontend" / "webui" / "public" / "locals"
 workers_count = get_env_var("SERVER_WORKERS", cpu_count(), int)
 
 # Reverting the Windows worker cap to allow multiple workers, relying on the 'spawn' fix in main.py
-# if os.name == 'nt' and workers_count > 1:
-#     print("WARNING: Capping SERVER_WORKERS to 1 on Windows to prevent WinError 10022 (Invalid argument).")
+if os.name == 'nt' and workers_count > 1:
+    ASCIIColors.warning("WARNING: Capping SERVER_WORKERS to 1 on Windows to prevent WinError 10022 (Invalid argument).")
+    workers_count = 1
 
 SERVER_CONFIG = {
     "host": get_env_var("SERVER_HOST", "0.0.0.0"),
