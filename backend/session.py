@@ -5,6 +5,7 @@ import datetime
 import threading
 from pathlib import Path
 from typing import Dict, Optional, Any, cast
+from urllib.parse import urlparse
 
 from fastapi import HTTPException, Depends, status
 from sqlalchemy.orm import Session, joinedload, object_session
@@ -51,9 +52,6 @@ _client_build_locks_lock = threading.Lock()
 
 # helper function
 def ensure_bool(value, default=False):
-    """
-    Ensures a value is a boolean.  Attempts to parse strings as booleans.
-    """
     if isinstance(value, bool):
         return value
     elif isinstance(value, str):
@@ -66,7 +64,6 @@ def ensure_bool(value, default=False):
 
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
     return db.query(DBUser).filter(DBUser.username == username).first()
-
 
 async def get_current_db_user_from_token(
     token: str = Depends(oauth2_scheme), 
@@ -106,28 +103,22 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     db = object_session(db_user)
     db_was_created = False
     if not db:
-        # print(f"WARNING: db_user object for '{username}' was detached. Getting a new session.")
         db = next(get_db())
         db_user = db.merge(db_user)
         db_was_created = True
 
     try:
-        # Enforce Expert UI for admins
         if db_user.is_admin and db_user.user_ui_level != 4:
-            # print(f"INFO: Correcting UI level for admin user '{db_user.username}' to Expert (4).")
             db_user.user_ui_level = 4
             try:
                 db.commit()
                 db.refresh(db_user)
             except Exception as e:
-                print(f"ERROR: Could not persist corrected UI level for admin '{db_user.username}'. Error: {e}")
                 db.rollback()
 
-        # Initialize session if needed (THREAD-SAFE)
         if username not in user_sessions:
             with _session_init_lock:
-                if username not in user_sessions: # Double check inside lock
-                    print(f"INFO: Re-initializing session for {username} on first request after server start.")
+                if username not in user_sessions:
                     session_llm_params = {
                         "ctx_size": db_user.llm_ctx_size, "temperature": db_user.llm_temperature,
                         "top_k": db_user.llm_top_k, "top_p": db_user.llm_top_p,
@@ -145,10 +136,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         user_model_full = db_user.lollms_model_name
         session = user_sessions[username]
         
-        # Sync model name if changed in DB
         if session.get("lollms_model_name") != user_model_full:
             session["lollms_model_name"] = user_model_full
-            # print(f"INFO: Synced session model name for '{username}' to '{user_model_full}'.")
 
         llm_settings_overridden = False
         effective_llm_params = {
@@ -164,7 +153,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "reasoning_summary": db_user.reasoning_summary
         }
 
-        # --- Enforce Context Size Lock and other alias overrides ---
         ctx_size_to_enforce = None
         if user_model_full and '/' in user_model_full:
             binding_alias, model_name = user_model_full.split('/', 1)
@@ -210,7 +198,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         lc = get_user_lollms_client(username)
         ai_name_for_user = getattr(lc, "ai_name", "assistant")
         
-        # Helper bools
         is_api_service_enabled = ensure_bool(settings.get("openai_api_service_enabled", False), False)
         is_api_require_key = ensure_bool(settings.get("openai_api_require_key", True), True)
         is_ollama_service_enabled = ensure_bool(settings.get("ollama_service_enabled", False), False)
@@ -331,12 +318,23 @@ def load_mcps(username):
 
         for mcp in all_active_mcps:
             try:
-                mcp_base_url = mcp.url.rstrip('/')
-                if not mcp_base_url.endswith('/mcp'):
-                    mcp_full_url = f"{mcp_base_url}/mcp"
-                else:
-                    mcp_full_url = mcp_base_url
+                if not mcp.url: continue
                 
+                mcp_base_url = mcp.url.rstrip('/')
+                parsed = urlparse(mcp_base_url)
+                
+                # Intelligent URL handling for external MCPs
+                if mcp_base_url.endswith('/mcp'):
+                     mcp_full_url = mcp_base_url
+                elif parsed.path and parsed.path != '/':
+                     # If the user provided a specific path (e.g. /mcp-kb), respect it.
+                     mcp_full_url = mcp_base_url
+                else:
+                     # Default to Lollms convention
+                     mcp_full_url = f"{mcp_base_url}/mcp"
+                
+                print(f"DEBUG: MCP '{mcp.name}' resolved URL: {mcp_full_url}")
+
                 server_info = {"server_url": mcp_full_url}
                 
                 if mcp.authentication_type == "lollms_chat_auth" and access_token:
@@ -353,40 +351,35 @@ def load_mcps(username):
 
 
 def invalidate_user_mcp_cache(username: str):
-    if username in user_sessions and 'tools_cache' in user_sessions[username]:
-        del user_sessions[username]['tools_cache']
-        print(f"INFO: Invalidated tools cache for user: {username}")
-
-def reload_lollms_client_mcp(username: str):
     if username in user_sessions:
         session = user_sessions[username]
         if 'tools_cache' in session:
             del session['tools_cache']
-            print(f"INFO: Invalidated tools cache for user: {username}")
-        
         if 'servers_infos' in session:
             del session['servers_infos']
-            print(f"INFO: Invalidated MCP servers cache for user: {username}")
+        # Force client rebuild to pick up new MCPs
+        session.pop("lollms_clients_cache", None)
+        print(f"INFO: Fully invalidated MCP caches for user: {username}")
+
+def reload_lollms_client_mcp(username: str):
+    """
+    Clears all MCP-related caches to force a rebuild of the client and tool discovery
+    on the next request.
+    """
+    invalidate_user_mcp_cache(username)
 
 
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
-        # print(f"INFO: No active session for '{username}' in get_user_lollms_client. Building temporary client.")
         return build_lollms_client_from_params(username, binding_alias_override)
 
     clients_cache = session.setdefault("lollms_clients_cache", {})
-    
-    # Determine cache key: 'default' for user's main model, or the specific override alias
     cache_key = binding_alias_override or "default"
 
-    # Fast path check before locking
     if cache_key in clients_cache:
-        # print(f"DEBUG: Returning cached client for user '{username}' with key '{cache_key}'.")
         return clients_cache[cache_key]
     
-    # --- THREAD LOCKING START ---
-    # Ensure a lock exists for this specific user+key combination
     lock_key = f"{username}_{cache_key}"
     
     with _client_build_locks_lock:
@@ -395,7 +388,7 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
         lock = _client_build_locks[lock_key]
 
     with lock:
-        # Double-check inside lock in case another thread finished building while we waited
+        # Check cache again inside lock
         if cache_key in clients_cache:
             return clients_cache[cache_key]
 
@@ -403,8 +396,6 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
         client = build_lollms_client_from_params(username, binding_alias_override)
         clients_cache[cache_key] = client
         return client
-    # --- THREAD LOCKING END ---
-
 
 def build_lollms_client_from_params(
     username: str, 
@@ -435,14 +426,13 @@ def build_lollms_client_from_params(
             "discussions": {},
             "llm_params": {},
         }
-        # print(f"INFO: No active session for '{username}'. Creating temporary client context.")
 
     db = next(get_db())
     try:
         user_db = db.query(DBUser).filter(DBUser.username == username).first()
         if not user_db:
              raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
-
+        
         # Validate selected models against active bindings before building client
         if load_llm and user_db.lollms_model_name and '/' in user_db.lollms_model_name:
             binding_alias_check, _ = user_db.lollms_model_name.split('/', 1)
@@ -706,20 +696,23 @@ def build_lollms_client_from_params(
                     
                 client_init_params["stt_binding_name"] = selected_stt_binding.name
                 client_init_params["stt_binding_config"] = stt_binding_config
-        # --- END STT Binding Integration ---
         
+        # --- MCP Integration ---
+        # If we have servers_infos in cache (from load_mcps), pass them.
+        # We assume load_mcps has run if needed.
         if 'servers_infos' not in session:
             session['servers_infos'] = load_mcps(username)
         servers_infos = session['servers_infos']
         
-        if load_llm and servers_infos:
+        # Always inject MCP if we are loading LLM, as tools might be needed.
+        # Even if empty, it initializes the manager in lollms_client.
+        if load_llm:
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 
         try:
             ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}'.")
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            
             return lc
         except Exception as e:
             traceback.print_exc()

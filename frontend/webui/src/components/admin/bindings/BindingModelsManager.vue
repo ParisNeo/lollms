@@ -282,7 +282,7 @@ function handleFileChange(event) {
     const file = event.target.files[0];
     if (!file) return;
     if (file.size > 5 * 1024 * 1024) { uiStore.addNotification('File is too large (max 5MB).', 'error'); return; }
-    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { uiStore.addNotification('Invalid file type. Use JPG, PNG, or WEBP.', 'error'); return; }
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { uiStore.addNotification('Invalid file type. Use JPG, PNG, and WEBP.', 'error'); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
         const img = new Image();
@@ -459,6 +459,7 @@ watch(() => props.binding, (newBinding) => {
                                      <input 
                                         v-if="['str', 'int', 'float'].includes(param.type)"
                                         :type="param.type === 'str' ? 'text' : 'number'"
+                                        :step="param.type === 'float' ? 'any' : 1"
                                         :id="`p-${param.name}`"
                                         v-model="form[param.name]"
                                         class="input-field"

@@ -7,7 +7,8 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat: overhaul help system and clean up UI assets
 
-## [Unreleased]
+#
+- feat: refactor backend imports and cleanup UI assets# [Unreleased]
 
 - feat: overhaul UI assets and enhance backend configuration
 

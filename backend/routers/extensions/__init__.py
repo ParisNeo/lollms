@@ -1,4 +1,4 @@
-# backend/routers/services.py
+# backend/routers/extensions/__init__.py
 import traceback
 import re
 from typing import List
@@ -12,6 +12,7 @@ from backend.db import get_db
 from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.db.models.db_task import DBTask
 from backend.security import generate_sso_secret
+# Import reload_lollms_client_mcp directly to ensure full cache clearing
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions, load_mcps, reload_lollms_client_mcp
 from backend.models import (
     MCPCreate, MCPUpdate, MCPPublic, ToolInfo,
@@ -57,19 +58,23 @@ def _reload_mcps_task(task: Task, username: str):
     task.log("Starting MCP client reload...")
     task.set_progress(20)
     try:
+        # This function in session.py clears tools_cache, servers_infos AND lollms_clients_cache
         reload_lollms_client_mcp(username)
+        
+        # Trigger a build immediately to start connection process
+        task.log("Rebuilding client connections...")
+        try:
+            # We don't return the client, just trigger the build
+            get_user_lollms_client(username)
+        except Exception as build_e:
+            task.log(f"Warning during client rebuild: {build_e}", level="WARNING")
+
         task.log("MCP client reloaded successfully.")
         task.set_progress(100)
         return {"message": "MCP client and tools cache re-initialized."}
     except Exception as e:
         task.log(f"Error during MCP reload: {e}", level="ERROR")
         raise e
-
-def _invalidate_user_mcp_cache(username: str):
-    """Invalidates the lollms_client and tools cache for a given user."""
-    if username in user_sessions and 'tools_cache' in user_sessions[username]:
-        del user_sessions[username]['tools_cache']
-        print(f"INFO: Invalidated tools cache for user: {username}")
 
 def _format_mcp_public(mcp: DBMCP) -> MCPPublic:
     # This function is specifically for DBMCP objects
@@ -146,12 +151,8 @@ def create_mcp(
         client_id_to_set = _generate_unique_client_id(db, mcp_data.name)
 
     mcp_dict = mcp_data.model_dump(exclude={"client_id"})
-    url = mcp_dict.get('url')
-    if url and not url.endswith('/mcp'):
-        if url.endswith('/'):
-            mcp_dict['url'] = url + 'mcp'
-        else:
-            mcp_dict['url'] = url + '/mcp'
+    
+    # NOTE: We trust the user provided URL here. backend/session.py handles normalization/defaults.
             
     new_mcp = DBMCP(**mcp_dict, client_id=client_id_to_set, owner_user_id=owner_id)
     db.add(new_mcp)
@@ -162,7 +163,19 @@ def create_mcp(
         db.rollback()
         raise HTTPException(status_code=409, detail="An MCP with this name already exists for this owner (user or system).")
     
-    _invalidate_user_mcp_cache(current_user.username)
+    # Reload logic immediately after creation
+    try:
+        reload_lollms_client_mcp(current_user.username)
+        # Trigger background task to ensure immediate reconnection attempt
+        task_manager.submit_task(
+            name=f"Refresh MCPs after Add",
+            target=_reload_mcps_task,
+            args=(current_user.username,),
+            owner_username=current_user.username
+        )
+    except Exception as e:
+        print(f"Error triggering MCP reload: {e}")
+
     return _format_mcp_public(new_mcp)
 
 @mcp_router.put("/{mcp_id}", response_model=MCPPublic)
@@ -181,13 +194,8 @@ def update_mcp(
         raise HTTPException(status_code=403, detail="Not authorized to edit this MCP.")
 
     update_data = mcp_update.model_dump(exclude_unset=True)
-    if 'url' in update_data and update_data['url']:
-        url = update_data['url']
-        if not url.endswith('/mcp'):
-            if url.endswith('/'):
-                update_data['url'] = url + 'mcp'
-            else:
-                update_data['url'] = url + '/mcp'
+
+    # NOTE: We trust the user provided URL here. backend/session.py handles normalization/defaults.
 
     for key, value in update_data.items():
         setattr(mcp_db, key, value)
@@ -199,7 +207,18 @@ def update_mcp(
         db.rollback()
         raise HTTPException(status_code=409, detail="An MCP with the new name already exists.")
 
-    _invalidate_user_mcp_cache(current_user.username)
+    # Reload logic immediately after update
+    try:
+        reload_lollms_client_mcp(current_user.username)
+        task_manager.submit_task(
+            name=f"Refresh MCPs after Update",
+            target=_reload_mcps_task,
+            args=(current_user.username,),
+            owner_username=current_user.username
+        )
+    except Exception as e:
+        print(f"Error triggering MCP reload: {e}")
+
     return _format_mcp_public(mcp_db)
 
 @mcp_router.delete("/{mcp_id}", status_code=204)
@@ -218,7 +237,19 @@ def delete_mcp(
 
     db.delete(mcp_db)
     db.commit()
-    _invalidate_user_mcp_cache(current_user.username)
+    
+    # Reload logic immediately after delete
+    try:
+        reload_lollms_client_mcp(current_user.username)
+        task_manager.submit_task(
+            name=f"Refresh MCPs after Delete",
+            target=_reload_mcps_task,
+            args=(current_user.username,),
+            owner_username=current_user.username
+        )
+    except Exception as e:
+        print(f"Error triggering MCP reload: {e}")
+
     return None
 
 # --- APPS LOGIC (Consolidated) ---
@@ -363,7 +394,7 @@ def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current
 
     cached_tools = user_sessions[username].get('tools_cache')
     if cached_tools is not None:
-        print(f"INFO: Serving cached tools for user: {username}")
+        # print(f"INFO: Serving cached tools for user: {username}")
         return cached_tools
 
     print(f"INFO: Building tools cache for user: {username}")
