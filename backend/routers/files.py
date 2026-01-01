@@ -25,7 +25,7 @@ from markdown_pdf import MarkdownPdf, Section
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
 from latex2mathml.converter import convert as latex2mathml
-
+from PIL import Image
 
 # Try to import optional document parsing libraries
 try:
@@ -230,7 +230,8 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str, extract_image
 
 @files_router.post("/extract-text")
 async def extract_text_from_file(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """
     Extracts text content from a single uploaded file.
@@ -247,7 +248,8 @@ async def extract_text_from_file(
 @files_router.post("/export-markdown")
 async def export_as_markdown(
     content: str = Form(...),
-    filename: str = Form("export.md")
+    filename: str = Form("export.md"),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """
     Accepts text content and returns it as a downloadable Markdown file.
@@ -637,7 +639,10 @@ def html_wrapper(html_body: str, title: str = "Export") -> bytes:
     return f"<html><head><meta charset='utf-8'><title>{title}</title></head><body>{html_body}</body></html>".encode("utf-8")
 
 @files_router.post("/export-content")
-async def export_content(payload: ContentExportRequest):
+async def export_content(
+    payload: ContentExportRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
     export_format = payload.format.lower()
     setting_key_format = 'markdown' if export_format == 'md' else export_format
     setting_key = f"export_to_{setting_key_format}_enabled"
@@ -810,10 +815,29 @@ async def upload_chat_image(
     """Handles image uploads specifically for attaching to a chat message before sending."""
     temp_path = get_user_temp_uploads_path(current_user.username)
     uploaded_files = []
+    
+    # Allowed mime types set for quick lookup
+    ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/tiff"}
+
     for file in files:
-        if not file.content_type.startswith("image/"):
-            raise HTTPException(status_code=400, detail="Only image files are allowed.")
+        # 1. Content-Type Header Check
+        if file.content_type not in ALLOWED_MIME_TYPES:
+             raise HTTPException(status_code=400, detail=f"Invalid file type: {file.content_type}. Only images are allowed.")
         
+        # 2. Content Verification using PIL
+        try:
+            file.file.seek(0)
+            img = Image.open(file.file)
+            img.verify() # Verify integrity
+            
+            # Check format (normalize to upper case)
+            if img.format.upper() not in ["JPEG", "PNG", "GIF", "WEBP", "BMP", "TIFF"]:
+                 raise HTTPException(status_code=400, detail="Unsupported image format.")
+                 
+            file.file.seek(0) # Reset pointer
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid or corrupted image file.")
+
         s_filename = secure_filename(file.filename)
         # Use a more unique name to avoid collisions
         unique_filename = f"{uuid.uuid4().hex[:8]}_{s_filename}"
