@@ -1,8 +1,25 @@
-# [UPDATE] backend/models/image.py
 # backend/models/image.py
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 import datetime
+
+class ImageAlbumBase(BaseModel):
+    name: str
+
+class ImageAlbumCreate(ImageAlbumBase):
+    pass
+
+class ImageAlbumUpdate(ImageAlbumBase):
+    pass
+
+class ImageAlbumPublic(ImageAlbumBase):
+    id: str
+    owner_user_id: int
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+    
+    class Config:
+        from_attributes = True
 
 class UserImagePublic(BaseModel):
     id: str
@@ -16,6 +33,7 @@ class UserImagePublic(BaseModel):
     discussion_id: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
+    album_id: Optional[str] = None  # New field
 
     class Config:
         from_attributes = True
@@ -36,12 +54,15 @@ class ImageGenerationRequest(BaseModel):
 class MoveImageToDiscussionRequest(BaseModel):
     discussion_id: str
 
+class MoveImageToAlbumRequest(BaseModel):
+    album_id: Optional[str] = None
+
 class ImageEditRequest(BaseModel):
     image_ids: Optional[List[str]] = None
     base_image_b64: Optional[str] = None
     prompt: str
     negative_prompt: Optional[str] = None
-    mask: Optional[str] = None # base64 encoded mask
+    mask: Optional[str] = None
     model: Optional[str] = None
     seed: Optional[int] = -1
     sampler_name: Optional[str] = None
@@ -50,8 +71,6 @@ class ImageEditRequest(BaseModel):
     width: Optional[int] = None
     height: Optional[int] = None
 
-
-# Added for prompt enhancement
 class ImagePromptEnhancementRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = ""
@@ -61,11 +80,9 @@ class ImagePromptEnhancementRequest(BaseModel):
     image_b64s: Optional[List[str]] = None
     mode: str = "description"
 
-
 class ImagePromptEnhancementResponse(BaseModel):
     prompt: Optional[str] = None
     negative_prompt: Optional[str] = None
-
 
 class SaveCanvasRequest(BaseModel):
     base_image_b64: Optional[str] = None
@@ -76,10 +93,9 @@ class SaveCanvasRequest(BaseModel):
     height: int
     bg_color: str = "#FFFFFF"
 
-# NEW: Timelapse Models
 class TimelapseKeyframe(BaseModel):
     prompt: str
-    duration: float = 2.0 # Seconds to show this image
+    duration: float = 2.0
 
 class TimelapseRequest(BaseModel):
     keyframes: List[TimelapseKeyframe]
@@ -88,5 +104,5 @@ class TimelapseRequest(BaseModel):
     width: int = 512
     height: int = 512
     fps: int = 24
-    transition_duration: float = 1.0 # Seconds for crossfade
+    transition_duration: float = 1.0
     seed: Optional[int] = -1

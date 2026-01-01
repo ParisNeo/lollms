@@ -238,3 +238,13 @@ class UserForAdminPanel(BaseModel):
 
     class Config:
         from_attributes = True
+
+class RequirementInfo(BaseModel):
+    name: str
+    required_version: Optional[str]
+    installed_version: Optional[str]
+    status: str # 'ok', 'newer', 'older', 'missing'
+
+class InstallReqPayload(BaseModel):
+    name: str
+    version: Optional[str] = None # If None, install latest

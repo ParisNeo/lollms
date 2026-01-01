@@ -5,6 +5,7 @@ import uuid
 import datetime
 import random
 import struct
+import threading
 from typing import Dict, List, Set, Optional
 from fastapi import WebSocket
 from ascii_colors import trace_exception, ASCIIColors
@@ -27,6 +28,9 @@ class ConnectionManager:
         # Hub Client State
         self.hub_writer: Optional[asyncio.StreamWriter] = None
         self.is_hub_connected = False
+        
+        # Cache server config workers count for quick access
+        self.workers_count = SERVER_CONFIG.get("workers", 1)
 
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
@@ -54,6 +58,11 @@ class ConnectionManager:
             
             connecting_user = db.query(DBUser).filter(DBUser.id == user_id).first()
             if connecting_user:
+                # Warm up LollmsClient in a separate thread to avoid blocking WebSocket handshake
+                # This ensures the client (and MCP connections) is ready when the UI requests it
+                from backend.session import get_user_lollms_client
+                threading.Thread(target=get_user_lollms_client, args=(connecting_user.username,), daemon=True).start()
+
                 friendships = db.query(DBFriendship).filter(
                     ((DBFriendship.user1_id == user_id) | (DBFriendship.user2_id == user_id)),
                     DBFriendship.status == FriendshipStatus.ACCEPTED
@@ -222,7 +231,8 @@ class ConnectionManager:
                     await self.broadcast(message_data)
                 
                 # 2. Push to Communication Hub (cross-worker synchronization)
-                if self.hub_writer:
+                # OPTIMIZATION: Only push to hub if running in multi-worker mode
+                if self.workers_count > 1 and self.hub_writer:
                     try:
                         encoded = json.dumps(message_data).encode('utf-8')
                         packet = struct.pack('!I', len(encoded)) + encoded
@@ -234,8 +244,10 @@ class ConnectionManager:
             
             asyncio.run_coroutine_threadsafe(dispatch(), self._loop)
 
-        # Persistence to DB as a logging fallback
-        self._put_on_db_queue(message_data)
+        # Persistence to DB as a logging fallback (only in multi-worker mode)
+        # In single worker mode, local delivery is enough and faster.
+        if self.workers_count > 1:
+            self._put_on_db_queue(message_data)
 
     def _put_on_db_queue(self, payload: dict):
         db = None

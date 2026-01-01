@@ -3,8 +3,11 @@ import socket
 from contextlib import closing
 import psutil
 import time
-from typing import Dict, List, Optional
+import json
+from typing import Dict, List, Optional, Any
+from sqlalchemy.orm import Session
 from backend.settings import settings
+from backend.db.models.config import GlobalConfig
 
 # Global in-memory tracking for service usage
 # Format: { service_name: { "total_hits": int, "users": { user_id: int } } }
@@ -109,3 +112,33 @@ def find_next_available_port(start_port: int, host: str = "127.0.0.1") -> int:
                 return port
             except OSError:
                 port += 1
+
+# --- Caching Helpers ---
+def get_system_cache(db: Session, key: str, default=None):
+    """Retrieves a cached value from GlobalConfig."""
+    try:
+        config = db.query(GlobalConfig).filter(GlobalConfig.key == key).first()
+        if config:
+            data = json.loads(config.value)
+            if isinstance(data, dict) and "value" in data and "type" in data and data["type"] == "cache":
+                return data["value"]
+            # Backward compatibility or direct value
+            return data
+    except Exception as e:
+        print(f"Cache read error for {key}: {e}")
+    return default
+
+def set_system_cache(db: Session, key: str, value: Any):
+    """Saves a value to GlobalConfig as a cache."""
+    try:
+        config = db.query(GlobalConfig).filter(GlobalConfig.key == key).first()
+        json_val = json.dumps({"value": value, "type": "cache"})
+        if config:
+            config.value = json_val
+        else:
+            config = GlobalConfig(key=key, value=json_val, category="System Cache", description="Auto-generated cache")
+            db.add(config)
+        db.commit()
+    except Exception as e:
+        print(f"Cache write error for {key}: {e}")
+        db.rollback()

@@ -32,6 +32,7 @@ import IconEye from '../assets/icons/IconEye.vue';
 import IconGpu from '../assets/icons/IconGpu.vue';
 import IconHardDrive from '../assets/icons/IconHardDrive.vue';
 import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
+import IconCode from '../assets/icons/IconCode.vue'; // New icon for requirements
 
 const route = useRoute();
 const router = useRouter();
@@ -47,6 +48,7 @@ const sections = [
   { type: 'link', id: 'system_load', name: 'System Load', icon: markRaw(IconHardDrive) },
   { type: 'link', id: 'gpu_load', name: 'GPU Load', icon: markRaw(IconGpu) },
   { type: 'link', id: 'logs_analysis', name: 'Logs & Analysis', icon: markRaw(IconFileText) },
+  { type: 'link', id: 'requirements', name: 'Requirements', icon: markRaw(IconCode) }, // NEW
   { type: 'link', id: 'operations', name: 'Operations', icon: markRaw(IconWrenchScrewdriver) },
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },

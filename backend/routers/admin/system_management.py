@@ -14,6 +14,10 @@ from fastapi import APIRouter, Depends, Request, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import func, desc, update
 from lollms_client import LollmsDataManager
+from packaging.requirements import Requirement
+from importlib.metadata import version as get_installed_version, PackageNotFoundError
+from packaging.version import parse as parse_version
+
 
 from sqlalchemy.orm import Session, joinedload, defer
 from backend.db import get_db
@@ -22,7 +26,7 @@ from backend.db.models.service import App as DBApp
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.db_task import DBTask
 from backend.models import UserAuthDetails, SystemUsageStats, GPUInfo, DiskInfo, TaskInfo
-from backend.models.admin import GlobalGenerationStats, UserActivityStat, ForceGlobalConfigPayload
+from backend.models.admin import GlobalGenerationStats, UserActivityStat, ForceGlobalConfigPayload, RequirementInfo, InstallReqPayload
 from backend.config import PROJECT_ROOT, APP_DATA_DIR, SERVER_CONFIG, APP_VERSION, USERS_DIR_NAME, TEMP_UPLOADS_DIR_NAME
 from backend.session import get_current_admin_user, get_user_data_root, user_sessions
 from backend.ws_manager import manager
@@ -445,6 +449,102 @@ async def trigger_manual_task_pruning(current_admin: UserAuthDetails = Depends(g
         owner_username=current_admin.username
     )
     return db_task
+
+@system_management_router.get("/system/requirements", response_model=List[RequirementInfo])
+async def get_system_requirements(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    requirements_path = PROJECT_ROOT / "requirements.txt"
+    if not requirements_path.exists():
+        raise HTTPException(status_code=404, detail="requirements.txt not found")
+    
+    results = []
+    
+    with open(requirements_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            
+            try:
+                req = Requirement(line)
+                name = req.name
+                
+                # Extract required version from specs if == is present
+                required_version = None
+                for spec in req.specifier:
+                    if spec.operator == '==':
+                        required_version = spec.version
+                        break
+                
+                installed_version = None
+                try:
+                    installed_version = get_installed_version(name)
+                except PackageNotFoundError:
+                    pass
+                
+                status = 'missing'
+                if installed_version:
+                    if not required_version:
+                        status = 'ok' # No specific version required
+                    else:
+                        inst_v = parse_version(installed_version)
+                        req_v = parse_version(required_version)
+                        
+                        if inst_v == req_v:
+                            status = 'ok'
+                        elif inst_v > req_v:
+                            status = 'newer'
+                        else:
+                            status = 'older'
+                
+                results.append(RequirementInfo(
+                    name=name,
+                    required_version=required_version or "Any",
+                    installed_version=installed_version or "Not Installed",
+                    status=status
+                ))
+            except Exception as e:
+                print(f"Error parsing requirement line '{line}': {e}")
+                continue
+                
+    return results
+
+@system_management_router.post("/system/requirements/install", response_model=TaskInfo, status_code=202)
+async def install_requirement(payload: InstallReqPayload, current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    def _install_task(task: Task, pkg_name: str, pkg_version: str):
+        task.log(f"Installing {pkg_name}...")
+        cmd = [sys.executable, "-m", "pip", "install"]
+        if pkg_version:
+            cmd.append(f"{pkg_name}=={pkg_version}")
+        else:
+            cmd.append("--upgrade")
+            cmd.append(pkg_name)
+            
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        task.process = process
+        for line in process.stdout:
+            task.log(line.strip())
+        
+        process.wait()
+        if process.returncode == 0:
+            task.log(f"Successfully installed {pkg_name}")
+            return {"message": "Installation successful"}
+        else:
+            raise Exception(f"Installation failed with code {process.returncode}")
+
+    target_version = payload.version
+    description = f"Installing {payload.name}"
+    if target_version:
+        description += f" version {target_version}"
+    else:
+        description += " (Latest)"
+
+    return task_manager.submit_task(
+        name=f"Install Requirement: {payload.name}",
+        target=_install_task,
+        args=(payload.name, target_version),
+        description=description,
+        owner_username=current_user.username
+    )
 
 # --- Update and Reboot Endpoints (Service Compatible) ---
 

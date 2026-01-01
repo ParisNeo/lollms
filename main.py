@@ -18,7 +18,7 @@ FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
+# from fastapi.middleware.gzip import GZipMiddleware # Disabled to improve streaming performance
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, inspect, desc
 
@@ -78,6 +78,7 @@ from backend.routers.image_studio import image_studio_router
 from backend.routers.notes import notes_router 
 from backend.routers.notebooks import router as notebooks_router
 from backend.routers.public import public_router
+from backend.routers.flow_studio import router as flow_studio_router
 
 from backend.routers.services.lollms_v1 import lollms_v1_router
 from backend.routers.admin.services_management import router as admin_services_router
@@ -221,7 +222,13 @@ def run_one_time_startup_tasks(lock: Lock):
             db.close()
 
         hub_port = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
-        threading.Thread(target=start_hub_server, args=('127.0.0.1', hub_port), daemon=True).start()
+        
+        # Only start the communication hub if we are running in multi-worker mode
+        if SERVER_CONFIG.get("workers", 1) > 1:
+            threading.Thread(target=start_hub_server, args=('127.0.0.1', hub_port), daemon=True).start()
+            print(f"INFO: Multi-worker mode detected. Started Communication Hub on port {hub_port}.")
+        else:
+            print("INFO: Single-worker mode detected. Skipping Communication Hub startup.")
         # ---------------------------------------------
 
         print("--- Running One-Time Startup Tasks ---")
@@ -472,7 +479,9 @@ async def startup_event():
     manager.set_loop(asyncio.get_running_loop())
     task_manager.init_app(db_session_module.SessionLocal)
     
-    broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
+    # Only start listener if multiple workers to avoid overhead on single worker setups
+    if SERVER_CONFIG.get("workers", 1) > 1:
+        broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
     
     if os.getpid() == os.getppid() or os.getenv("WORKER_ID") == "1":
         rss_scheduler = BackgroundScheduler(daemon=True)
@@ -508,7 +517,7 @@ async def startup_event():
             rss_scheduler.start()
 
     hub_port = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
-    print(f"INFO: Worker {os.getpid()} starting Communication Hub client listener on port {hub_port}.")
+    print(f"INFO: Worker {os.getpid()} configuration loaded. Hub Port: {hub_port}.")
 
 async def shutdown_event():
     ASCIIColors.info(f"--- Worker process (PID: {os.getpid()}) shutting down. ---")
@@ -574,9 +583,11 @@ app.include_router(notes_router)
 app.include_router(notebooks_router) 
 app.include_router(public_router)
 app.include_router(lollms_v1_router) 
+app.include_router(flow_studio_router)
 
-# Update admin_router inclusion if needed or include directly
-admin_router.include_router(admin_services_router) 
+# Add GZip Middleware to improve asset loading speed while keeping streaming functional
+# minimum_size=1000 ensures small streaming chunks aren't buffered
+# app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 add_ui_routes(app)
 

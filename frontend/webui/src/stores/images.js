@@ -8,9 +8,10 @@ import useEventBus from '../services/eventBus';
 
 export const useImageStore = defineStore('images', () => {
     const images = ref([]);
+    const albums = ref([]); // New
+    const selectedAlbumId = ref(null); // New
     const isLoading = ref(false);
     const isGenerating = ref(false); 
-    // Removed global isEnhancing flags to handle them locally in the view for better control
     
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
@@ -27,7 +28,6 @@ export const useImageStore = defineStore('images', () => {
     
     let saveDebounceTimer = null;
 
-    // Watch for user object to become available and initialize state
     watch(() => authStore.user, (newUser) => {
         if (newUser) {
             prompt.value = newUser.image_studio_prompt || '';
@@ -39,10 +39,8 @@ export const useImageStore = defineStore('images', () => {
         }
     }, { immediate: true });
 
-    // Watch for changes to persist them
     watch([prompt, negativePrompt, imageSize, nImages, seed, generationParams], () => {
         if (!authStore.isAuthenticated) return;
-        
         clearTimeout(saveDebounceTimer);
         saveDebounceTimer = setTimeout(() => {
             const payload = {
@@ -58,21 +56,14 @@ export const useImageStore = defineStore('images', () => {
     }, { deep: true });
 
     function handleTaskCompletion(task) {
-        // Safe parsing of the result
         let result = task.result;
         if (typeof result === 'string') {
-            try {
-                result = JSON.parse(result);
-            } catch (e) {
-                // If parsing fails, use raw string
-            }
+            try { result = JSON.parse(result); } catch (e) {}
         }
 
         const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
         const isEditTask = task.name.startsWith('Editing image:');
         
-        // Note: Enhancement task handling is now done locally in the View
-
         if ((isImageTask || isEditTask) && task.status === 'completed' && result) {
             const newItems = Array.isArray(result) ? result : [result];
             if (newItems.length > 0 && newItems[0]) {
@@ -86,13 +77,83 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
-    // Register Listener
     on('task:completed', handleTaskCompletion);
 
+    // --- Album Actions ---
+    async function fetchAlbums() {
+        try {
+            const response = await apiClient.get('/api/image-studio/albums');
+            albums.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch albums:", error);
+        }
+    }
+
+    async function createAlbum(name) {
+        try {
+            const response = await apiClient.post('/api/image-studio/albums', { name });
+            albums.value.unshift(response.data);
+            uiStore.addNotification(`Album '${name}' created.`, 'success');
+            return response.data;
+        } catch (error) {
+            uiStore.addNotification('Failed to create album.', 'error');
+        }
+    }
+
+    async function updateAlbum(id, name) {
+        try {
+            const response = await apiClient.put(`/api/image-studio/albums/${id}`, { name });
+            const index = albums.value.findIndex(a => a.id === id);
+            if (index !== -1) albums.value[index] = response.data;
+            uiStore.addNotification('Album renamed.', 'success');
+        } catch (error) {
+            uiStore.addNotification('Failed to update album.', 'error');
+        }
+    }
+
+    async function deleteAlbum(id) {
+        try {
+            await apiClient.delete(`/api/image-studio/albums/${id}`);
+            albums.value = albums.value.filter(a => a.id !== id);
+            if (selectedAlbumId.value === id) selectedAlbumId.value = null;
+            // Also refresh images as they are now ungrouped
+            fetchImages(); 
+            uiStore.addNotification('Album deleted.', 'success');
+        } catch (error) {
+            uiStore.addNotification('Failed to delete album.', 'error');
+        }
+    }
+
+    async function moveImageToAlbum(imageId, albumId) {
+        try {
+            await apiClient.put(`/api/image-studio/images/${imageId}/album`, { album_id: albumId });
+            // Update local state if currently viewing a filtered list
+            const imgIndex = images.value.findIndex(i => i.id === imageId);
+            if (imgIndex !== -1) {
+                images.value[imgIndex].album_id = albumId;
+                // If viewing a specific album and image moved out, remove from view
+                if (selectedAlbumId.value && selectedAlbumId.value !== albumId) {
+                    images.value.splice(imgIndex, 1);
+                }
+            }
+            uiStore.addNotification('Image moved.', 'success');
+        } catch (error) {
+            uiStore.addNotification('Failed to move image.', 'error');
+        }
+    }
+
+    // --- Image Actions ---
     async function fetchImages() {
         isLoading.value = true;
         try {
-            const response = await apiClient.get('/api/image-studio');
+            const params = {};
+            if (selectedAlbumId.value) params.album_id = selectedAlbumId.value;
+            // If explicit 'ungrouped' view is needed, could use a flag, but 'null' param works if backend handles it.
+            // Current backend logic: if album_id is missing, it returns ALL.
+            // If we want "Ungrouped", we need to pass a special value or change logic.
+            // Let's assume standard view shows everything unless filtered.
+            
+            const response = await apiClient.get('/api/image-studio', { params });
             images.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             console.error("Failed to fetch images:", error);
@@ -134,7 +195,6 @@ export const useImageStore = defineStore('images', () => {
             uiStore.addNotification('Image saved successfully!', 'success');
             return response.data;
         } catch (error) {
-            // Error is handled globally
             return null;
         } finally {
             isGenerating.value = false;
@@ -148,6 +208,10 @@ export const useImageStore = defineStore('images', () => {
         files.forEach(file => {
             formData.append('files', file);
         });
+        
+        if (selectedAlbumId.value) {
+            formData.append('album_id', selectedAlbumId.value);
+        }
 
         isGenerating.value = true;
         try {
@@ -187,7 +251,6 @@ export const useImageStore = defineStore('images', () => {
     }
 
     async function enhanceImagePrompt(payload) {
-        // Just send request and return task, view handles the rest
         try {
             const response = await apiClient.post('/api/image-studio/enhance-prompt', payload);
             const task = response.data;
@@ -201,6 +264,8 @@ export const useImageStore = defineStore('images', () => {
 
     return {
         images,
+        albums,
+        selectedAlbumId,
         isLoading,
         isGenerating,
         prompt,
@@ -209,6 +274,11 @@ export const useImageStore = defineStore('images', () => {
         nImages,
         seed,
         generationParams,
+        fetchAlbums,
+        createAlbum,
+        updateAlbum,
+        deleteAlbum,
+        moveImageToAlbum,
         fetchImages,
         generateImage,
         editImage,

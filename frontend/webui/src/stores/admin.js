@@ -120,6 +120,10 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingLollmsModels = ref(false);
     const systemLogs = ref([]);
     const isLoadingSystemLogs = ref(false);
+    
+    // Requirements
+    const systemRequirements = ref([]);
+    const isLoadingRequirements = ref(false);
 
     const appFilters = reactive(getStoredFilters('lollms-app-filters', {
         searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'last_update_date', sortOrder: 'desc', currentPage: 1, pageSize: 24
@@ -165,6 +169,11 @@ export const useAdminStore = defineStore('admin', () => {
              uiStore.addNotification('Fun Facts Generated!', 'success');
              fetchFunFacts(true);
              fetchFunFactCategories(true);
+        }
+        
+        if (taskName.includes('install requirement') && task.status === 'completed') {
+            fetchRequirements();
+            uiStore.addNotification('Requirement installed successfully.', 'success');
         }
     }
     on('task:completed', handleTaskCompletion);
@@ -459,6 +468,22 @@ export const useAdminStore = defineStore('admin', () => {
     async function approveContent(type, id) { await apiClient.post(`/api/admin/moderation/${type}/${id}/approve`); }
     async function deleteContent(type, id) { await apiClient.delete(`/api/admin/moderation/${type}/${id}`); }
 
+    // Requirements
+    async function fetchRequirements() {
+        isLoadingRequirements.value = true;
+        try {
+            const res = await apiClient.get('/api/admin/system/requirements');
+            systemRequirements.value = res.data;
+        } finally {
+            isLoadingRequirements.value = false;
+        }
+    }
+    
+    async function installRequirement(name, version) {
+        const res = await apiClient.post('/api/admin/system/requirements/install', { name, version });
+        tasksStore.addTask(res.data);
+    }
+
     // Services
     async function fetchServiceDashboard() { isLoadingServiceStats.value = true; try { const res = await apiClient.get('/api/admin/services/dashboard'); serviceStats.value = res.data; } finally { isLoadingServiceStats.value = false; } }
     async function resetServiceUsage() { await apiClient.post('/api/admin/services/reset-usage'); await fetchServiceDashboard(); uiStore.addNotification('Usage statistics reset.', 'success'); }
@@ -487,6 +512,7 @@ export const useAdminStore = defineStore('admin', () => {
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories, newsArticles, isLoadingNewsArticles,
         isImporting, isEnhancingEmail, adminAvailableLollmsModels, isLoadingLollmsModels,
         appFilters, mcpFilters, promptFilters, systemLogs, isLoadingSystemLogs,
+        systemRequirements, isLoadingRequirements,
 
         // Actions
         forceAllUsersConfig, 
@@ -522,6 +548,7 @@ export const useAdminStore = defineStore('admin', () => {
         sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
         fetchBindingZoo, installLlmFromZoo, fetchTtiBindingZoo, installTtiFromZoo, fetchTtsBindingZoo, installTtsFromZoo, fetchSttBindingZoo, installSttFromZoo,
 
-        fetchModerationQueue, approveContent, deleteContent
+        fetchModerationQueue, approveContent, deleteContent,
+        fetchRequirements, installRequirement
     };
 });

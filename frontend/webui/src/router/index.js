@@ -28,6 +28,11 @@ const routes = [
     component: () => import('../views/HelpView.vue')
   },
   {
+    path: '/about',
+    name: 'About',
+    component: () => import('../views/AboutView.vue')
+  },
+  {
     path: '/datastores',
     name: 'DataStores',
     component: () => import('../views/DataStoresView.vue')
@@ -82,6 +87,11 @@ const routes = [
     path: '/messages',
     name: 'Messages',
     component: () => import('../views/MessagesView.vue')
+  },
+  {
+      path: '/flow-studio',
+      name: 'FlowStudio',
+      component: () => import('../views/FlowStudioView.vue')
   }
 ]
 

@@ -14,10 +14,10 @@ const Dashboard = defineAsyncComponent(() => import('./Dashboard.vue'));
 const SystemLoad = defineAsyncComponent(() => import('./SystemLoad.vue'));
 const GPULoad = defineAsyncComponent(() => import('./GPULoad.vue'));
 const LogsAndAnalysis = defineAsyncComponent(() => import('./LogsAndAnalysis.vue'));
+const RequirementsManagement = defineAsyncComponent(() => import('./RequirementsManagement.vue')); // NEW
 const Operations = defineAsyncComponent(() => import('./Operations.vue'));
 
 const UserTable = defineAsyncComponent(() => import('./UserTable.vue'));
-// GlobalSettings REMOVED as it is now merged into ServerSettings
 
 const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBindingsSettings.vue'));
 const TTIBindingsSettings = defineAsyncComponent(() => import('./bindings/TTIBindingsSettings.vue'));
@@ -47,6 +47,7 @@ const tabs = [
     { id: 'system_load', component: SystemLoad },
     { id: 'gpu_load', component: GPULoad },
     { id: 'logs_analysis', component: LogsAndAnalysis },
+    { id: 'requirements', component: RequirementsManagement }, // NEW
     { id: 'operations', component: Operations },
     { id: 'users', component: UserTable },
     { id: 'tasks', component: TaskManager },
@@ -61,7 +62,6 @@ const tabs = [
     { id: 'mcps', component: McpsManagement },
     { id: 'personalities', component: PersonalitiesManagement },
     { id: 'prompts', component: PromptsManagement },
-    // global_settings tab REMOVED
     { id: 'email', component: EmailSettings },
     { id: 'sso_client_settings', component: SSOClientSettings },
     { id: 'scim_settings', component: SCIMSettings },

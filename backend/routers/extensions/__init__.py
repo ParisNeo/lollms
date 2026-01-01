@@ -1,8 +1,9 @@
 # backend/routers/extensions/__init__.py
 import traceback
 import re
-from typing import List
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from typing import List, Optional, Any
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
@@ -11,8 +12,8 @@ from ascii_colors import ASCIIColors
 from backend.db import get_db
 from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.db.models.db_task import DBTask
-from backend.security import generate_sso_secret
-# Import reload_lollms_client_mcp directly to ensure full cache clearing
+from backend.db.models.user import User as DBUser
+from backend.db.models.config import GlobalConfig
 from backend.session import get_current_active_user, get_user_lollms_client, user_sessions, load_mcps, reload_lollms_client_mcp
 from backend.models import (
     MCPCreate, MCPUpdate, MCPPublic, ToolInfo,
@@ -29,6 +30,30 @@ mcp_router = APIRouter(prefix="/api/mcps", tags=["Services"])
 apps_router = APIRouter(prefix="/api/apps", tags=["Services"])
 discussion_tools_router = APIRouter(prefix="/api/discussions", tags=["Services"])
 
+# --- Caching Helpers for MCP Tools ---
+def get_cached_tools(db: Session):
+    config = db.query(GlobalConfig).filter(GlobalConfig.key == "cache_mcp_tools").first()
+    if config:
+        try:
+            return json.loads(config.value).get("value")
+        except: return None
+    return None
+
+def set_cached_tools(db: Session, tools: List[Any]):
+    config = db.query(GlobalConfig).filter(GlobalConfig.key == "cache_mcp_tools").first()
+    val = json.dumps({"value": tools, "type": "cache"})
+    if config:
+        config.value = val
+    else:
+        config = GlobalConfig(key="cache_mcp_tools", value=val, category="System Cache")
+        db.add(config)
+    db.commit()
+
+def invalidate_tools_cache(db: Session):
+    db.query(GlobalConfig).filter(GlobalConfig.key == "cache_mcp_tools").delete()
+    db.commit()
+
+
 def _generate_unique_client_id(db: Session, name: str) -> str:
     base_slug = re.sub(r'[^a-z0-9_]+', '', name.lower().replace(' ', '_'))
     client_id = base_slug
@@ -42,9 +67,7 @@ def _generate_unique_client_id(db: Session, name: str) -> str:
         counter += 1
 
 def _to_task_info(db_task: DBTask) -> TaskInfo:
-    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
-    if not db_task:
-        return None
+    if not db_task: return None
     return TaskInfo(
         id=db_task.id, name=db_task.name, description=db_task.description,
         status=db_task.status, progress=db_task.progress,
@@ -58,26 +81,23 @@ def _reload_mcps_task(task: Task, username: str):
     task.log("Starting MCP client reload...")
     task.set_progress(20)
     try:
-        # This function in session.py clears tools_cache, servers_infos AND lollms_clients_cache
         reload_lollms_client_mcp(username)
         
-        # Trigger a build immediately to start connection process
+        # Invalidate global cache too if needed, assuming admin might be triggering this
+        with task.db_session_factory() as db:
+            invalidate_tools_cache(db)
+
         task.log("Rebuilding client connections...")
-        try:
-            # We don't return the client, just trigger the build
-            get_user_lollms_client(username)
-        except Exception as build_e:
-            task.log(f"Warning during client rebuild: {build_e}", level="WARNING")
+        get_user_lollms_client(username)
 
         task.log("MCP client reloaded successfully.")
         task.set_progress(100)
-        return {"message": "MCP client and tools cache re-initialized."}
+        return {"message": "MCP client re-initialized."}
     except Exception as e:
-        task.log(f"Error during MCP reload: {e}", level="ERROR")
+        task.log(f"Error: {e}", level="ERROR")
         raise e
 
 def _format_mcp_public(mcp: DBMCP) -> MCPPublic:
-    # This function is specifically for DBMCP objects
     return MCPPublic(
         id=mcp.id, name=mcp.name, client_id=mcp.client_id, url=mcp.url, icon=mcp.icon,
         active=mcp.active, type=mcp.type,
@@ -97,7 +117,6 @@ def list_mcps(
     all_mcps = []
     accessible_host = get_accessible_host()
 
-    # 1. Get manually registered MCPs from the DBMCP table
     mcp_query = db.query(DBMCP).options(joinedload(DBMCP.owner))
     if not current_user.is_admin:
         mcp_query = mcp_query.filter(or_(DBMCP.owner_user_id == current_user.id, DBMCP.type == 'system'))
@@ -105,7 +124,6 @@ def list_mcps(
     for mcp in mcp_query.all():
         all_mcps.append(_format_mcp_public(mcp))
 
-    # 2. Get installed MCPs from the DBApp table
     app_query = db.query(DBApp).options(joinedload(DBApp.owner)).filter(DBApp.app_metadata['item_type'].as_string() == 'mcp')
     if not current_user.is_admin:
         app_query = app_query.filter(or_(DBApp.owner_user_id == current_user.id, DBApp.type == 'system'))
@@ -124,11 +142,10 @@ def list_mcps(
                 owner_username=app.owner.username if app.owner else "System",
                 created_at=app.created_at, updated_at=app.updated_at,
                 sso_redirect_uri=app.sso_redirect_uri,
-                sso_user_infos_to_share=app.sso_user_infos_to_share or []
+                sso_user_infos_to_share=app.sso_user_infos_to_share or [],
+                item_type='mcp'
             ))
-        except Exception as e:
-            trace_exception(e)
-            continue
+        except Exception: continue
     return sorted(all_mcps, key=lambda m: m.name)
 
 @mcp_router.post("", response_model=MCPPublic, status_code=201)
@@ -151,30 +168,21 @@ def create_mcp(
         client_id_to_set = _generate_unique_client_id(db, mcp_data.name)
 
     mcp_dict = mcp_data.model_dump(exclude={"client_id"})
-    
-    # NOTE: We trust the user provided URL here. backend/session.py handles normalization/defaults.
-            
     new_mcp = DBMCP(**mcp_dict, client_id=client_id_to_set, owner_user_id=owner_id)
     db.add(new_mcp)
     try:
         db.commit()
         db.refresh(new_mcp, ["owner"])
+        # Invalidate Cache
+        invalidate_tools_cache(db)
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="An MCP with this name already exists for this owner (user or system).")
+        raise HTTPException(status_code=409, detail="An MCP with this name already exists.")
     
-    # Reload logic immediately after creation
     try:
         reload_lollms_client_mcp(current_user.username)
-        # Trigger background task to ensure immediate reconnection attempt
-        task_manager.submit_task(
-            name=f"Refresh MCPs after Add",
-            target=_reload_mcps_task,
-            args=(current_user.username,),
-            owner_username=current_user.username
-        )
-    except Exception as e:
-        print(f"Error triggering MCP reload: {e}")
+        task_manager.submit_task(name=f"Refresh MCPs after Add", target=_reload_mcps_task, args=(current_user.username,), owner_username=current_user.username)
+    except: pass
 
     return _format_mcp_public(new_mcp)
 
@@ -195,29 +203,22 @@ def update_mcp(
 
     update_data = mcp_update.model_dump(exclude_unset=True)
 
-    # NOTE: We trust the user provided URL here. backend/session.py handles normalization/defaults.
-
     for key, value in update_data.items():
         setattr(mcp_db, key, value)
     
     try:
         db.commit()
         db.refresh(mcp_db, ["owner"])
+        # Invalidate Cache
+        invalidate_tools_cache(db)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=409, detail="An MCP with the new name already exists.")
 
-    # Reload logic immediately after update
     try:
         reload_lollms_client_mcp(current_user.username)
-        task_manager.submit_task(
-            name=f"Refresh MCPs after Update",
-            target=_reload_mcps_task,
-            args=(current_user.username,),
-            owner_username=current_user.username
-        )
-    except Exception as e:
-        print(f"Error triggering MCP reload: {e}")
+        task_manager.submit_task(name=f"Refresh MCPs after Update", target=_reload_mcps_task, args=(current_user.username,), owner_username=current_user.username)
+    except: pass
 
     return _format_mcp_public(mcp_db)
 
@@ -237,18 +238,13 @@ def delete_mcp(
 
     db.delete(mcp_db)
     db.commit()
+    # Invalidate Cache
+    invalidate_tools_cache(db)
     
-    # Reload logic immediately after delete
     try:
         reload_lollms_client_mcp(current_user.username)
-        task_manager.submit_task(
-            name=f"Refresh MCPs after Delete",
-            target=_reload_mcps_task,
-            args=(current_user.username,),
-            owner_username=current_user.username
-        )
-    except Exception as e:
-        print(f"Error triggering MCP reload: {e}")
+        task_manager.submit_task(name=f"Refresh MCPs after Delete", target=_reload_mcps_task, args=(current_user.username,), owner_username=current_user.username)
+    except: pass
 
     return None
 
@@ -320,7 +316,7 @@ def create_app(app_data: AppCreate, db: Session = Depends(get_db), current_user:
         db.refresh(new_app, ["owner"])
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=409, detail="An app with this name already exists for this owner (user or system).")
+        raise HTTPException(status_code=409, detail="An app with this name already exists.")
     return _format_app_public(new_app)
 
 @apps_router.put("/{app_id}", response_model=AppPublic)
@@ -387,16 +383,32 @@ def reload_user_lollms_client(
     return db_task
 
 @mcp_router.get("/tools", response_model=List[ToolInfo])
-def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current_active_user)):
+def list_all_available_tools(
+    force_refresh: bool = Query(False),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
     username = current_user.username
-    if username not in user_sessions:
-        user_sessions[username] = {}
+    
+    # 1. Try Global DB Cache (if not forced)
+    # Check if user has personal MCPs first. If so, their tools list is unique and can't use global cache directly
+    # unless we merge. For simplicity, we only use global cache if no personal MCPs.
+    
+    # Check for personal MCPs
+    user_db = db.query(DBUser).filter(DBUser.username == username).first()
+    has_personal_mcps = len(user_db.personal_mcps) > 0 if user_db else False
 
-    cached_tools = user_sessions[username].get('tools_cache')
-    if cached_tools is not None:
-        # print(f"INFO: Serving cached tools for user: {username}")
-        return cached_tools
+    if not force_refresh and not has_personal_mcps:
+        cached_tools = get_cached_tools(db)
+        if cached_tools:
+            return [ToolInfo(**t) for t in cached_tools]
 
+    # 2. Try In-Memory Session Cache (if not forced)
+    if username not in user_sessions: user_sessions[username] = {}
+    if not force_refresh and user_sessions[username].get('tools_cache'):
+        return user_sessions[username]['tools_cache']
+
+    # 3. Live Fetch
     print(f"INFO: Building tools cache for user: {username}")
     try:
         lc = get_user_lollms_client(username)
@@ -408,7 +420,13 @@ def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current
         all_tools = [ToolInfo(name=item["name"], description=item.get('description', '')) for item in tools]
         sorted_tools = sorted(all_tools, key=lambda x: x.name)
         
+        # Save to session
         user_sessions[username]['tools_cache'] = sorted_tools
+        
+        # Save to DB cache if this is a "system-only" view
+        if not has_personal_mcps:
+            set_cached_tools(db, [t.model_dump() for t in sorted_tools])
+            
         return sorted_tools
     except Exception as e:
         print(f"Error discovering tools for user {username}: {e}")
@@ -419,13 +437,13 @@ def list_all_available_tools(current_user: UserAuthDetails = Depends(get_current
 def get_discussion_tools(
     discussion_id: str,
     current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db) # Added db dependency for list_all_available_tools call
+    db: Session = Depends(get_db)
 ):
     discussion_obj = get_user_discussion(current_user.username, discussion_id)
     if not discussion_obj:
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
-    all_available_tools = list_all_available_tools(current_user)
+    all_available_tools = list_all_available_tools(False, current_user, db)
     
     metadata = discussion_obj.metadata or {}
     active_tool_names = set(metadata.get('active_tools', []))

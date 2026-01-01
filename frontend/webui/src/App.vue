@@ -16,6 +16,7 @@ import AudioPlayer from './components/chat/AudioPlayer.vue';
 import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ModalContainer from './components/modals/ModalContainer.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
+import ConnectionOverlay from './components/ui/ConnectionOverlay.vue';
 
 // Async Modals
 const SlideshowModal = defineAsyncComponent(() => import('./components/modals/SlideshowModal.vue'));
@@ -39,12 +40,15 @@ const isAuthenticating = computed(() => authStore.isAuthenticating);
 const isAuthenticated = computed(() => authStore.isAuthenticated);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const user = computed(() => authStore.user);
+const wsConnected = computed(() => authStore.wsConnected);
 
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
 const funFactCategory = computed(() => authStore.welcome_fun_fact_category);
 
 const isFunFactHanging = ref(false);
+const isReconnecting = ref(false);
+const hasConnectedOnce = ref(false); // Track if we ever connected successfully to suppress startup overlay
 
 const funFactStyle = computed(() => {
     const style = {
@@ -72,12 +76,51 @@ const showMainSidebar = computed(() => {
 function toggleFactHang() { isFunFactHanging.value = !isFunFactHanging.value; }
 
 onMounted(async () => {
+    // 1. Start Auth/Connection check immediately (Async)
+    const authPromise = authStore.attemptInitialAuth();
+
+    // 2. Initialize UI (Synchronous)
     uiStore.initializeTheme();
-    await authStore.attemptInitialAuth();
     uiStore.initializeSidebarState();
+
+    // 3. Await Auth Result
+    await authPromise;
+
     if (isAuthenticated.value) {
         pyodideStore.initialize();
         tasksStore.startPolling();
+    }
+});
+
+// Watch for connection restoration to re-initialize UI state
+watch(wsConnected, async (newVal, oldVal) => {
+    if (newVal) {
+        // If this is the first successful connection in this session, just mark it.
+        // This prevents the overlay from flashing on initial load.
+        if (!hasConnectedOnce.value) {
+            hasConnectedOnce.value = true;
+        } 
+        // If we were previously disconnected (oldVal was explicitly false, not undefined) 
+        // AND we are logged in, trigger synchronization logic.
+        else if (oldVal === false && isAuthenticated.value) {
+            isReconnecting.value = true;
+            try {
+                console.log("[App] Connection restored. Re-initializing...");
+                // 1. Refresh User Data/Settings
+                await authStore.fetchUser(); 
+                // 2. Restart Task Listeners/Polling
+                tasksStore.startPolling();
+                // 3. Notify user
+                uiStore.addNotification("Server connection restored. UI refreshed.", "success");
+            } catch (e) {
+                console.error("[App] Re-initialization failed:", e);
+            } finally {
+                // Small delay to let user see "Reconnected" status before hiding overlay
+                setTimeout(() => {
+                    isReconnecting.value = false;
+                }, 800);
+            }
+        }
     }
 });
 
@@ -94,6 +137,26 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-50 dark:bg-gray-900 flex flex-col">
     
+    <!-- Connection Lost Overlay -->
+    <!-- Logic: 
+         - Show if disconnected AND authenticated AND we have successfully connected at least once before (avoids startup flash).
+         - OR show if we are currently in the middle of a reconnection sync (isReconnecting). 
+    -->
+    <Transition
+        enter-active-class="transition ease-out duration-300"
+        enter-from-class="opacity-0"
+        enter-to-class="opacity-100"
+        leave-active-class="transition ease-in duration-200"
+        leave-from-class="opacity-100"
+        leave-to-class="opacity-0"
+    >
+        <ConnectionOverlay 
+            v-if="(!wsConnected && isAuthenticated && hasConnectedOnce) || isReconnecting" 
+            :message="isReconnecting ? 'Synchronizing data...' : 'Searching for server'"
+            :sub-message="isReconnecting ? 'Reconnected' : 'Connection Lost'"
+        />
+    </Transition>
+
     <!-- Splash Screen -->
     <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col bg-gray-50 dark:bg-gray-950 transition-all duration-700 overflow-hidden">
         

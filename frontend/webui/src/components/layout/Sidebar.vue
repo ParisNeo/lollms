@@ -15,6 +15,7 @@ import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconDatabase from '../../assets/icons/IconDatabase.vue';
+import IconShare from '../../assets/icons/IconShare.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -55,11 +56,11 @@ onMounted(() => {
         // Desktop interactions
         sidebarElement.addEventListener('mousemove', resetActivityTimer);
         sidebarElement.addEventListener('mousedown', resetActivityTimer);
-        sidebarElement.addEventListener('wheel', resetActivityTimer);
+        sidebarElement.addEventListener('wheel', resetActivityTimer, { passive: true });
         
         // Mobile interactions
-        sidebarElement.addEventListener('touchstart', resetActivityTimer);
-        sidebarElement.addEventListener('touchmove', resetActivityTimer);
+        sidebarElement.addEventListener('touchstart', resetActivityTimer, { passive: true });
+        sidebarElement.addEventListener('touchmove', resetActivityTimer, { passive: true });
         sidebarElement.addEventListener('scroll', resetActivityTimer, { passive: true });
         
         // Keyboard interactions
@@ -135,6 +136,14 @@ onUnmounted(() => {
           title="Data Studio"
         >
             <IconDatabase class="w-5 h-5 text-green-500" />
+        </router-link>
+
+        <router-link
+          to="/flow-studio"
+          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          title="Flow Studio"
+        >
+            <IconShare class="w-5 h-5 text-cyan-500" />
         </router-link>
 
         <router-link

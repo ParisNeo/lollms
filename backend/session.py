@@ -193,6 +193,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             if session_params.get("ctx_size") != ctx_size_to_enforce:
                 session_params["ctx_size"] = ctx_size_to_enforce
                 user_sessions[username]["llm_params"] = session_params
+                # Optimization: Only invalidate if ctx_size actually changed
                 user_sessions[username]["lollms_clients_cache"] = {}
 
         lc = get_user_lollms_client(username)
@@ -333,14 +334,32 @@ def load_mcps(username):
                      # Default to Lollms convention
                      mcp_full_url = f"{mcp_base_url}/mcp"
                 
-                print(f"DEBUG: MCP '{mcp.name}' resolved URL: {mcp_full_url}")
-
                 server_info = {"server_url": mcp_full_url}
                 
                 if mcp.authentication_type == "lollms_chat_auth" and access_token:
                     server_info["auth_config"] = { "type": "bearer", "token": access_token }
                 elif mcp.authentication_type == "bearer":
                     server_info["auth_config"] = { "type": "bearer", "token": mcp.authentication_key }
+                elif mcp.authentication_type == "api_key":
+                    # [FIX] Handle JSON-encoded key for header customization
+                    key = mcp.authentication_key
+                    header = "X-API-Key"
+                    
+                    if key and key.strip().startswith('{'):
+                        try:
+                            data = json.loads(key)
+                            if isinstance(data, dict):
+                                key = data.get("key", "")
+                                header = data.get("header_name", "X-API-Key")
+                        except Exception as e:
+                            print(f"Warning: Failed to parse API key JSON for {mcp.name}, treating as raw key. Error: {e}")
+                            pass
+                    
+                    server_info["auth_config"] = { 
+                        "type": "api_key", 
+                        "key": key,
+                        "header_name": header
+                    }
 
                 servers_infos[mcp.name] = server_info
             except Exception as e:
@@ -369,13 +388,15 @@ def reload_lollms_client_mcp(username: str):
     invalidate_user_mcp_cache(username)
 
 
-def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None) -> LollmsClient:
+def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None, load_mcp: bool = True) -> LollmsClient:
     session = user_sessions.get(username)
     if not session:
-        return build_lollms_client_from_params(username, binding_alias_override)
+        return build_lollms_client_from_params(username, binding_alias_override, load_mcp=load_mcp)
 
     clients_cache = session.setdefault("lollms_clients_cache", {})
     cache_key = binding_alias_override or "default"
+    if not load_mcp:
+        cache_key += "_no_mcp"
 
     if cache_key in clients_cache:
         return clients_cache[cache_key]
@@ -393,7 +414,7 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
             return clients_cache[cache_key]
 
         print(f"INFO: LollmsClient not in cache for user '{username}' with key '{cache_key}'. Building new client.")
-        client = build_lollms_client_from_params(username, binding_alias_override)
+        client = build_lollms_client_from_params(username, binding_alias_override, load_mcp=load_mcp)
         clients_cache[cache_key] = client
         return client
 
@@ -414,7 +435,8 @@ def build_lollms_client_from_params(
     load_llm: bool = True,
     load_tti: bool = False,
     load_tts: bool = False,
-    load_stt: bool = False
+    load_stt: bool = False,
+    load_mcp: bool = True
 ) -> LollmsClient:
     session = user_sessions.get(username)
     
@@ -706,7 +728,7 @@ def build_lollms_client_from_params(
         
         # Always inject MCP if we are loading LLM, as tools might be needed.
         # Even if empty, it initializes the manager in lollms_client.
-        if load_llm:
+        if load_llm and load_mcp:
             client_init_params["mcp_binding_name"] = "remote_mcp"
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 

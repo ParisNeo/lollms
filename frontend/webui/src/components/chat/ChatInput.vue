@@ -589,11 +589,12 @@ onUnmounted(() => {
         </div>
 
         <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
-            <!-- Attached Previews (User uploads only) -->
-            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-1">
+            
+            <!-- SPECIAL SELECTION ZONE: Distinctly styled area for attachments -->
+            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
                 <div v-for="(img, index) in stagedImages" :key="`staged-img-${index}`" 
                      @click="openStagedImageViewer(index)"
-                     class="relative w-16 h-16 group rounded-lg overflow-hidden border-2 transition-all shadow-sm cursor-pointer border-blue-500"
+                     class="relative w-16 h-16 group rounded-lg overflow-hidden border-2 transition-all shadow-sm cursor-pointer border-blue-500 hover:scale-105"
                      :class="{'grayscale opacity-60': !currentModelVisionSupport}">
                     <img :src="img.previewUrl" class="w-full h-full object-cover" />
                     <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1">
@@ -602,8 +603,8 @@ onUnmounted(() => {
                 </div>
 
                 <div v-for="file in attachedFiles" :key="file.title" 
-                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-all duration-200 shadow-sm"
-                     :class="file.is_loaded ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-900/30 dark:border-blue-800' : 'bg-gray-50 border-gray-200 text-gray-400 opacity-60'">
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-all duration-200 shadow-sm bg-white dark:bg-gray-800"
+                     :class="file.is_loaded ? 'border-blue-200 text-blue-700 dark:border-blue-800' : 'border-gray-200 text-gray-400 opacity-60'">
                     <button @click="toggleArtefactLoad(file)" :title="file.is_loaded ? 'Unload' : 'Load'"><IconCheckCircle v-if="file.is_loaded" class="w-4 h-4 text-blue-600"/><IconCircle v-else class="w-4 h-4" /></button>
                     <span class="truncate max-w-[150px] font-medium" :title="file.title">{{ file.title }}</span>
                     <button @click="removeArtefact(file)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Remove"><IconXMark class="w-3.5 h-3.5" /></button>

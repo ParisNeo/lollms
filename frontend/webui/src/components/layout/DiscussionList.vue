@@ -1,16 +1,19 @@
 <script setup>
-import { computed, ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router'; 
+import { computed, ref, onMounted, watch } from 'vue';
+import { useRouter, useRoute } from 'vue-router'; 
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useNotesStore } from '../../stores/notes';
 import { useNotebookStore } from '../../stores/notebooks'; 
 import { useDataStore } from '../../stores/data'; 
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
+import { useImageStore } from '../../stores/images';
+import { useFlowStore } from '../../stores/flow';
 import { storeToRefs } from 'pinia';
 import DiscussionItem from './DiscussionItem.vue';
 import DiscussionGroupItem from './DiscussionGroupItem.vue';
 import NoteList from '../notes/NoteList.vue';
+import AlbumList from '../images/AlbumList.vue';
 
 import logoDefault from '../../assets/logo.png';
 import IconHome from '../../assets/icons/IconHome.vue';
@@ -31,9 +34,11 @@ import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue'; 
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
-import IconServer from '../../assets/icons/IconServer.vue'; // For Notebooks
-import IconDatabase from '../../assets/icons/IconDatabase.vue'; // For Data Stores
+import IconServer from '../../assets/icons/IconServer.vue'; 
+import IconDatabase from '../../assets/icons/IconDatabase.vue'; 
 import IconTrash from '../../assets/icons/IconTrash.vue'; 
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconShare from '../../assets/icons/IconShare.vue';
 
 const store = useDiscussionsStore();
 const notesStore = useNotesStore();
@@ -41,19 +46,23 @@ const notebookStore = useNotebookStore();
 const dataStore = useDataStore();
 const authStore = useAuthStore();
 const uiStore = useUiStore();
+const imageStore = useImageStore();
+const flowStore = useFlowStore();
 const router = useRouter();
+const route = useRoute();
 
 const { user } = storeToRefs(authStore);
 const { isLoadingDiscussions, discussionGroupsTree, sharedWithMe, sortedDiscussions } = storeToRefs(store);
 const { notebooks } = storeToRefs(notebookStore);
 const { ownedDataStores, sharedDataStores } = storeToRefs(dataStore);
+const { flows } = storeToRefs(flowStore);
 
 const activeDiscussion = computed(() => store.activeDiscussion);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const welcomeText = computed(() => authStore.welcomeText || 'LoLLMs');
 const welcomeSlogan = computed(() => authStore.welcomeSlogan || 'One tool to rule them all');
 
-const activeTab = ref('chat'); // 'chat', 'notes', 'notebooks', or 'data'
+const activeTab = ref('chat'); // 'chat', 'notes', 'notebooks', 'data', 'images', 'flows'
 const searchTerm = ref('');
 const isSearchVisible = ref(false);
 const isSharedVisible = ref(false);
@@ -63,23 +72,32 @@ const isStarredVisible = ref(false);
 const isRootDragOver = ref(false);
 
 onMounted(() => {
-    if (notesStore.notes.length === 0) {
-        notesStore.fetchNotes();
-    }
-    if (notebookStore.notebooks.length === 0) {
-        notebookStore.fetchNotebooks();
-    }
-    if (dataStore.ownedDataStores.length === 0) {
-        dataStore.fetchDataStores();
-    }
+    if (notesStore.notes.length === 0) notesStore.fetchNotes();
+    if (notebookStore.notebooks.length === 0) notebookStore.fetchNotebooks();
+    if (dataStore.ownedDataStores.length === 0) dataStore.fetchDataStores();
+    if (imageStore.albums.length === 0) imageStore.fetchAlbums();
+    if (flowStore.flows.length === 0) flowStore.fetchFlows();
 });
+
+// Watch route changes to automatically select the correct tab
+watch(() => route.path, (path) => {
+    if (path.startsWith('/flow-studio')) {
+        activeTab.value = 'flows';
+    } else if (path.startsWith('/notebooks')) {
+        activeTab.value = 'notebooks';
+    } else if (path.startsWith('/datastores')) {
+        activeTab.value = 'data';
+    } else if (path.startsWith('/image-studio')) {
+        activeTab.value = 'images';
+    } else if (path === '/' || path.startsWith('/chat')) {
+        activeTab.value = 'chat';
+    }
+}, { immediate: true });
 
 const filteredSharedDiscussions = computed(() => {
     if (!searchTerm.value) return sharedWithMe.value;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
-    return sharedWithMe.value.filter(d => 
-        d.title.toLowerCase().includes(lowerCaseSearch)
-    );
+    return sharedWithMe.value.filter(d => d.title.toLowerCase().includes(lowerCaseSearch));
 });
 
 const filteredDiscussionTree = computed(() => {
@@ -120,6 +138,12 @@ const filteredDataStores = computed(() => {
     if (!searchTerm.value) return allStores;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
     return allStores.filter(s => s.name.toLowerCase().includes(lowerCaseSearch));
+});
+
+const filteredFlows = computed(() => {
+    if (!searchTerm.value) return flows.value;
+    const lowerCaseSearch = searchTerm.value.toLowerCase();
+    return flows.value.filter(f => f.name.toLowerCase().includes(lowerCaseSearch));
 });
 
 function handleNewGroup() {
@@ -164,7 +188,6 @@ async function handleNewItem() {
     } else if (activeTab.value === 'notes') {
         notesStore.createNote({ title: 'New Note', content: '', group_id: notesStore.activeGroupId });
     } else if (activeTab.value === 'notebooks') {
-        // [FIXED] Open the wizard instead of creating directly
         uiStore.openModal('notebookWizard');
     } else if (activeTab.value === 'data') {
         await router.push('/datastores');
@@ -172,6 +195,28 @@ async function handleNewItem() {
             const event = new CustomEvent('lollms:open-new-datastore');
             window.dispatchEvent(event);
         }, 100);
+    } else if (activeTab.value === 'images') {
+        const { confirmed, value } = await uiStore.showConfirmation({
+            title: 'New Album',
+            message: 'Enter a name for your new album:',
+            confirmText: 'Create',
+            inputType: 'text',
+            inputPlaceholder: 'Album Name'
+        });
+        if (confirmed && value) {
+            await imageStore.createAlbum(value);
+        }
+    } else if (activeTab.value === 'flows') {
+        const { confirmed, value } = await uiStore.showConfirmation({
+            title: 'New Workflow',
+            message: 'Enter a name for your new flow:',
+            confirmText: 'Create',
+            inputType: 'text',
+            inputPlaceholder: 'My Awesome Flow'
+        });
+        if (confirmed && value) {
+            await flowStore.createFlow(value);
+        }
     }
 }
 
@@ -184,6 +229,11 @@ async function openDataStore(store) {
     await router.push({ path: '/datastores', query: { storeId: store.id } });
 }
 
+async function openFlow(flow) {
+    flowStore.currentFlow = flow;
+    router.push('/flow-studio');
+}
+
 async function handleDeleteNotebook(notebook) {
     const confirmed = await uiStore.showConfirmation({
         title: `Delete Notebook "${notebook.title}"?`,
@@ -192,6 +242,17 @@ async function handleDeleteNotebook(notebook) {
     });
     if (confirmed.confirmed) {
         await notebookStore.deleteNotebook(notebook.id);
+    }
+}
+
+async function handleDeleteFlow(flow) {
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete Flow "${flow.name}"?`,
+        message: 'This will permanently delete this workflow.',
+        confirmText: 'Delete'
+    });
+    if (confirmed.confirmed) {
+        await flowStore.deleteFlow(flow.id);
     }
 }
 
@@ -233,43 +294,62 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </button>
             </div>
 
-            <!-- Tab Switcher -->
-            <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg">
+            <!-- Tab Switcher with SCROLLBAR enabled -->
+            <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto custom-scrollbar">
                 <button 
                     @click="activeTab = 'chat'" 
-                    class="flex-1 py-1.5 text-[10px] font-bold rounded-md transition-colors flex flex-col items-center justify-center"
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'chat' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Chats"
                 >
                     <IconMessage class="w-3.5 h-3.5 mb-0.5" />
-                    <span>CHATS</span>
+                    <span>CHAT</span>
                 </button>
                 <button 
                     @click="activeTab = 'notes'" 
-                    class="flex-1 py-1.5 text-[10px] font-bold rounded-md transition-colors flex flex-col items-center justify-center"
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'notes' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Notes"
                 >
                     <IconPencil class="w-3.5 h-3.5 mb-0.5" />
-                    <span>NOTES</span>
+                    <span>NOTE</span>
+                </button>
+                <button 
+                    @click="activeTab = 'images'" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'images' ? 'bg-white dark:bg-gray-900/50 text-pink-600 dark:text-pink-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Images"
+                >
+                    <IconPhoto class="w-3.5 h-3.5 mb-0.5" />
+                    <span>IMG</span>
                 </button>
                 <button 
                     @click="activeTab = 'notebooks'" 
-                    class="flex-1 py-1.5 text-[10px] font-bold rounded-md transition-colors flex flex-col items-center justify-center"
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'notebooks' ? 'bg-white dark:bg-gray-900/50 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Notebooks"
                 >
                     <IconServer class="w-3.5 h-3.5 mb-0.5" />
-                    <span>BOOKS</span>
+                    <span>BOOK</span>
                 </button>
                 <button 
                     @click="activeTab = 'data'" 
-                    class="flex-1 py-1.5 text-[10px] font-bold rounded-md transition-colors flex flex-col items-center justify-center"
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'data' ? 'bg-white dark:bg-gray-900/50 text-green-600 dark:text-green-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Data Stores"
                 >
                     <IconDatabase class="w-3.5 h-3.5 mb-0.5" />
                     <span>DATA</span>
+                </button>
+                <!-- NEW FLOWS TAB -->
+                <button 
+                    @click="activeTab = 'flows'" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'flows' ? 'bg-white dark:bg-gray-900/50 text-cyan-600 dark:text-cyan-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Workflows"
+                >
+                    <IconShare class="w-3.5 h-3.5 mb-0.5" />
+                    <span>FLOW</span>
                 </button>
             </div>
 
@@ -285,14 +365,14 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <router-link to="/news" class="btn-icon-flat" title="News">
                         <IconFileText class="h-4 w-4" />
                     </router-link>
-                    <button v-if="activeTab !== 'notebooks' && activeTab !== 'data'" @click="handleNewGroup" class="btn-icon-flat" title="New Group">
+                    <button v-if="activeTab !== 'notebooks' && activeTab !== 'data' && activeTab !== 'flows'" @click="handleNewGroup" class="btn-icon-flat" :title="activeTab === 'images' ? 'New Album' : 'New Group'">
                         <IconFolder class="w-4 h-4" />
                     </button>
                     <button v-if="activeTab === 'chat' && user && user.user_ui_level >= 4" @click="showToolbox = !showToolbox" class="btn-icon-flat" :class="{ 'bg-slate-100 dark:bg-gray-700': showToolbox }" title="Toggle Toolbox">
                         <IconAdjustmentsHorizontal class="h-4 w-4" />
                     </button>
                 </div>
-                <button @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'data' ? 'New Data Store' : 'New Notebook'))">
+                <button @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook'))))">
                     <IconPlus class="h-4 w-4" stroke-width="2.5" />
                 </button>
             </div>
@@ -395,6 +475,11 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 <NoteList :search-term="searchTerm" />
             </template>
 
+            <!-- IMAGES TAB -->
+            <template v-else-if="activeTab === 'images'">
+                <AlbumList :search-term="searchTerm" />
+            </template>
+
             <!-- NOTEBOOKS TAB -->
             <template v-else-if="activeTab === 'notebooks'">
                 <div v-if="notebookStore.isLoading" class="text-center p-4 text-gray-500">Loading notebooks...</div>
@@ -425,7 +510,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </div>
             </template>
 
-            <!-- DATA TAB (NEW) -->
+            <!-- DATA TAB -->
             <template v-else-if="activeTab === 'data'">
                 <div v-if="dataStore.isLoading" class="text-center p-4 text-gray-500">Loading stores...</div>
                 <div v-else-if="filteredDataStores.length === 0" class="empty-state-flat">
@@ -450,6 +535,42 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     </div>
                 </div>
             </template>
+            
+            <!-- FLOWS TAB (NEW) -->
+            <template v-else-if="activeTab === 'flows'">
+                <div v-if="flowStore.isLoading" class="text-center p-4 text-gray-500">Loading flows...</div>
+                <div v-else-if="filteredFlows.length === 0" class="empty-state-flat">
+                    <p class="text-base font-medium text-slate-600 dark:text-gray-300 mb-2">
+                         {{ searchTerm ? 'No matches found' : 'No workflows yet' }}
+                    </p>
+                     <p class="text-sm text-slate-500 dark:text-gray-400">
+                        Create a new workflow to automate tasks.
+                    </p>
+                </div>
+                <div v-else class="space-y-1">
+                    <div v-for="flow in filteredFlows" :key="flow.id" 
+                         class="group flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+                         :class="{'bg-cyan-50 dark:bg-cyan-900/20': flowStore.currentFlow?.id === flow.id}"
+                         @click="openFlow(flow)">
+                        <div class="flex items-center gap-3 min-w-0">
+                            <IconShare class="w-4 h-4 flex-shrink-0 text-cyan-500" />
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ flow.name }}</span>
+                                <span class="text-[10px] text-gray-500 truncate" v-if="flow.description">{{ flow.description }}</span>
+                            </div>
+                        </div>
+                        <button @click.stop="handleDeleteFlow(flow)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity" title="Delete Workflow">
+                            <IconTrash class="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            </template>
         </div>
     </div>
 </template>
+
+<style scoped>
+.custom-scrollbar::-webkit-scrollbar { height: 4px; width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+</style>

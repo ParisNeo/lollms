@@ -23,6 +23,8 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconSquares2x2 from '../../assets/icons/IconSquares2x2.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
+import IconShare from '../../assets/icons/IconShare.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -45,6 +47,7 @@ const isNotebooksActive = computed(() => route.path.startsWith('/notebooks'));
 const isImageStudioActive = computed(() => route.path.startsWith('/image-studio'));
 const isVoicesStudioActive = computed(() => route.path.startsWith('/voices-studio'));
 const isDataStoresActive = computed(() => route.path.startsWith('/datastores'));
+const isFlowStudioActive = computed(() => route.path.startsWith('/flow-studio'));
 
 const runningApps = computed(() => {
     const allServices = [...dataStore.userApps, ...dataStore.systemApps];
@@ -172,6 +175,11 @@ const vOnClickOutside = {
                                 <IconBookOpen class="h-5 w-5 text-gray-400" />
                                 <span>Help</span>
                             </router-link>
+                            
+                            <router-link to="/about" @click="closeMenu" class="menu-item flex items-center gap-3">
+                                <IconInfo class="h-5 w-5 text-gray-400" />
+                                <span>About</span>
+                            </router-link>
 
                             <button v-if="runningApps.length > 0" @click="activeSubMenu = 'apps'" class="menu-item flex items-center justify-between group">
                                 <div class="flex items-center gap-3">
@@ -244,6 +252,14 @@ const vOnClickOutside = {
                                 <div class="flex flex-col">
                                     <span class="font-bold">Data Studio</span>
                                     <span class="text-[10px] opacity-60">RAG & Knowledge</span>
+                                </div>
+                            </router-link>
+
+                            <router-link to="/flow-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isFlowStudioActive}">
+                                <IconShare class="h-5 w-5 text-cyan-500" />
+                                <div class="flex flex-col">
+                                    <span class="font-bold">Flow Studio</span>
+                                    <span class="text-[10px] opacity-60">Workflows & Logic</span>
                                 </div>
                             </router-link>
                         </div>

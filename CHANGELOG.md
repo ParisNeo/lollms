@@ -12,6 +12,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat: overhaul UI assets and enhance backend configuration
 
+## [Unreleased]
+
+- feat(core): add ImageAlbum model, admin requirement info, and extensive UI updates
+
 ## [2.1.0] - "Restart" - 2025-12-28
 
 This version marks a complete architectural evolution from the legacy `lollms_webui` (v1.16.0 "Twins"). LoLLMs is now a full-scale, multi-user AI orchestration platform.

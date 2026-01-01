@@ -13,7 +13,7 @@ import string
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
@@ -24,6 +24,7 @@ from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
+from backend.db.models.config import GlobalConfig
 from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
 from backend.session import user_sessions, build_lollms_client_from_params, get_user_data_root
@@ -31,6 +32,7 @@ from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.files import extract_text_from_file_bytes 
+from backend.utils import track_service_usage, check_rate_limit
 
 # --- Router Definition ---
 openai_v1_router = APIRouter(prefix="/v1")
@@ -222,11 +224,35 @@ def resolve_model_name(db: Session, requested_model: str) -> Tuple[str, str]:
     if binding_alias:
         return binding_alias, model_name
 
+    # If we fail to resolve, force invalidate cache so next list attempt is fresh
+    invalidate_model_cache(db)
     raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid alias.")
 
 def generate_mistral_compatible_id() -> str:
     """Generates a 9-character alphanumeric ID required by Mistral/LiteLLM."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=9))
+
+def get_cached_models(db: Session):
+    config = db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").first()
+    if config:
+        try:
+            return json.loads(config.value).get("value")
+        except: return None
+    return None
+
+def set_cached_models(db: Session, models_list: list):
+    config = db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").first()
+    val = json.dumps({"value": models_list, "type": "cache"})
+    if config:
+        config.value = val
+    else:
+        config = GlobalConfig(key="cache_available_models", value=val, category="System Cache")
+        db.add(config)
+    db.commit()
+
+def invalidate_model_cache(db: Session):
+    db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").delete()
+    db.commit()
 
 # --- END HELPER FUNCTIONS ---
 
@@ -300,6 +326,11 @@ async def get_user_from_api_key(
 
     db_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
     
+    # Rate Limit Check
+    if not check_rate_limit(api_key, "openai"):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded.")
+
+    track_service_usage("openai", user.id)
     return user
 
 # --- Helper to Extract Images and Convert Messages ---
@@ -491,7 +522,7 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
                             break
                     except: pass
     
-    # Strategy 2: Fallback to scanning raw text for JSON objects
+    # Strategy 2: Fallback to scanning raw text for JSON candidates
     if not valid_tool_call_data:
         ASCIIColors.info("Scanning raw text for JSON candidates (Fallback)...")
         candidates = extract_json_candidates(content)
@@ -563,11 +594,20 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
 
 @openai_v1_router.get("/models")
 async def list_models(
+    force_refresh: bool = Query(False, description="Force refresh of the model cache"),
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
     ASCIIColors.info(f"------------ Open AI V1 --------------")
     ASCIIColors.info(f" {user.username} is listing the models")
+    
+    # 1. Try DB Cache first (unless forced)
+    if not force_refresh:
+        cached = get_cached_models(db)
+        if cached:
+            ASCIIColors.success("Returning cached model list.")
+            return {"object": "list", "data": cached}
+
     all_models = []
     active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
     model_display_mode = settings.get("model_display_mode", "mixed")
@@ -601,7 +641,6 @@ async def list_models(
                     if model_display_mode == 'aliased':
                         if not alias_data:
                             continue
-                        # In aliased mode, use the alias title as the ID
                         if alias_data.get('title'):
                             id_to_send = alias_data.get('title')
                             name_to_send = alias_data.get('title')
@@ -611,8 +650,6 @@ async def list_models(
                             id_to_send = alias_data.get('title')
                             name_to_send = alias_data.get('title')
                     
-                    # For original mode, we keep internal_id
-
                     all_models.append({
                         "id": id_to_send,
                         "name": name_to_send,
@@ -625,11 +662,18 @@ async def list_models(
             continue
 
     if not all_models:
-        raise HTTPException(status_code=404, detail="No models found from any active bindings.")
+        # If forcing refresh, we don't error out, just return empty list to update cache
+        if not force_refresh:
+             raise HTTPException(status_code=404, detail="No models found from any active bindings.")
     
     unique_models = {m["id"]: m for m in all_models}
-    ASCIIColors.info(f"------------ DONE --------------")
-    return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
+    final_list = sorted(list(unique_models.values()), key=lambda x: x['id'])
+    
+    # Update Cache
+    set_cached_models(db, final_list)
+    ASCIIColors.info(f"------------ DONE (Cache Updated) --------------")
+    
+    return {"object": "list", "data": final_list}
 
 
 @openai_v1_router.get("/personalities", response_model=PersonalityListResponse)
@@ -665,7 +709,13 @@ async def chat_completions(
     ASCIIColors.info(f"------------ Open AI V1 --------------")
     ASCIIColors.bold(f"Received Chat Completion Request. Model: {request.model}, Stream: {request.stream}")
 
-    binding_alias, model_name = resolve_model_name(db, request.model)
+    try:
+        binding_alias, model_name = resolve_model_name(db, request.model)
+    except HTTPException as e:
+        # If model not found, invalidate cache to force refresh next time
+        if e.status_code == 400:
+            invalidate_model_cache(db)
+        raise e
 
     try:
         lc = build_lollms_client_from_params(

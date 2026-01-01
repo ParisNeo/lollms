@@ -1,5 +1,4 @@
-# [UPDATE] lollms/backend/routers/image_studio.py
-# lollms/backend/routers/image_studio.py
+# backend/routers/image_studio.py
 import base64
 import uuid
 import json
@@ -8,19 +7,20 @@ from typing import List, Optional
 from PIL import Image
 import io
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request, Form
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from werkzeug.utils import secure_filename
 from ascii_colors import trace_exception
 
 from backend.db import get_db
-from backend.db.models.image import UserImage
+from backend.db.models.image import UserImage, ImageAlbum
 from backend.models import UserAuthDetails, TaskInfo
 from backend.models.image import (
     UserImagePublic, ImageGenerationRequest, MoveImageToDiscussionRequest, 
     ImageEditRequest, ImagePromptEnhancementRequest, ImagePromptEnhancementResponse,
-    SaveCanvasRequest, TimelapseRequest
+    SaveCanvasRequest, TimelapseRequest,
+    ImageAlbumCreate, ImageAlbumUpdate, ImageAlbumPublic, MoveImageToAlbumRequest
 )
 from backend.session import (
     get_current_active_user, get_user_data_root, 
@@ -44,12 +44,95 @@ image_studio_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
-@image_studio_router.get("", response_model=List[UserImagePublic])
-async def get_user_images(
+# --- Album Management ---
+
+@image_studio_router.get("/albums", response_model=List[ImageAlbumPublic])
+async def get_albums(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    return db.query(UserImage).filter(UserImage.owner_user_id == current_user.id).order_by(UserImage.created_at.desc()).all()
+    return db.query(ImageAlbum).filter(ImageAlbum.owner_user_id == current_user.id).order_by(ImageAlbum.created_at.desc()).all()
+
+@image_studio_router.post("/albums", response_model=ImageAlbumPublic)
+async def create_album(
+    album: ImageAlbumCreate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    new_album = ImageAlbum(name=album.name, owner_user_id=current_user.id)
+    db.add(new_album)
+    db.commit()
+    db.refresh(new_album)
+    return new_album
+
+@image_studio_router.put("/albums/{album_id}", response_model=ImageAlbumPublic)
+async def update_album(
+    album_id: str,
+    album: ImageAlbumUpdate,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    db_album = db.query(ImageAlbum).filter(ImageAlbum.id == album_id, ImageAlbum.owner_user_id == current_user.id).first()
+    if not db_album:
+        raise HTTPException(status_code=404, detail="Album not found")
+    db_album.name = album.name
+    db.commit()
+    db.refresh(db_album)
+    return db_album
+
+@image_studio_router.delete("/albums/{album_id}", status_code=204)
+async def delete_album(
+    album_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    db_album = db.query(ImageAlbum).filter(ImageAlbum.id == album_id, ImageAlbum.owner_user_id == current_user.id).first()
+    if not db_album:
+        raise HTTPException(status_code=404, detail="Album not found")
+    db.delete(db_album)
+    db.commit()
+
+@image_studio_router.put("/images/{image_id}/album")
+async def move_image_to_album(
+    image_id: str,
+    payload: MoveImageToAlbumRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    image = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
+    if not image:
+        raise HTTPException(status_code=404, detail="Image not found")
+    
+    if payload.album_id:
+        album = db.query(ImageAlbum).filter(ImageAlbum.id == payload.album_id, ImageAlbum.owner_user_id == current_user.id).first()
+        if not album:
+            raise HTTPException(status_code=404, detail="Album not found")
+        image.album_id = payload.album_id
+    else:
+        image.album_id = None
+        
+    db.commit()
+    return {"message": "Image moved successfully"}
+
+# --- Image Management ---
+
+@image_studio_router.get("", response_model=List[UserImagePublic])
+async def get_user_images(
+    album_id: Optional[str] = None,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    query = db.query(UserImage).filter(UserImage.owner_user_id == current_user.id)
+    if album_id:
+        query = query.filter(UserImage.album_id == album_id)
+    else:
+        # Optional: Decide if default view shows ALL images or only ungrouped. 
+        # Usually "All Photos" shows everything. 
+        # If we pass explicit 'none' string, filter for null.
+        if album_id == 'none':
+            query = query.filter(UserImage.album_id == None)
+            
+    return query.order_by(UserImage.created_at.desc()).all()
 
 @image_studio_router.get("/{image_id}/file")
 async def get_image_file(
@@ -57,18 +140,12 @@ async def get_image_file(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    # Allow fetching by ID (database lookup) OR by filename (direct path check if ID format is filename)
     image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
-    
     filename = image_record.filename if image_record else image_id
-    
-    # Sanitize to ensure user stays within their dir
     filename = secure_filename(filename)
-    
     file_path = get_user_images_path(current_user.username) / filename
     if not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found on disk.")
-        
     return FileResponse(str(file_path))
 
 @image_studio_router.post("/save-canvas", response_model=UserImagePublic)
@@ -87,7 +164,6 @@ async def save_canvas_as_new_image(
         if payload.drawing_b64:
             drawing_bytes = base64.b64decode(payload.drawing_b64)
             drawing_img = Image.open(io.BytesIO(drawing_bytes)).convert("RGBA")
-            # Ensure drawing is the same size as the base
             if drawing_img.size != base_img.size:
                 drawing_img = drawing_img.resize(base_img.size, Image.Resampling.LANCZOS)
             final_img = Image.alpha_composite(base_img, drawing_img)
@@ -116,7 +192,6 @@ async def save_canvas_as_new_image(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to save canvas: {e}")
 
-
 @image_studio_router.post("/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def generate_image(
     request: Request,
@@ -125,7 +200,7 @@ async def generate_image(
     request_data = await request.json()
     model_full_name = request_data.get("model") or current_user.tti_binding_model_name
     if not model_full_name or '/' not in model_full_name:
-        raise HTTPException(status_code=400, detail="A valid TTI model must be selected in your settings or provided in the request.")
+        raise HTTPException(status_code=400, detail="A valid TTI model must be selected.")
 
     db_task = task_manager.submit_task(
         name=f"Generating {request_data.get('n', 1)} image(s): {request_data.get('prompt', '')[:30]}...",
@@ -135,7 +210,6 @@ async def generate_image(
         owner_username=current_user.username
     )
     return db_task
-
 
 @image_studio_router.post("/edit", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def edit_image(
@@ -159,11 +233,19 @@ async def edit_image(
 @image_studio_router.post("/upload", response_model=List[UserImagePublic])
 async def upload_images(
     files: List[UploadFile] = File(...),
+    album_id: Optional[str] = Form(None), # Allow upload directly to album
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     user_images_path = get_user_images_path(current_user.username)
     new_images_db = []
+    
+    target_album_id = None
+    if album_id and album_id != 'null' and album_id != 'undefined':
+        # Verify ownership
+        album = db.query(ImageAlbum).filter(ImageAlbum.id == album_id, ImageAlbum.owner_user_id == current_user.id).first()
+        if album: target_album_id = album.id
+
     for file in files:
         s_filename = secure_filename(file.filename)
         filename = f"{uuid.uuid4().hex}_{s_filename}"
@@ -177,7 +259,8 @@ async def upload_images(
             id=str(uuid.uuid4()),
             owner_user_id=current_user.id,
             filename=filename,
-            prompt="Uploaded image"
+            prompt="Uploaded image",
+            album_id=target_album_id
         )
         db.add(new_image)
         new_images_db.append(new_image)
