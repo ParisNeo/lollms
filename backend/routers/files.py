@@ -7,6 +7,9 @@ import uuid
 import os
 import tempfile
 import requests
+import socket
+import ipaddress
+from urllib.parse import urlparse
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional
 
@@ -281,6 +284,42 @@ def md2_to_html(md_text: str) -> str:
     ]
     return markdown2.markdown(md_text, extras=extras)
 
+def _validate_url(url: str):
+    """
+    Validates a URL to prevent SSRF attacks.
+    Ensures the scheme is http/https and the host is not a private/local IP.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            raise ValueError(f"Invalid scheme: {parsed.scheme}")
+            
+        hostname = parsed.hostname
+        if not hostname:
+             raise ValueError("Invalid hostname")
+
+        # 1. Check if hostname is an IP address
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
+                raise ValueError(f"Access to local/private IP {hostname} is forbidden.")
+            if ip.is_multicast or ip.is_reserved:
+                 raise ValueError(f"Access to restricted IP {hostname} is forbidden.")
+        except ValueError:
+            # 2. Not an IP, resolve domain to check IP
+            try:
+                addr_info = socket.getaddrinfo(hostname, None)
+                for family, _, _, _, sockaddr in addr_info:
+                    ip_str = sockaddr[0]
+                    ip = ipaddress.ip_address(ip_str)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
+                         raise ValueError(f"Domain {hostname} resolves to private IP {ip_str}.")
+            except socket.gaierror:
+                pass # DNS resolution failed, requests will likely fail too
+                
+    except Exception as e:
+        raise ValueError(f"URL validation failed: {str(e)}")
+
 def _download_image_to_temp(src: str) -> str:
     if src.startswith("data:"):
         head, b64data = src.split(",", 1)
@@ -294,6 +333,16 @@ def _download_image_to_temp(src: str) -> str:
         tf.write(data)
         tf.flush(); tf.close()
         return tf.name
+    
+    # SECURITY: Validate URL before making request
+    try:
+        _validate_url(src)
+    except ValueError as e:
+        print(f"SSRF Protection prevented access to: {src}. Reason: {e}")
+        # Return a placeholder or fail gracefully?
+        # Creating a dummy text file or raising exception is safer
+        raise e
+
     r = requests.get(src, timeout=10)
     r.raise_for_status()
     ext = os.path.splitext(src)[1] or ".png"
@@ -390,8 +439,10 @@ def html_to_docx_bytes(html: str) -> bytes:
             try:
                 tmp = _download_image_to_temp(src)
                 doc.add_picture(tmp, width=Inches(5.5))
-            except Exception:
-                doc.add_paragraph(alt)
+            except Exception as e:
+                # Add text placeholder if image fails (e.g. blocked by SSRF check)
+                print(f"Failed to add image to DOCX: {e}")
+                doc.add_paragraph(f"[Image: {alt} - Could not be loaded]")
             finally:
                 try:
                     if tmp and os.path.exists(tmp): os.unlink(tmp)
