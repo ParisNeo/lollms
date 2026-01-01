@@ -124,6 +124,15 @@ async def respond_request(friendship_id: int, data: FriendshipAction, current_db
     fs = db.query(Friendship).filter(Friendship.id == friendship_id).first()
     if not fs: raise HTTPException(404, "Request not found")
     
+    # Authorization Check 1: Is user involved in this friendship?
+    if current_db_user.id not in (fs.user1_id, fs.user2_id):
+        raise HTTPException(403, "You are not authorized to respond to this request")
+    
+    # Authorization Check 2: Is user the recipient (not the requester)?
+    # action_user_id is the user who initiated the request. The responder must be the other party.
+    if fs.action_user_id == current_db_user.id:
+        raise HTTPException(400, "You cannot respond to your own request")
+
     if data.action == 'accept':
         fs.status = FriendshipStatus.ACCEPTED
         fs.action_user_id = current_db_user.id
