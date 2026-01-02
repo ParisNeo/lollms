@@ -27,7 +27,8 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat: overhaul UI assets and enhance backend configuration
 
-## [Unreleased]
+#
+- chore(deps): bump lollms-client from 1.9.1 to 1.9.2# [Unreleased]
 
 - feat(flow-studio): add comprehensive Flow Studio UI and backend updates
 
