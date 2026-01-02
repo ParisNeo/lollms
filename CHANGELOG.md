@@ -22,7 +22,8 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(files): add SSRF protection with URL validation for image downloads
 
-## [Unreleased]
+#
+- chore(deps): bump lollms-client from 1.9.0 to 1.9.1# [Unreleased]
 
 - feat: overhaul UI assets and enhance backend configuration
 
