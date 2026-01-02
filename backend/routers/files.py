@@ -507,7 +507,10 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
     create a pure image slide deck.
     """
     prs = Presentation()
-    
+    # Set to 16:9
+    prs.slide_width = PptxInches(13.3333)
+    prs.slide_height = PptxInches(7.5)
+
     # --- Helper: Add Title Slide ---
     def add_title_slide(title, subtitle=""):
         slide_layout = prs.slide_layouts[0] # Title Slide

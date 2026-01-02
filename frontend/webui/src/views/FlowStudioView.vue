@@ -18,6 +18,7 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 
 const showCreator = ref(false);
+const editorRef = ref(null);
 const isAdmin = computed(() => authStore.isAdmin);
 
 onMounted(() => {
@@ -36,7 +37,10 @@ async function saveCurrentFlow() {
 async function runFlow() { 
     if (flowStore.currentFlow) { 
         await saveCurrentFlow(); 
-        await flowStore.executeFlow(flowStore.currentFlow.id); 
+        // Trigger the runner modal inside the editor
+        if (editorRef.value) {
+            editorRef.value.openRunner();
+        }
     } 
 }
 </script>
@@ -67,7 +71,7 @@ async function runFlow() {
         <div class="flex-grow relative bg-gray-100 dark:bg-gray-900 overflow-hidden">
             <Suspense>
                 <template #default>
-                    <FlowEditor v-if="flowStore.currentFlow" :flow="flowStore.currentFlow" />
+                    <FlowEditor ref="editorRef" v-if="flowStore.currentFlow" :flow="flowStore.currentFlow" />
                     <div v-else class="flex flex-col items-center justify-center h-full text-gray-400">
                         <IconShare class="w-16 h-16 mb-4 opacity-50" />
                         <p class="text-lg font-medium">Select or create a flow from the sidebar.</p>

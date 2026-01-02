@@ -333,10 +333,27 @@ def delete_flow(
     db.commit()
     return {"message": "Flow deleted"}
 
-def _execute_flow_task(task: Task, username: str, flow_id: str, graph_data: dict):
+def _execute_flow_task(task: Task, username: str, flow_id: str, graph_data: dict, inputs: dict = None):
     task.log(f"Initializing Flow Engine for user: {username}")
     engine = FlowEngine(username)
     
+    # Inject runtime inputs into graph data
+    if inputs:
+        # Create a quick lookup map
+        node_map = {n['id']: n for n in graph_data.get('nodes', [])}
+        
+        for node_id, node_inputs in inputs.items():
+            if node_id in node_map:
+                # Assuming node['data'] holds the static values for inputs
+                if 'data' not in node_map[node_id]:
+                    node_map[node_id]['data'] = {}
+                
+                # Merge runtime inputs into the node's static data configuration
+                # This allows the engine to pick them up as if they were configured
+                node_map[node_id]['data'].update(node_inputs)
+        
+        task.log(f"Injected runtime inputs for {len(inputs)} nodes.")
+
     task.log("Starting execution...")
     task.set_progress(10)
     
@@ -358,7 +375,7 @@ def _execute_flow_task(task: Task, username: str, flow_id: str, graph_data: dict
                 clean_val = val
             serializable_results[nid] = clean_val
                 
-        task.log(f"Execution completed. Results keys: {list(serializable_results.keys())}")
+        task.log(f"Execution completed.")
         return serializable_results
     except Exception as e:
         task.log(f"Execution failed: {str(e)}", level="ERROR")
@@ -374,10 +391,13 @@ def execute_flow(
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
 
+    # If inputs are provided, we use the graph stored in DB but inject the inputs.
+    # The _execute_flow_task will handle the merge on a copy of the graph data in memory.
+    
     task = task_manager.submit_task(
         name=f"Execute Flow: {flow.name}",
         target=_execute_flow_task,
-        args=(current_user.username, flow.id, flow.data),
+        args=(current_user.username, flow.id, flow.data, request.inputs),
         description=f"Running workflow {flow.id}",
         owner_username=current_user.username
     )

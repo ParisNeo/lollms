@@ -333,6 +333,9 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         connection.commit()
         # Bootstrap default nodes if empty
         _bootstrap_default_nodes(connection)
+    else:
+        # Check if we need to update existing definitions (Version control for nodes)
+        _bootstrap_default_nodes(connection)
     # -------------------------------------------------------------
 
     # ------------------ NEW MIGRATION FOR IMAGE ALBUMS ------------------
@@ -1189,82 +1192,161 @@ def _bootstrap_default_nodes(connection):
     from sqlalchemy import text
     import uuid
     
-    # Simple Python Executor
-    code_python = """
-class CustomNode:
-    def execute(self, inputs, context):
-        # inputs is a dict of values
-        # context contains 'engine' and 'lollms_client'
-        return {"output": inputs.get("input", "")}
-"""
-    # LLM Generator
-    code_llm = """
-class CustomNode:
-    def execute(self, inputs, context):
-        prompt = inputs.get("prompt", "")
-        system = inputs.get("system_prompt", "")
-        if not prompt: return {"text": ""}
-        client = context.lollms_client
-        return {"text": client.generate_text(prompt, system_prompt=system)}
-"""
-    # If/Else Branching
-    code_branch = """
-class CustomNode:
-    def execute(self, inputs, context):
-        condition = inputs.get("condition", False)
-        # We return the branch name to follow, or just data
-        # For this engine, we interpret boolean output as flow control if needed
-        return {"true_path": inputs.get("data") if condition else None, "false_path": inputs.get("data") if not condition else None}
-"""
-
+    # ------------------ DEFINE NODES ------------------
     nodes = [
         {
-            "id": str(uuid.uuid4()), "name": "input_text", "label": "Input Text",
+            "name": "input_text", "label": "Text Input", "class_name": "CustomNode", "is_public": True,
+            "description": "Standard node to provide manual text input to the workflow.",
             "inputs": [], "outputs": [{"name": "text", "type": "string"}],
             "color": "bg-blue-100 dark:bg-blue-900 border-blue-500",
             "code": "class CustomNode:\n    def execute(self, inputs, ctx):\n        return {'text': inputs.get('value', '')}"
         },
         {
-            "id": str(uuid.uuid4()), "name": "llm_generate", "label": "LLM Gen",
-            "inputs": [{"name": "prompt", "type": "string"}, {"name": "system_prompt", "type": "string"}],
-            "outputs": [{"name": "text", "type": "string"}],
+            "name": "llm_generate", "label": "Text Generator", "class_name": "CustomNode", "is_public": True,
+            "description": "Generates text using the primary LLM binding.",
+            "inputs": [{"name": "prompt", "type": "string"}, {"name": "system_prompt", "type": "string", "optional": True}],
+            "outputs": [{"name": "generated_text", "type": "string"}],
             "color": "bg-purple-100 dark:bg-purple-900 border-purple-500",
-            "code": code_llm
+            "code": """
+class CustomNode:
+    def execute(self, inputs, context):
+        prompt = inputs.get("prompt", "")
+        system = inputs.get("system_prompt", "")
+        if not prompt: return {"generated_text": ""}
+        client = context.lollms_client
+        return {"generated_text": client.generate_text(prompt, system_prompt=system)}
+"""
         },
         {
-            "id": str(uuid.uuid4()), "name": "loop_executor", "label": "Loop",
-            "description": "Executes a target node N times.",
-            "inputs": [{"name": "target_node", "type": "node_ref"}, {"name": "iterations", "type": "int"}, {"name": "start_value", "type": "any"}],
-            "outputs": [{"name": "results", "type": "list"}],
+            "name": "text_to_image", "label": "Image Generator", "class_name": "CustomNode", "is_public": True,
+            "description": "Generates images from text using the configured TTI binding.",
+            "inputs": [{"name": "prompt", "type": "string"}, {"name": "width", "type": "int", "default": 1024}, {"name": "height", "type": "int", "default": 1024}],
+            "outputs": [{"name": "image_b64", "type": "string"}],
+            "color": "bg-pink-100 dark:bg-pink-900 border-pink-500",
+            "code": """
+class CustomNode:
+    def execute(self, inputs, context):
+        prompt = inputs.get("prompt", "")
+        if not prompt: return {"image_b64": ""}
+        client = context.lollms_client
+        if not client.tti: raise Exception("No TTI binding configured")
+        img_bytes = client.tti.generate_image(prompt, width=inputs.get('width', 1024), height=inputs.get('height', 1024))
+        import base64
+        return {"image_b64": base64.b64encode(img_bytes).decode('utf-8')}
+"""
+        },
+        {
+            "name": "text_to_speech", "label": "Voice Generator", "class_name": "CustomNode", "is_public": True,
+            "description": "Converts text to speech audio using the configured TTS binding.",
+            "inputs": [{"name": "text", "type": "string"}, {"name": "voice", "type": "string", "optional": True}],
+            "outputs": [{"name": "audio_b64", "type": "string"}],
             "color": "bg-orange-100 dark:bg-orange-900 border-orange-500",
             "code": """
 class CustomNode:
     def execute(self, inputs, context):
-        target_node_id = inputs.get("target_node")
-        count = int(inputs.get("iterations", 1))
-        val = inputs.get("start_value")
-        results = []
+        text = inputs.get("text", "")
+        if not text: return {"audio_b64": ""}
+        client = context.lollms_client
+        if not client.tts: raise Exception("No TTS binding configured")
+        audio_bytes = client.tts.generate_audio(text, voice=inputs.get('voice'))
+        import base64
+        return {"audio_b64": base64.b64encode(audio_bytes).decode('utf-8')}
+"""
+        },
+        {
+            "name": "datastore_query", "label": "RAG Query", "class_name": "CustomNode", "is_public": True,
+            "description": "Queries a Data Store and returns relevant document chunks.",
+            "inputs": [{"name": "datastore_id", "type": "string"}, {"name": "query", "type": "string"}, {"name": "top_k", "type": "int", "default": 5}],
+            "outputs": [{"name": "context", "type": "string"}, {"name": "sources", "type": "list"}],
+            "color": "bg-green-100 dark:bg-green-900 border-green-500",
+            "code": """
+class CustomNode:
+    def execute(self, inputs, context):
+        ds_id = inputs.get("datastore_id")
+        query = inputs.get("query", "")
+        if not ds_id or not query: return {"context": "", "sources": []}
         
-        if not target_node_id: return {"results": []}
-        
-        # Access the engine to run sub-nodes
-        engine = context.engine
-        
-        for i in range(count):
-            # Execute the node referenced by ID. 
-            # We assume the target node takes 'input' and 'index'
-            res = engine.execute_node_isolated(target_node_id, {"input": val, "index": i})
-            # Assuming target returns 'output'
-            if isinstance(res, dict) and 'output' in res:
-                val = res['output'] # Chained loop
-            results.append(val)
-            
-        return {"results": results}
+        from backend.session import get_safe_store_instance
+        db = next(context.engine.db_session_factory())
+        try:
+            ss = get_safe_store_instance(context.owner_username, ds_id, db)
+            results = ss.query(query, top_k=inputs.get('top_k', 5))
+            chunks = [r['chunk_text'] for r in results]
+            return {"context": "\\n---\\n".join(chunks), "sources": results}
+        finally:
+            db.close()
+"""
+        },
+        {
+            "name": "web_search", "label": "Web Search", "class_name": "CustomNode", "is_public": True,
+            "description": "Performs a live web search using DuckDuckGo.",
+            "inputs": [{"name": "query", "type": "string"}],
+            "outputs": [{"name": "results", "type": "list"}, {"name": "summary", "type": "string"}],
+            "color": "bg-cyan-100 dark:bg-cyan-900 border-cyan-500",
+            "code": """
+class CustomNode:
+    def execute(self, inputs, context):
+        query = inputs.get("query", "")
+        if not query: return {"results": [], "summary": ""}
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                results = [r for r in ddgs.text(query, max_results=5)]
+                summary = "\\n".join([f"- {r['title']}: {r['body']}" for r in results])
+                return {"results": results, "summary": summary}
+        except Exception as e:
+            return {"results": [], "summary": f"Search failed: {e}"}
 """
         }
     ]
-    
-    # Insert logic (simplified)
-    # in real usage, we use SQLAlchemy models, but here raw SQL or core insert for migration safety
-    # skipping full implementation to save space, assuming API creation is primary method.
-    pass
+
+    # ------------------ SYNC WITH DB ------------------
+    for node in nodes:
+        # Check if exists
+        existing = connection.execute(
+            text("SELECT id FROM flow_node_definitions WHERE name = :name"),
+            {"name": node["name"]}
+        ).first()
+
+        if existing:
+            # Update
+            connection.execute(
+                text("""
+                    UPDATE flow_node_definitions 
+                    SET label = :label, class_name = :class_name, description = :description, is_public = :is_public, 
+                        inputs = :inputs, outputs = :outputs, color = :color, code = :code 
+                    WHERE name = :name
+                """),
+                {
+                    "name": node["name"],
+                    "label": node["label"],
+                    "class_name": node["class_name"],
+                    "description": node["description"],
+                    "is_public": node["is_public"],
+                    "inputs": json.dumps(node["inputs"]),
+                    "outputs": json.dumps(node["outputs"]),
+                    "color": node["color"],
+                    "code": node["code"]
+                }
+            )
+        else:
+            # Insert
+            connection.execute(
+                text("""
+                    INSERT INTO flow_node_definitions (id, name, label, class_name, description, is_public, inputs, outputs, color, code)
+                    VALUES (:id, :name, :label, :class_name, :description, :is_public, :inputs, :outputs, :color, :code)
+                """),
+                {
+                    "id": str(uuid.uuid4()),
+                    "name": node["name"],
+                    "label": node["label"],
+                    "class_name": node["class_name"],
+                    "description": node["description"],
+                    "is_public": node["is_public"],
+                    "inputs": json.dumps(node["inputs"]),
+                    "outputs": json.dumps(node["outputs"]),
+                    "color": node["color"],
+                    "code": node["code"]
+                }
+            )
+    connection.commit()

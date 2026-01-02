@@ -3,7 +3,8 @@ import { ref, watch, onMounted, computed } from 'vue';
 import { useFlowStore } from '../../stores/flow';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
-import NodeCreatorModal from './NodeCreatorModal.vue'; // Direct import for stability
+import NodeCreatorModal from './NodeCreatorModal.vue'; 
+import FlowRunnerModal from './FlowRunnerModal.vue'; // IMPORTED
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
@@ -22,6 +23,7 @@ const isDraggingCanvas = ref(false), isDraggingNode = ref(false), draggedNodeId 
 const isLinking = ref(false), linkStart = ref(null), mousePos = ref({ x: 0, y: 0 });
 
 const showNodeEditor = ref(false);
+const showRunnerModal = ref(false); // NEW
 const nodeToEdit = ref(null);
 const showTutorial = ref(false);
 
@@ -93,7 +95,6 @@ function isInputConnected(nodeId, handleName) {
 }
 
 function openEditNode(nodeDef) {
-    console.log("Opening edit for node definition:", nodeDef.name);
     nodeToEdit.value = JSON.parse(JSON.stringify(nodeDef));
     showNodeEditor.value = true;
 }
@@ -108,7 +109,7 @@ function addNode(typeDef) {
         label: typeDef.label,
         x: viewCenterX > 0 ? viewCenterX : 50,
         y: viewCenterY > 0 ? viewCenterY : 50,
-        data: {},
+        data: {}, // Data will hold manual input values
         inputs: typeDef.inputs.map(i => i.name),
         outputs: typeDef.outputs.map(o => o.name),
         color: typeDef.color
@@ -180,6 +181,11 @@ const activeLinkPath = computed(() => {
     const d = Math.abs(e.x - s.x) * 0.5;
     return `M ${s.x} ${s.y} C ${s.x + (linkStart.value.type==='output'?d:-d)} ${s.y}, ${e.x - (linkStart.value.type==='output'?d:-d)} ${e.y}, ${e.x} ${e.y}`;
 });
+
+// Expose openRunner for the parent view to call
+defineExpose({
+    openRunner: () => showRunnerModal.value = true
+});
 </script>
 
 <template>
@@ -248,9 +254,11 @@ const activeLinkPath = computed(() => {
                                 @mouseup.stop="endLink($event, n.id, i, 'input')" 
                                 :title="getNodeInputType(n.type, i)"
                             ></div>
-                            <span class="text-[10px] text-gray-500 ml-1 truncate flex-1 select-none">{{ i }}</span>
+                            <span class="text-[10px] text-gray-500 ml-1 truncate flex-1 select-none" :title="i">{{ i }}</span>
                             
+                            <!-- [MODIFIED] Dynamic Input Rendering based on type -->
                             <template v-if="!isInputConnected(n.id, i)">
+                                <!-- Model Selector -->
                                 <select v-if="getNodeInputType(n.type, i) === 'model_selection'"
                                         v-model="n.data[i]"
                                         class="ml-auto w-24 h-5 text-[9px] border rounded px-0 bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:outline-none"
@@ -259,7 +267,27 @@ const activeLinkPath = computed(() => {
                                         <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }}</option>
                                     </optgroup>
                                 </select>
-                                <input v-else-if="['input_text', 'combiner', 'loop_executor'].includes(n.type) || n.type.includes('generate')" 
+                                
+                                <!-- Boolean Toggle -->
+                                <input v-else-if="getNodeInputType(n.type, i) === 'boolean'"
+                                       type="checkbox"
+                                       v-model="n.data[i]"
+                                       class="ml-auto w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                       @mousedown.stop
+                                />
+                                
+                                <!-- Numeric Input -->
+                                <input v-else-if="getNodeInputType(n.type, i) === 'int' || getNodeInputType(n.type, i) === 'float'"
+                                       type="number"
+                                       v-model.number="n.data[i]" 
+                                       :step="getNodeInputType(n.type, i) === 'float' ? 'any' : '1'"
+                                       class="ml-auto w-16 h-5 text-[9px] border rounded px-1 bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:outline-none"
+                                       placeholder="0" 
+                                       @mousedown.stop 
+                                />
+                                
+                                <!-- Generic Text Input (Default) -->
+                                <input v-else
                                        v-model="n.data[i]" 
                                        class="ml-auto w-20 h-5 text-[9px] border rounded px-1 bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:outline-none"
                                        placeholder="Val" 
@@ -289,6 +317,17 @@ const activeLinkPath = computed(() => {
             <NodeCreatorModal v-if="showNodeEditor" :nodeToEdit="nodeToEdit" @close="showNodeEditor = false; nodeToEdit = null;" />
         </Teleport>
 
+        <!-- Runner Modal -->
+        <Teleport to="body">
+            <FlowRunnerModal 
+                v-if="showRunnerModal" 
+                :flowData="flow.data" 
+                :flowId="flow.id" 
+                :flowName="flow.name"
+                @close="showRunnerModal = false" 
+            />
+        </Teleport>
+
         <!-- Tutorial Modal -->
         <Teleport to="body">
             <div v-if="showTutorial" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -300,7 +339,7 @@ const activeLinkPath = computed(() => {
                             <li><strong>Add Nodes:</strong> Drag items from the left palette onto the canvas.</li>
                             <li><strong>Connect:</strong> Drag from an output circle (right) to an input circle (left). Match colors for data types!</li>
                             <li><strong>Configure:</strong> Type values directly into input fields or use selectors on nodes. If a link is connected, the widget hides.</li>
-                            <li><strong>Run:</strong> Click "Run Flow" in the top bar to execute.</li>
+                            <li><strong>Run:</strong> Click "Run Flow" in the top bar to test your flow with Auto-UI or as a Service.</li>
                             <li><strong>Admins:</strong> Can define custom node logic using Python by clicking the Pencil icon or "Define Node".</li>
                         </ul>
                     </div>

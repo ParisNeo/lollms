@@ -1,4 +1,3 @@
-// frontend/webui/src/stores/discussions.js
 import { defineStore, storeToRefs } from 'pinia';
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import apiClient from '../services/api'; // Import apiClient
@@ -63,6 +62,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     // --- WATCHER for task updates ---
+    // [OPTIMIZATION] Removed { deep: true } to prevent performance freeze on large task lists.
+    // The tasks store uses shallowRef and replaces the array reference on updates, so deep watch is unnecessary.
     watch(tasks, async (newTasks) => {
         const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
         if (activeTrackedTaskIds.length === 0) return;
@@ -92,7 +93,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 }
             }
         }
-    }, { deep: true });
+    });
 
     // NEW WATCHER: Watch for model changes to refresh context status
     watch(() => user.value?.lollms_model_name, (newModel, oldModel) => {

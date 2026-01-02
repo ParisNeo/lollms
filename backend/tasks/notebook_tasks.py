@@ -7,12 +7,13 @@ from datetime import datetime
 from typing import List, Optional, Any
 from sqlalchemy.orm.attributes import flag_modified
 
+from lollms_client import MSG_TYPE
 from backend.db.models.notebook import Notebook as DBNotebook
 from backend.session import get_user_lollms_client, build_lollms_client_from_params, get_user_notebook_assets_path
 from backend.task_manager import Task
 from ascii_colors import trace_exception
 
-def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: str, input_tab_ids: List[str], action: str, target_tab_id: Optional[str] = None):
+def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: str, input_tab_ids: List[str], action: str, target_tab_id: Optional[str] = None, skip_llm: bool = False, generate_speech: bool = False):
     task.log(f"Starting notebook processing: {action}")
     task.set_progress(5)
     
@@ -87,6 +88,10 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                     "2. Subsequent slides should cover the topic in a logical narrative flow.\n"
                     "3. **The Final Slide MUST be a Conclusion or Thank You slide**.\n"
                 )
+                
+                speech_key = ""
+                if generate_speech:
+                    speech_key = ', "speech": "Script for the presenter"'
 
                 if slide_mode == 'image_only':
                     system_prompt = "You are an AI Art Director creating a full-visual presentation."
@@ -95,7 +100,7 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                         "Generate a JSON list of detailed image prompts for each slide. "
                         "The image prompt MUST describe the textual content to appear in the image itself (e.g. 'A futuristic billboard displaying the text \"Welcome\"', or 'A diagram of X with labels'). "
                         "Since this is an image-only presentation, do NOT provide separate bullet points. The text must be integrated into the visual description.\n"
-                        "Format: `[ { \"title\": \"Slide Title\", \"image_prompt\": \"...\" }, ... ]`"
+                        f"Format: `[ {{ \"title\": \"Slide Title\", \"image_prompt\": \"...\"{speech_key} }}, ... ]`"
                     )
                 elif slide_mode == 'hybrid':
                     system_prompt = "You are a Presentation Designer."
@@ -103,13 +108,13 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                         f"{structure_instruction}\n"
                         "Generate a structured JSON for a slide deck. "
                         "Layouts: 'TitleBody', 'TitleImageBody'. "
-                        "Format: `[ { \"layout\": \"TitleImageBody\", \"title\": \"...\", \"bullets\": [\"...\"], \"image_prompt\": \"...\" } ]`"
+                        f"Format: `[ {{ \"layout\": \"TitleImageBody\", \"title\": \"...\", \"bullets\": [\"...\"], \"image_prompt\": \"...\"{speech_key} }} ]`"
                     )
                 else: 
                     system_prompt = "You are a Presentation Copywriter."
                     contextual_prompt = (
                         f"{structure_instruction}\n"
-                        "Generate JSON: `[ { \"title\": \"...\", \"bullets\": [\"...\"] } ]`"
+                        f"Generate JSON: `[ {{ \"title\": \"...\", \"bullets\": [\"...\"]{speech_key} }} ]`"
                     )
 
                 if global_style_prompt:
@@ -135,6 +140,10 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                         f"Return ONLY the updated JSON object for this single slide.\n"
                         f"[INSTRUCTION]\n{instruction}"
                     )
+                    
+                    if generate_speech:
+                         contextual_prompt += "\nMake sure to update or add the 'speech' field with presenter notes."
+
                 except Exception as e:
                     raise ValueError(f"Invalid update instruction format: {e}")
 
@@ -169,28 +178,39 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                     f"Return ONLY a JSON list containing 1 image prompt string.\n"
                     f"[INSTRUCTION]\n{slide_instruction}"
                 )
+            
+            elif action == 'edit_image' and target_tab:
+                # Direct Edit Action (Img2Img) - Skip LLM generation, go straight to TTI
+                pass
 
             else:
                 contextual_prompt = f"{prompt}\n\nAnswer in Markdown."
             
             def stream_cb(chunk, msg_type=None, **kwargs):
                 if task.cancellation_event.is_set(): return False
+                if msg_type == MSG_TYPE.MSG_TYPE_INFO:
+                    task.log(f"AI Info: {chunk}")
                 return True
 
-            task.log("Sending request to AI (Long Context Processing)...")
-            
-            # Use long_context_processing
-            response_text = lc.long_context_processing(
-                text_to_process=text_to_process,
-                contextual_prompt=contextual_prompt,
-                system_prompt=system_prompt,
-                streaming_callback=stream_cb
-            )
-            
-            task.set_progress(60)
+            response_text = ""
+            result_data = None
+
+            # Skip LLM for direct image actions if prompts are sufficient
+            if action != 'edit_image' and not (action == 'images' and skip_llm):
+                task.log("Sending request to AI (Long Context Processing)...")
+                response_text = lc.long_context_processing(
+                    text_to_process=text_to_process,
+                    contextual_prompt=contextual_prompt,
+                    system_prompt=system_prompt,
+                    streaming_callback=stream_cb
+                )
+                task.set_progress(60)
+            else:
+                # If skipping LLM, user input IS the prompt
+                response_text = prompt
+                task.log("Skipping AI text processing, using prompt directly.")
 
             # 5. Handle Results
-            result_data = None
             
             if is_slide_generation:
                 import re
@@ -223,7 +243,7 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                                 img_p = slide.get('image_prompt', '')
                                 if img_p:
                                     final_p = f"{img_p}, {global_style_prompt}".strip()
-                                    task.log(f"Generating visual {i+1}/{total}...")
+                                    task.log(f"Generating visual {i+1}/{total}: {final_p[:30]}...")
                                     try:
                                         img_bytes = lc_tti.tti.generate_image(final_p, width=width, height=height)
                                         if img_bytes:
@@ -243,7 +263,8 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                                 "bullets": slide.get('bullets', []),
                                 "images": img_list,
                                 "selected_image_index": 0,
-                                "image_prompt": slide.get('image_prompt', '')
+                                "image_prompt": slide.get('image_prompt', ''),
+                                "speech": slide.get('speech', '')
                             })
                             task.set_progress(60 + int((i+1)/total*35))
 
@@ -286,20 +307,29 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                     width = int(slide_format.get('width', 1024))
                     height = int(slide_format.get('height', 768))
                     try:
-                        # Parse regex from LLM response if it returned JSON
-                        import re
-                        image_prompt = response_text.strip() # Default to raw text if no JSON found
-                        json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
-                        if json_match:
-                            try:
-                                prompt_list = json.loads(json_match.group(0))
-                                if prompt_list and len(prompt_list) > 0:
-                                    image_prompt = prompt_list[0]
-                            except: pass
+                        image_prompt = response_text.strip() # Default
                         
-                        # Clean up prompt if it captured the instruction by mistake (unlikely with improved prompt)
+                        # Only parse JSON if we actually used the LLM to generate it.
+                        if not skip_llm:
+                            import re
+                            json_match = re.search(r'\[.*\]', response_text, re.DOTALL)
+                            if json_match:
+                                try:
+                                    prompt_list = json.loads(json_match.group(0))
+                                    if prompt_list and len(prompt_list) > 0:
+                                        image_prompt = prompt_list[0]
+                                except: pass
+                        
+                        # Clean up prompt prefix if present (manual or auto)
+                        if "SLIDE_INDEX:" in image_prompt:
+                             try:
+                                 parts = image_prompt.split('|', 1)
+                                 image_prompt = parts[1].strip()
+                             except: pass
                         
                         final_prompt = f"{image_prompt}, {global_style_prompt}".strip()
+                        task.log(f"Generating image for prompt: {final_prompt[:100]}...")
+                        
                         img_bytes = lc_tti.tti.generate_image(final_prompt, width=width, height=height)
                         if img_bytes:
                             assets_path = get_user_notebook_assets_path(username, notebook_id)
@@ -312,28 +342,101 @@ def _process_notebook_task(task: Task, username: str, notebook_id: str, prompt: 
                             }
                     except Exception as e:
                         task.log(f"Regen failed: {e}", "ERROR")
+                        trace_exception(e)
+
+            elif action == 'edit_image' and target_tab:
+                # Edit existing image (Image-to-Image)
+                lc_tti = build_lollms_client_from_params(username, load_llm=False, load_tti=True)
+                if lc_tti.tti:
+                    width = int(slide_format.get('width', 1024))
+                    height = int(slide_format.get('height', 768))
+                    
+                    slide_idx = 0
+                    edit_prompt = prompt
+                    if "SLIDE_INDEX:" in prompt:
+                        try:
+                            parts = prompt.split('|', 1)
+                            slide_idx = int(parts[0].split(':')[1])
+                            edit_prompt = parts[1].strip()
+                        except: pass
+                    
+                    try:
+                        current_content = json.loads(target_tab['content'])
+                        if 0 <= slide_idx < len(current_content.get('slides_data', [])):
+                            slide = current_content['slides_data'][slide_idx]
+                            images = slide.get('images', [])
+                            selected_idx = slide.get('selected_image_index', 0)
+                            
+                            if images and 0 <= selected_idx < len(images):
+                                source_img_obj = images[selected_idx]
+                                source_path_url = source_img_obj.get('path')
+                                
+                                if source_path_url:
+                                    filename = os.path.basename(source_path_url)
+                                    assets_path = get_user_notebook_assets_path(username, notebook_id)
+                                    source_file = assets_path / filename
+                                    
+                                    if source_file.exists():
+                                        with open(source_file, "rb") as image_file:
+                                            source_b64 = base64.b64encode(image_file.read()).decode('utf-8')
+                                        
+                                        task.log(f"Editing image for slide {slide_idx+1} with prompt: {edit_prompt[:50]}...")
+                                        
+                                        img_bytes = None
+                                        if hasattr(lc_tti.tti, 'edit_image'):
+                                            # FIX: use 'images' argument for edit_image to match error log expectation
+                                            img_bytes = lc_tti.tti.edit_image(images=source_b64, prompt=edit_prompt, width=width, height=height)
+                                        else:
+                                            # Fallback to img2img if specific edit_image not found
+                                            img_bytes = lc_tti.tti.generate_image(prompt=edit_prompt, image=source_b64, width=width, height=height)
+                                            
+                                        if img_bytes:
+                                            new_filename = f"edited_{uuid.uuid4().hex[:8]}.png"
+                                            with open(assets_path / new_filename, 'wb') as f:
+                                                f.write(img_bytes)
+                                            
+                                            new_img_url = f"/api/notebooks/{notebook_id}/assets/{new_filename}"
+                                            result_data = {
+                                                "new_image": { "path": new_img_url, "prompt": edit_prompt },
+                                                "slide_index": slide_idx
+                                            }
+                                        else:
+                                            task.log("TTI Edit returned no image.", "ERROR")
+                                    else:
+                                        task.log(f"Source file missing: {filename}", "ERROR")
+                            else:
+                                task.log("No image selected to edit.", "WARNING")
+                    except Exception as e:
+                        task.log(f"Edit failed: {e}", "ERROR")
+                        trace_exception(e)
 
             # 6. Update Notebook (General cases)
-            if target_tab and action != 'update_slide_text': # Update slide text already handled the tab modification
-                if action == 'images' and result_data and 'new_image' in result_data:
-                    # Update specific slide if prompted
+            if target_tab and action != 'update_slide_text': 
+                # Handle Image Updates (New Generation or Edit)
+                if (action == 'images' or action == 'edit_image') and result_data and 'new_image' in result_data:
+                    idx = -1
                     if "SLIDE_INDEX:" in prompt:
                         try:
                             parts = prompt.split('|', 1)
                             idx = int(parts[0].split(':')[1])
-                            tab_content = json.loads(target_tab['content'])
-                            if 0 <= idx < len(tab_content['slides_data']):
-                                tab_content['slides_data'][idx]['images'].append(result_data['new_image'])
-                                tab_content['slides_data'][idx]['selected_image_index'] = len(tab_content['slides_data'][idx]['images']) - 1
-                                target_tab['content'] = json.dumps(tab_content)
-                                flag_modified(notebook, "tabs")
                         except: pass
+                    elif result_data and 'slide_index' in result_data:
+                        idx = result_data['slide_index']
+                    
+                    if idx >= 0:
+                        tab_content = json.loads(target_tab['content'])
+                        if 0 <= idx < len(tab_content['slides_data']):
+                            tab_content['slides_data'][idx]['images'].append(result_data['new_image'])
+                            tab_content['slides_data'][idx]['selected_image_index'] = len(tab_content['slides_data'][idx]['images']) - 1
+                            target_tab['content'] = json.dumps(tab_content)
+                            flag_modified(notebook, "tabs")
+
                 elif isinstance(result_data, dict) and 'type' in result_data:
                      target_tab['content'] = json.dumps(result_data)
                      target_tab['type'] = 'slides'
                      flag_modified(notebook, "tabs")
-                elif not isinstance(result_data, dict):
-                     target_tab['content'] = result_data if result_data else response_text
+                elif not isinstance(result_data, dict) and result_data:
+                     target_tab['content'] = result_data
                      flag_modified(notebook, "tabs")
             elif not target_tab:
                 new_tab_title = f"Result: {action}"
@@ -445,3 +548,4 @@ def _add_artefact(notebook, title, content):
     current = list(notebook.artefacts)
     current.append({ "filename": title, "content": content, "type": "text", "is_loaded": True })
     notebook.artefacts = current
+

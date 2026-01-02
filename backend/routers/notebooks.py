@@ -3,6 +3,7 @@ import uuid
 import json
 import shutil
 import re
+import base64
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -75,6 +76,8 @@ class ProcessRequest(BaseModel):
     input_tab_ids: List[str]
     output_type: str
     target_tab_id: Optional[str] = None
+    skip_llm: bool = False
+    generate_speech: bool = False
 
 # --- Endpoints ---
 
@@ -235,7 +238,11 @@ async def upload_notebook_source(
     assets_path.mkdir(parents=True, exist_ok=True)
     
     safe_filename = secure_filename(file.filename)
-    file_path = assets_path / safe_filename
+    # Ensure uniqueness
+    extension = Path(safe_filename).suffix
+    stem = Path(safe_filename).stem
+    unique_filename = f"{stem}_{uuid.uuid4().hex[:8]}{extension}"
+    file_path = assets_path / unique_filename
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
@@ -250,27 +257,103 @@ async def upload_notebook_source(
         
     if is_text:
         new_artefact = {
-            "filename": safe_filename,
+            "filename": unique_filename,
             "content": content,
             "type": "text",
             "is_loaded": True
         }
         current_artefacts = list(notebook.artefacts)
-        current_artefacts = [a for a in current_artefacts if a['filename'] != safe_filename]
+        current_artefacts = [a for a in current_artefacts if a['filename'] != unique_filename]
         current_artefacts.append(new_artefact)
         notebook.artefacts = current_artefacts
         db.commit()
     elif use_docling:
         # Trigger Docling conversion task
         task_manager.submit_task(
-            name=f"Notebook {notebook_id}: Convert {safe_filename}",
+            name=f"Notebook {notebook_id}: Convert {unique_filename}",
             target=_convert_file_with_docling_task,
-            args=(current_user.username, notebook_id, str(file_path), safe_filename),
-            description=f"Converting {safe_filename} to markdown...",
+            args=(current_user.username, notebook_id, str(file_path), unique_filename),
+            description=f"Converting {unique_filename} to markdown...",
             owner_username=current_user.username
         )
     
-    return {"filename": safe_filename}
+    return {"filename": unique_filename}
+
+
+@router.post("/{notebook_id}/describe_image")
+async def describe_notebook_image(
+    notebook_id: str,
+    file: UploadFile = File(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Uploads an image temporarily and asks the LLM to describe it for prompt generation.
+    """
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
+    
+    # Read file content
+    try:
+        content = await file.read()
+        b64_image = base64.b64encode(content).decode('utf-8')
+        
+        # We also save it to assets just in case, or we can just keep it in memory
+        # Saving it might be useful if we want to refer to it later
+        safe_filename = f"desc_{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}"
+        assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
+        assets_path.mkdir(parents=True, exist_ok=True)
+        (assets_path / safe_filename).write_bytes(content)
+        
+        lc = get_user_lollms_client(current_user.username)
+        
+        prompt = "Describe this image in detail, focusing on visual elements, style, composition, and colors. This description will be used to generate a similar image."
+        
+        description = lc.generate_text(prompt, images=[b64_image], max_new_tokens=256)
+        
+        return {"description": description}
+        
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to describe image: {str(e)}")
+
+@router.post("/{notebook_id}/describe_asset")
+async def describe_notebook_asset_endpoint(
+    notebook_id: str,
+    payload: Dict[str, str],
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Describes an image that already exists in the notebook assets.
+    """
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
+    
+    filename = payload.get("filename")
+    if not filename:
+        raise HTTPException(status_code=400, detail="Filename required.")
+        
+    assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
+    file_path = assets_path / secure_filename(filename)
+    
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Asset file not found.")
+        
+    try:
+        content = file_path.read_bytes()
+        b64_image = base64.b64encode(content).decode('utf-8')
+        
+        lc = get_user_lollms_client(current_user.username)
+        prompt = "Describe this image in detail, focusing on visual elements, style, composition, and colors. This description will be used to generate a similar image."
+        description = lc.generate_text(prompt, images=[b64_image], max_new_tokens=256)
+        
+        return {"description": description}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to describe image: {str(e)}")
 
 
 @router.post("/{notebook_id}/artefact")
@@ -348,7 +431,7 @@ def process_notebook_ai(
     task = task_manager.submit_task(
         name=task_name,
         target=_process_notebook_task,
-        args=(current_user.username, notebook_id, payload.prompt, payload.input_tab_ids, payload.output_type, payload.target_tab_id),
+        args=(current_user.username, notebook_id, payload.prompt, payload.input_tab_ids, payload.output_type, payload.target_tab_id, payload.skip_llm, payload.generate_speech),
         description=f"Processing notebook with action: {payload.output_type}",
         owner_username=current_user.username
     )
@@ -397,6 +480,10 @@ def export_notebook(
             import io
             
             prs = Presentation()
+            # Set to 16:9 (Widescreen)
+            prs.slide_width = PptxInches(13.3333)
+            prs.slide_height = PptxInches(7.5)
+            
             assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
             
             # --- Check Metadata for Slide Mode ---
@@ -469,6 +556,16 @@ def export_notebook(
                                         slide.shapes.add_picture(img_path_local, PptxInches(5), PptxInches(2), width=PptxInches(4))
                                     else:
                                         slide.placeholders[1].text_frame.text = "\n".join(s.get('bullets', []))
+                            
+                            # Add Speaker Notes
+                            speech_text = s.get('speech', '')
+                            if speech_text:
+                                try:
+                                    notes_slide = slide.notes_slide
+                                    text_frame = notes_slide.notes_text_frame
+                                    text_frame.text = speech_text
+                                except Exception as ex:
+                                    print(f"Error adding notes to slide: {ex}")
 
                     except Exception as e:
                         print(f"Slide export error: {e}")

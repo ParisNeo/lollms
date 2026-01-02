@@ -119,6 +119,20 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
 
+        // --- BUFFERING LOGIC START ---
+        // We accumulate text in this buffer and only flush it to the reactive state periodically.
+        let contentBuffer = '';
+        let lastUpdateTimestamp = 0;
+        const UPDATE_INTERVAL = 60; // ms (approx 16fps) - Reduces UI freezing significantly
+        
+        const flushBuffer = () => {
+            if (contentBuffer && messageToUpdate) {
+                messageToUpdate.content += contentBuffer;
+                contentBuffer = '';
+            }
+            lastUpdateTimestamp = Date.now();
+        };
+
         const processStreamData = (data) => {
             if (!messageToUpdate) return;
             
@@ -133,7 +147,14 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     if (generationState.value.status !== 'streaming' && !generationState.value.details.includes('ttft')) {
                          generationState.value = { status: 'streaming', details: 'generating...' };
                     }
-                    messageToUpdate.content += data.content;
+                    
+                    // Buffer content instead of direct update
+                    contentBuffer += data.content;
+                    
+                    const now = Date.now();
+                    if (now - lastUpdateTimestamp > UPDATE_INTERVAL) {
+                        flushBuffer();
+                    }
                     break;
                 case 'step_start':
                     generationState.value = { status: 'thinking', details: data.content || 'Thinking...' };
@@ -181,6 +202,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     break;
                 case 'finalize': {
+                    flushBuffer(); // Ensure any remaining text is written before finalizing
+                    
                     const finalData = data.data;
                     const userMsgIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
                     if (userMsgIndex !== -1 && finalData.user_message) {
@@ -211,6 +234,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
             }
         };
+        // --- BUFFERING LOGIC END ---
         
         try {
             // Determine full URL to ensure compatibility with dev proxy and specific baseURL settings
@@ -249,6 +273,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                 }
             }
+            // Ensure any final buffer content is flushed at the end of stream
+            flushBuffer();
 
         } catch (error) {
             if (error.name !== 'AbortError') {

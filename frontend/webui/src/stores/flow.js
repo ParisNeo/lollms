@@ -90,14 +90,20 @@ export const useFlowStore = defineStore('flow', () => {
         }
     }
 
-    async function executeFlow(flowId) {
+    async function executeFlow(flowId, inputs = null) {
         try {
-            const response = await apiClient.post('/api/flows/execute', { flow_id: flowId });
+            const payload = { flow_id: flowId };
+            if (inputs) {
+                payload.inputs = inputs;
+            }
+            
+            const response = await apiClient.post('/api/flows/execute', payload);
             tasksStore.addTask(response.data);
             uiStore.addNotification("Flow execution started", "info");
             return response.data;
         } catch (error) {
             uiStore.addNotification("Failed to execute flow", "error");
+            console.error(error);
         }
     }
 

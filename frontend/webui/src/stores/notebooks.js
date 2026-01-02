@@ -97,14 +97,15 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
-    async function processWithAi(prompt, inputTabIds, outputType, targetTabId = null) {
+    async function processWithAi(prompt, inputTabIds, outputType, targetTabId = null, skipLlm = false) {
         if (!activeNotebook.value) return;
         try {
             const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/process`, {
                 prompt,
                 input_tab_ids: inputTabIds,
                 output_type: outputType,
-                target_tab_id: targetTabId
+                target_tab_id: targetTabId,
+                skip_llm: skipLlm
             });
             uiStore.addNotification(`AI processing (${outputType}) started.`, "info");
         } catch (e) {
@@ -123,6 +124,30 @@ export const useNotebookStore = defineStore('notebooks', () => {
             if (idx !== -1) notebooks.value[idx].title = res.data.title;
         } catch (e) {
             uiStore.addNotification("Failed to generate title.", "error");
+        }
+    }
+    
+    async function describeImage(file) {
+        if (!activeNotebook.value) return;
+        const fd = new FormData();
+        fd.append('file', file);
+        try {
+            const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/describe_image`, fd);
+            return res.data.description;
+        } catch (e) {
+            uiStore.addNotification(`Failed to describe image: ${e.message}`, 'error');
+            throw e;
+        }
+    }
+
+    async function describeAsset(filename) {
+        if (!activeNotebook.value) return;
+        try {
+            const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/describe_asset`, { filename });
+            return res.data.description;
+        } catch (e) {
+            uiStore.addNotification(`Failed to describe asset: ${e.message}`, 'error');
+            throw e;
         }
     }
     
@@ -192,10 +217,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
     return { 
         notebooks, activeNotebook, isLoading, 
         fetchNotebooks, selectNotebook, saveActive, uploadSource, createTextArtefact, scrapeUrl, processWithAi, generateTitle,
+        describeImage, describeAsset,
         addTab, removeTab,
         createNotebook, deleteNotebook, 
         generateNotebookStructure, createStructuredNotebook,
         $reset 
     };
 });
-
