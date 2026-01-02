@@ -1,16 +1,25 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, Dict, Any, Union
 from datetime import datetime
 
 class FlowNodeDefBase(BaseModel):
     name: str
     label: str
+    category: str = "General"
     description: Optional[str] = None
     color: str = "bg-gray-100 border-gray-500"
     inputs: List[Dict[str, Any]] = []
     outputs: List[Dict[str, Any]] = []
     code: str
     class_name: str = "CustomNode"
+    requirements: List[str] = []
+
+    @field_validator('requirements', mode='before')
+    @classmethod
+    def validate_requirements(cls, v):
+        if v is None:
+            return []
+        return v
 
 class FlowNodeDefCreate(FlowNodeDefBase):
     pass
@@ -23,7 +32,6 @@ class FlowNodeDefPublic(FlowNodeDefBase):
     class Config:
         from_attributes = True
 
-# ... (Previous FlowBase, etc.)
 class FlowBase(BaseModel):
     name: str
     description: Optional[str] = None

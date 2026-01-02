@@ -30,8 +30,9 @@ class FlowNodeDefinition(Base):
     name: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     
-    # Visuals
+    # Visuals & Organization
     label: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, default="General", index=True) # NEW: Grouping
     color: Mapped[str] = mapped_column(String, default="bg-gray-100 border-gray-500")
     icon: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     
@@ -39,9 +40,10 @@ class FlowNodeDefinition(Base):
     inputs: Mapped[List[Dict[str, Any]]] = mapped_column(JSON, default=list)
     outputs: Mapped[List[Dict[str, Any]]] = mapped_column(JSON, default=list)
     
-    # Logic
+    # Logic & Dependencies
     code: Mapped[str] = mapped_column(Text, nullable=False) # Python code
     class_name: Mapped[str] = mapped_column(String, default="CustomNode") # The class to instantiate
+    requirements: Mapped[List[str]] = mapped_column(JSON, default=list) # NEW: Library requirements
     
     is_public: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

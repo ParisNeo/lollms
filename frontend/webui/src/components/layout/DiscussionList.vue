@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, watch, defineAsyncComponent } from 'vue';
 import { useRouter, useRoute } from 'vue-router'; 
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useNotesStore } from '../../stores/notes';
@@ -14,6 +14,9 @@ import DiscussionItem from './DiscussionItem.vue';
 import DiscussionGroupItem from './DiscussionGroupItem.vue';
 import NoteList from '../notes/NoteList.vue';
 import AlbumList from '../images/AlbumList.vue';
+
+// New: Async import the wizard
+const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
 
 import logoDefault from '../../assets/logo.png';
 import IconHome from '../../assets/icons/IconHome.vue';
@@ -70,6 +73,8 @@ const showToolbox = ref(false);
 const isUngroupedVisible = ref(true);
 const isStarredVisible = ref(false);
 const isRootDragOver = ref(false);
+
+const isFlowWizardOpen = ref(false);
 
 onMounted(() => {
     if (notesStore.notes.length === 0) notesStore.fetchNotes();
@@ -207,16 +212,8 @@ async function handleNewItem() {
             await imageStore.createAlbum(value);
         }
     } else if (activeTab.value === 'flows') {
-        const { confirmed, value } = await uiStore.showConfirmation({
-            title: 'New Workflow',
-            message: 'Enter a name for your new flow:',
-            confirmText: 'Create',
-            inputType: 'text',
-            inputPlaceholder: 'My Awesome Flow'
-        });
-        if (confirmed && value) {
-            await flowStore.createFlow(value);
-        }
+        // [MODIFIED] Trigger Wizard instead of prompt
+        isFlowWizardOpen.value = true;
     }
 }
 
@@ -294,7 +291,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </button>
             </div>
 
-            <!-- Tab Switcher with SCROLLBAR enabled -->
+            <!-- Tab Switcher -->
             <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto custom-scrollbar">
                 <button 
                     @click="activeTab = 'chat'" 
@@ -341,7 +338,6 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <IconDatabase class="w-3.5 h-3.5 mb-0.5" />
                     <span>DATA</span>
                 </button>
-                <!-- NEW FLOWS TAB -->
                 <button 
                     @click="activeTab = 'flows'" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
@@ -536,7 +532,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </div>
             </template>
             
-            <!-- FLOWS TAB (NEW) -->
+            <!-- FLOWS TAB -->
             <template v-else-if="activeTab === 'flows'">
                 <div v-if="flowStore.isLoading" class="text-center p-4 text-gray-500">Loading flows...</div>
                 <div v-else-if="filteredFlows.length === 0" class="empty-state-flat">
@@ -566,6 +562,11 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </div>
             </template>
         </div>
+
+        <!-- WIZARD INTEGRATION -->
+        <Teleport to="body">
+            <FlowWizardModal v-if="isFlowWizardOpen" @close="isFlowWizardOpen = false" />
+        </Teleport>
     </div>
 </template>
 

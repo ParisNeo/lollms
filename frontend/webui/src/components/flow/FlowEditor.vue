@@ -4,11 +4,12 @@ import { useFlowStore } from '../../stores/flow';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import NodeCreatorModal from './NodeCreatorModal.vue'; 
-import FlowRunnerModal from './FlowRunnerModal.vue'; // IMPORTED
+import FlowRunnerModal from './FlowRunnerModal.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
+import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 
 const props = defineProps({ flow: { type: Object, required: true } });
 const flowStore = useFlowStore();
@@ -23,11 +24,32 @@ const isDraggingCanvas = ref(false), isDraggingNode = ref(false), draggedNodeId 
 const isLinking = ref(false), linkStart = ref(null), mousePos = ref({ x: 0, y: 0 });
 
 const showNodeEditor = ref(false);
-const showRunnerModal = ref(false); // NEW
+const showRunnerModal = ref(false);
 const nodeToEdit = ref(null);
 const showTutorial = ref(false);
 
 const isAdmin = computed(() => authStore.isAdmin);
+
+// --- Palette Grouping ---
+const collapsedGroups = ref({});
+
+const groupedNodeTypes = computed(() => {
+    const groups = {};
+    flowStore.nodeDefinitions.forEach(def => {
+        const cat = def.category || "General";
+        if (!groups[cat]) groups[cat] = [];
+        groups[cat].push({
+            ...def,
+            type: def.name, 
+            color: def.color || "bg-gray-100 border-gray-500",
+        });
+    });
+    // Sort categories
+    return Object.keys(groups).sort().reduce((acc, key) => {
+        acc[key] = groups[key].sort((a, b) => a.label.localeCompare(b.label));
+        return acc;
+    }, {});
+});
 
 watch(() => props.flow, (newFlow) => {
     if (newFlow && newFlow.data) {
@@ -53,41 +75,23 @@ const nodeDefinitionsMap = computed(() => {
     return map;
 });
 
-const nodeTypes = computed(() => {
-    return flowStore.nodeDefinitions.map(def => ({
-        ...def,
-        type: def.name, 
-        color: def.color || "bg-gray-100 border-gray-500",
-    }));
-});
-
 function getTypeColor(typeName) {
     const map = {
-        'string': 'bg-gray-400',
-        'int': 'bg-green-500',
-        'float': 'bg-green-400',
-        'boolean': 'bg-orange-500',
-        'image': 'bg-pink-500',
-        'node_ref': 'bg-indigo-500',
-        'list': 'bg-cyan-500',
-        'model_selection': 'bg-purple-400',
-        'any': 'bg-white border-2 border-gray-400'
+        'string': 'bg-gray-400', 'int': 'bg-green-500', 'float': 'bg-green-400',
+        'boolean': 'bg-orange-500', 'image': 'bg-pink-500', 'node_ref': 'bg-indigo-500',
+        'list': 'bg-cyan-500', 'model_selection': 'bg-purple-400', 'any': 'bg-white border-2 border-gray-400'
     };
     return map[typeName] || map['any'];
 }
 
 function getNodeInputType(nodeType, inputName) {
     const def = nodeDefinitionsMap.value[nodeType];
-    if (!def) return 'any';
-    const inp = def.inputs.find(i => i.name === inputName);
-    return inp ? inp.type : 'any';
+    return def?.inputs.find(i => i.name === inputName)?.type || 'any';
 }
 
 function getNodeOutputType(nodeType, outputName) {
     const def = nodeDefinitionsMap.value[nodeType];
-    if (!def) return 'any';
-    const out = def.outputs.find(o => o.name === outputName);
-    return out ? out.type : 'any';
+    return def?.outputs.find(o => o.name === outputName)?.type || 'any';
 }
 
 function isInputConnected(nodeId, handleName) {
@@ -109,7 +113,7 @@ function addNode(typeDef) {
         label: typeDef.label,
         x: viewCenterX > 0 ? viewCenterX : 50,
         y: viewCenterY > 0 ? viewCenterY : 50,
-        data: {}, // Data will hold manual input values
+        data: {},
         inputs: typeDef.inputs.map(i => i.name),
         outputs: typeDef.outputs.map(o => o.name),
         color: typeDef.color
@@ -153,18 +157,10 @@ function deleteConnection(i) { connections.value.splice(i, 1); }
 function getPortPos(nodeId, handleId, type) {
     const node = nodes.value.find(n => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
-    const inputs = node.inputs || [];
-    const outputs = node.outputs || [];
-    const index = type === 'input' ? inputs.indexOf(handleId) : outputs.indexOf(handleId);
-    const nodeWidth = 192; // w-48
-    const headerHeight = 29; 
-    const bodyPadding = 8;
-    const rowHeight = 24; 
-    const rowGap = 8; 
+    const index = (type === 'input' ? node.inputs : node.outputs).indexOf(handleId);
+    const nodeWidth = 192, headerHeight = 29, bodyPadding = 8, rowHeight = 24, rowGap = 8; 
     const yOffset = headerHeight + bodyPadding + (index * (rowHeight + rowGap)) + (rowHeight / 2);
-    const x = type === 'input' ? node.x : node.x + nodeWidth;
-    const y = node.y + yOffset;
-    return { x, y };
+    return { x: type === 'input' ? node.x : node.x + nodeWidth, y: node.y + yOffset };
 }
 
 function getPathD(conn) {
@@ -182,172 +178,80 @@ const activeLinkPath = computed(() => {
     return `M ${s.x} ${s.y} C ${s.x + (linkStart.value.type==='output'?d:-d)} ${s.y}, ${e.x - (linkStart.value.type==='output'?d:-d)} ${e.y}, ${e.x} ${e.y}`;
 });
 
-// Expose openRunner for the parent view to call
-defineExpose({
-    openRunner: () => showRunnerModal.value = true
-});
+defineExpose({ openRunner: () => showRunnerModal.value = true });
 </script>
 
 <template>
     <div class="relative w-full h-full flex overflow-hidden">
-        <!-- Palette -->
-        <div class="w-60 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col z-10 flex-shrink-0">
-            <div class="p-3 border-b dark:border-gray-700 flex justify-between items-center">
-                <span class="font-bold text-xs uppercase text-gray-500 tracking-wider">Node Palette</span>
-                <button @click="showTutorial = true" class="text-blue-500 hover:text-blue-600 transition-colors"><IconInfo class="w-4 h-4"/></button>
+        <!-- Palette (Grouped) -->
+        <div class="w-64 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col z-10 flex-shrink-0">
+            <div class="p-3 border-b dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/30">
+                <span class="font-black text-[10px] uppercase text-gray-500 tracking-widest">Logic Nodes</span>
+                <button @click="showTutorial = true" class="text-blue-500 hover:text-blue-600"><IconInfo class="w-4 h-4"/></button>
             </div>
             
-            <div v-if="nodeTypes.length === 0" class="p-4 text-center text-gray-400 text-xs italic">
-                No nodes defined.<br>Admins can create nodes.
-            </div>
-
-            <div class="p-2 space-y-2 overflow-y-auto custom-scrollbar flex-grow">
-                <div v-for="nt in nodeTypes" :key="nt.id" 
-                     class="group p-2 rounded border dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-all active:scale-95 border-l-4 shadow-sm relative overflow-hidden"
-                     :class="nt.color.split(' ').find(c => c.startsWith('border-'))"
-                     @dblclick="addNode(nt)"
-                     draggable="true"
-                     @dragend="addNode(nt)"
-                     :title="nt.description"
-                >
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs font-bold truncate pr-2">{{ nt.label }}</span>
-                        <div class="flex items-center gap-1">
-                            <button v-if="isAdmin" @click.stop="openEditNode(nt)" class="text-gray-400 hover:text-blue-500 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                                <IconPencil class="w-3.5 h-3.5" />
-                            </button>
-                            <IconPlus class="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div class="flex-grow overflow-y-auto custom-scrollbar">
+                <div v-for="(groupItems, category) in groupedNodeTypes" :key="category" class="border-b dark:border-gray-700 last:border-0">
+                    <button @click="collapsedGroups[category] = !collapsedGroups[category]" 
+                            class="w-full flex items-center justify-between p-3 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors group">
+                        <span class="text-xs font-bold text-gray-600 dark:text-gray-400">{{ category }}</span>
+                        <IconChevronRight class="w-3 h-3 text-gray-400 transition-transform" :class="{'rotate-90': !collapsedGroups[category]}" />
+                    </button>
+                    
+                    <div v-show="!collapsedGroups[category]" class="p-2 space-y-1.5 animate-in fade-in slide-in-from-top-1">
+                        <div v-for="nt in groupItems" :key="nt.id" 
+                             class="group p-2 rounded border dark:border-gray-600 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition-all active:scale-95 border-l-4 shadow-sm"
+                             :class="nt.color.split(' ').find(c => c.startsWith('border-'))"
+                             @dblclick="addNode(nt)"
+                             draggable="true"
+                             @dragend="addNode(nt)"
+                             :title="nt.description"
+                        >
+                            <div class="flex items-center justify-between">
+                                <span class="text-[11px] font-bold truncate pr-2">{{ nt.label }}</span>
+                                <div class="flex items-center gap-1">
+                                    <button v-if="isAdmin" @click.stop="openEditNode(nt)" class="text-gray-400 hover:text-blue-500 p-0.5 opacity-0 group-hover:opacity-100"><IconPencil class="w-3 h-3" /></button>
+                                    <IconPlus class="w-3 h-3 text-gray-400 opacity-0 group-hover:opacity-100" />
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="text-[9px] text-gray-400 mt-1 line-clamp-1" v-if="nt.description">{{ nt.description }}</div>
                 </div>
             </div>
             
-            <div class="p-2 text-[9px] text-gray-400 text-center border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                Drag or Double-Click to Add
-            </div>
+            <div class="p-2 text-[9px] text-gray-400 text-center border-t dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 uppercase tracking-tighter">Double-click to spawn</div>
         </div>
 
         <!-- Canvas -->
-        <div 
-            class="flex-grow relative bg-gray-100 dark:bg-gray-900 flow-canvas overflow-hidden cursor-grab active:cursor-grabbing pattern-grid"
-            @mousedown="onMouseDown"
-            @mousemove="onMouseMove"
-            @mouseup="onMouseUp"
-            @wheel="onWheel"
-        >
+        <div class="flex-grow relative bg-gray-100 dark:bg-gray-950 flow-canvas overflow-hidden cursor-grab active:cursor-grabbing pattern-grid" @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp" @wheel="onWheel">
             <div class="transform-origin-0-0 w-full h-full" :style="{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }">
-                <!-- Links -->
-                <svg class="absolute top-0 left-0 overflow-visible pointer-events-none w-full h-full" style="width:1px;height:1px"><g><path v-for="(c,i) in connections" :key="c.id" :d="getPathD(c)" class="stroke-gray-400 dark:stroke-gray-500 stroke-[3px] fill-none pointer-events-auto hover:stroke-blue-500 cursor-pointer" @click.stop="deleteConnection(i)" /><path v-if="isLinking" :d="activeLinkPath" class="stroke-blue-400 stroke-[3px] fill-none" stroke-dasharray="5,5" /></g></svg>
+                <svg class="absolute top-0 left-0 overflow-visible pointer-events-none w-full h-full" style="width:1px;height:1px"><g><path v-for="(c,i) in connections" :key="c.id" :d="getPathD(c)" class="stroke-gray-400 dark:stroke-gray-500 stroke-[3px] fill-none pointer-events-auto hover:stroke-blue-500" @click.stop="deleteConnection(i)" /><path v-if="isLinking" :d="activeLinkPath" class="stroke-blue-400 stroke-[3px] fill-none" stroke-dasharray="5,5" /></g></svg>
                 
-                <!-- Nodes -->
                 <div v-for="n in nodes" :key="n.id" class="absolute w-48 rounded-lg shadow-lg border-2 bg-white dark:bg-gray-800 flex flex-col" :class="n.color" :style="{ transform: `translate(${n.x}px, ${n.y}px)` }" @mousedown.stop="startDragNode($event, n.id)">
-                    <div class="px-2 py-1 border-b dark:border-gray-700/50 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/20 cursor-grab active:cursor-grabbing"><span class="text-xs font-bold truncate select-none">{{ n.label }}</span><button @click.stop="deleteNode(n.id)" class="text-gray-400 hover:text-red-500 rounded"><IconXMark class="w-3 h-3" /></button></div>
-                    
+                    <div class="px-2 py-1 border-b dark:border-gray-700/50 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/20 cursor-grab"><span class="text-xs font-bold truncate select-none">{{ n.label }}</span><button @click.stop="deleteNode(n.id)" class="text-gray-400 hover:text-red-500"><IconXMark class="w-3 h-3" /></button></div>
                     <div class="p-2 space-y-2 relative">
-                        <!-- Inputs -->
                         <div v-for="i in n.inputs" :key="i" class="flex items-center relative h-6">
-                            <div 
-                                class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -left-[1.1rem] cursor-crosshair hover:scale-125 shadow-sm transition-transform"
-                                :class="getTypeColor(getNodeInputType(n.type, i))"
-                                @mousedown.stop="startLink($event, n.id, i, 'input')" 
-                                @mouseup.stop="endLink($event, n.id, i, 'input')" 
-                                :title="getNodeInputType(n.type, i)"
-                            ></div>
-                            <span class="text-[10px] text-gray-500 ml-1 truncate flex-1 select-none" :title="i">{{ i }}</span>
-                            
-                            <!-- [MODIFIED] Dynamic Input Rendering based on type -->
+                            <div class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -left-[1.1rem] cursor-crosshair hover:scale-125 shadow-sm" :class="getTypeColor(getNodeInputType(n.type, i))" @mousedown.stop="startLink($event, n.id, i, 'input')" @mouseup.stop="endLink($event, n.id, i, 'input')"></div>
+                            <span class="text-[10px] text-gray-500 ml-1 truncate flex-1 select-none">{{ i }}</span>
                             <template v-if="!isInputConnected(n.id, i)">
-                                <!-- Model Selector -->
-                                <select v-if="getNodeInputType(n.type, i) === 'model_selection'"
-                                        v-model="n.data[i]"
-                                        class="ml-auto w-24 h-5 text-[9px] border rounded px-0 bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                                        @mousedown.stop>
-                                    <optgroup v-for="group in dataStore.availableLLMModelsGrouped" :key="group.label" :label="group.label">
-                                        <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }}</option>
-                                    </optgroup>
-                                </select>
-                                
-                                <!-- Boolean Toggle -->
-                                <input v-else-if="getNodeInputType(n.type, i) === 'boolean'"
-                                       type="checkbox"
-                                       v-model="n.data[i]"
-                                       class="ml-auto w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                       @mousedown.stop
-                                />
-                                
-                                <!-- Numeric Input -->
-                                <input v-else-if="getNodeInputType(n.type, i) === 'int' || getNodeInputType(n.type, i) === 'float'"
-                                       type="number"
-                                       v-model.number="n.data[i]" 
-                                       :step="getNodeInputType(n.type, i) === 'float' ? 'any' : '1'"
-                                       class="ml-auto w-16 h-5 text-[9px] border rounded px-1 bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                                       placeholder="0" 
-                                       @mousedown.stop 
-                                />
-                                
-                                <!-- Generic Text Input (Default) -->
-                                <input v-else
-                                       v-model="n.data[i]" 
-                                       class="ml-auto w-20 h-5 text-[9px] border rounded px-1 bg-gray-50 dark:bg-gray-900 focus:ring-1 focus:ring-blue-500 focus:outline-none"
-                                       placeholder="Val" 
-                                       @mousedown.stop 
-                                />
+                                <select v-if="getNodeInputType(n.type, i) === 'model_selection'" v-model="n.data[i]" class="ml-auto w-24 h-5 text-[9px] border rounded bg-gray-50 dark:bg-gray-900" @mousedown.stop><optgroup v-for="group in dataStore.availableLLMModelsGrouped" :key="group.label" :label="group.label"><option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }}</option></optgroup></select>
+                                <input v-else-if="getNodeInputType(n.type, i) === 'boolean'" type="checkbox" v-model="n.data[i]" class="ml-auto w-4 h-4" @mousedown.stop />
+                                <input v-else-if="getNodeInputType(n.type, i) === 'int' || getNodeInputType(n.type, i) === 'float'" type="number" v-model.number="n.data[i]" class="ml-auto w-16 h-5 text-[9px] border rounded px-1 bg-gray-50 dark:bg-gray-900" @mousedown.stop />
+                                <input v-else v-model="n.data[i]" class="ml-auto w-20 h-5 text-[9px] border rounded px-1 bg-gray-50 dark:bg-gray-900" @mousedown.stop />
                             </template>
                         </div>
-
-                        <!-- Outputs -->
                         <div v-for="o in n.outputs" :key="o" class="flex items-center justify-end relative h-6">
                             <span class="text-[10px] text-gray-500 mr-1 truncate select-none">{{ o }}</span>
-                            <div 
-                                class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -right-[1.1rem] cursor-crosshair hover:scale-125 shadow-sm transition-transform"
-                                :class="getTypeColor(getNodeOutputType(n.type, o))"
-                                @mousedown.stop="startLink($event, n.id, o, 'output')" 
-                                @mouseup.stop="endLink($event, n.id, o, 'output')" 
-                                :title="getNodeOutputType(n.type, o)"
-                            ></div>
+                            <div class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -right-[1.1rem] cursor-crosshair hover:scale-125 shadow-sm" :class="getTypeColor(getNodeOutputType(n.type, o))" @mousedown.stop="startLink($event, n.id, o, 'output')" @mouseup.stop="endLink($event, n.id, o, 'output')"></div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
         
-        <!-- Editor Modal -->
         <Teleport to="body">
             <NodeCreatorModal v-if="showNodeEditor" :nodeToEdit="nodeToEdit" @close="showNodeEditor = false; nodeToEdit = null;" />
-        </Teleport>
-
-        <!-- Runner Modal -->
-        <Teleport to="body">
-            <FlowRunnerModal 
-                v-if="showRunnerModal" 
-                :flowData="flow.data" 
-                :flowId="flow.id" 
-                :flowName="flow.name"
-                @close="showRunnerModal = false" 
-            />
-        </Teleport>
-
-        <!-- Tutorial Modal -->
-        <Teleport to="body">
-            <div v-if="showTutorial" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-                <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-lg w-full p-6 animate-in fade-in zoom-in-95 border dark:border-gray-700">
-                    <h3 class="text-xl font-bold mb-4 text-gray-800 dark:text-gray-100">Welcome to Flow Studio</h3>
-                    <div class="space-y-4 text-sm text-gray-600 dark:text-gray-300">
-                        <p>Build powerful AI workflows visually.</p>
-                        <ul class="list-disc pl-5 space-y-1">
-                            <li><strong>Add Nodes:</strong> Drag items from the left palette onto the canvas.</li>
-                            <li><strong>Connect:</strong> Drag from an output circle (right) to an input circle (left). Match colors for data types!</li>
-                            <li><strong>Configure:</strong> Type values directly into input fields or use selectors on nodes. If a link is connected, the widget hides.</li>
-                            <li><strong>Run:</strong> Click "Run Flow" in the top bar to test your flow with Auto-UI or as a Service.</li>
-                            <li><strong>Admins:</strong> Can define custom node logic using Python by clicking the Pencil icon or "Define Node".</li>
-                        </ul>
-                    </div>
-                    <div class="mt-6 flex justify-end">
-                        <button @click="showTutorial = false" class="btn btn-primary px-6">Got it</button>
-                    </div>
-                </div>
-            </div>
+            <FlowRunnerModal v-if="showRunnerModal" :flowData="flow.data" :flowId="flow.id" :flowName="flow.name" @close="showRunnerModal = false" />
         </Teleport>
     </div>
 </template>
@@ -356,5 +260,5 @@ defineExpose({
 .transform-origin-0-0 { transform-origin: 0 0; }
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
-.pattern-grid { background-image: radial-gradient(#888 1px, transparent 1px); background-size: 20px 20px; }
+.pattern-grid { background-image: radial-gradient(#444 0.5px, transparent 0.5px); background-size: 20px 20px; }
 </style>

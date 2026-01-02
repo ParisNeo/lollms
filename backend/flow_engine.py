@@ -1,175 +1,165 @@
 import traceback
 import sys
-from typing import Dict, Any, List
+import importlib
+import json
+import os
+from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
-from backend.db.models.flow import FlowNodeDefinition
-from backend.session import build_lollms_client_from_params
+from ascii_colors import ASCIIColors
+
 from backend.db import session as db_session_module
-
-class ExecutionContext:
-    def __init__(self, engine, username):
-        self.engine = engine
-        self.username = username
-        # Default client (user's preferences)
-        self.lollms_client = engine._get_client()
-
-    def get_client(self, model_name: str = None):
-        """
-        Returns a LollmsClient instance. 
-        If model_name is provided, it builds a new client for that model.
-        Otherwise returns the default client.
-        """
-        if not model_name:
-            return self.lollms_client
-            
-        # Parse model_name (binding/model)
-        binding_alias = None
-        model_part = model_name
-        
-        if '/' in model_name:
-            binding_alias, model_part = model_name.split('/', 1)
-            
-        return build_lollms_client_from_params(
-            self.username,
-            binding_alias=binding_alias,
-            model_name=model_part,
-            load_llm=True
-        )
+from backend.db.models.flow import FlowNodeDefinition
+from backend.db.models.user import User as DBUser
+from backend.session import build_lollms_client_from_params
 
 class FlowEngine:
+    """
+    Executes a graph-based workflow defined by the Flow Studio.
+    Handles node instantiation, dependency management (auto-install), and execution order.
+    """
     def __init__(self, username: str):
         self.username = username
-        self.logs = []
-        self.client = None
-        self.node_definitions = {} 
-        self._load_definitions()
-
-    def log(self, message):
-        print(f"[FlowEngine] {message}")
-        self.logs.append(message)
-
-    def _get_client(self):
-        if not self.client:
-            self.client = build_lollms_client_from_params(
-                username=self.username,
-                load_llm=True,
-                load_tti=True
-            )
-        return self.client
-
-    def _load_definitions(self):
-        db = db_session_module.SessionLocal()
+        self.node_instances = {}
+        self.results = {}
+        self.db_session_factory = db_session_module.SessionLocal
+        self._lollms_client = None
+        self._is_admin = False
+        
+        # Determine if user is admin once
+        db = self.db_session_factory()
         try:
-            defs = db.query(FlowNodeDefinition).all()
-            for d in defs:
-                self.node_definitions[d.name] = d
+            u = db.query(DBUser).filter(DBUser.username == username).first()
+            if u:
+                self._is_admin = u.is_admin
         finally:
             db.close()
 
-    def _instantiate_node(self, node_type: str):
-        definition = self.node_definitions.get(node_type)
-        if not definition:
-            raise Exception(f"Unknown node type: {node_type}")
-        
-        local_scope = {}
-        try:
-            exec(definition.code, {}, local_scope)
-        except Exception as e:
-            raise Exception(f"Failed to compile code for {node_type}: {e}")
-        
-        NodeClass = local_scope.get(definition.class_name)
-        if not NodeClass:
-            raise Exception(f"Class '{definition.class_name}' not found in code for {node_type}")
-            
-        return NodeClass()
+    @property
+    def lollms_client(self):
+        """Lazy load the client with all user-configured capabilities enabled."""
+        if not self._lollms_client:
+            # Explicitly load all capabilities so nodes have access to TTI, TTS, etc.
+            self._lollms_client = build_lollms_client_from_params(
+                self.username, 
+                load_llm=True, 
+                load_tti=True, 
+                load_tts=True, 
+                load_stt=True
+            )
+        return self._lollms_client
 
-    def execute_node_isolated(self, node_id: str, inputs: Dict[str, Any]):
-        if not hasattr(self, 'current_graph_nodes'):
-            raise Exception("Isolated execution requires an active graph context.")
+    def _ensure_requirements(self, node_def: FlowNodeDefinition):
+        """Uses pipmaster to dynamically install requirements if missing."""
+        if not node_def.requirements:
+            return
+
+        import pipmaster
+        for req in node_def.requirements:
+            if not pipmaster.is_installed(req):
+                ASCIIColors.info(f"FlowEngine: Installing requirement '{req}' for node '{node_def.label}'...")
+                pipmaster.install(req)
+
+    def execute_node_isolated(self, node_id: str, graph_data: Dict[str, Any], inputs: Dict[str, Any]):
+        """Executes a single node, resolving its logic from the database."""
+        db = self.db_session_factory()
+        try:
+            # 1. Find Node in graph
+            node_in_graph = next((n for n in graph_data['nodes'] if n['id'] == node_id), None)
+            if not node_in_graph:
+                raise ValueError(f"Node {node_id} not found in graph data.")
+
+            # 2. Load definition from DB
+            node_def = db.query(FlowNodeDefinition).filter(FlowNodeDefinition.name == node_in_graph['type']).first()
+            if not node_def:
+                raise ValueError(f"Definition for node type '{node_in_graph['type']}' not found.")
+
+            # 3. Handle Dependencies
+            self._ensure_requirements(node_def)
+
+            # 4. Instantiate & Execute
+            local_scope = {}
+            try:
+                # Compile code with a filename for better tracebacks
+                compiled_code = compile(node_def.code, f"node_logic:{node_def.name}", "exec")
+                exec(compiled_code, {}, local_scope)
+            except Exception as e:
+                error_msg = f"Syntax/Compilation Error in node '{node_def.label}': {str(e)}"
+                if self._is_admin:
+                    error_msg += f"\n\nTraceback:\n{traceback.format_exc()}"
+                raise RuntimeError(error_msg)
             
-        target_node_data = self.current_graph_nodes.get(node_id)
-        if not target_node_data:
-            raise Exception(f"Target node {node_id} not found in graph.")
+            NodeClass = local_scope.get(node_def.class_name)
+            if not NodeClass:
+                raise ValueError(f"Class '{node_def.class_name}' not found in node code.")
+
+            # Context provided to the node
+            class NodeContext:
+                def __init__(self, engine, owner):
+                    self.engine = engine
+                    self.lollms_client = engine.lollms_client
+                    self.owner_username = owner
+
+                def get_client(self, model_name=None):
+                    if not model_name:
+                        return self.lollms_client
+                    return build_lollms_client_from_params(self.owner_username, model_name=model_name, load_tti=True, load_tts=True)
+
+            context = NodeContext(self, self.username)
+            instance = NodeClass()
             
-        final_inputs = {**target_node_data.get('data', {}), **inputs}
-        node_instance = self._instantiate_node(target_node_data['type'])
-        
-        # Pass context with capability to spawn new clients
-        context = ExecutionContext(self, self.username)
-        
-        self.log(f" > Executing isolated node {target_node_data.get('label', 'Node')} ({node_id})")
-        return node_instance.execute(final_inputs, context)
+            combined_inputs = {**(node_in_graph.get('data', {})), **inputs}
+            
+            try:
+                return instance.execute(combined_inputs, context)
+            except Exception as e:
+                # Enhance debugging for admins
+                error_prefix = f"Runtime Error in node '{node_def.label}': "
+                if self._is_admin:
+                    tb = traceback.format_exc()
+                    raise RuntimeError(f"{error_prefix}{str(e)}\n\nDetailed Traceback:\n{tb}")
+                else:
+                    raise RuntimeError(f"{error_prefix}{str(e)}")
+
+        finally:
+            db.close()
 
     def execute_graph(self, graph_data: Dict[str, Any]):
-        nodes = {n['id']: n for n in graph_data.get('nodes', [])}
-        self.current_graph_nodes = nodes 
-        
+        """Runs the whole graph by resolving dependencies."""
+        self.results = {}
+        nodes = graph_data.get('nodes', [])
         edges = graph_data.get('edges', [])
+
+        executed_nodes = set()
         
-        input_map = {nid: {} for nid in nodes} 
-        dependency_counts = {nid: 0 for nid in nodes}
-        adjacency = {nid: [] for nid in nodes}
+        while len(executed_nodes) < len(nodes):
+            progress_made = False
+            for node in nodes:
+                if node['id'] in executed_nodes:
+                    continue
 
-        for edge in edges:
-            source = edge['source']
-            target = edge['target']
-            if source in nodes and target in nodes:
-                target_handle = edge['targetHandle']
-                source_handle = edge['sourceHandle']
-                
-                target_node_def = self.node_definitions.get(nodes[target]['type'])
-                is_node_ref = False
-                if target_node_def:
-                    inp_def = next((i for i in target_node_def.inputs if i['name'] == target_handle), None)
-                    if inp_def and inp_def.get('type') == 'node_ref':
-                        is_node_ref = True
+                incoming_edges = [e for e in edges if e['target'] == node['id']]
+                can_execute = True
+                node_inputs = {}
 
-                if is_node_ref:
-                    if target not in input_map: input_map[target] = {}
-                    input_map[target][target_handle] = source
-                else:
-                    adjacency[source].append(target)
-                    dependency_counts[target] += 1
+                for edge in incoming_edges:
+                    source_id = edge['source']
+                    if source_id not in self.results:
+                        can_execute = False
+                        break
                     
-                    if target not in input_map: input_map[target] = {}
-                    input_map[target][target_handle] = {'source': source, 'handle': source_handle}
-
-        queue = [nid for nid, count in dependency_counts.items() if count == 0]
-        results = {} 
-
-        while queue:
-            node_id = queue.pop(0)
-            node_data = nodes[node_id]
-            node_type = node_data['type']
-            
-            node_inputs = node_data.get('data', {}).copy()
-            
-            connections = input_map.get(node_id, {})
-            for handle_name, source_info in connections.items():
-                if isinstance(source_info, str): 
-                    node_inputs[handle_name] = source_info
-                else:
-                    source_id = source_info['source']
-                    source_handle = source_info['handle']
-                    if source_id in results and source_handle in results[source_id]:
-                        node_inputs[handle_name] = results[source_id][source_handle]
-            
-            self.log(f"Executing {node_data.get('label', node_type)}...")
-            try:
-                node_instance = self._instantiate_node(node_type)
-                context = ExecutionContext(self, self.username)
+                    source_res = self.results[source_id]
+                    if isinstance(source_res, dict) and edge['sourceHandle'] in source_res:
+                        node_inputs[edge['targetHandle']] = source_res[edge['sourceHandle']]
                 
-                outputs = node_instance.execute(node_inputs, context)
-                results[node_id] = outputs
-                
-            except Exception as e:
-                self.log(f"Error executing {node_id}: {e}")
-                traceback.print_exc()
-                raise e
+                if can_execute:
+                    ASCIIColors.info(f"FlowEngine: Executing node {node['id']} ({node['type']})...")
+                    # execute_node_isolated handles its own internal error wrapping
+                    self.results[node['id']] = self.execute_node_isolated(node['id'], graph_data, node_inputs)
+                    executed_nodes.add(node['id'])
+                    progress_made = True
 
-            for neighbor in adjacency[node_id]:
-                dependency_counts[neighbor] -= 1
-                if dependency_counts[neighbor] == 0:
-                    queue.append(neighbor)
+            if not progress_made and len(executed_nodes) < len(nodes):
+                unexecuted = [n['id'] for n in nodes if n['id'] not in executed_nodes]
+                raise RuntimeError(f"Workflow stalled. Unmet dependencies or circular loop for nodes: {unexecuted}")
 
-        return results
+        return self.results

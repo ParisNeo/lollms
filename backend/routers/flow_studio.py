@@ -21,13 +21,13 @@ router = APIRouter(prefix="/api/flows", tags=["Flow Studio"])
 # --- Models for Code Gen/Test ---
 class GenerateCodeRequest(BaseModel):
     prompt: str
-    # inputs/outputs are optional context, but AI usually overrides them now
     current_inputs: Optional[List[Dict[str, Any]]] = None 
     current_outputs: Optional[List[Dict[str, Any]]] = None
 
 class TestCodeRequest(BaseModel):
     code: str
     inputs: Dict[str, Any]
+    requirements: List[str] = []
 
 # --- Flow Definitions (Nodes) ---
 
@@ -41,7 +41,7 @@ def list_node_definitions(
 @router.post("/nodes", response_model=FlowNodeDefPublic)
 def create_node_definition(
     def_data: FlowNodeDefCreate,
-    current_user: UserAuthDetails = Depends(get_current_admin_user), # Admin only
+    current_user: UserAuthDetails = Depends(get_current_admin_user),
     db: Session = Depends(get_db)
 ):
     if db.query(DBFlowNodeDefinition).filter(DBFlowNodeDefinition.name == def_data.name).first():
@@ -64,14 +64,8 @@ def update_node_definition(
     if not node:
         raise HTTPException(status_code=404, detail="Node definition not found")
         
-    # Update fields
-    node.name = def_data.name
-    node.label = def_data.label
-    node.description = def_data.description
-    node.color = def_data.color
-    node.inputs = def_data.inputs
-    node.outputs = def_data.outputs
-    node.code = def_data.code
+    for field, value in def_data.model_dump().items():
+        setattr(node, field, value)
     
     db.commit()
     db.refresh(node)
@@ -93,29 +87,18 @@ def delete_node_definition(
 # --- Code Generation & Debugging ---
 
 def extract_json_from_text(text: str):
-    """Attempts to find and parse JSON object from a possibly markdown-formatted text."""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    
-    # Try finding markdown JSON block
+    """Attempts to find and parse JSON object from text."""
+    try: return json.loads(text)
+    except json.JSONDecodeError: pass
     match = re.search(r'```json\s*(\{.*?\})\s*```', text, re.DOTALL)
     if match:
-        try:
-            return json.loads(match.group(1))
-        except:
-            pass
-            
-    # Try finding first { and last }
+        try: return json.loads(match.group(1))
+        except: pass
     start = text.find('{')
     end = text.rfind('}')
     if start != -1 and end != -1:
-        try:
-            return json.loads(text[start:end+1])
-        except:
-            pass
-            
+        try: return json.loads(text[start:end+1])
+        except: pass
     return None
 
 @router.post("/generate_code")
@@ -123,89 +106,39 @@ def generate_node_design(
     req: GenerateCodeRequest,
     current_user: UserAuthDetails = Depends(get_current_admin_user)
 ):
-    """
-    Generates a full node definition (metadata + code) from a user prompt.
-    """
     client = build_lollms_client_from_params(current_user.username)
-    
     supported_types = "string, int, float, boolean, image, node_ref, model_selection, list, any"
     
-    system_prompt = f"""You are an expert Python developer and System Architect for the Lollms Flow Studio.
-Your task is to design a custom node based on the user's description.
-You MUST output a single valid JSON object containing the node metadata and the Python code implementation.
+    system_prompt = f"""You are an expert Python developer for the Lollms Flow Studio.
+Design a custom node based on the user's description.
+Output a single valid JSON object.
 
 ### JSON Structure
 {{
-  "name": "snake_case_unique_id",
-  "label": "Human Readable Label",
-  "description": "A short description of what the node does.",
-  "color": "Tailwind CSS classes for background and border (e.g., 'bg-blue-100 dark:bg-blue-900 border-blue-500')",
-  "inputs": [
-    {{ "name": "input_variable_name", "type": "valid_type" }}
-  ],
-  "outputs": [
-    {{ "name": "output_variable_name", "type": "valid_type" }}
-  ],
-  "code": "The full python code string (see below)"
+  "name": "snake_case_id",
+  "label": "Human Label",
+  "category": "General | AI Generation | Video | Audio | Transformers | Logic",
+  "description": "Short description",
+  "color": "Tailwind bg and border classes",
+  "inputs": [ {{ "name": "var", "type": "valid_type" }} ],
+  "outputs": [ {{ "name": "var", "type": "valid_type" }} ],
+  "requirements": ["list", "of", "pip", "packages"],
+  "code": "Python code string"
 }}
 
-### Supported Types for Inputs/Outputs
-{supported_types}
-- Use 'model_selection' if the node needs to choose a specific LLM model.
-- Use 'node_ref' if the node triggers another node (like a loop).
-- Use 'image' for base64 encoded image strings.
+### Code Requirements
+- Class: `CustomNode`
+- Method: `def execute(self, inputs, context):`
+- `context.lollms_client`: Access to AI.
+- `context.get_client(model_name=None)`: Get client for specific model.
 
-### Python Code Requirements
-1.  **Class Name**: `CustomNode`
-2.  **Method**: `def execute(self, inputs, context):`
-    *   `inputs`: Dictionary of input values. Keys match your "inputs" definition.
-    *   `context`: Access to services.
-    *   **Returns**: A dictionary where keys match your "outputs" definition.
-3.  **Context Capabilities**:
-    *   `context.get_client(model_name=None)`: Returns a LollmsClient. Pass a model name string to use a specific model.
-    *   `client.generate_text(prompt, system_prompt=...)`: LLM generation.
-    *   `client.tti.generate_image(prompt, width, height)`: Returns bytes. **MUST convert to base64 string** before returning.
-    *   `context.engine`: Access to `execute_node_isolated` (only for advanced flow control).
-4.  **Libraries**: You may import standard libraries (`json`, `base64`, `random`, `math`, `re`).
-
-### Example Code Structure
-```python
-import base64
-import json
-
-class CustomNode:
-    def execute(self, inputs, context):
-        # Retrieve input
-        prompt = inputs.get("prompt", "")
-        
-        # Logic
-        client = context.get_client()
-        result = client.generate_text(prompt)
-        
-        # Return output
-        return {{"text": result}}
-```
-
-**IMPORTANT**: Respond ONLY with the JSON object. Do not add conversational text before or after.
+IMPORTANT: Respond ONLY with JSON.
 """
-
-    user_prompt = f"Design a node that does the following: {req.prompt}"
-    
+    user_prompt = f"Design a node that: {req.prompt}"
     generated_text = client.generate_text(user_prompt, system_prompt=system_prompt, max_new_tokens=2048)
-    
-    # Parse the response
     data = extract_json_from_text(generated_text)
-    
     if not data:
-        # Fallback: try to just extract code if JSON failed, but we really want the whole object
-        raise HTTPException(status_code=500, detail="AI failed to generate a valid JSON node definition. Please try again.")
-
-    # Validate minimal fields
-    required_fields = ["name", "label", "inputs", "outputs", "code"]
-    for field in required_fields:
-        if field not in data:
-             raise HTTPException(status_code=500, detail=f"AI generated incomplete definition (missing {field}).")
-
+        raise HTTPException(status_code=500, detail="AI failed to generate valid JSON.")
     return data
 
 @router.post("/test_code")
@@ -213,9 +146,13 @@ def test_node_code(
     req: TestCodeRequest,
     current_user: UserAuthDetails = Depends(get_current_admin_user)
 ):
-    """Executes the provided code snippet ephemerally for debugging."""
     try:
-        # Create a temporary execution environment
+        # Handle Requirements
+        import pipmaster
+        for r in req.requirements:
+            if not pipmaster.is_installed(r):
+                pipmaster.install(r)
+
         local_scope = {}
         try:
             exec(req.code, {}, local_scope)
@@ -224,44 +161,20 @@ def test_node_code(
         
         NodeClass = local_scope.get("CustomNode")
         if not NodeClass:
-            return {"status": "error", "error": "Class 'CustomNode' not found in code."}
+            return {"status": "error", "error": "Class 'CustomNode' not found."}
             
-        # Mock Context
         class MockContext:
             def __init__(self, user):
                 self.username = user
-                self.lollms_client = None # Lazy load
-                self.engine = None 
+                self.lollms_client = build_lollms_client_from_params(user)
+            def get_client(self, model_name=None): return self.lollms_client
 
-            def get_client(self, model_name=None):
-                # For testing, we just use the default client logic or build one on fly
-                if not self.lollms_client:
-                     self.lollms_client = build_lollms_client_from_params(self.username, load_llm=True, load_tti=True)
-                return self.lollms_client
-
-        context = MockContext(current_user.username)
         node_instance = NodeClass()
-        
-        # Execute
         try:
-            result = node_instance.execute(req.inputs, context)
-            
-            # Sanitize result for JSON
-            display_result = {}
-            if isinstance(result, dict):
-                for k, v in result.items():
-                    if isinstance(v, str) and len(v) > 200:
-                        display_result[k] = v[:50] + f"... ({len(v)} chars)"
-                    else:
-                        display_result[k] = v
-            else:
-                display_result = result
-
-            return {"status": "success", "output": display_result, "full_output": result} 
-            
+            result = node_instance.execute(req.inputs, MockContext(current_user.username))
+            return {"status": "success", "output": result} 
         except Exception as e:
             return {"status": "error", "error": f"Runtime Error: {str(e)}", "traceback": traceback.format_exc()}
-
     except Exception as e:
         return {"status": "error", "error": f"System Error: {str(e)}"}
 
@@ -334,49 +247,20 @@ def delete_flow(
     return {"message": "Flow deleted"}
 
 def _execute_flow_task(task: Task, username: str, flow_id: str, graph_data: dict, inputs: dict = None):
-    task.log(f"Initializing Flow Engine for user: {username}")
     engine = FlowEngine(username)
-    
-    # Inject runtime inputs into graph data
     if inputs:
-        # Create a quick lookup map
         node_map = {n['id']: n for n in graph_data.get('nodes', [])}
-        
         for node_id, node_inputs in inputs.items():
             if node_id in node_map:
-                # Assuming node['data'] holds the static values for inputs
-                if 'data' not in node_map[node_id]:
-                    node_map[node_id]['data'] = {}
-                
-                # Merge runtime inputs into the node's static data configuration
-                # This allows the engine to pick them up as if they were configured
+                if 'data' not in node_map[node_id]: node_map[node_id]['data'] = {}
                 node_map[node_id]['data'].update(node_inputs)
-        
-        task.log(f"Injected runtime inputs for {len(inputs)} nodes.")
-
-    task.log("Starting execution...")
-    task.set_progress(10)
     
+    task.log("Starting flow execution...")
+    task.set_progress(10)
     try:
         results = engine.execute_graph(graph_data)
         task.set_progress(100)
-        
-        # Serialize results for logging
-        serializable_results = {}
-        for nid, val in results.items():
-            clean_val = {}
-            if isinstance(val, dict):
-                for k, v in val.items():
-                    if isinstance(v, str) and len(v) > 200:
-                        clean_val[k] = v[:50] + "... [truncated]"
-                    else:
-                        clean_val[k] = v
-            else:
-                clean_val = val
-            serializable_results[nid] = clean_val
-                
-        task.log(f"Execution completed.")
-        return serializable_results
+        return results
     except Exception as e:
         task.log(f"Execution failed: {str(e)}", level="ERROR")
         raise e
@@ -390,9 +274,6 @@ def execute_flow(
     flow = db.query(DBFlow).filter(DBFlow.id == request.flow_id, DBFlow.owner_user_id == current_user.id).first()
     if not flow:
         raise HTTPException(status_code=404, detail="Flow not found")
-
-    # If inputs are provided, we use the graph stored in DB but inject the inputs.
-    # The _execute_flow_task will handle the merge on a copy of the graph data in memory.
     
     task = task_manager.submit_task(
         name=f"Execute Flow: {flow.name}",
