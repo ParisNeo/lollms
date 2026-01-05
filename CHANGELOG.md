@@ -32,7 +32,8 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(flow-studio): add comprehensive Flow Studio UI and backend updates
 
-## [Unreleased]
+#
+- chore(deps): bump lollms-client to 1.9.4 and safe_store to 3.3.4# [Unreleased]
 
 - feat(core): add video file support, extend DB schema, and overhaul UI assets
 
