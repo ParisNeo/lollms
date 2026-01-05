@@ -1,4 +1,3 @@
-<!-- frontend/webui/src/components/layout/PageViewLayout.vue -->
 <script setup>
 import { ref, onUnmounted, watch, markRaw } from 'vue';
 import { useUiStore } from '../../stores/ui';
@@ -61,7 +60,11 @@ onUnmounted(() => {
     </button>
 
     <div class="flex flex-col flex-1 overflow-hidden min-w-0">
-        <main class="flex-grow overflow-y-auto custom-scrollbar">
+        <!-- 
+            Updated: Added 'flex flex-col' to main to allow children to use h-full effectively. 
+            This fixes the issue where DataStoresView content collapsed to 0 height.
+        -->
+        <main class="flex-1 overflow-y-auto custom-scrollbar flex flex-col">
             <slot name="main"></slot>
         </main>
     </div>

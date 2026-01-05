@@ -54,12 +54,18 @@ class ConnectionManager:
             db = db_session_module.SessionLocal()
             new_connection = WebSocketConnection(user_id=user_id, session_id=session_id)
             db.add(new_connection)
-            db.commit()
             
             connecting_user = db.query(DBUser).filter(DBUser.id == user_id).first()
             if connecting_user:
+                # [FIX] Automatically register as admin if user has the flag
+                # This ensures broadcast_to_admins reaches them if they are on another worker
+                if connecting_user.is_admin:
+                    self.register_admin(user_id)
+                    ASCIIColors.cyan(f"Worker {os.getpid()}: Registered admin user {user_id}")
+
+                db.commit()
+
                 # Warm up LollmsClient in a separate thread to avoid blocking WebSocket handshake
-                # This ensures the client (and MCP connections) is ready when the UI requests it
                 from backend.session import get_user_lollms_client
                 threading.Thread(target=get_user_lollms_client, args=(connecting_user.username,), daemon=True).start()
 
@@ -81,7 +87,7 @@ class ConnectionManager:
                     for friend_id in friend_ids:
                         self.send_personal_message_sync(notification_payload, friend_id)
         except Exception as e:
-            print(f"ERROR: Failed to create DB record: {e}")
+            print(f"ERROR: Failed to create DB record or register user: {e}")
             if db: db.rollback()
         finally:
             if db: db.close()
@@ -206,7 +212,7 @@ class ConnectionManager:
             else:
                 await self.broadcast(payload)
         except Exception as e:
-            print(f"ERROR: Failed to route push broadcast payload: {e}")
+            print(f"ERROR: Failed to route push broadcast payload from hub: {e}")
 
     def broadcast_sync(self, message_data: dict):
         """
@@ -220,19 +226,23 @@ class ConnectionManager:
 
         if self._loop and self._loop.is_running():
             async def dispatch():
-                # 1. Local delivery (this worker instance)
-                msg_type = message_data.get("type")
-                if msg_type == "personal":
-                    uid = message_data.get("user_id")
-                    if uid is not None: await self.send_personal_message(message_data.get("data"), uid)
-                elif msg_type == "admins":
-                    await self.broadcast_to_admins(message_data.get("data"))
-                else:
-                    await self.broadcast(message_data)
+                # [FIX] Wrap local delivery in try-except so it doesn't block Hub propagation
+                try:
+                    # 1. Local delivery (this worker instance)
+                    msg_type = message_data.get("type")
+                    if msg_type == "personal":
+                        uid = message_data.get("user_id")
+                        if uid is not None: await self.send_personal_message(message_data.get("data"), uid)
+                    elif msg_type == "admins":
+                        await self.broadcast_to_admins(message_data.get("data"))
+                    else:
+                        await self.broadcast(message_data)
+                except Exception as e:
+                    print(f"ERROR: Local WebSocket delivery failed, proceeding to Hub sync: {e}")
                 
                 # 2. Push to Communication Hub (cross-worker synchronization)
-                # OPTIMIZATION: Only push to hub if running in multi-worker mode
-                if self.workers_count > 1 and self.hub_writer:
+                # Rely on hub_writer availability rather than just worker count check
+                if self.hub_writer:
                     try:
                         encoded = json.dumps(message_data).encode('utf-8')
                         packet = struct.pack('!I', len(encoded)) + encoded
@@ -244,8 +254,7 @@ class ConnectionManager:
             
             asyncio.run_coroutine_threadsafe(dispatch(), self._loop)
 
-        # Persistence to DB as a logging fallback (only in multi-worker mode)
-        # In single worker mode, local delivery is enough and faster.
+        # Persistence to DB as a fallback log for multi-worker synchronization audit
         if self.workers_count > 1:
             self._put_on_db_queue(message_data)
 
@@ -286,6 +295,7 @@ async def listen_for_broadcasts():
             reader, writer = await asyncio.open_connection('127.0.0.1', hub_port)
             manager.hub_writer = writer
             manager.is_hub_connected = True
+            print(f"INFO: Worker {os.getpid()} successfully connected to Communication Hub.")
             
             while True:
                 length_data = await reader.readexactly(4)

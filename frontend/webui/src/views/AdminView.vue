@@ -48,12 +48,13 @@ const sections = [
   { type: 'link', id: 'system_load', name: 'System Load', icon: markRaw(IconHardDrive) },
   { type: 'link', id: 'gpu_load', name: 'GPU Load', icon: markRaw(IconGpu) },
   { type: 'link', id: 'logs_analysis', name: 'Logs & Analysis', icon: markRaw(IconFileText) },
-  { type: 'link', id: 'requirements', name: 'Requirements', icon: markRaw(IconCode) }, // NEW
+  { type: 'link', id: 'requirements', name: 'Requirements', icon: markRaw(IconCode) },
   { type: 'link', id: 'operations', name: 'Operations', icon: markRaw(IconWrenchScrewdriver) },
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
   { type: 'link', id: 'services_mgmt', name: 'Services & Usage', icon: markRaw(IconServer) },
+  { type: 'link', id: 'email_marketing', name: 'Email Campaigns', icon: markRaw(IconMail) }, // ADDED
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'divider', label: 'Content' },
   { type: 'link', id: 'news_management', name: 'News Articles', icon: markRaw(IconFileText) },
@@ -120,3 +121,4 @@ const activeSectionId = computed({
         </template>
     </PageViewLayout>
 </template>
+

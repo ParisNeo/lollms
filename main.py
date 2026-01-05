@@ -46,7 +46,6 @@ from lollms_client import LollmsDataManager
 from backend.settings import settings
 
 from backend.routers.auth import auth_router
-from backend.routers.discussion import build_discussions_router
 from backend.routers.admin import admin_router
 from backend.routers.languages import languages_router
 from backend.routers.personalities import personalities_router
@@ -83,7 +82,6 @@ from backend.routers.flow_studio import router as flow_studio_router
 from backend.routers.services.lollms_v1 import lollms_v1_router
 from backend.routers.admin.services_management import router as admin_services_router
 
-from backend.routers.admin.email_marketing import router as email_marketing_router 
 from backend.db.models.email_marketing import EmailProposal, EmailTopic 
 from backend.tasks.email_tasks import _generate_email_proposal_task 
 
@@ -96,6 +94,8 @@ from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
 from backend.routers.news import news_router
 from backend.zoo_cache import load_cache
+
+from backend.routers.discussion import build_discussions_router
 
 import uvicorn
 from backend.settings import settings
@@ -539,7 +539,6 @@ app = FastAPI(
     on_shutdown=[shutdown_event]
 )
 
-app.include_router(email_marketing_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(languages_router)

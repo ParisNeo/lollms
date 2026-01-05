@@ -9,8 +9,9 @@ class Notebook(Base):
     
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     title = Column(String, nullable=False)
-    content = Column(Text, default="") # Kept for backward compatibility or main scratchpad
-    type = Column(String, default="generic") # New field: generic, data_analysis, book_building, slides_making, benchmarks
+    content = Column(Text, default="") 
+    type = Column(String, default="generic") 
+    language = Column(String, default="en") # New global language setting
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     
     # Stores references to files/sources processed for this notebook

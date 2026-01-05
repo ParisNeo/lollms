@@ -13,6 +13,7 @@ import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 import IconPresentationChartBar from '../../../assets/icons/IconPresentationChartBar.vue';
 import IconRefresh from '../../../assets/icons/IconRefresh.vue';
+import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import TaskProgressIndicator from '../TaskProgressIndicator.vue'; 
 
 import { useTasksStore } from '../../../stores/tasks';
@@ -35,6 +36,10 @@ const tasksStore = useTasksStore();
 const discussionsStore = useDiscussionsStore();
 const { tasks } = storeToRefs(tasksStore);
 const { activeAiTasks } = storeToRefs(discussionsStore);
+
+// State for prompt editing
+const editingPromptIdx = ref(-1);
+const editedPromptText = ref('');
 
 // ... (Math Rendering logic unchanged)
 function renderMath() {
@@ -83,7 +88,6 @@ const parsedMarkdown = (content) => {
   return html;
 };
 
-// Enhanced parser for tags
 const parsedStreamingContent = computed(() => {
     if (!props.content) return '';
     let content = props.content;
@@ -215,36 +219,38 @@ const getTokens = (text) => {
     return allTokens;
 };
 
-// [UPDATE] Find active task associated with this message to show progress indicator
 const activeTask = computed(() => {
     if (!props.messageId) return null;
     const discussionId = discussionsStore.currentDiscussionId;
     if (!discussionId) return null;
-    
-    // Check active tasks in the store
     const runningTasks = tasks.value.filter(t => t.status === 'running' || t.status === 'pending');
-    
-    // 1. Check if the message metadata explicitly links to a task (set by backend for slides)
-    // We access the message object from the store because props might be a copy or partial
     const messageObj = discussionsStore.messages.find(m => m.id === props.messageId);
     if (messageObj && messageObj.metadata && messageObj.metadata.active_task_id) {
         const linkedTask = runningTasks.find(t => t.id === messageObj.metadata.active_task_id);
         if (linkedTask) return linkedTask;
     }
-
-    // 2. Fallback: Check if the discussion has a tracked active task that might be relevant
     const tracked = activeAiTasks.value[discussionId];
     if (tracked && tracked.taskId) {
         const task = runningTasks.find(t => t.id === tracked.taskId);
-        // Heuristic: If we are the AI message and a task is running, it might be ours.
-        // Especially if it's a generation type task.
-        if (task && !props.isUser) {
-             return task;
-        }
+        if (task && !props.isUser) return task;
     }
     return null;
 });
 
+function handleRegenerateClick(index, part) {
+    if (editingPromptIdx.value === index) {
+        // [MODIFIED] Pass the custom prompt during regeneration
+        emit('regenerate', { ...part, custom_prompt: editedPromptText.value });
+        editingPromptIdx.value = -1;
+    } else {
+        editingPromptIdx.value = index;
+        editedPromptText.value = part.prompt;
+    }
+}
+
+function cancelEdit() {
+    editingPromptIdx.value = -1;
+}
 
 const simpleHash = str => {
   let hash = 0;
@@ -256,7 +262,6 @@ const simpleHash = str => {
   return hash;
 };
 
-// ... (Annotation helpers: drawAnnotations, downloadAnnotatedImage, onImageLoad - unchanged)
 function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayWidth) {
     if (!Array.isArray(annotations) || !ctx) return;
     annotations.forEach(ann => {
@@ -381,7 +386,6 @@ function onImageLoad(event, annotations) {
       <template v-else>
         <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
           
-          <!-- Standard Content -->
           <template v-if="part.type === 'content'">
             <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
@@ -398,7 +402,6 @@ function onImageLoad(event, annotations) {
             </template>
           </template>
 
-          <!-- Thinking Block -->
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
             <summary class="think-summary">
               <IconThinking class="h-5 w-5 flex-shrink-0" />
@@ -407,44 +410,65 @@ function onImageLoad(event, annotations) {
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
 
-          <!-- Image Tool Call (Generation / Editing / Slides) - Rendered as a nice block with Regenerate -->
-          <div v-else-if="part.type === 'image_tool'" class="my-4 p-3 rounded-lg border dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-             <div class="flex items-center justify-between mb-2">
+          <!-- [UPDATE] Enhanced Image Tool Call Block -->
+          <div v-else-if="part.type === 'image_tool'" class="my-4 p-4 rounded-xl border-2 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 shadow-sm">
+             <div class="flex items-center justify-between mb-4">
                  <div class="flex items-center gap-2">
-                     <div class="p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
-                         <IconPencil v-if="part.mode === 'edit'" class="w-4 h-4" />
-                         <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-4 h-4" />
-                         <IconPhoto v-else class="w-4 h-4" />
+                     <div class="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                         <IconPencil v-if="part.mode === 'edit'" class="w-5 h-5" />
+                         <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-5 h-5" />
+                         <IconPhoto v-else class="w-5 h-5" />
                      </div>
-                     <span class="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                         <template v-if="part.mode === 'edit'">Edit Request</template>
-                         <template v-else-if="part.mode === 'slides'">Slides Request</template>
-                         <template v-else>Generation Request</template>
-                     </span>
+                     <div class="flex flex-col">
+                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 leading-none mb-1">
+                            <template v-if="part.mode === 'edit'">Image Edit</template>
+                            <template v-else-if="part.mode === 'slides'">Slide Deck</template>
+                            <template v-else>Image Generation</template>
+                        </span>
+                        <span class="text-sm font-bold text-gray-800 dark:text-gray-200">AI Request Block</span>
+                     </div>
                  </div>
-                 <button @click="$emit('regenerate', part)" class="p-1.5 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500 transition-colors" title="Regenerate">
-                     <IconRefresh class="w-4 h-4" />
-                 </button>
+                 
+                 <div class="flex items-center gap-1">
+                    <button v-if="editingPromptIdx === index" @click="cancelEdit" class="btn-icon-sm" title="Cancel">
+                        <IconRefresh class="w-4 h-4 transform rotate-45 text-red-500" />
+                    </button>
+                    <button @click="handleRegenerateClick(index, part)" class="btn btn-sm" :class="editingPromptIdx === index ? 'btn-primary' : 'btn-secondary'" title="Regenerate">
+                        <IconCheckCircle v-if="editingPromptIdx === index" class="w-4 h-4 mr-1.5" />
+                        <IconRefresh v-else class="w-4 h-4 mr-1.5" />
+                        <span>{{ editingPromptIdx === index ? 'Submit' : 'Regenerate' }}</span>
+                    </button>
+                 </div>
              </div>
              
-             <!-- Show Active Task Progress if matched -->
-             <div v-if="activeTask" class="mb-2">
+             <div v-if="activeTask" class="mb-4">
                 <TaskProgressIndicator :task="activeTask" class="text-xs" />
              </div>
 
-             <!-- Slide List View -->
-             <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-purple-200 dark:border-purple-800">
-                 <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-gray-600 dark:text-gray-300 mb-1">
-                     <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
-                 </div>
+             <!-- [NEW] Inline Prompt Editor -->
+             <div v-if="editingPromptIdx === index" class="space-y-3 animate-in fade-in slide-in-from-top-2">
+                <p class="text-[10px] font-bold text-blue-500 uppercase tracking-wide">Customize Prompt:</p>
+                <textarea 
+                    v-model="editedPromptText" 
+                    rows="4" 
+                    class="input-field w-full text-sm font-medium h-32 resize-y" 
+                    placeholder="Enter customized generation prompt..."
+                    @keyup.esc="cancelEdit"
+                ></textarea>
+                <p class="text-[10px] text-gray-500 italic">This will generate a new variant using the updated prompt.</p>
              </div>
-             <!-- Standard Prompt View -->
-             <div v-else class="text-sm font-medium text-gray-800 dark:text-gray-200 italic">
-                 "{{ part.prompt }}"
+             <div v-else class="relative group/prompt">
+                 <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-purple-200 dark:border-purple-800">
+                     <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-gray-600 dark:text-gray-300 mb-1">
+                         <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
+                     </div>
+                 </div>
+                 <div v-else class="text-sm font-medium text-gray-800 dark:text-gray-200 italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all">
+                     "{{ part.prompt }}"
+                 </div>
              </div>
           </div>
 
-          <!-- Annotation Block -->
           <template v-else-if="part.type === 'annotate'">
             <div class="annotated-image-container relative my-4 group">
                 <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" @load="onImageLoad($event, part.annotations)"/>
@@ -469,24 +493,17 @@ function onImageLoad(event, annotations) {
     @apply prose prose-base dark:prose-invert max-w-none break-words;
     font-size: var(--message-font-size, 14px);
 }
+.btn-icon-sm { @apply p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center; }
 .think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
 details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
 .think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
 .think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
 .think-summary::-webkit-details-marker { display: none; }
 .think-content { @apply p-3; }
-
-.document-block {
-    @apply bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/50 rounded-lg;
-}
-.document-summary {
-    @apply flex items-center gap-2 p-2 text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer list-none select-none;
-    -webkit-tap-highlight-color: transparent;
-}
+.document-block { @apply bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/50 rounded-lg; }
+.document-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
 .document-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
 .document-summary::-webkit-details-marker { display: none; }
-details[open] > .document-summary {
-    @apply border-b border-gray-200 dark:border-gray-700/50;
-}
+details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 .document-content { @apply p-3; }
 </style>

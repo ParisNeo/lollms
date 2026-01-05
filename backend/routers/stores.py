@@ -142,7 +142,7 @@ def _sanitize_numpy(data: Any) -> Any:
     if isinstance(data, (np.int_, np.intc, np.intp, np.int8, np.int16, np.int32, np.int64,
                       np.uint8, np.uint16, np.uint32, np.uint64)):
         return int(data)
-    if isinstance(data, (np.float_, np.float16, np.float32, np.float64)):
+    if isinstance(data, (np.float64, np.float16, np.float32, np.float64)):
         return float(data)
     if isinstance(data, np.ndarray):
         return data.tolist()
@@ -1200,12 +1200,12 @@ async def update_datastore(datastore_id: str, ds_update: DataStoreEdit, current_
         
         return DataStorePublic(
              id=ds_db_obj.id, name=ds_db_obj.name, description=ds_db_obj.description,
-             owner_username=ds_db_obj.owner.username, permission_level=permission_level,
+             owner_username=ds_db.owner.username, permission_level=permission_level,
              created_at=ds_db_obj.created_at, updated_at=ds_db_obj.updated_at,
              vectorizer_name=ds_db_obj.vectorizer_name,
              vectorizer_config=ds_db_obj.vectorizer_config or {},
              chunk_size=ds_db_obj.chunk_size,
-             chunk_overlap=ds_db_obj.chunk_overlap
+             chunk_overlap=ds_db.chunk_overlap
         )
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error updating datastore: {e}")
@@ -1321,3 +1321,25 @@ async def unshare_datastore(datastore_id: str, target_user_id: int, current_user
         return {"message": f"Sharing for DataStore '{ds_to_unshare.name}' has been revoked from user '{target_user_db.username}'."}
     except Exception as e:
         db.rollback(); traceback.print_exc(); raise HTTPException(status_code=500, detail=f"DB error revoking share link: {e}")
+
+@datastore_router.delete("/{datastore_id}/leave", status_code=status.HTTP_200_OK)
+async def leave_datastore(datastore_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> Dict[str, str]:
+    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not user_db: raise HTTPException(status_code=404, detail="User not found.")
+
+    link_to_delete = db.query(DBSharedDataStoreLink).filter_by(datastore_id=datastore_id, shared_with_user_id=user_db.id).first()
+    if not link_to_delete:
+        # Check if it is the owner trying to leave (impossible, owner must delete)
+        ds = db.query(DBDataStore).filter_by(id=datastore_id).first()
+        if ds and ds.owner_user_id == user_db.id:
+             raise HTTPException(status_code=400, detail="Owner cannot leave the datastore. Delete it instead.")
+        raise HTTPException(status_code=404, detail="Shared link not found.")
+
+    try:
+        db.delete(link_to_delete)
+        db.commit()
+        return {"message": f"You have left the DataStore."}
+    except Exception as e:
+        db.rollback()
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"DB error leaving datastore: {e}")

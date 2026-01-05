@@ -21,8 +21,9 @@ import ConnectionOverlay from './components/ui/ConnectionOverlay.vue';
 // Async Modals
 const SlideshowModal = defineAsyncComponent(() => import('./components/modals/SlideshowModal.vue'));
 const CommandOutputModal = defineAsyncComponent(() => import('./components/modals/CommandOutputModal.vue'));
-// NEW: Make Notebook Wizard globally available
 const NotebookWizardModal = defineAsyncComponent(() => import('./components/modals/NotebookWizardModal.vue'));
+const ArtefactImportWizardModal = defineAsyncComponent(() => import('./components/modals/ArtefactImportWizardModal.vue'));
+const ArtefactViewerModal = defineAsyncComponent(() => import('./components/modals/ArtefactViewerModal.vue'));
 
 // UI Components
 import MessageContentRenderer from './components/ui/MessageContentRenderer/MessageContentRenderer.vue';
@@ -69,7 +70,7 @@ const layoutState = computed(() => {
 
 const showMainSidebar = computed(() => {
     if (!isAuthenticated.value) return false;
-    const noSidebarPaths = ['/settings', '/admin', '/datastores', '/friends', '/help', '/profile', '/messages', '/voices-studio', '/image-studio'];
+    const noSidebarPaths = ['/settings', '/admin', '/friends', '/help', '/profile', '/messages', '/voices-studio', '/image-studio'];
     return !noSidebarPaths.some(path => route.path.startsWith(path));
 });
 
@@ -138,10 +139,6 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-50 dark:bg-gray-900 flex flex-col">
     
     <!-- Connection Lost Overlay -->
-    <!-- Logic: 
-         - Show if disconnected AND authenticated AND we have successfully connected at least once before (avoids startup flash).
-         - OR show if we are currently in the middle of a reconnection sync (isReconnecting). 
-    -->
     <Transition
         enter-active-class="transition ease-out duration-300"
         enter-from-class="opacity-0"
@@ -283,7 +280,9 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     <ImageViewerModal />
     <SlideshowModal />
     <CommandOutputModal />
-    <NotebookWizardModal /> <!-- ADDED GLOBALLY -->
+    <NotebookWizardModal />
+    <ArtefactImportWizardModal /> <!-- Added -->
+    <ArtefactViewerModal />       <!-- Added -->
     <NotificationPanel /><AudioPlayer />
   </div>
 </template>

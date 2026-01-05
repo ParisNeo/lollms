@@ -1,62 +1,63 @@
 <template>
     <!-- TELEPORT EDITOR TOOLBAR TO GLOBAL HEADER -->
+    <!-- We use a wrapper with pointer-events-auto to ensure clicks are caught even if the header has background elements -->
     <Teleport to="#global-header-title-target" v-if="isComponentMounted && hasHeaderTarget">
-        <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 sm:p-1 gap-0.5 sm:gap-1 pointer-events-auto shadow-inner border dark:border-gray-700">
+        <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-xl p-1 gap-1 pointer-events-auto shadow-inner border border-gray-200 dark:border-gray-700 relative z-[100]">
             <button v-for="t in tools" :key="t.id" 
-                @click="setTool(t.id)" 
-                class="p-1.5 sm:p-2 rounded-md transition-all transform active:scale-90 relative z-10"
-                :class="tool === t.id ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                @click.stop="setTool(t.id)" 
+                type="button"
+                class="p-2 rounded-lg transition-all transform active:scale-95 cursor-pointer flex items-center justify-center"
+                :class="tool === t.id ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-500 shadow-md ring-1 ring-black/5' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-200'"
                 :title="t.name"
             >
-                <component :is="t.icon" class="w-4 h-4 sm:w-5 sm:h-5" />
+                <component :is="t.icon" class="w-5 h-5 pointer-events-none" />
             </button>
         </div>
     </Teleport>
 
     <Teleport to="#global-header-actions-target" v-if="isComponentMounted && hasHeaderTarget">
-        <div class="flex items-center gap-1 sm:gap-2 shrink-0 pointer-events-auto">
+        <div class="flex items-center gap-2 pointer-events-auto relative z-[100]">
             <!-- Undo/Redo -->
-            <button @click="undo" :disabled="historyIndex <= 0" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-20 transition-opacity" title="Undo (Ctrl+Z)"><IconUndo class="w-5 h-5" /></button>
-            <button @click="redo" :disabled="historyIndex >= history.length - 1" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-700 rounded disabled:opacity-20 transition-opacity" title="Redo (Ctrl+Y)"><IconRedo class="w-5 h-5" /></button>
+            <button @click="undo" :disabled="historyIndex <= 0" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg disabled:opacity-20 transition-all" title="Undo (Ctrl+Z)"><IconUndo class="w-5 h-5" /></button>
+            <button @click="redo" :disabled="historyIndex >= history.length - 1" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg disabled:opacity-20 transition-all" title="Redo (Ctrl+Y)"><IconRedo class="w-5 h-5" /></button>
             
             <div class="h-6 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
-            <!-- Global Actions -->
             <div class="flex items-center gap-1">
-                <button @click="saveProject" class="btn btn-secondary btn-sm" title="Save Multi-Layer Project">
-                    <IconFolder class="w-4 h-4 mr-1"/> <span class="hidden sm:inline">Project</span>
+                <button @click="saveProject" class="btn btn-secondary btn-sm h-9 px-3" title="Save Multi-Layer Project">
+                    <IconFolder class="w-4 h-4 mr-1.5"/> <span class="hidden sm:inline">Project</span>
                 </button>
-                <button @click="saveCanvas" class="btn btn-primary btn-sm" title="Flatten and Save PNG">
-                    <IconSave class="w-4 h-4 mr-1" /> <span class="hidden sm:inline">PNG</span>
+                <button @click="saveCanvas" class="btn btn-primary btn-sm h-9 px-3" title="Flatten and Save PNG">
+                    <IconSave class="w-4 h-4 mr-1.5" /> <span class="hidden sm:inline">PNG</span>
                 </button>
             </div>
             
-            <button @click="showMobileSidebar = !showMobileSidebar" class="lg:hidden btn btn-secondary p-2 ml-1"><IconAdjustmentsHorizontal class="w-5 h-5" /></button>
+            <button @click="showMobileSidebar = !showMobileSidebar" class="lg:hidden btn btn-secondary p-2 ml-1 h-9 w-9 flex items-center justify-center"><IconAdjustmentsHorizontal class="w-5 h-5" /></button>
         </div>
     </Teleport>
 
     <div class="h-full flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden relative select-none">
         
-        <!-- Tool Settings Bar -->
-        <div class="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-white/90 dark:bg-gray-900/90 backdrop-blur px-4 py-2 rounded-2xl shadow-xl border dark:border-gray-800">
+        <!-- Tool Settings Bar (Brush Size, Tolerance, etc) -->
+        <div class="absolute top-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-4 bg-white/95 dark:bg-gray-900/95 backdrop-blur px-4 py-2 rounded-2xl shadow-xl border dark:border-gray-800 animate-in fade-in slide-in-from-top-4">
             <!-- Color Picker -->
             <div class="flex items-center gap-2" v-if="['brush', 'line', 'rect', 'circle', 'text'].includes(tool)">
-                <input type="color" v-model="color" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent">
+                <input type="color" v-model="color" class="w-7 h-7 rounded-lg cursor-pointer border-0 p-0 bg-transparent overflow-hidden">
             </div>
             
-            <!-- Size / Font Slider -->
-            <div class="flex items-center gap-2" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand'].includes(tool)">
-                <span class="text-[9px] font-black text-gray-400 uppercase tracking-tighter">
+            <!-- Size / Tolerance Slider -->
+            <div class="flex items-center gap-3" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand'].includes(tool)">
+                <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest min-w-[50px]">
                     {{ tool === 'text' ? 'Font' : (tool === 'wand' ? 'Tolerance' : 'Size') }}
                 </span>
-                <input type="range" v-model.number="brushSize" :min="tool === 'wand' ? 0 : 1" :max="tool === 'wand' ? 100 : 400" class="w-24 sm:w-32 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer">
-                <span class="text-[10px] font-mono w-6 text-center">{{ brushSize }}</span>
+                <input type="range" v-model.number="brushSize" :min="tool === 'wand' ? 0 : 1" :max="tool === 'wand' ? 100 : 400" class="w-24 sm:w-40 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                <span class="text-[10px] font-mono font-bold w-8 text-center bg-gray-100 dark:bg-gray-800 py-0.5 rounded">{{ brushSize }}</span>
             </div>
 
             <!-- Clone Tool Anchor Actions -->
             <div v-if="tool === 'clone'" class="flex items-center gap-2 border-l dark:border-gray-700 pl-4">
-                <button @click="settingCloneAnchor = true" class="btn btn-xs" :class="settingCloneAnchor ? 'btn-primary' : 'btn-secondary'">
-                    Set Anchor
+                <button @click="settingCloneAnchor = true" class="btn btn-xs h-7" :class="settingCloneAnchor ? 'btn-primary' : 'btn-secondary'">
+                    {{ settingCloneAnchor ? 'Click Canvas...' : 'Set Anchor' }}
                 </button>
             </div>
         </div>
@@ -73,39 +74,29 @@
                 <!-- PROGRESS OVERLAY -->
                 <transition name="fade">
                     <div v-if="isProcessingTask" class="absolute inset-0 z-[100] flex flex-col items-center justify-center bg-gray-900/40 backdrop-blur-[2px]">
-                        <div class="w-64 bg-white/10 p-4 rounded-2xl border border-white/20 shadow-2xl">
+                        <div class="w-64 bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-200 dark:border-gray-700 shadow-2xl">
                              <div class="flex justify-between items-center mb-2">
-                                 <span class="text-[10px] font-black text-white uppercase tracking-[0.2em] animate-pulse">Processing...</span>
-                                 <span class="text-xs font-mono text-white">{{ activeTask?.progress || 0 }}%</span>
+                                 <span class="text-[10px] font-black text-blue-500 uppercase tracking-[0.2em] animate-pulse">Processing...</span>
+                                 <span class="text-xs font-mono font-bold">{{ activeTask?.progress || 0 }}%</span>
                              </div>
-                             <div class="h-2 w-full bg-black/40 rounded-full overflow-hidden">
+                             <div class="h-2 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
                                  <div class="h-full bg-blue-500 transition-all duration-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" :style="{ width: `${activeTask?.progress || 0}%` }"></div>
                              </div>
-                             <p class="mt-3 text-[10px] text-gray-300 italic text-center truncate">{{ activeTask?.description }}</p>
+                             <p class="mt-3 text-[10px] text-gray-500 dark:text-gray-400 italic text-center truncate">{{ activeTask?.description }}</p>
                         </div>
                     </div>
                 </transition>
 
                 <!-- Layer Composition Container -->
                 <div :style="combinedCanvasStyle" class="relative shadow-2xl origin-center canvas-stack">
-                    <!-- Base Layer (Always Bottom) -->
                     <canvas ref="imageCanvasRef" class="block bg-white layer-canvas"></canvas>
-                    
-                    <!-- Dynamic User Layers -->
                     <div v-for="layer in layers" :key="layer.id" v-show="layer.visible">
                          <canvas :ref="el => layer.el = el" class="absolute inset-0 layer-canvas" :style="{ zIndex: layer.order, opacity: layer.opacity }"></canvas>
                     </div>
-
-                    <!-- AI Mask Layer (Inpaint Selection) -->
                     <canvas ref="maskCanvasRef" class="absolute inset-0 opacity-40 layer-canvas pointer-events-none" style="z-index: 999"></canvas>
-                    
-                    <!-- Drawing Tool Preview Layer -->
                     <canvas ref="previewCanvasRef" class="absolute inset-0 pointer-events-none layer-canvas" style="z-index: 1000"></canvas>
                     
-                    <!-- Brush Cursor -->
                     <div v-show="showCursor" class="absolute pointer-events-none rounded-full border border-black/50 bg-white/20 z-[1100] transform -translate-x-1/2 -translate-y-1/2" :style="{ width: `${brushSize}px`, height: `${brushSize}px`, left: `${cursorX}px`, top: `${cursorY}px` }"></div>
-                    
-                    <!-- Clone Anchor Marker -->
                     <div v-if="cloneAnchor" class="absolute pointer-events-none z-[1100] flex items-center justify-center transform -translate-x-1/2 -translate-y-1/2" :style="{ left: `${cloneAnchor.x}px`, top: `${cloneAnchor.y}px` }">
                         <div class="w-4 h-4 border-2 border-green-500 rounded-full animate-ping"></div>
                         <div class="absolute w-px h-6 bg-green-500"></div>
@@ -125,7 +116,7 @@
             <!-- Inspector Sidebar -->
             <aside class="absolute inset-y-0 right-0 z-30 w-72 sm:w-80 bg-white dark:bg-gray-900 border-l dark:border-gray-800 transform transition-transform lg:relative lg:translate-x-0 flex flex-col shadow-xl" :class="showMobileSidebar ? 'translate-x-0' : 'translate-x-full'">
                 <div class="p-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                    <h3 class="font-black text-[10px] uppercase tracking-widest text-gray-500">Layers & Timeline</h3>
+                    <h3 class="font-black text-[10px] uppercase tracking-widest text-gray-500">Workspace Management</h3>
                 </div>
                 
                 <div class="flex-grow overflow-y-auto custom-scrollbar">
@@ -133,14 +124,14 @@
                     <!-- LAYER MANAGER -->
                     <div class="p-4 border-b dark:border-gray-800 space-y-3">
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Workspace Layers</span>
+                            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Active Layers</span>
                             <button @click="addNewLayer" class="text-blue-500 hover:scale-110 transition-transform"><IconPlus class="w-4 h-4"/></button>
                         </div>
                         
                         <div class="space-y-1">
                              <div @click="activeLayerId = 'mask'" class="layer-item group" :class="{'active': activeLayerId === 'mask'}">
                                 <IconPhoto class="w-3.5 h-3.5 opacity-50"/>
-                                <span class="text-xs font-bold truncate flex-grow">Selection Mask</span>
+                                <span class="text-xs font-bold truncate flex-grow">Selection Mask (AI Only)</span>
                             </div>
 
                             <div v-for="layer in sortedLayers" :key="layer.id" @click="activeLayerId = layer.id" class="layer-item group" :class="{'active': activeLayerId === layer.id}">
@@ -157,13 +148,13 @@
                     <!-- AI LAYER GENERATOR -->
                     <div class="p-4 border-b dark:border-gray-800 space-y-4">
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Generate Element</span>
+                            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">AI Composition</span>
                             <button @click="initiateEnhancement" class="text-blue-500 hover:scale-110 transition-transform"><IconSparkles class="w-4 h-4"/></button>
                         </div>
-                        <textarea v-model="prompt" rows="3" class="input-field w-full text-xs resize-none" placeholder="Describe the element to add to current layer..."></textarea>
+                        <textarea v-model="prompt" rows="3" class="input-field w-full text-xs resize-none" placeholder="Describe changes or additions..."></textarea>
                         
                         <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2 rounded-lg border dark:border-gray-700">
-                             <span class="text-[9px] font-black uppercase text-gray-500">Remove BG</span>
+                             <span class="text-[9px] font-black uppercase text-gray-500">Auto Key Transparency</span>
                              <button @click="aiRemoveBg = !aiRemoveBg" :class="aiRemoveBg ? 'bg-green-500' : 'bg-gray-400'" class="w-8 h-4 rounded-full relative transition-colors">
                                  <div class="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all" :style="{ left: aiRemoveBg ? '16px' : '2px' }"></div>
                              </button>
@@ -174,20 +165,20 @@
                         </select>
                         
                         <button @click="generateNewLayerElement" class="btn btn-primary w-full py-2 shadow-md flex items-center justify-center gap-2" :disabled="isProcessingTask">
-                            <IconPlus class="w-4 h-4"/> <span>Generate To New Layer</span>
+                            <IconPlus class="w-4 h-4"/> <span>Generate Asset Layer</span>
                         </button>
                     </div>
 
                     <!-- ADJUSTMENTS -->
                     <div class="p-4 space-y-4">
-                        <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Active Layer Opacity</span>
+                        <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">Layer Opacity</span>
                         <input type="range" v-model.number="activeLayer.opacity" min="0" max="1" step="0.05" class="w-full h-1.5 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer">
                     </div>
                 </div>
 
                 <div class="p-4 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-900/80">
                     <button @click="generateFlattenedEdit" class="btn btn-primary w-full py-3 shadow-xl transform active:scale-95 transition-all" :disabled="isProcessingTask">
-                        <IconSparkles class="w-5 h-5 mr-2" /> {{ activeLayerId === 'mask' ? 'INPAINT SELECTION' : 'RENDER COMPOSITION' }}
+                        <IconSparkles class="w-5 h-5 mr-2" /> {{ activeLayerId === 'mask' ? 'RENDER INPAINT' : 'FULL COMPOSTION' }}
                     </button>
                 </div>
             </aside>
@@ -250,7 +241,7 @@ const activeLayerId = ref('base'), tool = ref('brush'), color = ref('#000000'), 
 const brightness = ref(1.0), contrast = ref(1.0);
 
 const layers = ref([
-    { id: 'base', name: 'Original Plate', visible: true, order: 0, el: null, ctx: null, opacity: 1.0 }
+    { id: 'base', name: 'Background Plate', visible: true, order: 0, el: null, ctx: null, opacity: 1.0 }
 ]);
 const sortedLayers = computed(() => [...layers.value].sort((a, b) => b.order - a.order));
 const activeLayer = computed(() => layers.value.find(l => l.id === activeLayerId.value) || layers.value[0]);
@@ -260,15 +251,15 @@ let isDragging = false, lastX = 0, lastY = 0, startX = 0, startY = 0;
 const cursorX = ref(0), cursorY = ref(0), history = ref([]), historyIndex = ref(-1);
 
 const tools = [ 
-    { id: 'pan', name: 'Pan / Move', icon: IconHand }, 
-    { id: 'brush', name: 'Brush', icon: IconPencil }, 
+    { id: 'pan', name: 'Pan / Move Content', icon: IconHand }, 
+    { id: 'brush', name: 'Standard Brush', icon: IconPencil }, 
     { id: 'eraser', name: 'Eraser', icon: IconEraser }, 
-    { id: 'wand', name: 'Magic Wand (Transparency)', icon: IconWand },
+    { id: 'wand', name: 'Magic Wand (Color to Transparent)', icon: IconWand },
     { id: 'clone', name: 'Clone Stamp', icon: IconArrowPath },
-    { id: 'text', name: 'Text Tool', icon: IconType }, 
-    { id: 'line', name: 'Line', icon: IconLine }, 
-    { id: 'rect', name: 'Rect', icon: IconRect }, 
-    { id: 'circle', name: 'Circle', icon: IconCircle } 
+    { id: 'text', name: 'Text Layer', icon: IconType }, 
+    { id: 'line', name: 'Line Tool', icon: IconLine }, 
+    { id: 'rect', name: 'Rectangle', icon: IconRect }, 
+    { id: 'circle', name: 'Ellipse', icon: IconCircle } 
 ];
 
 const compatibleModels = computed(() => dataStore.availableTtiModels);
@@ -278,12 +269,13 @@ const activeTask = computed(() => tasksStore.tasks.find(t => t.id === activeTask
 
 onMounted(async () => {
     isComponentMounted.value = true;
+    
+    // Explicitly wipe the header title to prevent overlap
+    uiStore.setPageTitle({ title: '', icon: null });
+
     nextTick(() => hasHeaderTarget.value = !!document.getElementById('global-header-title-target'));
     
     on('task:completed', onTaskCompleted);
-    
-    // REMOVED uiStore.setPageTitle to prevent the overlap issue.
-    // The teleport will now be the only thing in the title area.
     
     if (maskCanvasRef.value) ctxMask.value = maskCanvasRef.value.getContext('2d');
     if (previewCanvasRef.value) ctxPreview.value = previewCanvasRef.value.getContext('2d');
@@ -311,6 +303,8 @@ async function loadImage(id) {
     finally { isLoadingImage.value = false; }
 }
 
+function setTool(t) { tool.value = t; }
+
 function addNewLayer(name = null) {
     const id = `layer_${Date.now()}`;
     layers.value.push({ id, name: name || `Layer ${layers.value.length}`, visible: true, order: layers.value.length, el: null, ctx: null, opacity: 1.0 });
@@ -337,7 +331,7 @@ function startAction(e) {
     if (tool.value === 'wand') { magicWandTransparency(x, y); return; }
     isDragging = true; lastX = e.clientX; lastY = e.clientY; startX = x; startY = y;
     if (tool.value === 'text') {
-        const t = prompt("Text:");
+        const t = prompt("Enter text overlay:");
         if (t) { const c = getActiveContext(); c.fillStyle = color.value; c.font = `bold ${brushSize.value}px sans-serif`; c.fillText(t, x, y); saveState(); }
         isDragging = false;
     } else if (['brush', 'eraser', 'clone'].includes(tool.value)) {
@@ -394,7 +388,8 @@ function commitShape(pos) {
 }
 
 function magicWandTransparency(startX, startY) {
-    const c = getActiveContext(); const w = c.canvas.width, h = c.canvas.height;
+    const c = getActiveContext(); if(!c) return;
+    const w = c.canvas.width, h = c.canvas.height;
     const imgData = c.getImageData(0,0,w,h); const data = imgData.data;
     const pos = (Math.floor(startY) * w + Math.floor(startX)) * 4;
     const tr = data[pos], tg = data[pos+1], tb = data[pos+2], tol = brushSize.value * 2.55;
@@ -407,7 +402,7 @@ function magicWandTransparency(startX, startY) {
 
 async function generateNewLayerElement() {
     isProcessingTask.value = true;
-    const fullPrompt = aiRemoveBg.value ? `${prompt.value} on a solid bright magenta background, isolated element` : prompt.value;
+    const fullPrompt = aiRemoveBg.value ? `${prompt.value} on a solid bright magenta background, isolated item, studio light` : prompt.value;
     try {
         const tsk = await imageStore.generateImage({
             prompt: fullPrompt, model: selectedModel.value, 
@@ -430,11 +425,11 @@ async function loadGeneratedAssetToLayer(id) {
     const res = await apiClient.get(`/api/image-studio/${id}/file`, { responseType: 'blob' });
     const img = new Image();
     img.onload = () => {
-        addNewLayer("AI Element");
+        addNewLayer("AI Asset");
         nextTick(() => {
             const l = activeLayer.value;
             l.ctx.drawImage(img, 0, 0);
-            if (aiRemoveBg.value) magicWandTransparency(0, 0); // Attempt keying out top-left pixel color (magenta)
+            if (aiRemoveBg.value) magicWandTransparency(0, 0); 
             saveState(); isProcessingTask.value = false;
         });
     };
@@ -459,7 +454,7 @@ function saveProject() {
     };
     const blob = new Blob([JSON.stringify(projectData)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `lollms_project_${Date.now()}.json`; a.click();
+    const a = document.createElement('a'); a.href = url; a.download = `project_${Date.now()}.json`; a.click();
 }
 
 function saveCanvas() {
@@ -473,7 +468,6 @@ function saveState() {
     const s = layers.value.map(l => ({ id: l.id, data: l.el?.toDataURL(), v: l.visible, o: l.opacity }));
     if (historyIndex.value < history.value.length - 1) history.value = history.value.slice(0, historyIndex.value+1);
     history.value.push(s); historyIndex.value++;
-    if (history.value.length > 20) { history.value.shift(); historyIndex.value--; }
 }
 
 function undo() { if (historyIndex.value > 0) { historyIndex.value--; applyHistory(history.value[historyIndex.value]); } }
@@ -489,7 +483,7 @@ function fitToScreen() {
     if (!containerRef.value || !imageCanvasRef.value) return;
     const cw = containerRef.value.clientWidth, ch = containerRef.value.clientHeight;
     const iw = imageCanvasRef.value.width, ih = imageCanvasRef.value.height;
-    zoom.value = Math.min((cw - 40) / iw, (ch - 40) / ih, 1);
+    zoom.value = Math.min((cw - 60) / iw, (ch - 60) / ih, 1);
 }
 
 function zoomIn() { zoom.value = Math.min(10, zoom.value + 0.1); }
@@ -509,7 +503,7 @@ function handleKeydown(e) {
 .pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; }
 .dark .pattern-grid { background-image: linear-gradient(45deg, #1f2937 25%, transparent 25%), linear-gradient(-45deg, #1f2937 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1f2937 75%), linear-gradient(-45deg, transparent 75%, #1f2937 75%); }
 .layer-canvas { image-rendering: pixelated; }
-.layer-item { @apply flex items-center gap-3 p-2.5 rounded-xl cursor-pointer border-2 border-transparent transition-all hover:bg-gray-100 dark:hover:bg-gray-800; }
+.layer-item { @apply flex items-center gap-3 p-3 rounded-xl cursor-pointer border-2 border-transparent transition-all hover:bg-gray-100 dark:hover:bg-gray-800; }
 .layer-item.active { @apply border-blue-500 bg-blue-50 dark:bg-blue-900/30; }
 .fade-enter-active, .fade-leave-active { transition: opacity 0.3s; }
 .fade-enter-from, .fade-leave-to { opacity: 0; }

@@ -14,6 +14,7 @@ import DiscussionItem from './DiscussionItem.vue';
 import DiscussionGroupItem from './DiscussionGroupItem.vue';
 import NoteList from '../notes/NoteList.vue';
 import AlbumList from '../images/AlbumList.vue';
+import DataStoreItem from '../datastores/DataStoreItem.vue'; // Imported DataStoreItem
 
 // New: Async import the wizard
 const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
@@ -42,6 +43,7 @@ import IconDatabase from '../../assets/icons/IconDatabase.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue'; 
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
 
 const store = useDiscussionsStore();
 const notesStore = useNotesStore();
@@ -133,16 +135,23 @@ const filteredDiscussionTree = computed(() => {
 });
 
 const filteredNotebooks = computed(() => {
-    if (!searchTerm.value) return notebooks.value;
+    const list = Array.isArray(notebooks.value) ? notebooks.value : [];
+    if (!searchTerm.value) return list;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
-    return notebooks.value.filter(n => n.title.toLowerCase().includes(lowerCaseSearch));
+    return list.filter(n => (n.title || '').toLowerCase().includes(lowerCaseSearch));
 });
 
-const filteredDataStores = computed(() => {
-    const allStores = [...ownedDataStores.value, ...sharedDataStores.value];
-    if (!searchTerm.value) return allStores;
+// Data Store Filtering
+const filteredOwnedStores = computed(() => {
+    if (!searchTerm.value) return ownedDataStores.value;
     const lowerCaseSearch = searchTerm.value.toLowerCase();
-    return allStores.filter(s => s.name.toLowerCase().includes(lowerCaseSearch));
+    return ownedDataStores.value.filter(s => s.name.toLowerCase().includes(lowerCaseSearch));
+});
+
+const filteredSharedStores = computed(() => {
+    if (!searchTerm.value) return sharedDataStores.value;
+    const lowerCaseSearch = searchTerm.value.toLowerCase();
+    return sharedDataStores.value.filter(s => s.name.toLowerCase().includes(lowerCaseSearch));
 });
 
 const filteredFlows = computed(() => {
@@ -222,8 +231,31 @@ async function openNotebook(notebook) {
     router.push('/notebooks');
 }
 
-async function openDataStore(store) {
-    await router.push({ path: '/datastores', query: { storeId: store.id } });
+// Data Store Handlers
+function handleDataStoreSelect(store) {
+    router.push({ path: '/datastores', query: { storeId: store.id } });
+}
+
+function onEditStore(store) { uiStore.openModal('editDataStore', { store }); }
+async function onDeleteStore(store) {
+    const { confirmed } = await uiStore.showConfirmation({ title: `Delete Data Store '${store.name}'?`, message: 'This will permanently delete the data store and all its indexed documents.', confirmText: 'Delete' });
+    if (confirmed) {
+        await dataStore.deleteDataStore(store.id);
+        // Clear selection if deleted store was selected
+        if (route.query.storeId === store.id) {
+            router.push('/datastores');
+        }
+    }
+}
+function onShareStore(store) { uiStore.openModal('shareDataStore', { store }); }
+async function onLeaveStore(store) {
+    const { confirmed } = await uiStore.showConfirmation({ title: `Leave '${store.name}'?`, message: 'You will lose access to this shared Data Store.', confirmText: 'Leave' });
+    if (confirmed) {
+        await dataStore.leaveDataStore(store.id);
+        if (route.query.storeId === store.id) {
+            router.push('/datastores');
+        }
+    }
 }
 
 async function openFlow(flow) {
@@ -280,7 +312,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <button @click="uiStore.toggleSidebar" class="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors md:hidden" title="Toggle Menu">
                         <IconMenu class="w-5 h-5" />
                     </button>
-                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0 object-contain rounded-md" @error="($event.target.src=logoDefault)">
+                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
                     <div class="min-w-0 flex-grow">
                         <h1 class="text-base font-semibold text-slate-900 dark:text-gray-100 truncate" :title="welcomeText">{{ welcomeText }}</h1>
                         <p class="text-xs text-slate-500 dark:text-gray-400 truncate" :title="welcomeSlogan">{{ welcomeSlogan }}</p>
@@ -292,7 +324,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
             </div>
 
             <!-- Tab Switcher -->
-            <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto custom-scrollbar">
+            <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto custom-scrollbar pb-1">
                 <button 
                     @click="activeTab = 'chat'" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
@@ -495,8 +527,8 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         <div class="flex items-center gap-3 min-w-0">
                             <IconServer class="w-4 h-4 flex-shrink-0 text-purple-500" />
                             <div class="flex flex-col min-w-0">
-                                <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ nb.title }}</span>
-                                <span class="text-[10px] text-gray-500 uppercase">{{ nb.type.replace('_', ' ') }}</span>
+                                <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ nb.title || 'Untitled Notebook' }}</span>
+                                <span class="text-[10px] text-gray-500 uppercase font-black tracking-widest">{{ (nb.type || 'generic').replace('_', ' ') }}</span>
                             </div>
                         </div>
                         <button @click.stop="handleDeleteNotebook(nb)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-red-500 transition-opacity" title="Delete Notebook">
@@ -508,8 +540,19 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
 
             <!-- DATA TAB -->
             <template v-else-if="activeTab === 'data'">
+                <div class="space-y-2 mb-4">
+                    <button @click="handleNewItem" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 transition-colors">
+                        <IconPlus class="w-5 h-5 flex-shrink-0" />
+                        <span>New Data Store</span>
+                    </button>
+                    <button @click="dataStore.fetchDataStores()" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+                        <IconRefresh class="w-5 h-5 flex-shrink-0" />
+                        <span>Refresh All Stores</span>
+                    </button>
+                </div>
+
                 <div v-if="dataStore.isLoading" class="text-center p-4 text-gray-500">Loading stores...</div>
-                <div v-else-if="filteredDataStores.length === 0" class="empty-state-flat">
+                <div v-else-if="filteredOwnedStores.length === 0 && filteredSharedStores.length === 0" class="empty-state-flat">
                     <p class="text-base font-medium text-slate-600 dark:text-gray-300 mb-2">
                          {{ searchTerm ? 'No matches found' : 'No data stores yet' }}
                     </p>
@@ -517,16 +560,36 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         Create a data store to index your documents for RAG.
                     </p>
                 </div>
-                <div v-else class="space-y-1">
-                    <div v-for="ds in filteredDataStores" :key="ds.id" 
-                         class="group flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors"
-                         @click="openDataStore(ds)">
-                        <div class="flex items-center gap-3 min-w-0">
-                            <IconDatabase class="w-4 h-4 flex-shrink-0 text-green-500" />
-                            <div class="flex flex-col min-w-0">
-                                <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ ds.name }}</span>
-                                <span class="text-[10px] text-gray-500 uppercase font-black tracking-tighter">{{ ds.owner_username === user?.username ? 'Personal' : 'Shared' }}</span>
-                            </div>
+                <div v-else class="space-y-4">
+                    <!-- Owned Stores -->
+                    <div v-if="filteredOwnedStores.length > 0">
+                        <h3 class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 mb-2 px-2">Your Stores</h3>
+                        <div class="space-y-1">
+                            <DataStoreItem 
+                                v-for="ds in filteredOwnedStores" 
+                                :key="ds.id" 
+                                :store="ds"
+                                :is-selected="route.query.storeId === ds.id"
+                                @select="handleDataStoreSelect"
+                                @edit="onEditStore"
+                                @delete="onDeleteStore"
+                                @share="onShareStore"
+                            />
+                        </div>
+                    </div>
+                    
+                    <!-- Shared Stores -->
+                    <div v-if="filteredSharedStores.length > 0">
+                        <h3 class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 mb-2 px-2">Shared With You</h3>
+                        <div class="space-y-1">
+                            <DataStoreItem 
+                                v-for="ds in filteredSharedStores" 
+                                :key="ds.id" 
+                                :store="ds"
+                                :is-selected="route.query.storeId === ds.id"
+                                @select="handleDataStoreSelect"
+                                @leave="onLeaveStore"
+                            />
                         </div>
                     </div>
                 </div>

@@ -4,6 +4,7 @@ import json
 import shutil
 import re
 import base64
+import os
 from datetime import datetime
 from typing import List, Optional, Dict, Any
 from pathlib import Path
@@ -28,7 +29,6 @@ router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
-# ... (Pydantic Models remain same) ...
 class StructureItem(BaseModel):
     title: str
     type: str = "markdown" 
@@ -79,8 +79,6 @@ class ProcessRequest(BaseModel):
     skip_llm: bool = False
     generate_speech: bool = False
 
-# --- Endpoints ---
-
 @router.get("", response_model=List[NotebookResponse])
 def get_notebooks(
     current_user: UserAuthDetails = Depends(get_current_active_user),
@@ -95,7 +93,6 @@ def create_notebook(
     db: Session = Depends(get_db)
 ):
     initial_tabs = []
-    
     if payload.structure:
         for item in payload.structure:
             initial_tabs.append({
@@ -115,21 +112,12 @@ def create_notebook(
             "images": []
         })
 
-    content_to_store = payload.content
+    content_to_store = payload.content or ""
     if payload.metadata:
         try:
-            content_obj = { "text": payload.content, "metadata": payload.metadata }
+            content_obj = { "text": payload.content or "", "metadata": payload.metadata }
             content_to_store = json.dumps(content_obj)
         except: pass
-
-    initial_artefacts = []
-    if payload.raw_text:
-        initial_artefacts.append({
-            "filename": "Initial Notes",
-            "content": payload.raw_text,
-            "type": "text",
-            "is_loaded": True
-        })
 
     new_notebook = DBNotebook(
         title=payload.title,
@@ -137,16 +125,24 @@ def create_notebook(
         type=payload.type,
         owner_user_id=current_user.id,
         tabs=initial_tabs,
-        artefacts=initial_artefacts
+        artefacts=[]
     )
+    
+    if payload.raw_text:
+        new_notebook.artefacts = [{
+            "filename": "Initial Notes",
+            "content": payload.raw_text,
+            "type": "text",
+            "is_loaded": True
+        }]
+
     db.add(new_notebook)
     db.commit()
     db.refresh(new_notebook)
     
-    # Trigger background ingestion for URLs
     if (payload.urls and len(payload.urls) > 0) or (payload.youtube_urls and len(payload.youtube_urls) > 0):
         task_manager.submit_task(
-            name=f"Notebook {new_notebook.id}: Ingest Sources",
+            name=f"Notebook Ingest: {new_notebook.title}",
             target=_ingest_notebook_sources_task,
             args=(current_user.username, new_notebook.id, payload.urls or [], payload.youtube_urls or []),
             description="Scraping web and YouTube sources...",
@@ -200,27 +196,17 @@ def generate_notebook_structure(
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     lc = get_user_lollms_client(current_user.username)
-    system_prompt = "You are a helpful AI assistant that structures documents and projects."
-    prompt = f"""Create a structure for a '{request.type}' notebook based on this request: "{request.prompt}".
-    Return a JSON list of objects. Each object must have:
-    - "title": string
-    - "type": string (one of: 'markdown', 'gallery', 'slides')
-    - "content": string (Optional initial content)
-    Example output: [{{"title": "Intro", "type": "markdown", "content": "# Intro"}}]
+    prompt = f"""Create a structure for a '{request.type}' notebook based on: "{request.prompt}".
+    Return a JSON list of objects with "title", "type" (markdown/slides), and "content".
     """
     try:
-        response_text = lc.generate_text(prompt, system_prompt=system_prompt, max_new_tokens=1024, temperature=0.7)
-        try:
-            import re
-            match = re.search(r'\[.*\]', response_text, re.DOTALL)
-            json_str = match.group(0) if match else response_text
-            structure_data = json.loads(json_str)
-            return [StructureItem(**item) for item in structure_data]
-        except json.JSONDecodeError:
-            return [StructureItem(title="Generated Plan", content=response_text)]
+        response_text = lc.generate_text(prompt, max_new_tokens=1024)
+        match = re.search(r'\[.*\]', response_text, re.DOTALL)
+        if match:
+            return [StructureItem(**item) for item in json.loads(match.group(0))]
+        return [StructureItem(title="Chapter 1", content=response_text)]
     except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"AI generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{notebook_id}/upload")
 async def upload_notebook_source(
@@ -237,124 +223,58 @@ async def upload_notebook_source(
     assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
     assets_path.mkdir(parents=True, exist_ok=True)
     
-    safe_filename = secure_filename(file.filename)
-    # Ensure uniqueness
-    extension = Path(safe_filename).suffix
-    stem = Path(safe_filename).stem
-    unique_filename = f"{stem}_{uuid.uuid4().hex[:8]}{extension}"
-    file_path = assets_path / unique_filename
+    fn = secure_filename(file.filename)
+    unique_fn = f"{uuid.uuid4().hex[:8]}_{fn}"
+    file_path = assets_path / unique_fn
     
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
     content = ""
-    is_text = False
-    try:
-        if file_path.suffix.lower() in ['.txt', '.md', '.py', '.js', '.json', '.html', '.css', '.c', '.cpp', '.h', '.hpp']:
-            content = file_path.read_text(encoding='utf-8', errors='ignore')
-            is_text = True
-    except: pass
-        
+    is_text = file_path.suffix.lower() in ['.txt', '.md', '.py', '.js', '.json', '.html', '.css', '.c', '.cpp']
     if is_text:
-        new_artefact = {
-            "filename": unique_filename,
-            "content": content,
-            "type": "text",
-            "is_loaded": True
-        }
-        current_artefacts = list(notebook.artefacts)
-        current_artefacts = [a for a in current_artefacts if a['filename'] != unique_filename]
-        current_artefacts.append(new_artefact)
-        notebook.artefacts = current_artefacts
+        content = file_path.read_text(encoding='utf-8', errors='ignore')
+        new_art = { "filename": unique_fn, "content": content, "type": "text", "is_loaded": True }
+        notebook.artefacts = list(notebook.artefacts) + [new_art]
         db.commit()
     elif use_docling:
-        # Trigger Docling conversion task
         task_manager.submit_task(
-            name=f"Notebook {notebook_id}: Convert {unique_filename}",
+            name=f"Convert: {fn}",
             target=_convert_file_with_docling_task,
-            args=(current_user.username, notebook_id, str(file_path), unique_filename),
-            description=f"Converting {unique_filename} to markdown...",
+            args=(current_user.username, notebook_id, str(file_path), unique_fn),
             owner_username=current_user.username
         )
     
-    return {"filename": unique_filename}
-
+    return {"filename": unique_fn}
 
 @router.post("/{notebook_id}/describe_image")
 async def describe_notebook_image(
     notebook_id: str,
     file: UploadFile = File(...),
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Uploads an image temporarily and asks the LLM to describe it for prompt generation.
-    """
-    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
-    if not notebook:
-        raise HTTPException(status_code=404, detail="Notebook not found.")
-    
-    # Read file content
     try:
         content = await file.read()
-        b64_image = base64.b64encode(content).decode('utf-8')
-        
-        # We also save it to assets just in case, or we can just keep it in memory
-        # Saving it might be useful if we want to refer to it later
-        safe_filename = f"desc_{uuid.uuid4().hex[:8]}_{secure_filename(file.filename)}"
-        assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
-        assets_path.mkdir(parents=True, exist_ok=True)
-        (assets_path / safe_filename).write_bytes(content)
-        
+        b64 = base64.b64encode(content).decode('utf-8')
         lc = get_user_lollms_client(current_user.username)
-        
-        prompt = "Describe this image in detail, focusing on visual elements, style, composition, and colors. This description will be used to generate a similar image."
-        
-        description = lc.generate_text(prompt, images=[b64_image], max_new_tokens=256)
-        
-        return {"description": description}
-        
+        desc = lc.generate_text("Describe this image for a prompt:", images=[b64])
+        return {"description": desc}
     except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Failed to describe image: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/{notebook_id}/describe_asset")
 async def describe_notebook_asset_endpoint(
     notebook_id: str,
     payload: Dict[str, str],
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
+    current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Describes an image that already exists in the notebook assets.
-    """
-    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
-    if not notebook:
-        raise HTTPException(status_code=404, detail="Notebook not found.")
-    
-    filename = payload.get("filename")
-    if not filename:
-        raise HTTPException(status_code=400, detail="Filename required.")
-        
-    assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
-    file_path = assets_path / secure_filename(filename)
-    
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Asset file not found.")
-        
-    try:
-        content = file_path.read_bytes()
-        b64_image = base64.b64encode(content).decode('utf-8')
-        
-        lc = get_user_lollms_client(current_user.username)
-        prompt = "Describe this image in detail, focusing on visual elements, style, composition, and colors. This description will be used to generate a similar image."
-        description = lc.generate_text(prompt, images=[b64_image], max_new_tokens=256)
-        
-        return {"description": description}
-    except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Failed to describe image: {str(e)}")
-
+    fn = payload.get("filename")
+    path = get_user_notebook_assets_path(current_user.username, notebook_id) / secure_filename(fn)
+    if not path.exists():
+        raise HTTPException(status_code=404)
+    b64 = base64.b64encode(path.read_bytes()).decode('utf-8')
+    lc = get_user_lollms_client(current_user.username)
+    return {"description": lc.generate_text("Describe this image for a prompt:", images=[b64])}
 
 @router.post("/{notebook_id}/artefact")
 def create_text_artefact(
@@ -364,29 +284,13 @@ def create_text_artefact(
     db: Session = Depends(get_db)
 ):
     notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
-    if not notebook:
-        raise HTTPException(status_code=404, detail="Notebook not found.")
-        
-    title = secure_filename(payload.get('title', 'untitled.txt'))
-    content = payload.get('content', '')
-    
-    assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
-    assets_path.mkdir(parents=True, exist_ok=True)
-    (assets_path / title).write_text(content, encoding='utf-8')
-    
-    new_artefact = {
-        "filename": title,
-        "content": content,
-        "type": "text",
-        "is_loaded": True
-    }
-    
-    current_artefacts = list(notebook.artefacts)
-    current_artefacts = [a for a in current_artefacts if a['filename'] != title]
-    current_artefacts.append(new_artefact)
-    notebook.artefacts = current_artefacts
+    if not notebook: raise HTTPException(status_code=404)
+    fn = secure_filename(payload.get('title', 'note.txt'))
+    path = get_user_notebook_assets_path(current_user.username, notebook_id) / fn
+    path.write_text(payload.get('content', ''), encoding='utf-8')
+    notebook.artefacts = list(notebook.artefacts) + [{ "filename": fn, "content": payload.get('content', ''), "type": "text", "is_loaded": True }]
     db.commit()
-    return {"filename": title}
+    return {"filename": fn}
 
 @router.post("/{notebook_id}/generate_title", response_model=GenerateTitleResponse)
 def generate_notebook_title(
@@ -395,47 +299,12 @@ def generate_notebook_title(
     db: Session = Depends(get_db)
 ):
     notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
-    if not notebook:
-        raise HTTPException(status_code=404, detail="Notebook not found.")
-    
-    context = ""
-    for tab in notebook.tabs:
-        context += f"Tab: {tab.get('title')}\n{tab.get('content', '')[:500]}\n\n"
-    
-    if not context.strip():
-        return {"title": "Untitled Notebook"}
-
+    if not notebook: raise HTTPException(status_code=404)
     lc = get_user_lollms_client(current_user.username)
-    prompt = f"Generate a short, descriptive title (max 5 words) for a notebook containing the following content:\n\n{context}"
-    try:
-        title = lc.generate_text(prompt, max_new_tokens=20).strip().strip('"')
-        notebook.title = title
-        db.commit()
-        return {"title": title}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Title generation failed: {e}")
-
-@router.post("/{notebook_id}/process", response_model=TaskInfo)
-def process_notebook_ai(
-    notebook_id: str,
-    payload: ProcessRequest,
-    current_user: UserAuthDetails = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
-    if not notebook:
-        raise HTTPException(status_code=404, detail="Notebook not found.")
-
-    task_name = f"Notebook {notebook_id} Process: {payload.output_type}"
-    
-    task = task_manager.submit_task(
-        name=task_name,
-        target=_process_notebook_task,
-        args=(current_user.username, notebook_id, payload.prompt, payload.input_tab_ids, payload.output_type, payload.target_tab_id, payload.skip_llm, payload.generate_speech),
-        description=f"Processing notebook with action: {payload.output_type}",
-        owner_username=current_user.username
-    )
-    return task
+    title = lc.generate_text(f"Summarize this notebook content into a short title: {notebook.content[:1000]}").strip().strip('"')
+    notebook.title = title
+    db.commit()
+    return {"title": title}
 
 @router.post("/{notebook_id}/scrape")
 def scrape_url_to_notebook(
@@ -443,14 +312,25 @@ def scrape_url_to_notebook(
     payload: Dict[str, str],
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    from backend.tasks.notebook_tasks import _ingest_notebook_sources_task
-    task = task_manager.submit_task(
-        name=f"Notebook {notebook_id}: Scrape URL",
+    return task_manager.submit_task(
+        name=f"Scrape: {payload['url']}",
         target=_ingest_notebook_sources_task,
         args=(current_user.username, notebook_id, [payload['url']], []),
         owner_username=current_user.username
     )
-    return task
+
+@router.post("/{notebook_id}/process", response_model=TaskInfo)
+def process_notebook_ai(
+    notebook_id: str,
+    payload: ProcessRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    return task_manager.submit_task(
+        name=f"AI Task: {payload.output_type}",
+        target=_process_notebook_task,
+        args=(current_user.username, notebook_id, payload.prompt, payload.input_tab_ids, payload.output_type, payload.target_tab_id, payload.skip_llm, payload.generate_speech),
+        owner_username=current_user.username
+    )
 
 @router.get("/{notebook_id}/export")
 def export_notebook(
@@ -464,136 +344,97 @@ def export_notebook(
         raise HTTPException(status_code=404, detail="Notebook not found.")
 
     if format == "json":
-        data = {
-            "title": notebook.title,
-            "type": notebook.type,
-            "content": notebook.content,
-            "tabs": notebook.tabs,
-            "artefacts": notebook.artefacts
-        }
+        data = { "title": notebook.title, "type": notebook.type, "content": notebook.content, "tabs": notebook.tabs, "artefacts": notebook.artefacts }
         return Response(content=json.dumps(data, indent=2), media_type="application/json", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.json"})
     
+    elif format == "pdf":
+        try:
+            from markdown_pdf import MarkdownPdf, Section
+            import tempfile
+            
+            pdf = MarkdownPdf(toc_level=2)
+            content_md = f"# {notebook.title}\n\n"
+            for tab in notebook.tabs:
+                content_md += f"## {tab['title']}\n\n"
+                if tab['type'] == 'slides':
+                    try:
+                        data = json.loads(tab['content'])
+                        for s in data.get('slides_data', []):
+                            content_md += f"### {s['title']}\n"
+                            for b in s.get('bullets', []): content_md += f"* {b}\n"
+                            content_md += "\n"
+                    except: pass
+                else: content_md += (tab.get('content') or "") + "\n\n"
+            
+            pdf.add_section(Section(content_md))
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
+                out_path = tf.name
+            pdf.save(out_path)
+            with open(out_path, "rb") as f: data = f.read()
+            os.unlink(out_path)
+            return Response(content=data, media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.pdf"})
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
+
     elif format == "pptx":
         try:
             from pptx import Presentation
-            from pptx.util import Inches as PptxInches
+            from pptx.util import Inches
             import io
             
             prs = Presentation()
-            # Set to 16:9 (Widescreen)
-            prs.slide_width = PptxInches(13.3333)
-            prs.slide_height = PptxInches(7.5)
-            
+            prs.slide_width = Inches(13.3333)
+            prs.slide_height = Inches(7.5)
             assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
             
-            # --- Check Metadata for Slide Mode ---
-            nb_metadata = {}
-            try:
-                loaded_content = json.loads(notebook.content)
-                if isinstance(loaded_content, dict) and 'metadata' in loaded_content:
-                    nb_metadata = loaded_content['metadata']
-            except: pass
-            
-            slide_mode = nb_metadata.get('slide_mode', 'hybrid')
-
             for tab in notebook.tabs:
-                if tab['type'] == 'slides':
+                if tab['type'] == 'slides' and tab.get('content'):
                     try:
-                        content_obj = json.loads(tab['content'])
-                        slides_data = content_obj.get('slides_data', [])
-                        
+                        slides_data = json.loads(tab['content']).get('slides_data', [])
                         for s in slides_data:
                             # Resolve Image
-                            img_path_local = None
-                            selected_img = None
-                            if s.get('images') and len(s.get('images')) > 0:
-                                idx = s.get('selected_image_index', 0)
-                                if idx < len(s['images']):
-                                    selected_img = s['images'][idx]
-                                    if selected_img and selected_img.get('path'):
-                                        # Convert /api/notebooks/{id}/assets/{filename} -> local path
-                                        filename = Path(selected_img['path']).name
-                                        local_file = assets_path / filename
-                                        if local_file.exists():
-                                            img_path_local = str(local_file)
+                            img_path = None
+                            if s.get('images'):
+                                img_url = s['images'][s.get('selected_image_index', 0)]['path']
+                                local_fn = os.path.basename(img_url)
+                                if (assets_path / local_fn).exists(): img_path = str(assets_path / local_fn)
 
-                            # Layout Selection
-                            if slide_mode == 'image_only':
-                                # Blank slide filled with image
-                                slide_layout = prs.slide_layouts[6] # Blank
-                                slide = prs.slides.add_slide(slide_layout)
-                                
-                                if img_path_local:
-                                    # Add picture covering entire slide
-                                    slide_width = prs.slide_width
-                                    slide_height = prs.slide_height
-                                    # Insert image
-                                    pic = slide.shapes.add_picture(img_path_local, 0, 0, width=slide_width, height=slide_height)
-                                    
-                                    # Crop if needed to fill aspect ratio
-                                    # python-pptx doesn't auto-crop easily, but resizing to fill is mostly what we want for "image only"
-                                else:
-                                    # Fallback text if no image found
-                                    txBox = slide.shapes.add_textbox(PptxInches(1), PptxInches(1), PptxInches(8), PptxInches(5))
-                                    tf = txBox.text_frame
-                                    tf.text = s.get('title', 'Untitled') + "\n(Image missing)"
-
+                            # Layout mapping
+                            layout = s.get('layout', 'TitleBody')
+                            if layout == 'ImageOnly' and img_path:
+                                slide = prs.slides.add_slide(prs.slide_layouts[6])
+                                slide.shapes.add_picture(img_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
                             else:
-                                # Standard Hybrid/Text
-                                layout_type = s.get('layout', 'TitleBody')
-                                slide_layout = prs.slide_layouts[1] # Title and Content
-                                slide = prs.slides.add_slide(slide_layout)
-                                
+                                slide = prs.slides.add_slide(prs.slide_layouts[1])
                                 if slide.shapes.title: slide.shapes.title.text = s.get('title', '')
                                 if len(slide.placeholders) > 1:
-                                    if img_path_local:
-                                        # If there's an image, use it in the placeholder if possible, or add separately
-                                        # Simple logic: add image to right side, text to left? 
-                                        # Or just use placeholder for text and add image floating.
-                                        slide.placeholders[1].text = "\n".join(s.get('bullets', []))
-                                        
-                                        # Add image smaller
-                                        slide.shapes.add_picture(img_path_local, PptxInches(5), PptxInches(2), width=PptxInches(4))
-                                    else:
-                                        slide.placeholders[1].text_frame.text = "\n".join(s.get('bullets', []))
+                                    slide.placeholders[1].text = "\n".join(s.get('bullets', []))
+                                if img_path: slide.shapes.add_picture(img_path, Inches(8), Inches(1.5), width=Inches(4.5))
                             
-                            # Add Speaker Notes
-                            speech_text = s.get('speech', '')
-                            if speech_text:
-                                try:
-                                    notes_slide = slide.notes_slide
-                                    text_frame = notes_slide.notes_text_frame
-                                    text_frame.text = speech_text
-                                except Exception as ex:
-                                    print(f"Error adding notes to slide: {ex}")
-
-                    except Exception as e:
-                        print(f"Slide export error: {e}")
-                        trace_exception(e)
+                            if s.get('speech'):
+                                try: slide.notes_slide.notes_text_frame.text = s['speech']
+                                except: pass
+                    except: pass
             
-            ppt_io = io.BytesIO()
-            prs.save(ppt_io)
-            ppt_io.seek(0)
-            return Response(content=ppt_io.getvalue(), media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.pptx"})
+            bio = io.BytesIO()
+            prs.save(bio)
+            return Response(content=bio.getvalue(), media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.pptx"})
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"PPTX export failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
-    raise HTTPException(status_code=400, detail="Unsupported format.")
+    raise HTTPException(status_code=400)
 
 @router.get("/{notebook_id}/assets/{filename}")
 def get_notebook_asset(
     notebook_id: str,
     filename: str,
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
-    """
-    Serves a specific asset (image/file) from a notebook's storage.
-    """
-    assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
-    file_path = assets_path / filename
-    
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Asset not found.")
-        
-    return FileResponse(file_path)
+    nb = db.query(DBNotebook.id).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not nb: raise HTTPException(status_code=403)
+    path = get_user_notebook_assets_path(current_user.username, notebook_id) / secure_filename(filename)
+    if not path.exists(): raise HTTPException(status_code=404)
+    return FileResponse(path)

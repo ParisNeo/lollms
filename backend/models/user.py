@@ -31,8 +31,10 @@ class BatchUsersSettingsUpdate(BaseModel):
 class EmailUsersRequest(BaseModel):
     subject: str
     body: str
-    recipients: List[int] = []
+    user_ids: List[int] = Field(default_factory=list)
     send_to_all: bool = False
+    background_color: Optional[str] = None
+    send_as_text: bool = False
 
 class EnhanceEmailRequest(BaseModel):
     subject: str

@@ -66,6 +66,7 @@ const NoteEditorModal = defineAsyncComponent(() => import('./NoteEditorModal.vue
 const NoteGroupModal = defineAsyncComponent(() => import('./NoteGroupModal.vue'));
 const SystemLogModal = defineAsyncComponent(() => import('./SystemLogModal.vue'));
 const ScrapeUrlModal = defineAsyncComponent(() => import('./ScrapeUrlModal.vue'));
+const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactImportWizardModal.vue'));
 </script>
 
 <template>

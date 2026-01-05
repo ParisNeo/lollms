@@ -1,9 +1,9 @@
 <template>
-  <div class="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-700">
-    <div v-if="isLoading" class="w-full h-full animate-pulse bg-gray-300 dark:bg-gray-600"></div>
-    <img v-else-if="imageUrl && !error" :src="imageUrl" :alt="alt" @load="$emit('load', $event)" class="w-full h-full object-contain" />
-    <div v-else class="text-xs text-gray-500 dark:text-gray-400 p-2 text-center">
-      Image Error
+  <div class="w-full h-full flex items-center justify-center bg-gray-200 dark:bg-gray-700 overflow-hidden relative">
+    <div v-if="isLoading" class="absolute inset-0 flex items-center justify-center bg-gray-300 dark:bg-gray-600 animate-pulse"></div>
+    <img v-else-if="imageUrl && !error" :src="imageUrl" :alt="alt" @load="$emit('load', $event)" class="w-full h-full" :class="imgClass" />
+    <div v-else class="text-xs text-gray-500 dark:text-gray-400 p-2 text-center absolute inset-0 flex items-center justify-center">
+      <span v-if="error">Image Error</span>
     </div>
   </div>
 </template>
@@ -14,7 +14,8 @@ import apiClient from '../../services/api';
 
 const props = defineProps({
   src: { type: String, required: true },
-  alt: { type: String, default: 'Authenticated image' }
+  alt: { type: String, default: 'Authenticated image' },
+  imgClass: { type: String, default: 'object-contain' } // Allow overriding object-fit
 });
 defineEmits(['load']);
 
@@ -47,8 +48,6 @@ async function fetchImage() {
     objectUrl = URL.createObjectURL(response.data);
     imageUrl.value = objectUrl;
   } catch (e) {
-    // console.error(`Failed to load authenticated image from ${props.src}`, e);
-    // Suppress console error for 404/401 to keep logs clean, just show UI error
     error.value = true;
   } finally {
     isLoading.value = false;

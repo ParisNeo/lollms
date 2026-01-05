@@ -26,6 +26,7 @@ const STTBindingsSettings = defineAsyncComponent(() => import('./bindings/STTBin
 const RAGBindingsSettings = defineAsyncComponent(() => import('./bindings/RAGBindingsSettings.vue'));
 const AiBotSettings = defineAsyncComponent(() => import('./AiBotSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
+const EmailMarketing = defineAsyncComponent(() => import('./EmailMarketing.vue')); // ENSURED
 const SSOClientSettings = defineAsyncComponent(() => import('./SSOClientSettings.vue'));
 const SCIMSettings = defineAsyncComponent(() => import('./SCIMSettings.vue'));
 const ImportTools = defineAsyncComponent(() => import('./ImportTools.vue'));
@@ -63,6 +64,7 @@ const tabs = [
     { id: 'personalities', component: PersonalitiesManagement },
     { id: 'prompts', component: PromptsManagement },
     { id: 'email', component: EmailSettings },
+    { id: 'email_marketing', component: EmailMarketing }, // ADDED
     { id: 'sso_client_settings', component: SSOClientSettings },
     { id: 'scim_settings', component: SCIMSettings },
     { id: 'import', component: ImportTools },
@@ -93,3 +95,4 @@ const activeComponent = computed(() => {
         </Suspense>
     </div>
 </template>
+

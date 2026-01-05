@@ -14,7 +14,7 @@ class TaskInfo(BaseModel):
     name: str
     description: Optional[str] = None
     status: TaskStatus
-    progress: int
+    progress: float
     logs: List[TaskLogMessage]
     result: Optional[Any] = None
     error: Optional[str] = None

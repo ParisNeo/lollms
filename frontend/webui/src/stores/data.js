@@ -467,6 +467,12 @@ export const useDataStore = defineStore('data', () => {
         ownedDataStores.value = ownedDataStores.value.filter(s => s.id !== storeId);
         uiStore.addNotification('Data store deleted.', 'success');
     }
+    async function leaveDataStore(storeId) {
+        const uiStore = useUiStore();
+        await apiClient.delete(`/api/datastores/${storeId}/leave`);
+        sharedDataStores.value = sharedDataStores.value.filter(s => s.id !== storeId);
+        uiStore.addNotification('You have left the shared Data Store.', 'success');
+    }
     async function shareDataStore({ storeId, username, permissionLevel }) {
         const uiStore = useUiStore();
         await apiClient.post(`/api/datastores/${storeId}/share`, { target_username: username, permission_level: permissionLevel });
@@ -916,7 +922,7 @@ export const useDataStore = defineStore('data', () => {
         fetchAvailableSttModels,
 
         loadAllInitialData, refreshAllModels, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
-        addDataStore, updateDataStore, deleteDataStore, shareDataStore,
+        addDataStore, updateDataStore, deleteDataStore, leaveDataStore, shareDataStore,
         revokeShare, getSharedWithList,
         fetchAvailableVectorizers, availableVectorizers,
         fetchStoreFiles, uploadFilesToStore,

@@ -87,7 +87,8 @@ class Task:
             # The manager will handle sending this to all relevant connections across all workers.
             manager.broadcast_to_admins_sync(payload)
             if db_task.owner_user_id:
-                manager.send_personal_message_sync(payload, db_task.owner_user_id)
+                # [FIX] Ensure user ID is passed as int for consistent lookup in connection manager
+                manager.send_personal_message_sync(payload, int(db_task.owner_user_id))
 
             # Handle special 'result' payloads for direct UI updates
             is_finished = db_task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
@@ -95,7 +96,7 @@ class Task:
             if is_finished:
                 end_payload = {"type": "task_end", "data": task_data}
                 if db_task.owner_user_id:
-                    manager.send_personal_message_sync(end_payload, db_task.owner_user_id)
+                    manager.send_personal_message_sync(end_payload, int(db_task.owner_user_id))
                 manager.broadcast_to_admins_sync(end_payload)
         except Exception as e:
             print(f"Error broadcasting task update for {self.id}: {e}")

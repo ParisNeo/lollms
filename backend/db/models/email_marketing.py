@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Enum
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Enum, JSON
 from sqlalchemy.sql import func
 import enum
 from backend.db.base import Base
@@ -25,6 +25,9 @@ class EmailProposal(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     sent_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # List of user IDs who have already received this email
+    recipients = Column(JSON, default=list) 
     
     admin_feedback = Column(Text, nullable=True) # Reason for rejection or notes
     generated_by = Column(String, default="lollms_bot") 

@@ -1,8 +1,10 @@
 <script setup>
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
+import { useImageStore } from '../../stores/images';
 import DiscussionList from './DiscussionList.vue';
 
 import logoDefault from '../../assets/logo.png';
@@ -11,15 +13,20 @@ import IconHome from '../../assets/icons/IconHome.vue';
 import IconSettings from '../../assets/icons/IconSettings.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
-import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconDatabase from '../../assets/icons/IconDatabase.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
 
+// Async import for Flow Wizard
+const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
+
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
+const imageStore = useImageStore();
+const route = useRoute();
+const router = useRouter();
 
 const user = computed(() => authStore.user);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
@@ -27,6 +34,7 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
 const activityTimeout = ref(null);
 const sidebarRef = ref(null);
+const isFlowWizardOpen = ref(false);
 
 function goToFeed() {
     uiStore.setMainView('feed');
@@ -82,6 +90,57 @@ onUnmounted(() => {
     }
     clearTimeout(activityTimeout.value);
 });
+
+// Context-aware logic for the Plus button in collapsed mode
+const currentContext = computed(() => {
+    const path = route.path;
+    if (path.startsWith('/notebooks')) return 'notebooks';
+    if (path.startsWith('/datastores')) return 'data';
+    if (path.startsWith('/flow-studio')) return 'flows';
+    if (path.startsWith('/image-studio')) return 'images';
+    return 'chat';
+});
+
+const plusButtonTitle = computed(() => {
+    switch (currentContext.value) {
+        case 'notebooks': return 'New Notebook';
+        case 'data': return 'New Data Store';
+        case 'flows': return 'New Workflow';
+        case 'images': return 'New Album';
+        default: return 'New Discussion';
+    }
+});
+
+async function handlePlusClick() {
+    switch (currentContext.value) {
+        case 'notebooks':
+            uiStore.openModal('notebookWizard');
+            break;
+        case 'data':
+            if (route.path !== '/datastores') await router.push('/datastores');
+            setTimeout(() => window.dispatchEvent(new CustomEvent('lollms:open-new-datastore')), 100);
+            break;
+        case 'flows':
+            isFlowWizardOpen.value = true;
+            break;
+        case 'images':
+            const { confirmed, value } = await uiStore.showConfirmation({
+                title: 'New Album',
+                message: 'Enter a name for your new album:',
+                confirmText: 'Create',
+                inputType: 'text',
+                inputPlaceholder: 'Album Name'
+            });
+            if (confirmed && value) {
+                await imageStore.createAlbum(value);
+            }
+            break;
+        case 'chat':
+        default:
+            discussionsStore.createNewDiscussion();
+            break;
+    }
+}
 </script>
 
 <template>
@@ -106,9 +165,9 @@ onUnmounted(() => {
 
         <!-- Quick Actions -->
         <button 
-          @click="discussionsStore.createNewDiscussion()" 
+          @click="handlePlusClick" 
           class="p-3 bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-colors" 
-          title="New Discussion"
+          :title="plusButtonTitle"
         >
           <IconPlus class="w-5 h-5" />
         </button>
@@ -171,5 +230,10 @@ onUnmounted(() => {
         </router-link>
       </div>
     </div>
+
+    <!-- Modals for Collapsed State -->
+    <Teleport to="body">
+        <FlowWizardModal v-if="isFlowWizardOpen" @close="isFlowWizardOpen = false" />
+    </Teleport>
   </aside>
 </template>

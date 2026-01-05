@@ -325,7 +325,8 @@ def process_image_generation_tags(text: str, user: DBUser, db: Session, discussi
                 "id": str(uuid.uuid4()),
                 "prompt": prompt,
                 "indices": group_indices,
-                "type": "generated"
+                "type": "generated",
+                "selected_index": 0 # New: Default selected variant
             })
 
         if main_loop and stream_queue:
@@ -537,7 +538,8 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
                     "id": str(uuid.uuid4()),
                     "prompt": prompt,
                     "indices": [current_image_count],
-                    "type": "edited"
+                    "type": "edited",
+                    "selected_index": 0 # New
                 })
                 
                 current_image_count += 1
@@ -616,7 +618,7 @@ def build_llm_generation_router(router: APIRouter):
                     if "chunk_text" in entry:
                         revamped_entry["content"]=entry["chunk_text"]
                     if "similarity_percent" in entry:
-                        revamped_entry["score"] = entry["similarity_percent"]
+                        revamped_entry["score"] = float(entry["similarity_percent"])
                     revamped_chunks.append(revamped_entry)
                 return revamped_chunks
             except Exception as e:
@@ -1046,6 +1048,11 @@ def build_llm_generation_router(router: APIRouter):
                                         existing_gen_infos.append(info)
                                     
                                     ai_message_obj.set_metadata_item("generated_image_infos", existing_gen_infos, discussion_obj)
+                                    # [UPDATE] Track generated groups for variant selection
+                                    existing_metadata = ai_message_obj.metadata or {}
+                                    existing_groups = existing_metadata.get("generated_groups", [])
+                                    existing_groups.extend(generated_groups)
+                                    ai_message_obj.set_metadata_item("generated_groups", existing_groups, discussion_obj)
                                     
                                     discussion_obj.commit()
 
@@ -1103,6 +1110,11 @@ def build_llm_generation_router(router: APIRouter):
                                         existing_gen_infos.append(info)
                                     
                                     ai_message_obj.set_metadata_item("generated_image_infos", existing_gen_infos, discussion_obj)
+                                    # [UPDATE] Track edited groups
+                                    existing_metadata = ai_message_obj.metadata or {}
+                                    existing_groups = existing_metadata.get("generated_groups", [])
+                                    existing_groups.extend(edit_groups)
+                                    ai_message_obj.set_metadata_item("generated_groups", existing_groups, discussion_obj)
 
                                     discussion_obj.commit()
 

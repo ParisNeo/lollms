@@ -31,6 +31,7 @@ ollama==0.6.0
 pydantic==2.11.10
 pydantic[email]==2.11.10
 Pillow==11.3.0
+numpy==2.2.6
 
 # --- SafeStore Library and Common Features ---
 # Using safe_store[all] is a convenient way to get most features.

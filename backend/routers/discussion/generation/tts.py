@@ -1,10 +1,10 @@
-# [UPDATE] backend/routers/discussion/generation/tts.py
 # backend/routers/discussion/generation/tts.py
 from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from sqlalchemy.orm import Session
 from typing import Optional
 from pydantic import BaseModel
 from pathlib import Path
+import re
 
 from backend.db import get_db
 from backend.session import get_current_active_user, build_lollms_client_from_params, get_user_data_root
@@ -16,6 +16,14 @@ class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None
     model: Optional[str] = None # For bindings that support multiple models
+
+def _clean_text_for_tts(text: str) -> str:
+    if not text: return ""
+    # Remove markdown bold/italic (*) and headers (#)
+    text = re.sub(r'[*#]', '', text)
+    # Remove unicode emojis (Supplementary Multilingual Plane)
+    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
+    return text.strip()
 
 def build_tts_router(router: APIRouter):
     @router.post("/generate_tts")
@@ -66,8 +74,11 @@ def build_tts_router(router: APIRouter):
                     _, model_name = user_tts_model_full.split('/', 1)
                     model_to_use = model_name
 
+            # Clean text before sending to TTS engine
+            cleaned_text = _clean_text_for_tts(request_data.text)
+
             audio_bytes = lc.tts.generate_audio(
-                text=request_data.text,
+                text=cleaned_text,
                 voice=voice_to_use,
                 model=model_to_use,
                 language=language_to_use

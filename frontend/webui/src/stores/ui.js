@@ -20,7 +20,7 @@ export const useUiStore = defineStore('ui', {
     // NEW: Slideshow State
     slideshow: {
         isOpen: false,
-        slides: [],
+        slides: [], // Items with { src, prompt, duration? }
         startIndex: 0,
         title: '',
         messageId: null

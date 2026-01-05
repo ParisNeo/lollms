@@ -1133,6 +1133,24 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             except Exception as e:
                 connection.rollback()
 
+    if not inspector.has_table("email_topics"):
+        from backend.db.models.email_marketing import EmailTopic
+        EmailTopic.__table__.create(connection)
+        connection.commit()
+
+    if not inspector.has_table("email_proposals"):
+        from backend.db.models.email_marketing import EmailProposal
+        EmailProposal.__table__.create(connection)
+        connection.commit()
+    else:
+        # Check for recipients column
+        ep_cols = [c['name'] for c in inspector.get_columns("email_proposals")]
+        if "recipients" not in ep_cols:
+            print("INFO: Adding 'recipients' column to 'email_proposals' table.")
+            connection.execute(text("ALTER TABLE email_proposals ADD COLUMN recipients JSON"))
+            connection.execute(text("UPDATE email_proposals SET recipients = '[]'"))
+            connection.commit()
+            
     if not inspector.has_table("note_groups"):
         NoteGroup.__table__.create(connection)
         connection.commit()
@@ -1151,6 +1169,28 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     else:
         # Check for 'tabs' column in notebooks
         notebook_columns = [col['name'] for col in inspector.get_columns('notebooks')]
+        
+        # Add 'language' column if missing
+        if 'language' not in notebook_columns:
+            ASCIIColors.info("Migrating database: Adding 'language' column to 'notebooks' table")
+            try:
+                # SQLite supports ADD COLUMN. We provide a default 'en'
+                connection.execute(text("ALTER TABLE notebooks ADD COLUMN language VARCHAR DEFAULT 'en'"))
+                connection.commit()
+                ASCIIColors.success("Successfully added 'language' column to 'notebooks'.")
+            except Exception as e:
+                ASCIIColors.error(f"Failed to migrate notebooks table: {e}")
+
+        # Check for any other missing notebook notebook_columns if necessary
+        if 'artefacts' not in notebook_columns:
+            ASCIIColors.info("Migrating database: Adding 'artefacts' column to 'notebooks' table")
+            try:
+                connection.execute(text("ALTER TABLE notebooks ADD COLUMN artefacts JSON DEFAULT '[]'"))
+                connection.commit()
+            except Exception as e:
+                ASCIIColors.error(f"Failed to add artefacts column: {e}")
+
+
         if 'tabs' not in notebook_columns:
             try:
                 connection.execute(text("ALTER TABLE notebooks ADD COLUMN tabs JSON"))
@@ -1410,3 +1450,5 @@ class CustomNode:
                 }
             )
     connection.commit()
+
+

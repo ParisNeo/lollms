@@ -102,10 +102,12 @@ def build_tti_generation_router(router: APIRouter):
         width: int = Form(1024),
         height: int = Form(1024),
         num_images: int = Form(1),
+        custom_prompt: Optional[str] = Form(None), # NEW: Added support for prompt override
         current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
         """
         Manually triggers a generation task based on a tag found in a message.
+        Allows prompt control by accepting a custom_prompt parameter.
         """
         discussion = get_user_discussion(current_user.username, discussion_id)
         if not discussion:
@@ -116,35 +118,30 @@ def build_tti_generation_router(router: APIRouter):
             raise HTTPException(status_code=404, detail="Message not found")
 
         task = None
+        # Use custom_prompt if provided, otherwise fallback to the tag's inner content
+        final_prompt = custom_prompt if custom_prompt and custom_prompt.strip() else tag_content
         
         if tag_type == 'slides':
             task = task_manager.submit_task(
                 name="Generating Slides (Regenerate)",
                 target=_generate_slides_task,
-                args=(current_user.username, discussion_id, message_id, tag_content, width, height, num_images),
-                description=f"Regenerating slides for: {tag_content[:30]}...",
+                args=(current_user.username, discussion_id, message_id, final_prompt, width, height, num_images),
+                description=f"Regenerating slides for: {final_prompt[:30]}...",
                 owner_username=current_user.username
             )
         elif tag_type == 'generate':
             task = task_manager.submit_task(
                 name="Generating Image (Regenerate)",
                 target=_generate_image_task,
-                # Note: _generate_image_task creates a NEW message usually. 
-                # Ideally we might want to append to THIS message if regenerating from tag?
-                # The existing task logic adds a new message. For 'regenerate tag', adding a new message 
-                # might be confusing if the tag is in the middle of history.
-                # However, changing that logic is complex. We will stick to the existing task 
-                # which adds a new message with the result, effectively 'responding' to the tag click.
-                args=(current_user.username, discussion_id, tag_content, "", width, height, {}, msg.id),
-                description=f"Regenerating image for: {tag_content[:30]}...",
+                # Passing the existing message_id as parent to preserve history
+                args=(current_user.username, discussion_id, final_prompt, "", width, height, {}, msg.id),
+                description=f"Regenerating image for: {final_prompt[:30]}...",
                 owner_username=current_user.username
             )
         elif tag_type == 'edit':
-             # For edit, we need source image.
-             # This simple endpoint assumes the tag context implies using the previous image in history.
-             # Finding that image is tricky without more context.
-             # For now, we return 501 Not Implemented or try best effort if we can resolve source.
-             # _image_studio_edit_task requires specific request_data structure.
+             # For edit, logic would involve resolving the source image from the tag index
+             # and passing it to the _image_studio_edit_task logic. 
+             # Implementation depends on the task signature.
              pass
 
         if not task:

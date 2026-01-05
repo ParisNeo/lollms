@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue';
+import { ref, computed, onMounted, onUnmounted, watch, defineAsyncComponent, Teleport } from 'vue';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../stores/data';
@@ -8,12 +8,11 @@ import { useTasksStore } from '../stores/tasks';
 import { useAdminStore } from '../stores/admin';
 import { useAuthStore } from '../stores/auth';
 import apiClient from '../services/api';
-import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import JsonRenderer from '../components/ui/JsonRenderer.vue';
 import GenericModal from '../components/modals/GenericModal.vue';
 
-// Async import for graph manager to prevent view crash if dependencies are missing
+// Async import for graph manager
 const DataStoreGraphManager = defineAsyncComponent({
   loader: () => import('../components/datastores/DataStoreGraphManager.vue'),
   loadingComponent: null,
@@ -25,7 +24,6 @@ const DataStoreGraphManager = defineAsyncComponent({
 // Icons
 import IconDatabase from '../assets/icons/IconDatabase.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
-import IconRefresh from '../assets/icons/IconRefresh.vue';
 import IconPencil from '../assets/icons/IconPencil.vue';
 import IconTrash from '../assets/icons/IconTrash.vue';
 import IconShare from '../assets/icons/IconShare.vue';
@@ -37,6 +35,7 @@ import IconEyeOff from '../assets/icons/IconEyeOff.vue';
 import IconMagnifyingGlass from '../assets/icons/IconMagnifyingGlass.vue';
 import IconCopy from '../assets/icons/IconCopy.vue';
 import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
+import IconInfo from '../assets/icons/IconInfo.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -53,7 +52,8 @@ const selectedStoreId = ref(null);
 const isLoadingAction = ref(null);
 const activeTab = ref('documents');
 const isAddFormVisible = ref(false);
-const newStoreForm = ref({ name: '', description: '', selectedVectorizerKey: null, config: {}, chunk_size: 1024, chunk_overlap: 256 });
+const showStoreInfo = ref(false); // Controls the Info Modal
+const newStoreForm = ref({ name: '', description: '', selectedVectorizerKey: null, config: {}, chunk_size: 2048, chunk_overlap: 256 });
 const isKeyVisible = ref({});
 const filesInSelectedStore = ref([]);
 const filesLoading = ref(false);
@@ -69,8 +69,8 @@ const selectedFilesToDelete = ref(new Set());
 // Scrape URL State
 const scrapeUrl = ref('');
 const scrapeDepth = ref(0);
-const isUploading = ref(false); // Used for upload file button
-const isScraping = ref(false); // Used for scrape button
+const isUploading = ref(false); 
+const isScraping = ref(false); 
 
 const queryText = ref('');
 const queryTopK = ref(10);
@@ -82,8 +82,8 @@ const searchInChunks = ref('');
 const searchMatches = ref([]);
 const currentMatchIndex = ref(-1);
 
-const viewingFile = ref(null); // Ref to hold file data for viewer
-const loadingFileContent = ref(null); // Track which file is being loaded
+const viewingFile = ref(null); 
+const loadingFileContent = ref(null); 
 
 const metadataOption = ref('none');
 const manualMetadata = ref({});
@@ -108,11 +108,9 @@ const selectedVectorizerDetails = computed(() => {
     const parts = newStoreForm.value.selectedVectorizerKey.split('/');
     if (parts.length < 2) return null;
     
-    // The key format is `${group.alias}/${model.value}`
     const bindingAlias = parts[0];
     const modelValue = parts.slice(1).join('/');
     
-    // Find binding
     const foundBinding = vectorizerOptions.value.find(group => group.alias === bindingAlias);
     
     if (foundBinding) {
@@ -125,7 +123,6 @@ const selectedVectorizerDetails = computed(() => {
 });
 
 const allDataStores = computed(() => [...ownedDataStores.value, ...sharedDataStores.value].sort((a, b) => a.name.localeCompare(b.name)));
-const myDataStores = computed(() => ownedDataStores.value.sort((a, b) => a.name.localeCompare(b.name)));
 const currentSelectedStore = computed(() => allDataStores.value.find(s => s.id === selectedStoreId.value));
 const isAnyTaskRunningForSelectedStore = computed(() => !!currentUploadTask.value || !!currentGraphTask.value || !!currentScrapeTask.value);
 
@@ -143,21 +140,30 @@ onMounted(() => {
     dataStore.fetchDataStores();
     dataStore.fetchAvailableVectorizers();
     tasksStore.fetchTasks();
-    
-    // Support opening the new form via a global event
     window.addEventListener('lollms:open-new-datastore', handleAddStoreClick);
 });
 
-// Watch route params for store selection
+// Watch to manage Title
+watch([selectedStoreId, isAddFormVisible], ([newId, adding]) => {
+    if (newId) {
+        uiStore.setPageTitle({ title: '' }); // Portal active, hide standard title
+    } else if (adding) {
+        uiStore.setPageTitle({ title: 'New Data Store', icon: IconPlus });
+    } else {
+        uiStore.setPageTitle({ title: 'Data Studio', icon: IconDatabase });
+    }
+}, { immediate: true });
+
+onUnmounted(() => {
+    uiStore.setPageTitle({ title: '' });
+    window.removeEventListener('lollms:open-new-datastore', handleAddStoreClick);
+});
+
 watch(() => router.currentRoute.value.query.storeId, (newId) => {
     if (newId) {
         selectStore(newId);
     }
 }, { immediate: true });
-
-onUnmounted(() => {
-    window.removeEventListener('lollms:open-new-datastore', handleAddStoreClick);
-});
 
 watch(tasks, (newTasks) => {
     if (!currentSelectedStore.value) { currentUploadTask.value = null; currentGraphTask.value = null; currentScrapeTask.value = null; return; }
@@ -167,7 +173,6 @@ watch(tasks, (newTasks) => {
     const latestGraphTask = findLatestTask('Generate Graph for:') || findLatestTask('Update Graph for:');
     const latestScrapeTask = findLatestTask('Scrape URL to DataStore:');
     
-    // Check for task completion to refresh file list
     if (
         (currentUploadTask.value && !latestUploadTask && (currentUploadTask.value.status === 'running' || currentUploadTask.value.status === 'pending')) ||
         (currentScrapeTask.value && !latestScrapeTask && (currentScrapeTask.value.status === 'running' || currentScrapeTask.value.status === 'pending'))
@@ -230,7 +235,7 @@ async function handleAddStore() {
         const payload = {
             name: newStoreForm.value.name,
             description: newStoreForm.value.description,
-            vectorizer_name: selectedVectorizerDetails.value.vectorizer_name, // Send raw vectorizer name
+            vectorizer_name: selectedVectorizerDetails.value.vectorizer_name, 
             vectorizer_config: newStoreForm.value.config || {},
             chunk_size: newStoreForm.value.chunk_size,
             chunk_overlap: newStoreForm.value.chunk_overlap
@@ -251,6 +256,17 @@ async function handleDeleteStore(store) {
         isLoadingAction.value = `delete_store_${store.id}`;
         try { await dataStore.deleteDataStore(store.id); if (selectedStoreId.value === store.id) selectedStoreId.value = null; } 
         finally { isLoadingAction.value = null; }
+    }
+}
+async function handleLeaveStore(store) {
+    const { confirmed } = await uiStore.showConfirmation({ 
+        title: `Leave '${store.name}'?`, 
+        message: 'You will lose access to this shared Data Store.', 
+        confirmText: 'Leave' 
+    });
+    if (confirmed) {
+        await dataStore.leaveDataStore(store.id);
+        if (selectedStoreId.value === store.id) selectedStoreId.value = null;
     }
 }
 function handleShareStore(store) { uiStore.openModal('shareDataStore', { store }); }
@@ -308,7 +324,6 @@ async function handleFileDrop(event) {
 }
 function handleFileChange(event) { addFilesToSelection(Array.from(event.target.files)); }
 
-// Optimized to handle large number of files
 function addFilesToSelection(newFiles) {
     const existingNames = new Set(selectedFilesToUpload.value.map(f => f.name + f.size));
     const filesToAdd = [];
@@ -348,7 +363,7 @@ async function handleUploadFiles() {
     if (!currentSelectedStore.value || selectedFilesToUpload.value.length === 0) { uiStore.addNotification('Please select files to upload.', 'warning'); return; }
     if (isAnyTaskRunningForSelectedStore.value) { uiStore.addNotification('A task is already running for this Data Store.', 'warning'); return; }
 
-    isUploading.value = true; // Start spinner immediately
+    isUploading.value = true; 
     
     try {
         const formData = new FormData();
@@ -385,7 +400,7 @@ async function handleUploadFiles() {
                     for (const file of selectedFilesToUpload.value) {
                         metadataPayload[file.name] = commonMetadata;
                     }
-                } else { // 'per-file'
+                } else { 
                     for (const file of selectedFilesToUpload.value) {
                         const fileMetadataStr = manualMetadata.value[file.name] || '';
                         metadataPayload[file.name] = fileMetadataStr.trim() ? parseKeyValueMetadata(fileMetadataStr) : {};
@@ -404,7 +419,7 @@ async function handleUploadFiles() {
         manualMetadata.value = {};
         allFilesMetadata.value = 'title: \nsubject: \nauthors: ';
     } finally {
-        isUploading.value = false; // Stop spinner
+        isUploading.value = false;
     }
 }
 
@@ -546,11 +561,9 @@ function scrollToMatch(match) {
             let targetMarkIndex = -1;
             let textOffset = 0;
             
-            // This is complex because v-html does not give us direct element mapping.
-            // We have to reconstruct the positions.
             const parts = text.split(regex);
             let currentOffset = 0;
-            for(let i = 1; i < parts.length; i += 2) { // Iterate over matches
+            for(let i = 1; i < parts.length; i += 2) { 
                  if (currentOffset === match.matchIndexInText) {
                     targetMarkIndex = matchCounterInChunk;
                     break;
@@ -573,7 +586,7 @@ function scrollToMatch(match) {
 }
 
 async function viewFileContent(file) {
-    if (loadingFileContent.value) return; // Prevent multiple clicks
+    if (loadingFileContent.value) return; 
     loadingFileContent.value = file.filename;
     
     try {
@@ -585,7 +598,6 @@ async function viewFileContent(file) {
         };
         uiStore.openModal('fileContent');
     } catch (e) {
-        // notification handled in store
     } finally {
         loadingFileContent.value = null;
     }
@@ -600,40 +612,43 @@ function copyContent() {
 </script>
 
 <template>
-  <PageViewLayout title="Data Studio" :title-icon="IconDatabase">
-    <template #sidebar>
-        <button @click="handleAddStoreClick" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 transition-colors">
-            <IconPlus class="w-5 h-5 flex-shrink-0" />
-            <span>New Data Store</span>
-        </button>
-        <button @click="dataStore.fetchDataStores()" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mt-2">
-            <IconRefresh class="w-5 h-5 flex-shrink-0" />
-            <span>Refresh All Stores</span>
-        </button>
-        <h3 class="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mt-4 px-3">Your Stores</h3>
-        <ul class="space-y-1 mt-2">
-            <li v-for="store in myDataStores" :key="store.id">
-                <button @click="selectStore(store.id)" class="w-full flex items-center justify-between text-left px-3 py-2 rounded-lg text-sm transition-colors group" :class="{'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': selectedStoreId === store.id, 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700': selectedStoreId !== store.id}">
-                    <span class="truncate">{{ store.name }}</span>
-                    <span class="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Owner</span>
-                </button>
-            </li>
-        </ul>
-        <h3 class="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 mt-4 px-3">Shared With You</h3>
-        <ul class="space-y-1 mt-2">
-            <li v-for="store in sharedDataStores" :key="store.id">
-                <button @click="selectStore(store.id)" class="w-full flex items-center justify-between text-left px-3 py-2 rounded-lg text-sm transition-colors group" :class="{'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': selectedStoreId === store.id, 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700': selectedStoreId !== store.id}">
-                    <span class="truncate">{{ store.name }}</span>
-                    <span class="ml-2 text-xs px-2 py-0.5 rounded-full" :class="{ 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': store.permission_level === 'revectorize', 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300': store.permission_level === 'read_write', 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300': store.permission_level === 'read_query' }">
-                        {{ store.permission_level.replace('_', ' ') }}
-                    </span>
-                </button>
-            </li>
-        </ul>
-    </template>
-    <template #main>
-        <div class="relative h-full w-full">
-            <div v-if="isAddFormVisible" class="p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm h-full overflow-y-auto">
+    <div class="flex flex-col h-full w-full">
+        <!-- Portals to Global Header -->
+        <template v-if="currentSelectedStore && !isAddFormVisible">
+            <!-- Portal for Title and Tabs -->
+            <Teleport to="#global-header-title-target">
+                <div class="flex items-center gap-4 h-full max-w-full overflow-hidden">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <IconDatabase class="w-5 h-5 text-green-500 flex-shrink-0" />
+                        <h2 class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate max-w-[200px]">{{ currentSelectedStore.name }}</h2>
+                    </div>
+                    <div class="h-5 w-px bg-gray-300 dark:border-gray-600 hidden md:block"></div>
+                    <nav class="flex space-x-1 p-1 bg-gray-100 dark:bg-gray-700/50 rounded-lg">
+                        <button @click="activeTab = 'documents'" :class="['px-3 py-1 text-xs font-medium rounded-md transition-all', activeTab === 'documents' ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-100' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700']">Documents</button>
+                        <button @click="activeTab = 'query'" :class="['px-3 py-1 text-xs font-medium rounded-md transition-all', activeTab === 'query' ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-100' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700']">Query</button>
+                        <button @click="activeTab = 'graph'" :class="['px-3 py-1 text-xs font-medium rounded-md transition-all', activeTab === 'graph' ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-100' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700']">Graph</button>
+                    </nav>
+                </div>
+            </Teleport>
+
+            <!-- Portal for Actions -->
+            <Teleport to="#global-header-actions-target">
+                <div class="flex items-center gap-1">
+                    <button @click="showStoreInfo = true" class="btn-icon" title="Store Info"><IconInfo class="w-5 h-5"/></button>
+                    <div class="h-4 w-px bg-gray-300 dark:border-gray-600 mx-1"></div>
+                    <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleShareStore(currentSelectedStore)" class="btn-icon" title="Share"><IconShare class="w-5 h-5" /></button>
+                    <button v-if="canReadWrite(currentSelectedStore)" @click="handleEditStore(currentSelectedStore)" class="btn-icon" title="Edit"><IconPencil class="w-5 h-5" /></button>
+                    <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleDeleteStore(currentSelectedStore)" class="btn-icon-danger" title="Delete">
+                        <IconAnimateSpin v-if="isLoadingAction === `delete_store_${currentSelectedStore.id}`" class="w-5 h-5 animate-spin" />
+                        <IconTrash v-else class="w-5 h-5" />
+                    </button>
+                </div>
+            </Teleport>
+        </template>
+
+        <!-- Main Content Area -->
+        <div class="p-4 overflow-y-auto flex-grow h-full w-full">
+            <div v-if="isAddFormVisible" class="p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
                 <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Create New Data Store</h2>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">A Data Store turns your documents into a queryable knowledge base.</p>
                 <form @submit.prevent="handleAddStore" class="mt-6 space-y-6">
@@ -720,36 +735,7 @@ function copyContent() {
                 <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">The selected data store could not be loaded.</p>
             </div>
             <div v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-md h-full overflow-hidden flex flex-col">
-                <div class="p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-start flex-wrap gap-4">
-                    <div>
-                        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ currentSelectedStore.name }}</h2>
-                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">{{ currentSelectedStore.description || 'No description provided.' }}</p>
-                        <div class="flex items-center text-xs text-gray-500 dark:text-gray-400 mt-2">
-                            <span class="mr-1">Owner:</span><UserAvatar :username="currentSelectedStore.owner_username" size-class="h-4 w-4" class="mr-1" /><span>{{ currentSelectedStore.owner_username }}</span>
-                        </div>
-                        <div class="mt-2 text-xs font-mono p-2 bg-gray-100 dark:bg-gray-700/50 rounded-md">
-                            <p><span class="font-semibold">Vectorizer:</span> {{ currentSelectedStore.vectorizer_name }}</p>
-                            <p><span class="font-semibold">Chunking:</span> {{ currentSelectedStore.chunk_size }} / {{ currentSelectedStore.chunk_overlap }}</p>
-                            <details v-if="Object.keys(currentSelectedStore.vectorizer_config).length > 0" class="mt-1"><summary class="cursor-pointer text-gray-500">View Config</summary><JsonRenderer :json="currentSelectedStore.vectorizer_config" class="mt-1 text-xs" /></details>
-                        </div>
-                    </div>
-                    <div class="flex items-center space-x-3 flex-shrink-0">
-                        <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleShareStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconShare class="w-4 h-4 mr-2" /> Share</button>
-                        <button v-if="canReadWrite(currentSelectedStore)" @click="handleEditStore(currentSelectedStore)" class="btn btn-secondary btn-sm"><IconPencil class="w-4 h-4 mr-2" /> Edit</button>
-                        <button v-if="currentSelectedStore.permission_level === 'owner'" @click="handleDeleteStore(currentSelectedStore)" class="btn btn-danger btn-sm">
-                            <IconAnimateSpin v-if="isLoadingAction === `delete_store_${currentSelectedStore.id}`" class="w-4 h-4 mr-2 animate-spin" />
-                            <IconTrash v-else class="w-4 h-4 mr-2" />
-                            Delete
-                        </button>
-                    </div>
-                </div>
-                <div class="border-b border-gray-200 dark:border-gray-700 px-6">
-                    <nav class="-mb-px flex space-x-6" aria-label="Tabs">
-                        <button @click="activeTab = 'documents'" :class="['tab-button', activeTab === 'documents' ? 'active' : 'inactive']">Documents</button>
-                        <button @click="activeTab = 'query'" :class="['tab-button', activeTab === 'query' ? 'active' : 'inactive']">Query</button>
-                        <button @click="activeTab = 'graph'" :class="['tab-button', activeTab === 'graph' ? 'active' : 'inactive']">Graph</button>
-                    </nav>
-                </div>
+                <!-- Content Area Tabs -->
                 <div v-show="activeTab === 'documents'" class="p-6 flex-grow overflow-y-auto space-y-8">
                     <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
                         <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
@@ -1001,58 +987,95 @@ function copyContent() {
                 <p class="text-gray-600 dark:text-gray-300">Please stand by...</p>
             </div>
         </div>
-        
-        <!-- File Viewer Modal -->
-        <GenericModal modalName="fileContent" title="Document Viewer" size="4xl">
-            <template #body>
-                <div v-if="viewingFile" class="space-y-4">
-                    <!-- Info Header -->
-                    <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col gap-2">
-                        <div class="flex justify-between items-start">
-                            <div>
-                                <h3 class="text-lg font-bold text-gray-900 dark:text-white break-all">
-                                    {{ viewingFile.metadata?.title || viewingFile.filename }}
-                                </h3>
-                                <p class="text-sm text-gray-500 dark:text-gray-400 font-mono mt-1" v-if="viewingFile.metadata?.title && viewingFile.metadata?.title !== viewingFile.filename">
-                                    {{ viewingFile.filename }}
-                                </p>
-                            </div>
-                            <div class="text-right text-xs text-gray-500 dark:text-gray-400 space-y-1 flex-shrink-0 ml-4">
-                                <div title="Total characters"><span class="font-semibold">{{ viewingFile.content.length.toLocaleString() }}</span> chars</div>
-                                <div title="Approximate word count"><span class="font-semibold">{{ viewingFile.content.split(/\s+/).length.toLocaleString() }}</span> words</div>
-                                <div title="Estimated tokens (char/4)"><span class="font-semibold">~{{ Math.ceil(viewingFile.content.length / 4).toLocaleString() }}</span> tokens</div>
-                            </div>
-                        </div>
-                        
-                        <div v-if="viewingFile.metadata && Object.keys(viewingFile.metadata).length > 0" class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
-                            <details class="text-sm group">
-                                <summary class="cursor-pointer text-blue-600 dark:text-blue-400 font-medium select-none">Show Metadata</summary>
-                                <div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border dark:border-gray-700">
-                                    <JsonRenderer :json="viewingFile.metadata" />
-                                </div>
-                            </details>
-                        </div>
-                    </div>
-
-                    <!-- Content -->
-                    <div class="relative group">
-                        <div class="absolute top-2 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-                             <button @click="copyContent" class="p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors" title="Copy Content">
-                                <IconCopy class="w-4 h-4" />
-                            </button>
-                        </div>
-                        <div class="p-4 border rounded-lg dark:border-gray-700 bg-white dark:bg-gray-900 overflow-auto max-h-[60vh] whitespace-pre-wrap font-mono text-sm leading-relaxed">
-                            {{ viewingFile.content }}
-                        </div>
+    </div>
+    
+    <!-- Store Info Modal -->
+    <GenericModal modalName="storeInfoModal" :isOpen="showStoreInfo" @close="showStoreInfo = false" :title="currentSelectedStore ? `${currentSelectedStore.name} Details` : 'Store Details'">
+        <template #body>
+            <div v-if="currentSelectedStore" class="space-y-4">
+                <div>
+                    <h4 class="font-semibold text-sm text-gray-700 dark:text-gray-300">Description</h4>
+                    <p class="text-sm text-gray-600 dark:text-gray-400">{{ currentSelectedStore.description || 'No description available.' }}</p>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-sm text-gray-700 dark:text-gray-300">Owner</h4>
+                    <div class="flex items-center gap-2 mt-1">
+                        <UserAvatar :username="currentSelectedStore.owner_username" size-class="h-6 w-6" />
+                        <span class="text-sm">{{ currentSelectedStore.owner_username }}</span>
                     </div>
                 </div>
-            </template>
-            <template #footer>
-                <button @click="uiStore.closeModal('fileContent')" class="btn btn-primary">Close</button>
-            </template>
-        </GenericModal>
-    </template>
-  </PageViewLayout>
+                <div class="grid grid-cols-2 gap-4 bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border dark:border-gray-600">
+                    <div>
+                        <span class="block text-xs font-semibold text-gray-500 uppercase">Vectorizer</span>
+                        <span class="text-sm">{{ currentSelectedStore.vectorizer_name }}</span>
+                    </div>
+                    <div>
+                        <span class="block text-xs font-semibold text-gray-500 uppercase">Chunking</span>
+                        <span class="text-sm">{{ currentSelectedStore.chunk_size }} / {{ currentSelectedStore.chunk_overlap }}</span>
+                    </div>
+                </div>
+                <div>
+                    <h4 class="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-1">Configuration</h4>
+                    <div class="max-h-60 overflow-y-auto border rounded dark:border-gray-600 p-2 bg-gray-50 dark:bg-gray-800">
+                        <JsonRenderer :json="currentSelectedStore.vectorizer_config" />
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template #footer>
+            <button @click="showStoreInfo = false" class="btn btn-primary">Close</button>
+        </template>
+    </GenericModal>
+
+    <!-- File Viewer Modal -->
+    <GenericModal modalName="fileContent" title="Document Viewer" size="4xl">
+        <template #body>
+            <div v-if="viewingFile" class="space-y-4">
+                <!-- Info Header -->
+                <div class="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg border border-gray-200 dark:border-gray-700 flex flex-col gap-2">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <h3 class="text-lg font-bold text-gray-900 dark:text-white break-all">
+                                {{ viewingFile.metadata?.title || viewingFile.filename }}
+                            </h3>
+                            <p class="text-sm text-gray-500 dark:text-gray-400 font-mono mt-1" v-if="viewingFile.metadata?.title && viewingFile.metadata?.title !== viewingFile.filename">
+                                {{ viewingFile.filename }}
+                            </p>
+                        </div>
+                        <div class="text-right text-xs text-gray-500 dark:text-gray-400 space-y-1 flex-shrink-0 ml-4">
+                            <div title="Total characters"><span class="font-semibold">{{ viewingFile.content.length.toLocaleString() }}</span> chars</div>
+                            <div title="Approximate word count"><span class="font-semibold">{{ viewingFile.content.split(/\s+/).length.toLocaleString() }}</span> words</div>
+                            <div title="Estimated tokens (char/4)"><span class="font-semibold">~{{ Math.ceil(viewingFile.content.length / 4).toLocaleString() }}</span> tokens</div>
+                        </div>
+                    </div>
+                    
+                    <div v-if="viewingFile.metadata && Object.keys(viewingFile.metadata).length > 0" class="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <details class="text-sm group">
+                            <summary class="cursor-pointer text-blue-600 dark:text-blue-400 font-medium select-none">Show Metadata</summary>
+                            <div class="mt-2 p-2 bg-white dark:bg-gray-900 rounded border dark:border-gray-700">
+                                <JsonRenderer :json="viewingFile.metadata" />
+                            </div>
+                        </details>
+                    </div>
+                </div>
+
+                <!-- Content -->
+                <div class="relative group">
+                    <div class="absolute top-2 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                         <button @click="copyContent" class="p-2 bg-white dark:bg-gray-800 border dark:border-gray-600 rounded-md shadow-sm hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 transition-colors" title="Copy Content">
+                            <IconCopy class="w-4 h-4" />
+                        </button>
+                    </div>
+                    <div class="p-4 border rounded-lg dark:border-gray-700 bg-white dark:bg-gray-900 overflow-auto max-h-[60vh] whitespace-pre-wrap font-mono text-sm leading-relaxed">
+                        {{ viewingFile.content }}
+                    </div>
+                </div>
+            </div>
+        </template>
+        <template #footer>
+            <button @click="uiStore.closeModal('fileContent')" class="btn btn-primary">Close</button>
+        </template>
+    </GenericModal>
 </template>
 
 <style>
