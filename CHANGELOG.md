@@ -37,6 +37,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(core): add video file support, extend DB schema, and overhaul UI assets
 
+## [Unreleased]
+
+- feat(notebook): add tab support and extend creation schema
+
 ## [2.1.0] - "Restart" - 2025-12-28
 
 This version marks a complete architectural evolution from the legacy `lollms_webui` (v1.16.0 "Twins"). LoLLMs is now a full-scale, multi-user AI orchestration platform.

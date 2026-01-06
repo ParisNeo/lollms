@@ -4,6 +4,7 @@ import traceback
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm.attributes import flag_modified
 from backend.db.models.notebook import Notebook as DBNotebook
+from backend.db.models.user import User as DBUser
 from backend.task_manager import Task
 from ascii_colors import trace_exception
 
@@ -28,14 +29,20 @@ def _ingest_notebook_sources_task(
     urls: List[str], 
     youtube_configs: List[Dict[str, str]] = None, 
     wikipedia_urls: List[str] = None,
-    initial_prompt: Optional[str] = None
+    google_search_queries: List[str] = None,
+    arxiv_queries: List[str] = None,
+    initial_prompt: Optional[str] = None,
+    target_tab_id: Optional[str] = None
 ):
     task.log("Starting production ingestion...")
     task.set_progress(5)
     
     yt_list = youtube_configs or []
     wiki_list = wikipedia_urls or []
-    total_ops = len(urls) + len(yt_list) + len(wiki_list)
+    google_list = google_search_queries or []
+    arxiv_list = arxiv_queries or []
+    
+    total_ops = len(urls) + len(yt_list) + len(wiki_list) + len(google_list) + len(arxiv_list)
     current_op = 0
 
     with task.db_session_factory() as db:
@@ -124,11 +131,114 @@ def _ingest_notebook_sources_task(
                             flag_modified(notebook, "artefacts")
                             db.commit()
                     except Exception as e:
-                        task.log(f"YouTube failed for {url}: {e}", "WARNING")
+                        error_trace = traceback.format_exc()
+                        task.log(f"YouTube failed for {url}: {e}\nTraceback:\n{error_trace}", "WARNING")
                     current_op += 1
                     if total_ops > 0: task.set_progress(int(current_op / total_ops * 90))
             except Exception as e:
-                task.log(f"YouTube system error: {e}", "ERROR")
+                error_trace = traceback.format_exc()
+                task.log(f"YouTube system error: {e}\nTraceback:\n{error_trace}", "ERROR")
+
+        # 4. Google Search Ingestion
+        if google_list:
+            user = db.query(DBUser).filter(DBUser.username == username).first()
+            if not user or not user.google_api_key or not user.google_cse_id:
+                task.log("Google Search skipped: User API Key or CSE ID missing.", "WARNING")
+            else:
+                try:
+                    from googleapiclient.discovery import build as google_build
+                    from scrapemaster import ScrapeMaster
+                    
+                    service = google_build("customsearch", "v1", developerKey=user.google_api_key)
+                    
+                    for query in google_list:
+                        if task.cancellation_event.is_set(): break
+                        task.log(f"Google Search: {query}")
+                        try:
+                            res = service.cse().list(q=query, cx=user.google_cse_id, num=5).execute()
+                            items = res.get('items', [])
+                            
+                            if items:
+                                # Add search result summary as one artefact
+                                summary_text = f"Search Results for '{query}':\n\n" + "\n".join([f"## {item.get('title')}\nLink: {item.get('link')}\n{item.get('snippet')}\n" for item in items])
+                                _add_artefact(notebook, f"Search Summary: {query}", summary_text)
+                                
+                                # Deep scrape top 3 results
+                                for i, item in enumerate(items[:3]):
+                                    if task.cancellation_event.is_set(): break
+                                    link = item.get('link')
+                                    task.log(f"Scraping result {i+1}: {link}")
+                                    try:
+                                        scraper = ScrapeMaster(link)
+                                        content = scraper.scrape_markdown()
+                                        if content:
+                                            _add_artefact(notebook, f"Web: {item.get('title')}", content)
+                                    except Exception as e:
+                                        task.log(f"Failed to scrape {link}: {e}", "WARNING")
+                                        
+                                flag_modified(notebook, "artefacts")
+                                db.commit()
+                            else:
+                                task.log(f"No results for query: {query}", "INFO")
+                                
+                        except Exception as e:
+                            task.log(f"Error searching '{query}': {e}", "ERROR")
+                        
+                        current_op += 1
+                        if total_ops > 0: task.set_progress(int(current_op / total_ops * 90))
+                except ImportError:
+                    task.log("Google API Client library not installed.", "ERROR")
+                except Exception as e:
+                    task.log(f"Google Search system error: {e}", "ERROR")
+
+        # 5. Arxiv Ingestion
+        if arxiv_list:
+            try:
+                import pipmaster as pm
+                if not pm.is_installed("arxiv"):
+                    pm.install("arxiv")
+                import arxiv
+                
+                client = arxiv.Client()
+                
+                for query in arxiv_list:
+                    if task.cancellation_event.is_set(): break
+                    task.log(f"Arxiv Search: {query}")
+                    try:
+                        search = arxiv.Search(
+                            query = query,
+                            max_results = 3,
+                            sort_by = arxiv.SortCriterion.Relevance
+                        )
+                        
+                        results = client.results(search)
+                        found_any = False
+                        
+                        for r in results:
+                            found_any = True
+                            # Format metadata
+                            content = f"# {r.title}\n\n"
+                            content += f"**Authors:** {', '.join([a.name for a in r.authors])}\n"
+                            content += f"**Published:** {r.published.strftime('%Y-%m-%d')}\n"
+                            content += f"**PDF:** {r.pdf_url}\n\n"
+                            content += "## Abstract\n"
+                            content += r.summary
+                            
+                            _add_artefact(notebook, f"Arxiv: {r.title}", content)
+                        
+                        if found_any:
+                            flag_modified(notebook, "artefacts")
+                            db.commit()
+                        else:
+                            task.log(f"No Arxiv results for: {query}", "INFO")
+                            
+                    except Exception as e:
+                        task.log(f"Error searching Arxiv for '{query}': {e}", "ERROR")
+                    
+                    current_op += 1
+                    if total_ops > 0: task.set_progress(int(current_op / total_ops * 90))
+            except Exception as e:
+                task.log(f"Arxiv system error: {e}", "ERROR")
 
         # --- TASK CHAINING: Trigger Production Phase ---
         if not task.cancellation_event.is_set():
@@ -172,6 +282,7 @@ def _ingest_notebook_sources_task(
                     prompt=effective_prompt,
                     input_tab_ids=[],
                     action=action,
+                    target_tab_id=target_tab_id,
                     selected_artefacts=[] # Implies use all available
                 )
             except Exception as e:

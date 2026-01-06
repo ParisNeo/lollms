@@ -42,24 +42,30 @@ def create_notebook(
 ):
     """Creates a new notebook and initializes its tabs/content."""
     initial_tabs = []
+    main_tab_id = None
+
     if payload.type == 'slides_making':
+        main_tab_id = str(uuid.uuid4())
         initial_tabs.append({
-            "id": str(uuid.uuid4()), "title": "Presentation", "type": "slides", 
+            "id": main_tab_id, "title": "Presentation", "type": "slides", 
             "content": json.dumps({"slides_data": [], "mode": "hybrid", "summary": ""}), "images": []
         })
     elif payload.type == 'youtube_video':
+        main_tab_id = str(uuid.uuid4())
         initial_tabs.append({
-            "id": str(uuid.uuid4()), "title": "Script", "type": "youtube_script", 
+            "id": main_tab_id, "title": "Script", "type": "youtube_script", 
             "content": json.dumps({"scenes": []}), "images": []
         })
     elif payload.type == 'book_building':
+        main_tab_id = str(uuid.uuid4())
         initial_tabs.append({
-            "id": str(uuid.uuid4()), "title": "Outline", "type": "book_plan", "content": "[]", "images": []
+            "id": main_tab_id, "title": "Outline", "type": "book_plan", "content": "[]", "images": []
         })
     
     if not initial_tabs:
+         main_tab_id = str(uuid.uuid4())
          initial_tabs.append({
-            "id": str(uuid.uuid4()), "title": "Main", "type": "markdown", "content": payload.initialPrompt or "", "images": []
+            "id": main_tab_id, "title": "Main", "type": "markdown", "content": payload.initialPrompt or "", "images": []
         })
 
     content_to_store = payload.content or ""
@@ -76,7 +82,9 @@ def create_notebook(
         language=payload.language or "en",
         owner_user_id=current_user.id,
         tabs=initial_tabs,
-        artefacts=[]
+        artefacts=[],
+        google_search_queries=payload.google_search_queries or [],
+        arxiv_queries=payload.arxiv_queries or []
     )
     
     if payload.raw_text:
@@ -104,7 +112,10 @@ def create_notebook(
             payload.urls or [], 
             payload.youtube_configs or [], 
             payload.wikipedia_urls or [],
-            payload.initialPrompt # Passed to enable auto-generation after ingestion
+            payload.google_search_queries or [],
+            payload.arxiv_queries or [],
+            payload.initialPrompt, # Passed to enable auto-generation after ingestion
+            main_tab_id # Target tab for output
         ),
         owner_username=current_user.username,
         description=new_notebook.id # Ensure overlay finds it

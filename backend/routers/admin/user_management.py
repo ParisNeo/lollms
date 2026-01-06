@@ -359,7 +359,7 @@ async def admin_remove_user(user_id: int, db: Session = Depends(get_db), current
 
 @user_management_router.post("/email-users", response_model=TaskInfo, status_code=202)
 async def email_users(payload: EmailUsersRequest, current_admin: UserAuthDetails = Depends(get_current_admin_user)):
-    if settings.get("password_recovery_mode") not in ["automatic", "system_mail", "outlook"]:
+    if settings.get("password_recovery_mode") not in ["automatic", "gmail", "system_mail", "outlook"]:
         raise HTTPException(status_code=412, detail="Email sending is not enabled.")
     if not payload.user_ids:
         raise HTTPException(status_code=400, detail="No users selected.")

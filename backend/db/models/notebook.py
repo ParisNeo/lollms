@@ -21,6 +21,10 @@ class Notebook(Base):
     # Stores tabs. List of dicts: { id, title, type, content, ... }
     tabs = Column(JSON, default=list)
     
+    # Stores source queries
+    google_search_queries = Column(JSON, default=list)
+    arxiv_queries = Column(JSON, default=list)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     

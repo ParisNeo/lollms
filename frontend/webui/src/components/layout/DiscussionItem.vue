@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import { useRouter, useRoute } from 'vue-router';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
@@ -25,6 +26,8 @@ const props = defineProps({
 const store = useDiscussionsStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
+const router = useRouter();
+const route = useRoute();
 
 const user = computed(() => authStore.user);
 const showMenu = ref(false);
@@ -34,11 +37,22 @@ const isActive = computed(() => store.generationInProgress && isSelected.value);
 const isTitleGenerating = computed(() => store.titleGenerationInProgressId === props.discussion.id);
 
 async function handleSelect() {
+  // Ensure we are on the main chat view
+  if (route.path !== '/') {
+      await router.push('/');
+  }
+  
   if (uiStore.mainView !== 'chat') {
       uiStore.setMainView('chat');
   }  
+  
   if (!isSelected.value) {
     await store.selectDiscussion(props.discussion.id);
+  }
+
+  // Auto-close sidebar on mobile
+  if (window.innerWidth < 768) {
+      uiStore.closeSidebar();
   }
 }
 

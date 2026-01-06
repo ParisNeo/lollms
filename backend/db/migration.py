@@ -1158,6 +1158,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("notes"):
         Note.__table__.create(connection)
         connection.commit()    
+
     if not inspector.has_table("notebooks"):
         try:
             Notebook.__table__.create(connection)
@@ -1209,6 +1210,23 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 print("INFO: Added 'type' column to 'notebooks' table.")
             except Exception as e:
                 print(f"WARNING: Failed to add 'type' column to notebooks table: {e}")
+                connection.rollback()
+        if "google_search_queries" not in notebook_columns:
+            try:
+                print("Migrating notebooks: adding google_search_queries column")
+                connection.execute(text("ALTER TABLE notebooks ADD COLUMN google_search_queries JSON"))
+                connection.commit()
+            except Exception as e:
+                print(f"WARNING: Failed to add 'google_search_queries' column to notebooks table: {e}")
+                connection.rollback()
+            
+        if "arxiv_queries" not in notebook_columns:
+            try:
+                print("Migrating notebooks: adding arxiv_queries column")
+                connection.execute(text("ALTER TABLE notebooks ADD COLUMN arxiv_queries JSON"))
+                connection.commit()
+            except Exception as e:
+                print(f"WARNING: Failed to add 'arxiv_queries' column to notebooks table: {e}")
                 connection.rollback()
 
     connection.commit()
@@ -1450,5 +1468,3 @@ class CustomNode:
                 }
             )
     connection.commit()
-
-

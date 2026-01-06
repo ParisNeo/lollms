@@ -199,8 +199,10 @@ async function handleRootDrop(event) {
 async function handleNewItem() { 
     if (activeTab.value === 'chat') {
         store.createNewDiscussion(store.currentGroupId); 
+        if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notes') {
         notesStore.createNote({ title: 'New Note', content: '', group_id: notesStore.activeGroupId });
+        if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notebooks') {
         uiStore.openModal('notebookWizard');
     } else if (activeTab.value === 'data') {
@@ -209,6 +211,7 @@ async function handleNewItem() {
             const event = new CustomEvent('lollms:open-new-datastore');
             window.dispatchEvent(event);
         }, 100);
+        if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'images') {
         const { confirmed, value } = await uiStore.showConfirmation({
             title: 'New Album',
@@ -229,11 +232,13 @@ async function handleNewItem() {
 async function openNotebook(notebook) {
     await notebookStore.selectNotebook(notebook.id);
     router.push('/notebooks');
+    if (window.innerWidth < 768) uiStore.closeSidebar();
 }
 
 // Data Store Handlers
 function handleDataStoreSelect(store) {
     router.push({ path: '/datastores', query: { storeId: store.id } });
+    if (window.innerWidth < 768) uiStore.closeSidebar();
 }
 
 function onEditStore(store) { uiStore.openModal('editDataStore', { store }); }
@@ -261,6 +266,7 @@ async function onLeaveStore(store) {
 async function openFlow(flow) {
     flowStore.currentFlow = flow;
     router.push('/flow-studio');
+    if (window.innerWidth < 768) uiStore.closeSidebar();
 }
 
 async function handleDeleteNotebook(notebook) {

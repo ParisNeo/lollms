@@ -183,6 +183,44 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
         print(f"CRITICAL: Failed to send SMTP email. Error: {e}")
         raise
 
+def _send_email_gmail(to_email: str, subject: str, html_content: Optional[str], text_content: str):
+    """Sends an email using Gmail's SMTP servers with pre-configured host/port."""
+    smtp_host = "smtp.gmail.com"
+    smtp_port = 587
+    smtp_user = settings.get("smtp_user")
+    smtp_password = settings.get("smtp_password")
+    # For Gmail, the 'From' header is generally overwritten by the authenticated user,
+    # but we set it for correctness. We rely on smtp_user as the sender.
+    from_email = smtp_user 
+    use_tls = True
+
+    if not all([smtp_user, smtp_password]):
+        raise ValueError("Gmail credentials (user and app password) are not configured.")
+
+    if html_content:
+        msg = MIMEMultipart('alternative')
+        part1 = MIMEText(text_content, 'plain', 'utf-8')
+        part2 = MIMEText(html_content, 'html', 'utf-8')
+        msg.attach(part1)
+        msg.attach(part2)
+    else:
+        msg = MIMEText(text_content, 'plain', 'utf-8')
+
+    msg['Subject'] = subject
+    msg['From'] = from_email
+    msg['To'] = to_email
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            if use_tls:
+                server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(from_email, [to_email], msg.as_string())
+        print(f"INFO: Email (Gmail) sent to {to_email}")
+    except Exception as e:
+        print(f"CRITICAL: Failed to send Gmail email. Error: {e}")
+        raise
+
 def _send_email_system_mail_text(to_email: str, subject: str, text_content: str):
     """Sends a plain text email using system commands."""
     
@@ -351,9 +389,13 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
     # Prepare HTML wrapper if needed
     html_body = _get_full_html_email(body, background_color) if not send_as_text else None
     
-    if recovery_mode == "smtp":
+    # FIX: Accept 'automatic' as 'smtp' since that's what the UI/Settings calls it
+    if recovery_mode == "smtp" or recovery_mode == "automatic":
         text_content = _convert_html_to_text(body)
         _send_email_smtp(to_email, subject, html_body, text_content)
+    elif recovery_mode == "gmail":
+        text_content = _convert_html_to_text(body)
+        _send_email_gmail(to_email, subject, html_body, text_content)
     elif recovery_mode == "system_mail":
         text_content = _convert_html_to_text(body)
         if send_as_text:
@@ -366,7 +408,7 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
         else:
             print("Outlook integration is only supported on Windows.")
     else:
-        print(f"WARNING: Email sending is set to '{recovery_mode}'.  No email sending configured.")
+        print(f"WARNING: Email sending is set to '{recovery_mode}'. No email sending configured or manual mode active.")
 
 def send_password_reset_email(to_email: str, reset_link: str, username: str):
     """Prepares and sends a password reset email using the configured method."""

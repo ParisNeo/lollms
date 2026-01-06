@@ -530,11 +530,23 @@ async def forgot_password(
 
     if user:
         recovery_mode = settings.get("password_recovery_mode", "manual")
-        smtp_host = settings.get("smtp_host")
         
-        is_automatic_possible = recovery_mode == 'automatic' and smtp_host and user.email
+        # Determine if email sending is viable
+        can_send_email = False
+        if user.email:
+            if recovery_mode == 'automatic':
+                # For automatic (SMTP), we need a host configured
+                if settings.get("smtp_host"):
+                    can_send_email = True
+            elif recovery_mode == 'gmail':
+                # For Gmail, we need the user (email) configured
+                if settings.get("smtp_user"):
+                    can_send_email = True
+            elif recovery_mode in ['system_mail', 'outlook']:
+                # These modes assume local configuration implies readiness
+                can_send_email = True
 
-        if is_automatic_possible:
+        if can_send_email:
             token = create_reset_token()
             user.password_reset_token = token
             user.reset_token_expiry = datetime.datetime.now(timezone.utc) + timedelta(hours=1)
@@ -545,15 +557,15 @@ async def forgot_password(
                 background_tasks.add_task(send_password_reset_email, user.email, reset_link, user.username)
             except Exception as e:
                 db.rollback()
-                # Fallback to manual mode on DB or mail error
+                # Fallback to manual mode notification on error
                 await manager.broadcast_to_admins({
                     "id": 0, "sender_id": 0, "sender_username": "System Alert",
                     "receiver_id": -1, "receiver_username": "Admins",
-                    "content": f"User '{user.username}' (ID: {user.id}) tried an automatic password reset, but it failed. Please assist them manually. Error: {e}",
+                    "content": f"User '{user.username}' (ID: {user.id}) requested password reset via {recovery_mode}, but it failed. Please assist manually. Error: {e}",
                     "sent_at": datetime.datetime.now(timezone.utc).isoformat()
                 })
 
-        else: # Manual mode or automatic is not possible
+        else: # Manual mode or configuration missing for selected mode
             dm_notification = {
                 "id": 0, "sender_id": 0, "sender_username": "System Alert",
                 "receiver_id": -1, "receiver_username": "Admins",

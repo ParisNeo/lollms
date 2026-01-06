@@ -28,7 +28,7 @@ from backend.config import (
     APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
-from backend.db.base import Base
+from backend.db.base import Base, TaskStatus
 from backend.db.migration import run_schema_migrations_and_bootstrap, check_and_update_db_version
 from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
@@ -36,6 +36,7 @@ from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
 from backend.db.models.connections import WebSocketConnection
+from backend.db.models.db_task import DBTask
 from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (
@@ -436,19 +437,50 @@ def run_one_time_startup_tasks(lock: Lock):
         finally:
             if db_for_sync: db_for_sync.close()
 
-        db_for_ws_cleanup: Optional[Session] = None
+        db_for_cleanup: Optional[Session] = None
         try:
-            db_for_ws_cleanup = next(get_db())
-            num_deleted = db_for_ws_cleanup.query(WebSocketConnection).delete()
-            db_for_ws_cleanup.commit()
-            if num_deleted > 0:
-                ASCIIColors.yellow(f"--- Cleared {num_deleted} stale WebSocket connection entries from the database. ---")
+            db_for_cleanup = next(get_db())
+            
+            # 1. Cleanup WebSocket connections
+            num_deleted_ws = db_for_cleanup.query(WebSocketConnection).delete()
+            
+            # 2. Cleanup Tasks
+            # Mark any running or pending tasks as failed because the server restarted
+            interrupted_tasks = db_for_cleanup.query(DBTask).filter(
+                DBTask.status.in_([TaskStatus.RUNNING, TaskStatus.PENDING])
+            ).all()
+            
+            if interrupted_tasks:
+                for task in interrupted_tasks:
+                    task.status = TaskStatus.FAILED
+                    task.error = "Task interrupted by server restart."
+                    task.completed_at = datetime.datetime.now(datetime.timezone.utc)
+                    # We can't easily append to JSON field safely in bulk update if it relies on existing value, 
+                    # so we updated objects. Now we just ensure logs exist.
+                    if task.logs is None: task.logs = []
+                    # Create a new list to force SQLAlchemy to detect the change on the JSON column
+                    current_logs = list(task.logs)
+                    current_logs.append({
+                        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        "message": "Server restarted. Task forced to failed state.",
+                        "level": "ERROR"
+                    })
+                    task.logs = current_logs
+            
+            db_for_cleanup.commit()
+
+            if num_deleted_ws > 0:
+                ASCIIColors.yellow(f"--- Cleared {num_deleted_ws} stale WebSocket connection entries. ---")
+            
+            if interrupted_tasks:
+                ASCIIColors.yellow(f"--- Updated {len(interrupted_tasks)} active tasks to FAILED due to restart. ---")
+
         except Exception as e:
-            ASCIIColors.error(f"ERROR during WebSocket connection cleanup: {e}")
+            ASCIIColors.error(f"ERROR during cleanup: {e}")
             trace_exception(e)
-            if db_for_ws_cleanup: db_for_ws_cleanup.rollback()
+            if db_for_cleanup: db_for_cleanup.rollback()
         finally:
-            if db_for_ws_cleanup: db_for_ws_cleanup.close()
+            if db_for_cleanup: db_for_cleanup.close()
 
         load_cache()
         task_manager.init_app(db_session_module.SessionLocal)

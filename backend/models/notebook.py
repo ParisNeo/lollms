@@ -18,6 +18,8 @@ class NotebookCreate(BaseModel):
     urls: Optional[List[str]] = None
     youtube_urls: Optional[List[str]] = None
     wikipedia_urls: Optional[List[str]] = None
+    google_search_queries: Optional[List[str]] = None
+    arxiv_queries: Optional[List[str]] = None
     youtube_configs: Optional[List[Dict[str, str]]] = None # List of {url, lang}
     raw_text: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None 

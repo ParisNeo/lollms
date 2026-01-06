@@ -80,6 +80,7 @@ async function handleSave() {
                     <label for="password_recovery_mode" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Email Sending Method</label>
                     <select id="password_recovery_mode" v-model="form.password_recovery_mode" class="input-field mt-1">
                         <option value="manual">Manual (Admin Managed)</option>
+                        <option value="gmail">Gmail</option>
                         <option value="automatic">SMTP Server</option>
                         <option value="system_mail">System Mail Command</option>
                         <option value="outlook">Outlook (Windows only)</option>
@@ -100,6 +101,30 @@ async function handleSave() {
                         <p class="text-sm text-yellow-800 dark:text-yellow-200">
                             <span class="font-semibold">System Mail Mode</span> uses the server's built-in `mail` command (e.g., from `mailutils`). This is a simpler alternative to SMTP but requires the command to be installed and properly configured on the server's operating system.
                         </p>
+                    </div>
+                    
+                    <!-- Gmail Mode Info -->
+                    <div v-if="form.password_recovery_mode === 'gmail'" class="space-y-6 pt-4">
+                        <div class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-lg">
+                            <p class="text-sm text-red-800 dark:text-red-200">
+                                <span class="font-semibold">Gmail Mode</span> uses Gmail's SMTP servers automatically.
+                            </p>
+                            <p class="text-xs text-red-700 dark:text-red-300 mt-2">
+                                <strong>Important:</strong> You must use an <strong>App Password</strong> if 2-Step Verification is enabled on your Google Account. Regular passwords often do not work.
+                                <a href="https://support.google.com/accounts/answer/185833" target="_blank" class="underline hover:text-red-900 dark:hover:text-red-100">Learn how to create an App Password</a>.
+                            </p>
+                        </div>
+                        
+                         <div class="grid grid-cols-1 gap-y-6 sm:grid-cols-2 sm:gap-x-6">
+                            <div class="sm:col-span-2">
+                                <label for="gmail_user" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Gmail Address</label>
+                                <input type="email" id="gmail_user" v-model="form.smtp_user" class="input-field mt-1" placeholder="your.name@gmail.com" autocomplete="email">
+                            </div>
+                            <div class="sm:col-span-2">
+                                <label for="gmail_password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">App Password</label>
+                                <input type="password" id="gmail_password" v-model="form.smtp_password" class="input-field mt-1" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
+                            </div>
+                        </div>
                     </div>
 
                     <!-- SMTP Configuration Fields (Conditional) -->
