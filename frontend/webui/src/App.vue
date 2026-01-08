@@ -21,7 +21,6 @@ import ConnectionOverlay from './components/ui/ConnectionOverlay.vue';
 // Async Modals
 const SlideshowModal = defineAsyncComponent(() => import('./components/modals/SlideshowModal.vue'));
 const CommandOutputModal = defineAsyncComponent(() => import('./components/modals/CommandOutputModal.vue'));
-const NotebookWizardModal = defineAsyncComponent(() => import('./components/modals/NotebookWizardModal.vue'));
 const ArtefactImportWizardModal = defineAsyncComponent(() => import('./components/modals/ArtefactImportWizardModal.vue'));
 const ArtefactViewerModal = defineAsyncComponent(() => import('./components/modals/ArtefactViewerModal.vue'));
 
@@ -280,9 +279,9 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     <ImageViewerModal />
     <SlideshowModal />
     <CommandOutputModal />
-    <NotebookWizardModal />
-    <ArtefactImportWizardModal /> <!-- Added -->
-    <ArtefactViewerModal />       <!-- Added -->
+    <!-- NotebookWizardModal has been moved to ModalContainer.vue -->
+    <ArtefactImportWizardModal /> 
+    <ArtefactViewerModal />       
     <NotificationPanel /><AudioPlayer />
   </div>
 </template>

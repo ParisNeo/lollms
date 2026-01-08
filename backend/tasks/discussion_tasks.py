@@ -134,14 +134,24 @@ def _memorize_ltm_task(task: Task, username: str, discussion_id: str):
             
             lc = get_user_lollms_client(username)
             
-            system_prompt = """You are a Memory Assistant. Your goal is to extract important, long-term information about the user from the provided conversation.
-Identify key facts such as names, preferences, relationships, specific work details, or important events.
-Ignore casual conversation, greetings, or temporary context.
-If no important information is found, return {"memories": []}.
+            system_prompt = """You are a Memory Manager for an AI assistant. Your goal is to extract STRICTLY USEFUL long-term information.
+
+CRITERIA FOR SAVING:
+1. User Details: Name, age, profession, specific preferences, or strong dislikes.
+2. Solved Problems: If a complex technical problem was solved, summarize the solution logic (not the whole conversation) so it can be recalled later.
+3. Project Context: Ongoing project details that will be needed in future sessions.
+
+DO NOT SAVE:
+- Casual conversation ("how are you", "thanks", "hello").
+- Temporary context (e.g., "rewrite this paragraph", "what is 2+2").
+- General knowledge or facts the AI already knows.
+- Vague statements.
+
+If no important information is found based on these strict criteria, return {"memories": []}.
 """
             template = """{
   "memories": [
-    {"title": "Title of the memory", "content": "Content of the memory"}
+    {"title": "Concise Title", "content": "Specific detail or solution summary"}
   ]
 }"""
             # Truncate conversation if too long (simple heuristic)
@@ -200,7 +210,7 @@ If no important information is found, return {"memories": []}.
                         "data": {"discussion_id": discussion_id, "zone": "memory"}
                     }, db_user.id)
                 else:
-                    task.log("No valid memory objects found in response.", "INFO")
+                    task.log("No relevant information found to save.", "INFO")
             else:
                 task.log("No important memories found in this conversation.", "INFO")
     

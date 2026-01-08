@@ -46,6 +46,8 @@ import IconMagnifyingGlass from '../../assets/icons/IconMagnifyingGlass.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../assets/icons/IconCircle.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue'; 
+import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue';
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -103,6 +105,8 @@ const editedImages = ref([]);
 const newImageFiles = ref([]);
 const editImageInput = ref(null);
 const audioPlayerRef = ref(null);
+const previewMap = ref({});
+const sourceRefs = ref({}); // To store refs to source items for scrolling
 
 const selectedViewIndices = ref({});
 
@@ -170,6 +174,54 @@ function handleSpeak() {
         const textToSpeak = props.message.content.replace(/```[\s\S]*?```/g, 'Code block.').replace(/<think>[\s\S]*?<\/think>/g, '');
         discussionsStore.generateTTSForMessage(props.message.id, textToSpeak);
     }
+}
+
+function isUrl(str) {
+    if (typeof str !== 'string') return false;
+    return str.startsWith('http://') || str.startsWith('https://');
+}
+
+function togglePreview(index) {
+    if (previewMap.value[index]) {
+        delete previewMap.value[index];
+    } else {
+        previewMap.value[index] = true;
+    }
+}
+
+// Function to handle clicking citation buttons in the content
+function handleCitationClick(index) {
+    // Ensure sources are visible
+    isSourcesVisible.value = true;
+    
+    // Find the source item. Assuming sortedSources order matches if we use index from props
+    // We try to match by the 'index' property if available, or just use array index 
+    // BUT sortedSources is sorted by score. The citation [1] refers to the index property we added in backend.
+    
+    nextTick(() => {
+        // Find the element ref. We need to map index to the sorted list index or iterate
+        const targetSourceIndex = sortedSources.value.findIndex(s => s.index === index);
+        
+        if (targetSourceIndex !== -1) {
+            const el = sourceRefs.value[targetSourceIndex];
+            if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                // Optional: Flash highlight effect
+                el.classList.add('bg-yellow-100', 'dark:bg-yellow-900/50');
+                setTimeout(() => {
+                    el.classList.remove('bg-yellow-100', 'dark:bg-yellow-900/50');
+                }, 2000);
+            }
+        } else {
+             // Fallback to direct array index if no explicit index property
+             const el = sourceRefs.value[index - 1]; // citations are 1-based
+             if (el) {
+                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                 el.classList.add('bg-yellow-100', 'dark:bg-yellow-900/50');
+                 setTimeout(() => el.classList.remove('bg-yellow-100', 'dark:bg-yellow-900/50'), 2000);
+             }
+        }
+    });
 }
 
 onMounted(() => {
@@ -370,7 +422,11 @@ const hasEvents = computed(() => props.message.events && props.message.events.le
 const hasSources = computed(() => props.message.sources && props.message.sources.length > 0);
 const sortedSources = computed(() => {
     if (!hasSources.value) return [];
-    return [...props.message.sources].sort((a, b) => (b.score || 0) - (a.score || 0));
+    // If index property is present, sort by index first, then score
+    return [...props.message.sources].sort((a, b) => {
+        if (a.index && b.index) return a.index - b.index;
+        return (b.score || 0) - (a.score || 0);
+    });
 });
 
 const lastEventSummary = computed(() => {
@@ -570,6 +626,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             :last-user-image="lastUserImage"
                             :message-id="message.id"
                             @regenerate="handleTagRegeneration"
+                            @citation-click="handleCitationClick"
                         />
 
                         <!-- Centralized Image Zone with Gallery Underneath -->
@@ -745,10 +802,38 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     </div>
 
                     <div v-if="isSourcesVisible" class="mt-2 space-y-2 pl-4">
-                        <div v-for="source in sortedSources" :key="source.title" @click="showSourceDetails(source)" class="source-item">
-                            <div class="similarity-chip" :class="getSimilarityColor(source.score)" :title="typeof source.score === 'number' ? `Similarity: ${(source.score).toFixed(1)}%` : 'Similarity: N/A'"></div>
-                            <div class="truncate flex-grow" :title="source.title">{{ source.title }}</div>
-                            <div v-if="typeof source.score === 'number'" class="font-mono text-xs text-gray-500 dark:text-gray-400 flex-shrink-0">{{ (source.score).toFixed(1) }}%</div>
+                        <div v-for="(source, index) in sortedSources" :key="index" :ref="el => { if(el) sourceRefs[index] = el }" class="flex flex-col gap-1 transition-all duration-300">
+                             <div class="flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 transition-all cursor-pointer group" @click="showSourceDetails(source)">
+                                <div class="flex items-center gap-2 min-w-0">
+                                    <div class="similarity-chip" :class="getSimilarityColor(source.score)" :title="typeof source.score === 'number' ? `Similarity: ${(source.score).toFixed(1)}%` : 'Similarity: N/A'"></div>
+                                    <div class="truncate text-xs text-gray-700 dark:text-gray-300" :title="source.title">
+                                        <span v-if="source.index" class="font-mono font-bold mr-1">[{{ source.index }}]</span>
+                                        {{ source.title }}
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                                    <div v-if="typeof source.score === 'number'" class="font-mono text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">{{ (source.score).toFixed(1) }}%</div>
+                                    <!-- Web Link -->
+                                    <a v-if="isUrl(source.source)" :href="source.source" target="_blank" @click.stop class="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-500 transition-colors" title="Open Website">
+                                        <IconGlobeAlt class="w-3.5 h-3.5" />
+                                    </a>
+                                    <!-- Sneak Peek -->
+                                    <button v-if="isUrl(source.source)" @click.stop="togglePreview(index)" class="p-1 rounded hover:bg-purple-100 dark:hover:bg-purple-900 text-purple-500 transition-colors" :class="{'bg-purple-100 dark:bg-purple-900': previewMap[index]}" title="Toggle Preview">
+                                        <IconEye class="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                             </div>
+                             
+                             <!-- Inline Preview -->
+                             <div v-if="previewMap[index]" class="w-full h-80 mt-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white overflow-hidden relative shadow-inner animate-in fade-in zoom-in-95 duration-200">
+                                 <iframe :src="source.source" class="w-full h-full" sandbox="allow-scripts allow-same-origin"></iframe>
+                                 <div class="absolute top-2 right-2">
+                                     <button @click="togglePreview(index)" class="p-1 bg-gray-900/50 text-white rounded-full hover:bg-gray-900 transition-colors"><IconXMark class="w-4 h-4"/></button>
+                                 </div>
+                                 <div class="absolute inset-0 pointer-events-none flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 -z-10">
+                                    <span class="text-xs text-gray-400">Loading preview...</span>
+                                 </div>
+                             </div>
                         </div>
                     </div>
                 </div>
@@ -848,65 +933,21 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     </div>
 </template>
 <style scoped>
-/* Event Visualization Enhancements */
-.events-content {
-    @apply space-y-1 p-2 bg-gray-50 dark:bg-gray-900/50 rounded-b-lg;
+.message-prose {
+    @apply prose prose-base dark:prose-invert max-w-none break-words;
+    font-size: var(--message-font-size, 14px);
 }
-
-.event-item, .step-group-summary {
-    @apply flex items-start gap-3;
-}
-
-.step-group-summary {
-    @apply p-2 rounded-lg list-none select-none cursor-pointer transition-colors hover:bg-gray-100 dark:hover:bg-gray-800;
-    -webkit-tap-highlight-color: transparent;
-}
-.step-group-block[open] > .step-group-summary {
-    @apply bg-gray-100 dark:bg-gray-800 rounded-b-none;
-}
-.step-group-block[open] > .step-group-summary .toggle-icon {
-    transform: rotate(90deg);
-}
-.step-group-content {
-    @apply pl-4 border-l-2 border-gray-300 dark:border-gray-600 space-y-1 py-2;
-}
-
-.event-icon-container {
-    @apply flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center;
-}
-.event-details {
-    @apply flex-1 min-w-0;
-}
-.event-title {
-    @apply text-xs font-semibold tracking-wider uppercase;
-}
-.event-body {
-    @apply mt-1;
-}
-.event-body-summary {
-    @apply text-sm text-gray-600 dark:text-gray-400 truncate;
-}
-.step-end-block {
-    @apply mt-2 pt-2 border-t border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-800 p-1 rounded-md;
-}
-/* Event-specific styling */
-.event-type-thought .event-icon-container { @apply bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300; }
-.event-type-thought .event-title { @apply text-purple-600 dark:text-purple-300; }
-
-.event-type-tool_call .event-icon-container { @apply bg-yellow-100 dark:bg-yellow-900/50 text-yellow-600 dark:text-yellow-300; }
-.event-type-tool_call .event-title { @apply text-yellow-600 dark:text-yellow-300; }
-.event-type-tool_call .event-body { @apply p-2 bg-white dark:bg-gray-800 rounded; }
-
-.event-type-observation .event-icon-container { @apply bg-cyan-100 dark:bg-cyan-900/50 text-cyan-600 dark:text-cyan-300; }
-.event-type-observation .event-title { @apply text-cyan-600 dark:text-cyan-300; }
-
-.event-type-scratchpad .event-icon-container { @apply bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-300; }
-.event-type-scratchpad .event-title { @apply text-orange-600 dark:text-orange-300; }
-.event-type-scratchpad .event-body { @apply p-2 bg-white dark:bg-gray-800 rounded max-h-40 overflow-y-auto; }
-
-.event-type-error .event-icon-container, .event-type-exception .event-icon-container { @apply bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-300; }
-.event-type-error .event-title, .event-type-exception .event-title { @apply text-red-600 dark:text-red-300; }
-
-.event-type-step_start .event-icon-container, .event-type-step_end .event-icon-container { @apply bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300; }
-.event-type-step_start .event-title, .event-type-step_end .event-title { @apply text-gray-600 dark:text-gray-300; }
+.btn-icon-sm { @apply p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center; }
+.think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
+details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
+.think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
+.think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
+.think-summary::-webkit-details-marker { display: none; }
+.think-content { @apply p-3; }
+.document-block { @apply bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/50 rounded-lg; }
+.document-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
+.document-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
+.document-summary::-webkit-details-marker { display: none; }
+details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
+.document-content { @apply p-3; }
 </style>

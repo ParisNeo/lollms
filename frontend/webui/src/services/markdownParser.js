@@ -26,9 +26,33 @@ function unprotectHtml(html) {
     return result;
 }
 
+// Custom extension to handle [N] citations
+const citationExtension = {
+  name: 'citation',
+  level: 'inline',
+  start(src) { return src.match(/\[\d+\]/)?.index; },
+  tokenizer(src, tokens) {
+    const rule = /^\[(\d+)\]/;
+    const match = rule.exec(src);
+    if (match) {
+      return {
+        type: 'citation',
+        raw: match[0],
+        index: match[1]
+      };
+    }
+  },
+  renderer(token) {
+    return `<button class="citation-btn text-blue-500 hover:underline font-mono text-xs align-super cursor-pointer select-none px-0.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors" data-index="${token.index}">[${token.index}]</button>`;
+  }
+};
+
+marked.use({ extensions: [citationExtension] });
+
 export function parsedMarkdown(content) {
     if (typeof content !== 'string') return '';
     const protectedContent = protectMath(content);
+    // Use marked with our custom extension
     const rawHtml = marked.parse(protectedContent, { gfm: true, breaks: true, mangle: false, smartypants: false });
     return unprotectHtml(rawHtml);
 };

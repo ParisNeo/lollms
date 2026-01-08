@@ -37,7 +37,8 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(core): add video file support, extend DB schema, and overhaul UI assets
 
-## [Unreleased]
+#
+- feat: prune obsolete UI asset bundles and update index.html# [Unreleased]
 
 - feat(notebook): add tab support and extend creation schema
 

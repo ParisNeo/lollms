@@ -281,7 +281,18 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             max_image_width=db_user.max_image_width,
             max_image_height=db_user.max_image_height,
             compress_images=db_user.compress_images,
-            image_compression_quality=db_user.image_compression_quality
+            image_compression_quality=db_user.image_compression_quality,
+
+            # Herd Mode Settings
+            herd_mode_enabled=db_user.herd_mode_enabled,
+            herd_participants=db_user.herd_participants or [],
+            herd_rounds=db_user.herd_rounds,
+            
+            # Google Search Settings
+            google_api_key=db_user.google_api_key,
+            google_cse_id=db_user.google_cse_id,
+            web_search_enabled=db_user.web_search_enabled,
+            web_search_deep_analysis=db_user.web_search_deep_analysis
         )
     finally:
         if db_was_created:

@@ -22,7 +22,7 @@ class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     is_moderator: Optional[bool] = None
     user_ui_level: Optional[int] = None
-    status: Optional[str] = None # NEW
+    status: Optional[str] = None
 
 class BatchUsersSettingsUpdate(BaseModel):
     user_ids: List[int]
@@ -83,7 +83,7 @@ class AuthorPublic(BaseModel):
     icon: Optional[str] = None
     is_admin: bool = False
     is_moderator: bool = False
-    status: str = "active" # NEW
+    status: str = "active"
     
     class Config:
         from_attributes = True
@@ -95,7 +95,7 @@ class UserPublic(BaseModel):
     is_admin: bool = False
     is_moderator: bool = False
     is_active: bool = True
-    status: str = "active" # NEW
+    status: str = "active"
     created_at: Optional[datetime] = None
 
     class Config:
@@ -120,7 +120,7 @@ class UserAuthDetails(BaseModel):
     is_admin: bool
     is_moderator: bool = False
     is_active: bool
-    status: str = "active" # NEW
+    status: str = "active"
     icon: Optional[str] = None
     first_name: Optional[str] = None
     family_name: Optional[str] = None
@@ -189,8 +189,8 @@ class UserAuthDetails(BaseModel):
     
     latex_builder_enabled: bool = False
     allow_user_chunking_config: bool = True
-    default_chunk_size: int = 2048 # System-wide default from config, not user pref
-    default_chunk_overlap: int = 256 # System-wide default from config, not user pref
+    default_chunk_size: int = 2048
+    default_chunk_overlap: int = 256
     
     coding_style_constraints: Optional[str] = None
     programming_language_preferences: Optional[str] = None
@@ -209,13 +209,18 @@ class UserAuthDetails(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: bool = False
     image_editing_enabled: bool = False
-    slide_maker_enabled: bool = False # NEW
+    slide_maker_enabled: bool = False
     note_generation_enabled: bool = False
     activate_generated_images: bool = False
     
     # Memory Settings
     memory_enabled: bool = False
     auto_memory_enabled: bool = False
+
+    # Herd Mode Settings
+    herd_mode_enabled: bool = False
+    herd_participants: List[Dict[str, str]] = Field(default_factory=list)
+    herd_rounds: int = 2
 
     preferred_name: Optional[str] = None
     
@@ -307,13 +312,18 @@ class UserUpdate(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: Optional[bool] = None
     image_editing_enabled: Optional[bool] = None
-    slide_maker_enabled: Optional[bool] = None # NEW
+    slide_maker_enabled: Optional[bool] = None
     activate_generated_images: Optional[bool] = None
     note_generation_enabled: Optional[bool] = None
     
     # Memory Settings
     memory_enabled: Optional[bool] = None
     auto_memory_enabled: Optional[bool] = None
+
+    # Herd Mode Settings
+    herd_mode_enabled: Optional[bool] = None
+    herd_participants: Optional[List[Dict[str, str]]] = None
+    herd_rounds: Optional[int] = None
     
     reasoning_activation: Optional[bool] = None
     reasoning_effort: Optional[str] = None

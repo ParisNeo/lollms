@@ -76,6 +76,11 @@ class User(Base):
     reasoning_activation = Column(Boolean, default=False, nullable=True)
     reasoning_effort = Column(String, nullable=True)
     reasoning_summary = Column(Boolean, default=False, nullable=True)
+    
+    # Herd Mode Settings
+    herd_mode_enabled = Column(Boolean, default=False, nullable=False)
+    herd_participants = Column(JSON, nullable=True) # List of {model: str, personality: str}
+    herd_rounds = Column(Integer, default=2, nullable=False)
 
     max_image_width = Column(Integer, default=-1, nullable=True)
     max_image_height = Column(Integer, default=-1, nullable=True)

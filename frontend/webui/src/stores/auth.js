@@ -36,8 +36,8 @@ export const useAuthStore = defineStore('auth', () => {
     const ws = ref(null);
     const wsConnected = ref(false);
     const hasConnectedOnce = ref(false); 
-    let reconnectTimeout = null;
     let heartbeatInterval = null;
+    let reconnectTimeout = null;
 
     // --- Audio Objects ---
     const audioChime = new Audio('/audio/chime_aud.wav');
@@ -173,6 +173,9 @@ export const useAuthStore = defineStore('auth', () => {
                         discussionsStore.refreshActiveDiscussionMessages();
                     }
                     discussionsStore.loadDiscussions();
+                    break;
+                case 'data_zone_processed': 
+                    discussionsStore.handleDataZoneUpdate(data.data); 
                     break;
                 case 'discussion_images_updated':
                     discussionsStore.handleDiscussionImagesUpdated(data.data);

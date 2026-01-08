@@ -43,9 +43,7 @@ const memoryContext = computed(() => {
     if (activeMems.length === 0) return '';
     
     return activeMems.map((m) => {
-        // Find the index in the FULL sorted list for consistent reference,
-        // or should we re-index based on active selection?
-        // Backend usually sends ALL memories. So we use the index from the full list.
+        // Find the index in the FULL sorted list for consistent reference
         const fullIndex = sortedMemories.value.findIndex(sm => sm.id === m.id) + 1;
         return `[Memory #${fullIndex}] ${m.title}: ${m.content}`;
     }).join('\n\n');
@@ -80,33 +78,55 @@ async function handleDeleteMemory(memoryId) {
         confirmText: 'Delete'
     });
     
-    if (confirmed) {
+    if (confirmed && confirmed.confirmed) {
+        // Optimistically remove from UI (so animation can start) before the store refreshes
+        // This also removes the title from the loaded set if it was selected
+        loadedMemoryTitles.value.delete(memoryToDelete.title);
+        loadedMemoryTitles.value = new Set(loadedMemoryTitles.value); // trigger reactivity
+
         await memoriesStore.deleteMemory(memoryId);
     }
 }
 
-function handleLoadMemory(memoryTitle) { loadedMemoryTitles.value.add(memoryTitle); }
-function handleUnloadMemory(memoryTitle) { loadedMemoryTitles.value.delete(memoryTitle); }
+function handleLoadMemory(title) { 
+    loadedMemoryTitles.value.add(title);
+    // Force reactivity for the Set
+    loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
+}
+
+function handleUnloadMemory(title) { 
+    loadedMemoryTitles.value.delete(title);
+    // Force reactivity for the Set
+    loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
+}
 
 async function refreshMemories() {
     await memoriesStore.fetchMemories();
-    // Auto-select all new memories if not explicitly unselected?
-    // For now, keep current behavior: explicitly select/deselect
-    // If set is empty (first load), select all.
+    // Auto-select all new memories if set is empty (first load)
     if (loadedMemoryTitles.value.size === 0 && memories.value.length > 0) {
         memories.value.forEach(m => loadedMemoryTitles.value.add(m.title));
+        loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
     }
 }
 
-watch(memories, (newVal) => {
-    // If new memories appear and we have a selection "all" strategy or similar, we could update here.
-    // For now just ensuring UI reactivity.
+// Watch for changes in memories list to prune titles that no longer exist (deleted via AI or manually)
+watch(memories, (newMemories) => {
+    const currentTitles = new Set(newMemories.map(m => m.title));
+    let changed = false;
+    for (const title of loadedMemoryTitles.value) {
+        if (!currentTitles.has(title)) {
+            loadedMemoryTitles.value.delete(title);
+            changed = true;
+        }
+    }
+    if (changed) {
+        loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
+    }
 }, { deep: true });
 
 onMounted(() => {
     refreshMemories();
 });
-
 </script>
 
 <template>
@@ -152,8 +172,8 @@ onMounted(() => {
             <div class="flex-1 overflow-y-auto custom-scrollbar p-1">
                 <div v-if="isLoadingMemories" class="text-center py-6"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
                 <div v-else-if="filteredMemories.length === 0" class="text-center py-6 text-xs text-gray-400">Empty</div>
-                <div v-else class="space-y-1">
-                    <div v-for="(mem, index) in filteredMemories" :key="mem.id" 
+                <transition-group name="mem" tag="div" class="space-y-1" v-else>
+                    <div v-for="(mem, index) in filteredMemories" :key="mem.id"
                          class="group p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 flex items-center justify-between transition-all border border-transparent"
                          :class="{'border-green-500/20 bg-green-50/10 dark:bg-green-900/5': loadedMemoryTitles.has(mem.title)}">
                         
@@ -178,7 +198,7 @@ onMounted(() => {
                             <button @click="handleDeleteMemory(mem.id)" class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 shadow-sm text-red-500" title="Delete"><IconTrash class="w-3.5 h-3.5" /></button>
                         </div>
                     </div>
-                </div>
+                </transition-group>
             </div>
         </div>
     </div>
@@ -189,4 +209,15 @@ onMounted(() => {
 .custom-scrollbar::-webkit-scrollbar { width: 3px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 .prose-xs { @apply text-xs leading-relaxed text-gray-600 dark:text-gray-400; }
+
+/* Transition for memory list items */
+.mem-enter-active,
+.mem-leave-active {
+  transition: all 0.25s ease;
+}
+.mem-enter-from,
+.mem-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
 </style>

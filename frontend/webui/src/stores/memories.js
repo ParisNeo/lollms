@@ -53,11 +53,20 @@ export const useMemoriesStore = defineStore('memories', () => {
         const uiStore = useUiStore();
         try {
             await apiClient.delete(`/api/memories/${memoryId}`);
+            
+            // Optimistic update
             memories.value = memories.value.filter(m => m.id !== memoryId);
+            
+            // Re-fetch to ensure sync with server
+            await fetchMemories();
+            
             emit('memories:updated');
             uiStore.addNotification('Memory deleted.', 'success');
         } catch (error) {
             console.error("Failed to delete memory:", error);
+            uiStore.addNotification('Failed to delete memory.', 'error');
+            // Re-fetch to restore state if delete failed partially or list is out of sync
+            await fetchMemories();
         }
     }
     

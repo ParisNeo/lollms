@@ -8,8 +8,8 @@ set -euo pipefail
 VENV_DIR="venv"
 REQUIREMENTS_FILE="requirements.txt"
 MAIN_SCRIPT="main.py"
-PYTHON_EXECUTABLE="python3"
 UPDATE_FLAG_FILE="update_request.flag"
+PYTHON_EXECUTABLE="python3"
 
 # Detect if stdout is a TTY for color output
 IS_TTY=0
@@ -34,7 +34,7 @@ print_info()    { echo -e "${COLOR_INFO}[INFO]${COLOR_RESET} $*"; }
 print_success() { echo -e "${COLOR_SUCCESS}[SUCCESS]${COLOR_RESET} $*"; }
 print_error()   { echo -e "${COLOR_ERROR}[ERROR]${COLOR_RESET} $*" >&2; }
 
-# Trap interrupts to exit the loop cleanly (e.g., 'systemctl stop')
+# Trap interrupts to exit the loop cleanly
 trap "echo 'Stopping LOLLMs...'; exit 0" SIGTERM SIGINT
 
 print_header "LOLLMs Runner"
@@ -47,6 +47,8 @@ if ! command -v python3 &>/dev/null; then
   else
     PYTHON_EXECUTABLE="python"
   fi
+else
+    PYTHON_EXECUTABLE="python3"
 fi
 
 # --- 2. Setup / Venv ---
@@ -62,8 +64,7 @@ else
     source "$VENV_DIR/bin/activate"
 fi
 
-# --- 3. Initial Update Logic (CLI argument) ---
-# This handles the case where user explicitly runs ./run.sh --update
+# --- 3. Initial Update Logic (CLI argument ONLY) ---
 DO_UPDATE=0
 RESET_MODE=0
 RESET_USER=""
@@ -108,6 +109,7 @@ perform_update() {
     fi
 }
 
+# Only update if explicitly requested via CLI argument
 if [ "$DO_UPDATE" -eq 1 ]; then
     perform_update
 fi
@@ -120,32 +122,25 @@ if [ "$RESET_MODE" -eq 1 ]; then
     fi
     print_info "Running Password Reset Tool..."
     export PYTHONPATH="$(pwd)"
-    python3 reset_password.py "$RESET_USER" "$RESET_PASS"
+    $PYTHON_EXECUTABLE reset_password.py "$RESET_USER" "$RESET_PASS"
     exit 0
 fi
 
-# --- 5. Environment Setup & Secret Key Prompt ---
+# --- 5. Environment Setup ---
 if [ ! -f ".env" ]; then
     if [ -f ".env.example" ]; then
         print_info "Configuring '.env' file for the first time..."
         cp ".env.example" ".env"
         
-        echo -e "\n${COLOR_HEADER}============================================================${COLOR_RESET}"
-        echo -e "${COLOR_HEADER}                SECURITY CONFIGURATION                      ${COLOR_RESET}"
-        echo -e "${COLOR_HEADER}============================================================${COLOR_RESET}"
-        echo "A SECRET_KEY is required to secure user sessions and tokens."
-        
-        # Read with a timeout/default check to be automation friendly
-        # Note: If running as service without TTY, this might skip or block. 
-        # Usually service runs imply env is already set up.
+        # Only prompt for key if running interactively
         if [ -t 0 ]; then
+             echo "A SECRET_KEY is required."
              read -p "Enter a random secret string (or press Enter to auto-generate): " user_secret || true
         else
              user_secret=""
         fi
         
         if [ -z "$user_secret" ]; then
-            print_info "Generating secure random key..."
             if command -v openssl >/dev/null 2>&1; then
                 user_secret=$(openssl rand -hex 32)
             else
@@ -154,21 +149,20 @@ if [ ! -f ".env" ]; then
         fi
         
         echo "SECRET_KEY=$user_secret" >> .env
-        print_success "Security key configured in .env."
-        echo -e "${COLOR_HEADER}============================================================${COLOR_RESET}\n"
+        print_success "Security key configured."
     fi
 fi
 
-# --- 6. Main Execution Loop (Service Mode Support) ---
+# --- 6. Main Execution Loop ---
 export PYTHONPATH="$(pwd)"
 export PYTHONUNBUFFERED=1
 
-print_info "Entering execution loop..."
+print_info "Starting application loop. Updates will only run if triggered via UI."
 
 while true; do
-    # Check for update request flag from UI
+    # Check for update request flag from UI (Manual Trigger)
     if [ -f "$UPDATE_FLAG_FILE" ]; then
-        print_info "Update flag detected. Starting update..."
+        print_info "Update flag detected (from UI). Starting update..."
         perform_update
         rm -f "$UPDATE_FLAG_FILE"
         print_info "Update finished. Restarting application..."
@@ -176,20 +170,15 @@ while true; do
 
     print_info "Launching LOLLMs..."
     
-    # Run python in background to allow signal trapping, or just run it.
-    # Running in foreground inside loop allows simpler restart logic.
-    python3 "$MAIN_SCRIPT" "$@" &
+    # Use the detected python executable
+    $PYTHON_EXECUTABLE "$MAIN_SCRIPT" "$@" &
     PID=$!
     
-    # Wait for the specific process
     wait $PID
     EXIT_CODE=$?
     
     print_info "Application exited with code $EXIT_CODE."
     
-    # If the app crashed or exited, we loop back and restart (Systemd style behavior).
-    # This ensures that even if 'Update' kills the process, it comes back up.
-    
-    # Optional: Delay to prevent tight loops on crash
+    # Simple delay to prevent rapid looping on crash
     sleep 2
 done

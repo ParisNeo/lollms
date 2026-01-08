@@ -46,6 +46,7 @@ from backend.db.models.discussion import SharedDiscussionLink as DBSharedDiscuss
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
 from backend.db.models.memory import UserMemory
+from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.discussion import get_user_discussion, get_user_discussion_manager
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
@@ -571,6 +572,111 @@ def perform_google_search(query: str, api_key: str, cse_id: str) -> List[Dict[st
         print(f"Google Search Error: {e}")
         return []
 
+def process_herd_logic(
+    user: DBUser, 
+    discussion_obj: LollmsDiscussion, 
+    prompt: str, 
+    main_loop, 
+    stream_queue, 
+    db_session: Session
+):
+    """
+    Executes the multi-model herd debate and returns the accumulated context.
+    """
+    participants = user.herd_participants or []
+    if not participants:
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Herd mode active but no participants found. Proceeding with standard generation."})) + "\n")
+        return ""
+
+    rounds = user.herd_rounds if user.herd_rounds is not None else 2
+    debate_history = ""
+    
+    # 1. Start Herd Root Step
+    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Herd Debate: Initializing {len(participants)} participants for {rounds} rounds..."})) + "\n")
+
+    for round_idx in range(rounds):
+        # 2. Start Round Step
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Herd Debate: Starting Round {round_idx + 1} of {rounds}..."})) + "\n")
+        
+        for p_idx, participant in enumerate(participants):
+            p_model_full = participant.get('model')
+            p_persona_name = participant.get('personality')
+            
+            p_name_display = p_persona_name or p_model_full or f"Participant {p_idx+1}"
+            
+            # Resolve Binding/Model
+            binding_alias = None
+            model_name = None
+            if p_model_full and '/' in p_model_full:
+                binding_alias, model_name = p_model_full.split('/', 1)
+            elif not p_model_full:
+                 # Fallback to default binding if not specified
+                 default_binding = db_session.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).first()
+                 if default_binding:
+                     binding_alias = default_binding.alias
+                     model_name = default_binding.default_model_name
+
+            # Resolve Personality System Prompt
+            p_system_prompt = "You are a helpful assistant participating in a debate."
+            if p_persona_name:
+                pers = db_session.query(DBPersonality).filter(
+                    (DBPersonality.name == p_persona_name) | (DBPersonality.id == p_persona_name)
+                ).first()
+                if pers:
+                    p_system_prompt = pers.prompt_text
+            
+            # Construct Prompt
+            if round_idx == 0:
+                p_user_prompt = f"User Request: {prompt}\n\nTask: Provide initial concepts, solutions, or ideas. Be concise."
+            else:
+                p_user_prompt = f"User Request: {prompt}\n\nCurrent Debate History:\n{debate_history}\n\nTask: Review the debate history. Critique previous ideas, refine your own, or provide a better alternative."
+
+            # 3. Start Participant Step
+            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Herd Debate: {p_name_display} is thinking..."})) + "\n")
+            
+            try:
+                # Build ephemeral client
+                temp_client = build_lollms_client_from_params(
+                    username=user.username,
+                    binding_alias=binding_alias,
+                    model_name=model_name,
+                    load_llm=True,
+                    load_tti=False,
+                    load_tts=False,
+                    load_stt=False,
+                    load_mcp=False
+                )
+                
+                # Generate
+                response = temp_client.generate_text(
+                    p_user_prompt, 
+                    system_prompt=p_system_prompt,
+                    max_new_tokens=1024, # Limit response size for speed
+                    temperature=0.7
+                )
+                
+                debate_history += f"\n\n[Round {round_idx+1} - {p_name_display}]:\n{response}"
+                
+                # 4. End Participant Step (With Content)
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": response})) + "\n")
+
+            except Exception as e:
+                error_msg = f"Participant {p_name_display} failed: {e}"
+                print(error_msg)
+                # End with error
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": error_msg, "status": "error"})) + "\n")
+
+        # 5. End Round Step
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": f"Round {round_idx + 1} complete."})) + "\n")
+
+    # 6. End Herd Step
+    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": "Debate concluded. Handing over to Leader."})) + "\n")
+    
+    # 7. Announce Leader
+    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Leader is answering..."})) + "\n")
+
+    return debate_history
+
 def build_llm_generation_router(router: APIRouter):
     @router.post("/{discussion_id}/chat")
     async def chat_in_existing_discussion(
@@ -712,7 +818,8 @@ def build_llm_generation_router(router: APIRouter):
                 "- `n` (optional): Number of variants to generate (max 10).\n"
                 "Example: `<generate_image width=\"1216\" height=\"832\" n=\"2\">A majestic lion in the savannah at sunset, photorealistic style</generate_image>`"
             )
-            
+        
+        if owner_db_user.slide_maker_enabled:
             # --- NEW: Slide Generation Instruction ---
             preamble_parts.append(
                 "## Slide Show Generation Instructions\n"
@@ -898,6 +1005,9 @@ def build_llm_generation_router(router: APIRouter):
                     search_sources_list = []
                     
                     if web_search_enabled and owner_db_user.google_api_key and owner_db_user.google_cse_id:
+                        # Notify UI we are checking
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Web Agent: Analyzing need for search..."})) + "\n")
+                        
                         # 1. Ask LLM if it needs to search
                         pre_flight_prompt = f"The user asked: \"{prompt}\".\nDo you need to search the internet for current information to answer this?\nReply with JSON: {{ \"search\": true/false, \"query\": \"search terms\" }}"
                         
@@ -913,33 +1023,42 @@ def build_llm_generation_router(router: APIRouter):
                                     
                                     if decision.get("search"):
                                         query = decision.get("query")
-                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "info", "content": f"Searching web for: {query}"}) + "\n")
+                                        # Use step_start for persistent status
+                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Web Agent: Searching for '{query}'..."})) + "\n")
                                         
                                         # Perform Search
                                         results = perform_google_search(query, owner_db_user.google_api_key, owner_db_user.google_cse_id)
                                         
                                         if results:
-                                            # Optional: Deep Analysis (Scraping)
                                             scraped_content = []
-                                            if owner_db_user.web_search_deep_analysis:
-                                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "info", "content": "Analyzing search results..."}) + "\n")
+                                            # Use scraping by default for top results to fix "sparse" results
+                                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Web Agent: Reading content from results..."})) + "\n")
+                                            
+                                            try:
                                                 scraper = ScrapeMaster()
-                                                for res in results[:2]: # Limit deep read to top 2
+                                                # Scrape top 3
+                                                for res in results[:3]: 
                                                     try:
                                                         content = scraper.scrape(res['link'])
                                                         if content:
-                                                            scraped_content.append(f"Source: {res['link']}\nContent: {content[:1500]}...") # Limit content size
-                                                    except: pass
+                                                            clean_content = content.strip()
+                                                            if len(clean_content) > 500: # Ensure meaningful content
+                                                                scraped_content.append(f"### Source: {res['title']}\nURL: {res['link']}\nContent:\n{clean_content[:4000]}") # 4k char limit per page
+                                                    except Exception: pass
+                                            except Exception: pass
                                             
                                             # Construct Context
-                                            search_context = "### Web Search Results:\n"
-                                            for res in results:
-                                                search_context += f"- Title: {res['title']}\n  Link: {res['link']}\n  Snippet: {res['snippet']}\n\n"
-                                                search_sources_list.append({"title": res['title'], "content": res['snippet'], "source": res['link'], "score": 100})
+                                            search_context = "### Web Search & Browsing Results:\n\n"
                                             
                                             if scraped_content:
-                                                search_context += "\n### Deep Content Analysis:\n" + "\n\n".join(scraped_content)
-                                                
+                                                search_context += "\n".join(scraped_content)
+                                                search_context += "\n\n--- Search Snippets ---\n"
+
+                                            for i, res in enumerate(results):
+                                                idx = i + 1
+                                                search_context += f"[{idx}] Title: {res['title']}\n  Link: {res['link']}\n  Snippet: {res['snippet']}\n\n"
+                                                search_sources_list.append({"title": res['title'], "content": res['snippet'], "source": res['link'], "score": 100, "index": idx})
+                                            
                                             # Send sources to frontend immediately
                                             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "content": search_sources_list}) + "\n")
 
@@ -958,9 +1077,32 @@ def build_llm_generation_router(router: APIRouter):
                     
                     # Augment prompt if search context exists
                     final_user_message = prompt
-                    if search_context:
-                        final_user_message = f"{prompt}\n\n[Context from Web Search]:\n{search_context}\n\n[Instruction]: Answer the user's question using the provided search context. Cite sources where appropriate."
+                    
+                    # --- HERD MODE LOGIC ---
+                    herd_debate_context = ""
+                    if owner_db_user.herd_mode_enabled:
+                         # We need a separate DB session for the herd logic since it might access bindings/personalities
+                         db_herd = next(get_db())
+                         try:
+                             herd_debate_context = process_herd_logic(
+                                 owner_db_user, 
+                                 discussion_obj, 
+                                 prompt, 
+                                 main_loop, 
+                                 stream_queue, 
+                                 db_herd
+                             )
+                         finally:
+                             db_herd.close()
 
+                    # Move search context to system prompt as requested
+                    if search_context:
+                        # Append to system prompt
+                        active_personality.system_prompt += f"\n\n{search_context}\n\n[INSTRUCTION]: Use the Web Search Context above to answer the user's question. Cite sources using [1], [2] format corresponding to the numbered list in the context."
+
+                    if herd_debate_context:
+                         final_user_message += f"\n\n[HERD DEBATE CONTEXT]:\n{herd_debate_context}\n\n[INSTRUCTION]: Act as the Leader. Based on the user's request and the debate above, synthesize the best solution. Start with a description of the problem and the best solution distilled from the debate."
+                    
                     # FIX: Pass add_user_message=not is_resend to prevent duplication on regeneration
                     # FIX: Pass generation_tip_id which was set correctly above
                     result = discussion_obj.chat(

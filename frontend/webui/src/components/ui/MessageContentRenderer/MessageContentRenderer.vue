@@ -29,7 +29,7 @@ const props = defineProps({
   messageId: { type: String, default: null },
 });
 
-const emit = defineEmits(['regenerate']);
+const emit = defineEmits(['regenerate', 'citation-click']);
 
 const messageContentRef = ref(null);
 const tasksStore = useTasksStore();
@@ -377,10 +377,21 @@ function onImageLoad(event, annotations) {
     };
     requestAnimationFrame(tryDrawing);
 }
+
+function handleContentClick(event) {
+    // Check if the clicked element is a citation button (injected via markdownParser extension)
+    const btn = event.target.closest('.citation-btn');
+    if (btn) {
+        const index = btn.dataset.index;
+        if (index) {
+            emit('citation-click', parseInt(index));
+        }
+    }
+}
 </script>
 
 <template>
-  <div :key="isStreaming ? 'streaming' : 'settled'" ref="messageContentRef">
+  <div :key="isStreaming ? 'streaming' : 'settled'" ref="messageContentRef" @click="handleContentClick">
     <div v-if="content || (isUser && !hasImages)" class="message-prose">
       <div v-if="isStreaming" v-html="parsedStreamingContent"></div>
       <template v-else>

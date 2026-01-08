@@ -1,6 +1,7 @@
-<!-- [UPDATE] frontend/webui/src/components/chat/ChatInput.vue -->
 <script setup>
+// ... (Imports from existing ChatInput.vue)
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
+import { useRouter } from 'vue-router'; // Added useRouter
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
@@ -39,7 +40,10 @@ import IconServer from '../../assets/icons/IconServer.vue';
 import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
-import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue'; // Google/Web Search Icon
+import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue'; 
+import IconObservation from '../../assets/icons/IconObservation.vue';
+import IconUserGroup from '../../assets/icons/IconUserGroup.vue'; 
+import IconSettings from '../../assets/icons/IconSettings.vue'; // Added IconSettings
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -47,8 +51,9 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
 const { on, off } = useEventBus();
+const router = useRouter(); // Initialize router
 
-// Defensive computed properties to prevent crashes on re-mounts
+// ... (Existing reactive refs & storeToRefs - activeDiscussion, user, etc.)
 const dStoreRefs = storeToRefs(discussionsStore);
 const activeDiscussionArtefacts = computed(() => dStoreRefs.activeDiscussionArtefacts?.value || []);
 const activeDiscussion = computed(() => dStoreRefs.activeDiscussion?.value || null);
@@ -72,31 +77,23 @@ const inputTokenCount = ref(0);
 let tokenizeInputDebounceTimer = null;
 const isDraggingOver = ref(false);
 
-// Local override for web search if user wants to toggle it quickly per-chat
 const isWebSearchActive = ref(false); 
-
-// Local state for user uploads (NOT generated images)
-const stagedImages = ref([]); // { file, previewUrl }
-
+const stagedImages = ref([]); 
 const user = computed(() => authStore.user);
 
-// Initialize web search toggle from user pref
+// ... (Existing Watchers & Mounted logic for user pref, etc.)
 watch(user, (newUser) => {
     if (newUser) {
         isWebSearchActive.value = !!newUser.web_search_enabled;
     }
 }, { immediate: true });
 
-
 const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
-
-// REQUIREMENT: Separate generated images from user uploads. 
-// We no longer preview the global discussion gallery here.
 const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 const isGoogleSearchConfigured = computed(() => !!user.value?.google_api_key && !!user.value?.google_cse_id);
 
-// --- Context Bar Logic ---
+// ... (Context Bar Logic, Rag Selection, Mcp Selection - Unchanged)
 const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
 const maxTokens = computed(() => activeDiscussionContextStatus.value?.max_tokens || 1);
 
@@ -130,7 +127,6 @@ const progressBorderColorClass = computed(() => {
     return 'border-gray-200 dark:border-gray-700';
 });
 
-// --- RAG & MCP Selection Logic ---
 const ragStoreSelection = computed({
     get: () => activeDiscussion.value?.rag_datastore_ids || [],
     set: (newIds) => { if (activeDiscussion.value) discussionsStore.updateDiscussionRagStores({ discussionId: activeDiscussion.value.id, ragDatastoreIds: newIds }); }
@@ -171,16 +167,31 @@ function toggleWebSearch() {
 // Function to toggle global user preferences from the menu shortcut
 async function toggleUserPref(key, currentValue) {
     try {
-        await authStore.updateUserPreferences({ [key]: !currentValue }, false); // false = silent update (no toast)
+        await authStore.updateUserPreferences({ [key]: !currentValue }, false);
     } catch (e) {
         console.error("Failed to toggle preference:", e);
     }
+}
+
+function navigateToContextSettings() {
+    router.push('/settings?section=context');
 }
 
 // --- Active Features Badges ---
 const activeFeatures = computed(() => {
     const features = [];
     
+    // Herd Mode
+    if (user.value?.herd_mode_enabled) {
+        features.push({
+            id: 'herd',
+            icon: IconUserGroup,
+            label: `Herd (${user.value.herd_participants?.length || 0})`,
+            colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800',
+            title: `Herd Mode Active. ${user.value.herd_rounds} Rounds.`
+        });
+    }
+
     // RAG
     if (ragStoreSelection.value.length > 0) {
         features.push({ 
@@ -191,7 +202,7 @@ const activeFeatures = computed(() => {
             title: `${ragStoreSelection.value.length} Data Store(s) Active`
         });
     }
-
+    
     // Tools
     if (mcpToolSelection.value.length > 0) {
         features.push({ 
@@ -211,6 +222,28 @@ const activeFeatures = computed(() => {
             label: 'Web',
             colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
             title: 'Web Search Active. AI can search the internet.'
+        });
+    }
+    
+    // Thinking (Reasoning)
+    if (user.value?.reasoning_activation) {
+        features.push({
+            id: 'thinking',
+            icon: IconThinking,
+            label: 'Thinking',
+            colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
+            title: 'Thinking Mode Enabled. AI will reason before answering.'
+        });
+    }
+
+    // Annotation
+    if (user.value?.image_annotation_enabled) {
+        features.push({
+            id: 'annotation',
+            icon: IconObservation,
+            label: 'Annotate',
+            colorClass: 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800',
+            title: 'Image Annotation Enabled. AI can detect objects.'
         });
     }
 
@@ -244,7 +277,7 @@ const activeFeatures = computed(() => {
             id: 'img_gen',
             icon: IconPhoto,
             label: 'ImgGen',
-            colorClass: 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800',
+            colorClass: 'text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-50 dark:bg-fuchsia-900/20 border-fuchsia-200 dark:border-fuchsia-800',
             title: 'Image Generation Enabled. AI can create images.'
         });
     }
@@ -255,7 +288,7 @@ const activeFeatures = computed(() => {
             id: 'img_edit',
             icon: IconPencil,
             label: 'ImgEdit',
-            colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
+            colorClass: 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800',
             title: 'Image Editing Enabled. AI can modify existing images.'
         });
     }
@@ -292,13 +325,16 @@ const activeFeatures = computed(() => {
             title: 'Audio Features (TTS/STT) Enabled.'
         });
     }
-    
+
     return features;
 });
 
 const showHeaderRow = computed(() => showContextBar.value || activeFeatures.value.length > 0);
+const maxVisibleBadges = 5;
+const visibleFeatures = computed(() => activeFeatures.value.slice(0, maxVisibleBadges));
+const hiddenFeatures = computed(() => activeFeatures.value.slice(maxVisibleBadges));
 
-// --- Image & File Handling ---
+// ... (Image & File Handling - Unchanged)
 function openStagedImageViewer(startIndex) {
     uiStore.openImageViewer({
         imageList: stagedImages.value.map((img) => ({ 
@@ -308,7 +344,6 @@ function openStagedImageViewer(startIndex) {
         startIndex
     });
 }
-
 async function toggleArtefactLoad(file) {
     if (!activeDiscussion.value) return;
     if (file.is_loaded) {
@@ -317,7 +352,6 @@ async function toggleArtefactLoad(file) {
         await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version });
     }
 }
-
 async function removeArtefact(file) {
     if (!activeDiscussion.value) return;
     const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' });
@@ -325,71 +359,36 @@ async function removeArtefact(file) {
         await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title });
     }
 }
-
 function removeStagedImage(index) {
     const removed = stagedImages.value.splice(index, 1)[0];
     if (removed && removed.previewUrl) {
         URL.revokeObjectURL(removed.previewUrl);
     }
 }
-
 function triggerFileUpload() { fileInput.value?.click(); }
 function triggerImageUpload() { imageInput.value?.click(); }
-
 async function handleFilesInput(files) {
     if (files.length === 0) return;
-    
-    // Separate images from other files
     const images = files.filter(f => f.type.startsWith('image/'));
     const others = files.filter(f => !f.type.startsWith('image/'));
-
     if (images.length > 0) {
         images.forEach(file => {
-            stagedImages.value.push({
-                file,
-                previewUrl: URL.createObjectURL(file)
-            });
+            stagedImages.value.push({ file, previewUrl: URL.createObjectURL(file) });
         });
     }
-
     if (others.length > 0) {
         if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
         if (activeDiscussion.value) {
             isUploading.value = true;
             try {
-                await Promise.all(others.map(file => discussionsStore.addArtefact({ 
-                    discussionId: activeDiscussion.value.id, 
-                    file, 
-                    extractImages: true 
-                })));
-            } finally {
-                isUploading.value = false;
-            }
+                await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true })));
+            } finally { isUploading.value = false; }
         }
     }
 }
-
-async function handleFileUpload(event) {
-    const files = Array.from(event.target.files || []);
-    await handleFilesInput(files);
-    event.target.value = '';
-}
-
-async function handleImageUpload(event) {
-    const files = Array.from(event.target.files || []);
-    await handleFilesInput(files);
-    event.target.value = '';
-}
-
-async function handleDrop(event) {
-    event.stopPropagation();
-    isDraggingOver.value = false;
-    const files = Array.from(event.dataTransfer.files);
-    if (files.length > 0) {
-        await handleFilesInput(files);
-    }
-}
-
+async function handleFileUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files); event.target.value = ''; }
+async function handleImageUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files); event.target.value = ''; }
+async function handleDrop(event) { event.stopPropagation(); isDraggingOver.value = false; const files = Array.from(event.dataTransfer.files); if (files.length > 0) { await handleFilesInput(files); } }
 async function handlePaste(event) {
     event.stopPropagation();
     const items = (event.clipboardData || window.clipboardData).items;
@@ -408,18 +407,11 @@ async function handlePaste(event) {
         await handleFilesInput(imageFiles);
     }
 }
-
 async function handleAddFromUrl() {
-    if (!activeDiscussion.value) {
-        uiStore.addNotification('Please start a discussion first.', 'warning');
-        return;
-    }
+    if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; }
     uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id });
 }
-
-function handlePromptSelection(content) {
-    messageText.value += (messageText.value ? '\n' : '') + content;
-}
+function handlePromptSelection(content) { messageText.value += (messageText.value ? '\n' : '') + content; }
 
 const filteredUserPromptsByCategory = computed(() => {
     if (!userPromptSearchTerm.value) return userPromptsByCategory.value;
@@ -434,12 +426,8 @@ const filteredUserPromptsByCategory = computed(() => {
 
 let mediaRecorder = null;
 let audioChunks = [];
-
 async function toggleRecording() {
-    if (isRecording.value) {
-        mediaRecorder?.stop();
-        isRecording.value = false;
-    } else {
+    if (isRecording.value) { mediaRecorder?.stop(); isRecording.value = false; } else {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
             mediaRecorder = new MediaRecorder(stream);
@@ -453,9 +441,7 @@ async function toggleRecording() {
             };
             mediaRecorder.start();
             isRecording.value = true;
-        } catch (err) {
-            uiStore.addNotification('Microphone access denied.', 'error');
-        }
+        } catch (err) { uiStore.addNotification('Microphone access denied.', 'error'); }
     }
 }
 
@@ -465,19 +451,16 @@ async function handleSendMessage() {
     const text = messageText.value.trim();
     if (!text && attachedFiles.value.length === 0 && stagedImages.value.length === 0) return;
 
-    // Prepare files for transport
     const imagesToUpload = stagedImages.value.map(item => item.file);
     const localPreviews = stagedImages.value.map(item => item.previewUrl);
-
-    // Clear input immediately for better UX
     messageText.value = '';
     inputTokenCount.value = 0;
-    stagedImages.value = []; // Clear staged images after sending
+    stagedImages.value = []; 
 
     try {
         await discussionsStore.sendMessage({ 
             prompt: text, 
-            image_server_paths: [], // Handled inside store by actual file objects if needed
+            image_server_paths: [], 
             localImageUrls: localPreviews,
             image_files: imagesToUpload,
             webSearchEnabled: isWebSearchActive.value
@@ -485,34 +468,20 @@ async function handleSendMessage() {
     } catch(err) {
         console.error("SendMessage failed:", err);
         uiStore.addNotification('Failed to send message.', 'error');
-        // Restore state if failed
         messageText.value = text;
-        imagesToUpload.forEach((file, i) => {
-            stagedImages.value.push({ file, previewUrl: localPreviews[i] });
-        });
+        imagesToUpload.forEach((file, i) => { stagedImages.value.push({ file, previewUrl: localPreviews[i] }); });
     }
 }
 
-function handleKeyDown(event) {
-    if (event.key === 'Enter' && !event.shiftKey) {
-        event.preventDefault();
-        handleSendMessage();
-    }
-}
-
+function handleKeyDown(event) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendMessage(); } }
 async function fetchInputTokenCount(text) {
     if (!text.trim()) { inputTokenCount.value = 0; return; }
     try {
         const response = await apiClient.post('/api/discussions/tokenize', { text });
         inputTokenCount.value = response.data.tokens;
-    } catch (error) {
-        // Suppress
-    }
+    } catch (error) {}
 }
-
-function handleStopGeneration() {
-    discussionsStore.stopGeneration();
-}
+function handleStopGeneration() { discussionsStore.stopGeneration(); }
 
 watch(messageText, (newText) => {
     clearTimeout(tokenizeInputDebounceTimer);
@@ -524,16 +493,12 @@ onMounted(() => {
     promptsStore.fetchPrompts();
     if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
     if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
-
-    // Listen for global drops/pastes from ChatView
     on('files-dropped-in-chat', handleFilesInput);
     on('files-pasted-in-chat', handleFilesInput);
 });
-
 onUnmounted(() => {
     off('files-dropped-in-chat', handleFilesInput);
     off('files-pasted-in-chat', handleFilesInput);
-    // Cleanup preview URLs
     stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl));
 });
 </script>
@@ -556,8 +521,6 @@ onUnmounted(() => {
         <!-- Context Bar / Feature Badges Row -->
         <div v-if="showHeaderRow" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700 overflow-x-auto no-scrollbar">
              <div class="max-w-4xl mx-auto flex items-center gap-3">
-                
-                <!-- Context Bar Section -->
                 <template v-if="showContextBar">
                     <div class="flex items-center gap-1 text-gray-500 flex-shrink-0">
                         <IconToken class="w-3.5 h-3.5" />
@@ -570,27 +533,40 @@ onUnmounted(() => {
                         <span>{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
                     </div>
                 </template>
-                <div v-else class="flex-grow"></div> <!-- Spacer if no context bar -->
+                <div v-else class="flex-grow"></div> 
 
-                <!-- Divider if both exist -->
                 <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 flex-shrink-0" v-if="showContextBar && activeFeatures.length > 0"></div>
 
-                <!-- Feature Badges -->
                 <div class="flex items-center gap-1.5 flex-shrink-0" v-if="activeFeatures.length > 0">
-                    <div v-for="feat in activeFeatures" :key="feat.id" 
+                    <div v-for="feat in visibleFeatures" :key="feat.id" 
                          :class="['flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-help', feat.colorClass]"
                          :title="feat.title">
-                        <component :is="feat.icon" class="w-3 h-3" />
+                        <div class="w-3 h-3 flex-shrink-0 flex items-center justify-center">
+                            <component :is="feat.icon" class="w-full h-full fill-current" />
+                        </div>
                         <span class="hidden md:inline">{{ feat.label }}</span>
                     </div>
-                </div>
 
+                    <div v-if="hiddenFeatures.length > 0" class="relative group/overflow">
+                        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-help bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300">
+                            <span>+{{ hiddenFeatures.length }}</span>
+                        </div>
+                        <div class="absolute bottom-full right-0 mb-1 w-max p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl opacity-0 group-hover/overflow:opacity-100 transition-opacity pointer-events-none group-hover/overflow:pointer-events-auto flex flex-col gap-1 z-50">
+                            <div v-for="feat in hiddenFeatures" :key="feat.id" 
+                                :class="['flex items-center gap-2 px-2 py-1 rounded border text-[10px] font-bold uppercase tracking-wider', feat.colorClass]">
+                                <div class="w-3 h-3 flex-shrink-0 flex items-center justify-center">
+                                    <component :is="feat.icon" class="w-full h-full fill-current" />
+                                </div>
+                                <span>{{ feat.label }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
 
         <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
-            
-            <!-- SPECIAL SELECTION ZONE: Distinctly styled area for attachments -->
+            <!-- SPECIAL SELECTION ZONE -->
             <div v-if="stagedImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
                 <div v-for="(img, index) in stagedImages" :key="`staged-img-${index}`" 
                      @click="openStagedImageViewer(index)"
@@ -625,6 +601,9 @@ onUnmounted(() => {
                         <!-- NEW Context Options Submenu -->
                         <DropdownSubmenu title="Context Options" icon="cog" collection="ui">
                              <div class="p-1 min-w-[200px]">
+                                <!-- Group: Knowledge -->
+                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Knowledge</div>
+                                
                                 <!-- Web Search Toggle -->
                                 <button 
                                     @click.stop="toggleWebSearch" 
@@ -659,6 +638,32 @@ onUnmounted(() => {
                                     <IconCircle v-else class="w-3.5 h-3.5 text-gray-400" />
                                 </button>
                                 
+                                <!-- Group: Reasoning -->
+                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Reasoning</div>
+                                
+                                <!-- Herd Mode Toggle -->
+                                <button @click.stop="toggleUserPref('herd_mode_enabled', user.herd_mode_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconUserGroup class="w-4 h-4 text-amber-500" />
+                                        <span>Herd Mode</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.herd_mode_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                
+                                <!-- Thinking Mode Toggle -->
+                                <button @click.stop="toggleUserPref('reasoning_activation', user.reasoning_activation)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconThinking class="w-4 h-4 text-purple-500" />
+                                        <span>Thinking</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.reasoning_activation" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Group: Generation -->
+                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Generation</div>
+
                                 <!-- Image Generation Toggle -->
                                 <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_generation_enabled', user.image_generation_enabled)" class="menu-item flex justify-between items-center group/item">
                                     <span class="flex items-center gap-2">
@@ -676,6 +681,18 @@ onUnmounted(() => {
                                         <span>Image Edit</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.image_editing_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                
+                                <!-- Image Annotation Toggle -->
+                                <button @click.stop="toggleUserPref('image_annotation_enabled', user.image_annotation_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <div class="w-4 h-4 flex-shrink-0 flex items-center justify-center">
+                                            <IconObservation class="w-full h-full text-pink-600" />
+                                        </div>
+                                        <span>Annotate</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.image_annotation_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
@@ -699,9 +716,19 @@ onUnmounted(() => {
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
+                                <!-- Settings Link -->
+                                <div class="my-1 border-t border-gray-100 dark:border-gray-700 mt-2"></div>
+                                <button @click="navigateToContextSettings" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconSettings class="w-4 h-4 text-gray-500" />
+                                        <span>Configure...</span>
+                                    </span>
+                                </button>
+
                              </div>
                         </DropdownSubmenu>
-
+                        
+                        <!-- RAG, Tools, Prompts Submenus (Same as before) -->
                         <DropdownSubmenu title="RAG Context" icon="database">
                              <div class="p-1 max-h-64 overflow-y-auto min-w-[200px]">
                                 <div v-if="availableRagStores.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No stores available.</div>

@@ -659,6 +659,29 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                     print(f"WARNING: Failed to add column {col_name} to users table: {e}")
                     connection.rollback()
         
+        # New Herd Mode fields
+        new_herd_cols = {
+            "herd_mode_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "herd_participants": "JSON",
+            "herd_rounds": "INTEGER DEFAULT 2 NOT NULL"
+        }
+        
+        for col_name, col_sql_def in new_herd_cols.items():
+            if col_name not in user_columns_db:
+                try:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
+                    connection.commit()
+                except Exception as e:
+                    print(f"WARNING: Failed to add column {col_name} to users table: {e}")
+                    connection.rollback()
+        
+        # Backfill JSON default if needed
+        if "herd_participants" in new_herd_cols:
+             try:
+                 connection.execute(text("UPDATE users SET herd_participants = '[]' WHERE herd_participants IS NULL"))
+                 connection.commit()
+             except Exception: pass
+
         # New Google Search & Web Search fields
         new_web_search_cols = {
             "google_api_key": "VARCHAR",

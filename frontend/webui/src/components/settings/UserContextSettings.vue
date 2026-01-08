@@ -1,13 +1,19 @@
+<!-- frontend/webui/src/components/settings/UserContextSettings.vue -->
 <script setup>
 import { computed, ref, watch, nextTick, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
+import { useDataStore } from '../../stores/data'; // Import data store for lists
 import { storeToRefs } from 'pinia';
 import LanguageSelector from '../ui/LanguageSelector.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
+import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const authStore = useAuthStore();
+const dataStore = useDataStore(); // Use data store
 const { user } = storeToRefs(authStore);
+const { availableLollmsModels, allPersonalities } = storeToRefs(dataStore); // Get lists
 
 // Local state for form fields
 const preferredName = ref('');
@@ -30,6 +36,7 @@ const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
 const memoryEnabled = ref(false);
 const autoMemoryEnabled = ref(false);
+const reasoningActivation = ref(false);
 const maxImageWidth = ref(-1);
 const maxImageHeight = ref(-1);
 const compressImages = ref(false);
@@ -41,6 +48,11 @@ const googleCseId = ref('');
 const webSearchEnabled = ref(false);
 const webSearchDeepAnalysis = ref(false);
 const isKeyVisible = ref(false);
+
+// Herd Mode States
+const herdModeEnabled = ref(false);
+const herdRounds = ref(2);
+const herdParticipants = ref([]); // Array of { model: string, personality: string }
 
 const hasChanges = ref(false);
 const isSaving = ref(false);
@@ -70,6 +82,7 @@ function populateForm() {
     noteGenerationEnabled.value = user.value.note_generation_enabled || false;
     memoryEnabled.value = user.value.memory_enabled || false;
     autoMemoryEnabled.value = user.value.auto_memory_enabled || false;
+    reasoningActivation.value = user.value.reasoning_activation || false;
     maxImageWidth.value = user.value.max_image_width ?? -1;
     maxImageHeight.value = user.value.max_image_height ?? -1;
     compressImages.value = user.value.compress_images || false;
@@ -80,6 +93,11 @@ function populateForm() {
     googleCseId.value = user.value.google_cse_id || '';
     webSearchEnabled.value = user.value.web_search_enabled || false;
     webSearchDeepAnalysis.value = user.value.web_search_deep_analysis || false;
+
+    // Herd Mode
+    herdModeEnabled.value = user.value.herd_mode_enabled || false;
+    herdRounds.value = user.value.herd_rounds || 2;
+    herdParticipants.value = user.value.herd_participants ? JSON.parse(JSON.stringify(user.value.herd_participants)) : [];
     
     // Reset change tracker
     nextTick(() => {
@@ -87,6 +105,12 @@ function populateForm() {
     });
   }
 }
+
+// Ensure data for selectors is loaded
+onMounted(() => {
+    if (availableLollmsModels.value.length === 0) dataStore.fetchAvailableLollmsModels();
+    if (allPersonalities.value.length === 0) dataStore.fetchPersonalities();
+});
 
 // Watch for changes in the user object (e.g., after login or refresh)
 watch(user, populateForm, { immediate: true, deep: true });
@@ -96,11 +120,12 @@ watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
-    memoryEnabled, autoMemoryEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
-    googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis
+    memoryEnabled, autoMemoryEnabled, reasoningActivation, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
+    googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis,
+    herdModeEnabled, herdRounds, herdParticipants // Add herd fields
 ], () => {
   hasChanges.value = true;
-});
+}, { deep: true }); // Need deep watch for array
 
 const staticInfo = [
   { label: 'Date', placeholder: '{{date}}' },
@@ -108,6 +133,14 @@ const staticInfo = [
   { label: 'Date & Time', placeholder: '{{datetime}}' },
   { label: 'Username', placeholder: '{{user_name}}' },
 ];
+
+function addHerdParticipant() {
+    herdParticipants.value.push({ model: '', personality: '' });
+}
+
+function removeHerdParticipant(index) {
+    herdParticipants.value.splice(index, 1);
+}
 
 async function handleSaveChanges() {
     if (!hasChanges.value) return;
@@ -134,6 +167,7 @@ async function handleSaveChanges() {
             note_generation_enabled: noteGenerationEnabled.value,
             memory_enabled: memoryEnabled.value,
             auto_memory_enabled: autoMemoryEnabled.value,
+            reasoning_activation: reasoningActivation.value,
             max_image_width: maxImageWidth.value,
             max_image_height: maxImageHeight.value,
             compress_images: compressImages.value,
@@ -141,7 +175,10 @@ async function handleSaveChanges() {
             google_api_key: googleApiKey.value,
             google_cse_id: googleCseId.value,
             web_search_enabled: webSearchEnabled.value,
-            web_search_deep_analysis: webSearchDeepAnalysis.value
+            web_search_deep_analysis: webSearchDeepAnalysis.value,
+            herd_mode_enabled: herdModeEnabled.value,
+            herd_rounds: herdRounds.value,
+            herd_participants: herdParticipants.value
         });
         hasChanges.value = false;
     } finally {
@@ -173,7 +210,7 @@ async function handleSaveChanges() {
             <p class="text-xs text-gray-500 mt-1">If left blank, the AI will use your username: <strong>{{ user?.username }}</strong></p>
         </div>
         
-        <!-- Google Search Settings (NEW) -->
+        <!-- Google Search Settings -->
         <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg space-y-4">
             <div class="flex items-center justify-between">
                 <div>
@@ -213,6 +250,59 @@ async function handleSaveChanges() {
                 </div>
             </div>
             <p v-if="!googleApiKey || !googleCseId" class="text-xs text-red-500 italic">API Key and CSE ID are required to enable Web Search.</p>
+        </div>
+
+        <!-- Herd Mode Settings -->
+        <div class="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800/50 rounded-lg space-y-4">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Herd Mode</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Combine multiple AI models/personalities to debate and refine solutions.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="herdModeEnabled" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-purple-600"></div>
+                </label>
+            </div>
+            
+            <div v-if="herdModeEnabled" class="space-y-4 pl-2 border-l-2 border-purple-200 dark:border-purple-800">
+                <div class="flex items-center gap-4">
+                    <label class="text-sm font-medium whitespace-nowrap">Rounds</label>
+                    <input type="number" v-model.number="herdRounds" min="1" max="10" class="input-field w-20 text-center">
+                    <span class="text-xs text-gray-500">Number of debate cycles before final synthesis.</span>
+                </div>
+                
+                <div>
+                    <div class="flex justify-between items-center mb-2">
+                        <label class="text-sm font-medium">Herd Participants</label>
+                        <button @click="addHerdParticipant" class="btn btn-secondary btn-sm flex items-center gap-1">
+                            <IconPlus class="w-4 h-4"/> Add
+                        </button>
+                    </div>
+                    
+                    <div v-if="herdParticipants.length === 0" class="text-center p-3 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-500">
+                        No participants. Add models to join the herd.
+                    </div>
+                    
+                    <div v-else class="space-y-2">
+                        <div v-for="(participant, index) in herdParticipants" :key="index" class="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded border dark:border-gray-700">
+                             <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                <select v-model="participant.model" class="input-field text-xs">
+                                    <option value="" disabled>Select Model</option>
+                                    <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
+                                </select>
+                                <select v-model="participant.personality" class="input-field text-xs">
+                                    <option value="">Default Personality</option>
+                                    <option v-for="p in allPersonalities" :key="p.name" :value="p.name">{{ p.name }}</option>
+                                </select>
+                             </div>
+                             <button @click="removeHerdParticipant(index)" class="text-red-500 hover:text-red-700 p-1">
+                                 <IconTrash class="w-4 h-4" />
+                             </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Memory Settings -->
@@ -279,6 +369,17 @@ async function handleSaveChanges() {
         
         <!-- Toggle Sections -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+             <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
+                <div class="flex-grow">
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Thinking Mode</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI reasoning/thinking process (if supported).</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="reasoningActivation" class="sr-only peer">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+
             <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
                 <div class="flex-grow">
                     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Fun Mode 🎉</h3>

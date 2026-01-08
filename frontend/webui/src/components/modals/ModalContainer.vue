@@ -67,6 +67,8 @@ const NoteGroupModal = defineAsyncComponent(() => import('./NoteGroupModal.vue')
 const SystemLogModal = defineAsyncComponent(() => import('./SystemLogModal.vue'));
 const ScrapeUrlModal = defineAsyncComponent(() => import('./ScrapeUrlModal.vue'));
 const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactImportWizardModal.vue'));
+// Registered the NotebookWizardModal here
+const NotebookWizardModal = defineAsyncComponent(() => import('./NotebookWizardModal.vue'));
 </script>
 
 <template>
@@ -131,5 +133,8 @@ const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactI
     <NoteGroupModal v-if="activeModal === 'noteGroup'" />
     <SystemLogModal v-if="activeModal === 'systemLog'" />
     <ScrapeUrlModal v-if="activeModal === 'scrapeUrl'" />
+    <ArtefactImportWizardModal v-if="activeModal === 'artefactImportWizard'" />
+    <!-- Added the modal here -->
+    <NotebookWizardModal v-if="activeModal === 'notebookWizard'" />
   </div>
 </template>

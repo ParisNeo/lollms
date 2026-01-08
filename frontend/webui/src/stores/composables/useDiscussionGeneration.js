@@ -159,6 +159,10 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'step_start':
                     generationState.value = { status: 'thinking', details: data.content || 'Thinking...' };
                     break;
+                case 'info':
+                    // Handle general info messages in status bar
+                    generationState.value = { status: 'info', details: data.content };
+                    break;
                 case 'tool_call':
                     let details = 'Using tool...';
                     try {
