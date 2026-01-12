@@ -326,14 +326,14 @@ async function submitGenModal() {
 
 async function handleGenerateSummary() { await notebookStore.generateSummary(); }
 async function selectVariant(index) { const newData = { ...slideData.value }; newData.slides_data[selectedSlideIdx.value].selected_image_index = index; await updateContent(newData); }
+
 async function deleteVariant(index) {
-    const confirmed = await uiStore.showConfirmation({ title: 'Delete Variant', message: 'Remove image?', confirmText: 'Delete' });
+    const confirmed = await uiStore.showConfirmation({ title: 'Delete Variant', message: 'Remove image version?', confirmText: 'Delete' });
     if (confirmed.confirmed) {
-        const newData = { ...slideData.value }; newData.slides_data[selectedSlideIdx.value].images.splice(index, 1);
-        if (newData.slides_data[selectedSlideIdx.value].selected_image_index >= newData.slides_data[selectedSlideIdx.value].images.length) newData.slides_data[selectedSlideIdx.value].selected_image_index = Math.max(0, newData.slides_data[selectedSlideIdx.value].images.length - 1);
-        await updateContent(newData);
+        await notebookStore.deleteSlideImage(currentTab.value.id, currentSlide.value.id, index);
     }
 }
+
 async function updateSlideField(field, value) { const newData = { ...slideData.value }; newData.slides_data[selectedSlideIdx.value][field] = value; await updateContent(newData); }
 async function playSlideshow() { const deck = slideData.value.slides_data.map(s => ({ src: s.images?.[s.selected_image_index || 0]?.path || '', title: s.title })).filter(s => !!s.src); if (deck.length === 0) return; uiStore.openSlideshow({ slides: deck, title: props.notebook.title, startIndex: selectedSlideIdx.value }); }
 
@@ -587,27 +587,50 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                             <button @click="handleGenerateSlideTitle" class="btn btn-secondary btn-sm h-10 w-10 p-0 rounded-full" :disabled="isTitleGenerating"><IconAnimateSpin v-if="isTitleGenerating" class="w-5 h-5 animate-spin" /><IconSparkles v-else class="w-5 h-5 text-blue-500" /></button>
                         </div>
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <div class="lg:col-span-2 aspect-video bg-black rounded-2xl relative group overflow-hidden shadow-lg border dark:border-gray-800">
-                                <div class="absolute top-3 left-3 z-10 flex gap-1">
-                                    <button @click="viewMode = 'image'" class="px-2 py-1 text-[10px] font-bold rounded uppercase transition-colors" :class="viewMode === 'image' ? 'bg-white text-black' : 'bg-black/50 text-white hover:bg-black/80'">Image</button>
-                                    <button v-if="currentSlide.html_content" @click="viewMode = 'html'" class="px-2 py-1 text-[10px] font-bold rounded uppercase transition-colors" :class="viewMode === 'html' ? 'bg-white text-black' : 'bg-black/50 text-white hover:bg-black/80'">Graphic</button>
+                            
+                            <!-- MAIN VISUAL AREA (Image + Versions) -->
+                            <div class="lg:col-span-2 flex flex-col gap-3">
+                                <div class="aspect-video bg-black rounded-2xl relative group overflow-hidden shadow-lg border dark:border-gray-800 w-full">
+                                    <div class="absolute top-3 left-3 z-10 flex gap-1">
+                                        <button @click="viewMode = 'image'" class="px-2 py-1 text-[10px] font-bold rounded uppercase transition-colors" :class="viewMode === 'image' ? 'bg-white text-black' : 'bg-black/50 text-white hover:bg-black/80'">Image</button>
+                                        <button v-if="currentSlide.html_content" @click="viewMode = 'html'" class="px-2 py-1 text-[10px] font-bold rounded uppercase transition-colors" :class="viewMode === 'html' ? 'bg-white text-black' : 'bg-black/50 text-white hover:bg-black/80'">Graphic</button>
+                                    </div>
+
+                                    <template v-if="viewMode === 'html' && currentSlide.html_content">
+                                        <iframe :src="currentHtmlSrc" class="w-full h-full border-none bg-white"></iframe>
+                                    </template>
+                                    <template v-else>
+                                        <AuthenticatedImage v-if="currentImage" :src="currentImage.path" img-class="object-contain" class="w-full h-full" />
+                                        <div v-else class="w-full h-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-gray-400"><IconPhoto class="w-8 h-8 opacity-20" /></div>
+                                    </template>
+
+                                    <div class="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button @click="handleGenerateHtml" class="p-2 bg-black/60 rounded-lg text-white hover:bg-blue-600" title="Generate Graphic"><IconCode class="w-4 h-4" /></button>
+                                        <button @click="openGenModal('refine_image')" class="p-2 bg-black/60 rounded-lg text-white hover:bg-purple-600" title="Edit Image"><IconMagic class="w-4 h-4" /></button>
+                                        <button @click="openGenModal('images')" class="p-2 bg-black/60 rounded-lg text-white hover:bg-green-600" title="New Variant"><IconRefresh class="w-4 h-4" /></button>
+                                    </div>
+                                    <div class="absolute bottom-3 left-3 bg-black/60 text-white text-[10px] px-2 py-1 rounded-full font-mono pointer-events-none">{{ currentSlide.layout }}</div>
                                 </div>
 
-                                <template v-if="viewMode === 'html' && currentSlide.html_content">
-                                    <iframe :src="currentHtmlSrc" class="w-full h-full border-none bg-white"></iframe>
-                                </template>
-                                <template v-else>
-                                    <AuthenticatedImage v-if="currentImage" :src="currentImage.path" img-class="object-contain" class="w-full h-full" />
-                                    <div v-else class="w-full h-full bg-gray-200 dark:bg-gray-800 flex items-center justify-center text-gray-400"><IconPhoto class="w-8 h-8 opacity-20" /></div>
-                                </template>
-
-                                <div class="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <button @click="handleGenerateHtml" class="p-2 bg-black/60 rounded-lg text-white hover:bg-blue-600" title="Generate Graphic"><IconCode class="w-4 h-4" /></button>
-                                    <button @click="openGenModal('refine_image')" class="p-2 bg-black/60 rounded-lg text-white hover:bg-purple-600" title="Edit Image"><IconMagic class="w-4 h-4" /></button>
-                                    <button @click="openGenModal('images')" class="p-2 bg-black/60 rounded-lg text-white hover:bg-green-600" title="New Variant"><IconRefresh class="w-4 h-4" /></button>
+                                <!-- Versions Strip -->
+                                <div v-if="currentSlide?.images?.length > 0" class="w-full overflow-x-auto custom-scrollbar">
+                                    <div class="flex gap-2 pb-2">
+                                        <div v-for="(img, idx) in currentSlide.images" :key="idx" 
+                                            @click="selectVariant(idx)"
+                                            class="relative h-20 w-32 flex-shrink-0 rounded-lg overflow-hidden cursor-pointer border-2 transition-all group/thumb bg-black"
+                                            :class="idx === (currentSlide.selected_image_index || 0) ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-gray-800 hover:border-gray-500 opacity-60 hover:opacity-100'">
+                                            <AuthenticatedImage :src="img.path" class="w-full h-full object-cover" />
+                                            <button @click.stop="deleteVariant(idx)" class="absolute top-1 right-1 p-1 bg-red-600 text-white rounded-md opacity-0 group-hover/thumb:opacity-100 transition-opacity shadow-sm hover:bg-red-500" title="Delete Version">
+                                                <IconTrash class="w-3 h-3" />
+                                            </button>
+                                            <div class="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[9px] px-1.5 py-0.5 truncate font-mono">
+                                                {{ idx === (currentSlide.selected_image_index || 0) ? 'Active' : `Ver ${idx + 1}` }}
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="absolute bottom-3 left-3 bg-black/60 text-white text-[10px] px-2 py-1 rounded-full font-mono pointer-events-none">{{ currentSlide.layout }}</div>
                             </div>
+
                             <div class="bg-white dark:bg-gray-900 rounded-2xl p-5 border dark:border-gray-800 shadow-sm flex flex-col">
                                 <h3 class="text-xs font-black uppercase text-gray-400 mb-4">Slide Content</h3>
                                 <div class="flex-grow space-y-4 overflow-y-auto max-h-[300px] custom-scrollbar pr-2">
@@ -730,6 +753,6 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
   animation: progress-animation 1s linear infinite;
 }
 @keyframes progress-animation { from { background-position: 1rem 0; } to { background-position: 0 0; } }
-.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 </style>

@@ -1,4 +1,3 @@
-# backend/db/migration.py
 # Standard Library Imports
 import json
 import re
@@ -148,7 +147,10 @@ def _bootstrap_global_settings(connection):
         
         "tasks_auto_cleanup": { "value": True, "type": "boolean", "description": "Automatically delete completed, failed, or cancelled tasks from the database.", "category": "Task Manager" },
         "tasks_retention_days": { "value": 7, "type": "integer", "description": "How many days to keep finished tasks in the database before auto-cleanup.", "category": "Task Manager" },
-        "com_hub_port": { "value": SERVER_CONFIG.get("com_hub_port", 8042), "type": "integer", "description": "Port for the inter-worker Communication Hub. Requires a restart.", "category": "Task Manager" }
+        "com_hub_port": { "value": SERVER_CONFIG.get("com_hub_port", 8042), "type": "integer", "description": "Port for the inter-worker Communication Hub. Requires a restart.", "category": "Task Manager" },
+
+        "maintenance_mode": { "value": False, "type": "boolean", "description": "Put the system in maintenance mode. Only admins can access.", "category": "System" },
+        "maintenance_message": { "value": "We are performing scheduled maintenance. We'll be back shortly.", "type": "text", "description": "Message displayed to users during maintenance.", "category": "System" },
     }
 
     select_keys_query = text("SELECT key FROM global_configs")
@@ -659,12 +661,33 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                     print(f"WARNING: Failed to add column {col_name} to users table: {e}")
                     connection.rollback()
         
-        # New Herd Mode fields
+
         new_herd_cols = {
             "herd_mode_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
-            "herd_participants": "JSON",
-            "herd_rounds": "INTEGER DEFAULT 2 NOT NULL"
+            "herd_participants": "JSON", 
+            "herd_precode_participants": "JSON",
+            "herd_postcode_participants": "JSON",
+            "herd_rounds": "INTEGER DEFAULT 2 NOT NULL",
+            "herd_dynamic_mode": "BOOLEAN DEFAULT 0 NOT NULL",
+            "herd_model_pool": "JSON"
         }
+        
+        for col_name, col_sql_def in new_herd_cols.items():
+            if col_name not in user_columns_db:
+                try:
+                    connection.execute(text(f"ALTER TABLE users ADD COLUMN {col_name} {col_sql_def}"))
+                    connection.commit()
+                except Exception as e:
+                    print(f"WARNING: Failed to add column {col_name} to users table: {e}")
+                    connection.rollback()
+        
+        # Backfill JSON default if needed
+        for json_col in ["herd_participants", "herd_precode_participants", "herd_postcode_participants", "herd_model_pool"]:
+            if json_col in new_herd_cols:
+                 try:
+                     connection.execute(text(f"UPDATE users SET {json_col} = '[]' WHERE {json_col} IS NULL"))
+                     connection.commit()
+                 except Exception: pass
         
         for col_name, col_sql_def in new_herd_cols.items():
             if col_name not in user_columns_db:
@@ -1491,3 +1514,4 @@ class CustomNode:
                 }
             )
     connection.commit()
+    

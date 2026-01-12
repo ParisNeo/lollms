@@ -1,4 +1,3 @@
-# backend/routers/discussion/generation/llm.py
 # Standard Library Imports
 import base64
 import io
@@ -581,101 +580,246 @@ def process_herd_logic(
     db_session: Session
 ):
     """
-    Executes the multi-model herd debate and returns the accumulated context.
+    Executes the 4-phase Herd Mode workflow:
+    1. Pre-code Brainstorming (Ideas)
+    2. Answer Crafting (Leader Draft)
+    3. Post-code Brainstorming (Critique)
+    4. Final Answer (Leader Final)
     """
-    participants = user.herd_participants or []
-    if not participants:
+    precode_crew = []
+    postcode_crew = []
+    
+    # --- DYNAMIC CREW GENERATION ---
+    if user.herd_dynamic_mode and user.herd_model_pool:
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Herd Manager: analyzing task and assembling dynamic teams..."})) + "\n")
+        
+        try:
+            # 1. Prepare inputs
+            model_pool_desc = json.dumps(user.herd_model_pool, indent=2)
+            leader_client = get_user_lollms_client(user.username)
+            
+            # 2. Construct Manager Prompt
+            manager_prompt = f"""You are the Herd Manager.
+Your goal is to assemble two teams of AI agents to solve a specific user request.
+You must CREATE distinct personas (Name + Specific System Prompt) for each agent and assign them to the most appropriate 'model' from the Available Models list.
+
+[USER REQUEST]
+"{prompt}"
+
+[AVAILABLE MODELS POOL]
+{model_pool_desc}
+
+[INSTRUCTIONS]
+1. **Pre-code Crew**: Create 2-3 agents to brainstorm ideas, architecture, and high-level solutions. 
+   - Define a unique `system_prompt` for each that gives them a specific perspective (e.g., "You are a database expert", "You are a creative thinker").
+2. **Post-code Crew**: Create 2-3 agents to critique, review, and find flaws.
+   - Define a unique `system_prompt` for each (e.g., "You are a security auditor", "You are a performance optimizer").
+3. **Model Assignment**: For the `model` field, you MUST use one of the strings from the "model" key in the pool above.
+
+[OUTPUT FORMAT]
+Return ONLY a valid JSON object. No markdown formatting.
+{{
+  "pre_code_crew": [
+    {{ "name": "Agent Name", "system_prompt": "You are...", "model": "model_id_from_pool" }}
+  ],
+  "post_code_crew": [
+    {{ "name": "Agent Name", "system_prompt": "You are...", "model": "model_id_from_pool" }}
+  ]
+}}
+"""
+            # 3. Generate Configuration
+            json_config_str = leader_client.generate_code(manager_prompt, language="json").strip()
+            
+            # Cleanup potential markdown code blocks if the model ignores instruction
+            if json_config_str.startswith("```"):
+                json_config_str = json_config_str.split('\n', 1)[1]
+                if json_config_str.endswith("```"):
+                    json_config_str = json_config_str.rsplit('\n', 1)[0]
+
+            if json_config_str:
+                try:
+                    config = json.loads(json_config_str)
+                    precode_crew = config.get("pre_code_crew", [])
+                    postcode_crew = config.get("post_code_crew", [])
+                    
+                    # Mark as dynamic for the runner
+                    for agent in precode_crew: agent['is_dynamic'] = True
+                    for agent in postcode_crew: agent['is_dynamic'] = True
+                    
+                    msg = f"**Dynamic Teams Assembled:**\n\n*Pre-code Phase:*\n" + "\n".join([f"- {a['name']} ({a['model']})" for a in precode_crew])
+                    msg += "\n\n*Post-code Phase:*\n" + "\n".join([f"- {a['name']} ({a['model']})" for a in postcode_crew])
+                    
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": msg})) + "\n")
+                except json.JSONDecodeError as je:
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": f"Failed to parse crew configuration: {je}. Using static fallback."})) + "\n")
+            else:
+                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": "Model returned empty configuration. Using static fallback."})) + "\n")
+
+        except Exception as e:
+            trace_exception(e)
+            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": f"Dynamic generation error: {e}. Falling back."})) + "\n")
+
+    # --- FALLBACK TO STATIC IF DYNAMIC FAILED OR DISABLED ---
+    if not precode_crew and not postcode_crew:
+        precode_crew = user.herd_precode_participants or []
+        postcode_crew = user.herd_postcode_participants or []
+        
+        # Legacy fallback
+        if not precode_crew and not postcode_crew:
+            legacy_crew = user.herd_participants or []
+            precode_crew = legacy_crew
+            postcode_crew = legacy_crew
+
+    if not precode_crew and not postcode_crew:
         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Herd mode active but no participants found. Proceeding with standard generation."})) + "\n")
         return ""
 
     rounds = user.herd_rounds if user.herd_rounds is not None else 2
-    debate_history = ""
     
-    # 1. Start Herd Root Step
-    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Herd Debate: Initializing {len(participants)} participants for {rounds} rounds..."})) + "\n")
-
-    for round_idx in range(rounds):
-        # 2. Start Round Step
-        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Herd Debate: Starting Round {round_idx + 1} of {rounds}..."})) + "\n")
+    # [FIX] Load previous discussion history to provide context to agents
+    history_text = ""
+    # Ensure messages are loaded
+    if not discussion_obj.messages:
+        discussion_obj.load_messages()
+    
+    # Simple approach: Take last 10 messages for context
+    recent_messages = discussion_obj.messages[-10:] 
+    
+    for msg in recent_messages:
+        # Skip the currently generating AI message (if it exists as a placeholder)
+        if msg.sender_type == 'assistant' and not msg.content:
+            continue
         
-        for p_idx, participant in enumerate(participants):
-            p_model_full = participant.get('model')
-            p_persona_name = participant.get('personality')
-            
-            p_name_display = p_persona_name or p_model_full or f"Participant {p_idx+1}"
-            
-            # Resolve Binding/Model
-            binding_alias = None
-            model_name = None
-            if p_model_full and '/' in p_model_full:
-                binding_alias, model_name = p_model_full.split('/', 1)
-            elif not p_model_full:
-                 # Fallback to default binding if not specified
-                 default_binding = db_session.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).first()
-                 if default_binding:
-                     binding_alias = default_binding.alias
-                     model_name = default_binding.default_model_name
+        sender = msg.sender
+        text = msg.content
+        history_text += f"{sender}: {text}\n"
 
-            # Resolve Personality System Prompt
-            p_system_prompt = "You are a helpful assistant participating in a debate."
-            if p_persona_name:
+    full_context_history = f"Discussion History:\n{history_text}\n\n[Current Task]: {prompt}\n\n"
+    
+    # Helper to run an agent
+    def run_agent(agent_def, context, phase_name, round_num):
+        model_full = agent_def.get('model')
+        
+        # Dynamic agents have explicit system prompts
+        is_dynamic = agent_def.get('is_dynamic', False)
+        
+        persona_name = agent_def.get('name') if is_dynamic else agent_def.get('personality')
+        display_name = persona_name or model_full or "Agent"
+        
+        # Resolve Binding/Model
+        binding_alias = None
+        model_name = None
+        if model_full and '/' in model_full:
+            binding_alias, model_name = model_full.split('/', 1)
+        elif not model_full:
+             # Fallback default
+             default_binding = db_session.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).first()
+             if default_binding:
+                 binding_alias = default_binding.alias
+                 model_name = default_binding.default_model_name
+
+        # Resolve System Prompt
+        sys_prompt = ""
+        
+        if is_dynamic:
+            sys_prompt = agent_def.get('system_prompt', "You are a helpful assistant.")
+        else:
+            # Static Logic: Load from DB
+            sys_prompt = f"You are participating in a {phase_name} session."
+            if persona_name:
                 pers = db_session.query(DBPersonality).filter(
-                    (DBPersonality.name == p_persona_name) | (DBPersonality.id == p_persona_name)
+                    (DBPersonality.name == persona_name) | (DBPersonality.id == persona_name)
                 ).first()
                 if pers:
-                    p_system_prompt = pers.prompt_text
+                    sys_prompt = pers.prompt_text
             
-            # Construct Prompt
-            if round_idx == 0:
-                p_user_prompt = f"User Request: {prompt}\n\nTask: Provide initial concepts, solutions, or ideas. Be concise."
-            else:
-                p_user_prompt = f"User Request: {prompt}\n\nCurrent Debate History:\n{debate_history}\n\nTask: Review the debate history. Critique previous ideas, refine your own, or provide a better alternative."
+            if phase_name == "Pre-code Brainstorming":
+                sys_prompt += "\n\nTask: Brainstorm ideas, architecture, and high-level solutions for the user's request. Do not write full code yet. Critique previous ideas if any."
+            elif phase_name == "Post-code Critique":
+                sys_prompt += "\n\nTask: Review the proposed solution/code. Look for bugs, security issues, logic errors, or missing requirements. Be critical but constructive."
 
-            # 3. Start Participant Step
-            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Herd Debate: {p_name_display} is thinking..."})) + "\n")
+        # Emit step start
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"**{display_name}** ({phase_name} Round {round_num})" })) + "\n")
+        
+        try:
+            temp_client = build_lollms_client_from_params(
+                username=user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                load_llm=True,
+                load_tti=False,
+                load_tts=False,
+                load_stt=False,
+                load_mcp=False
+            )
             
-            try:
-                # Build ephemeral client
-                temp_client = build_lollms_client_from_params(
-                    username=user.username,
-                    binding_alias=binding_alias,
-                    model_name=model_name,
-                    load_llm=True,
-                    load_tti=False,
-                    load_tts=False,
-                    load_stt=False,
-                    load_mcp=False
-                )
-                
-                # Generate
-                response = temp_client.generate_text(
-                    p_user_prompt, 
-                    system_prompt=p_system_prompt,
-                    max_new_tokens=1024, # Limit response size for speed
-                    temperature=0.7
-                )
-                
-                debate_history += f"\n\n[Round {round_idx+1} - {p_name_display}]:\n{response}"
-                
-                # 4. End Participant Step (With Content)
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": response})) + "\n")
+            response = temp_client.generate_text(
+                context, 
+                system_prompt=sys_prompt,
+                max_new_tokens=1024,
+                temperature=0.7
+            )
+            
+            # Emit step end with result content
+            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": response })) + "\n")
+            return f"\n\n[{phase_name} - {display_name}]:\n{response}"
+        except Exception as e:
+            err = f"Agent {display_name} failed: {e}"
+            print(err)
+            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": err, "status": "error"})) + "\n")
+            return f"\n\n[{phase_name} - {display_name}]: [FAILED]"
 
-            except Exception as e:
-                error_msg = f"Participant {p_name_display} failed: {e}"
-                print(error_msg)
-                # End with error
-                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": error_msg, "status": "error"})) + "\n")
-
-        # 5. End Round Step
-        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": f"Round {round_idx + 1} complete."})) + "\n")
-
-    # 6. End Herd Step
-    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": "Debate concluded. Handing over to Leader."})) + "\n")
+    # --- PHASE 1: Pre-code Brainstorming ---
+    if precode_crew:
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Phase 1: Pre-code Brainstorming"})) + "\n")
+        
+        for r in range(rounds):
+            all_ready = True
+            for agent in precode_crew:
+                out = run_agent(agent, full_context_history, "Pre-code Brainstorming", r+1)
+                full_context_history += out
+                
+                if "<ready/>" not in out.lower():
+                    all_ready = False
+            
+            if all_ready and r > 0:
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "All agents ready. Proceeding."})) + "\n")
+                break
+        
+    # --- PHASE 2: Answer Crafting (Leader Draft) ---
+    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Phase 2: Leader drafting solution..."})) + "\n")
     
-    # 7. Announce Leader
-    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Leader is answering..."})) + "\n")
+    leader_client = get_user_lollms_client(user.username)
+    leader_prompt = f"{full_context_history}\n\n[INSTRUCTION]: Act as the Team Leader. Based on the brainstorming above, create a complete draft solution/implementation."
+    
+    try:
+        draft_response = leader_client.generate_text(leader_prompt, max_new_tokens=2048)
+        full_context_history += f"\n\n[Leader Draft]:\n{draft_response}"
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": draft_response })) + "\n")
+    except Exception as e:
+        full_context_history += f"\n\n[Leader Draft]: [FAILED] {e}"
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": f"Draft generation failed: {e}", "status": "error"})) + "\n")
 
-    return debate_history
+    # --- PHASE 3: Post-code Brainstorming ---
+    if postcode_crew:
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Phase 3: Post-code Critique"})) + "\n")
+        
+        for r in range(rounds):
+            all_ready = True
+            for agent in postcode_crew:
+                out = run_agent(agent, full_context_history, "Post-code Critique", r+1)
+                full_context_history += out
+                
+                if "<ready/>" not in out.lower():
+                    all_ready = False
+            
+            if all_ready and r > 0:
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "All agents satisfied."})) + "\n")
+                break
+
+    # --- PHASE 4: Final Answer (Handled by caller) ---
+    return full_context_history
+
 
 def build_llm_generation_router(router: APIRouter):
     @router.post("/{discussion_id}/chat")
@@ -1094,15 +1238,15 @@ def build_llm_generation_router(router: APIRouter):
                              )
                          finally:
                              db_herd.close()
+                    if herd_debate_context:
+                        # The Final Instruction for Phase 4
+                        final_user_message += f"\n\n[FULL HERD WORKFLOW HISTORY]:\n{herd_debate_context}\n\n[INSTRUCTION]: Act as the Team Leader. Review the entire history above (Ideas, Draft, Critiques). Synthesize the FINAL, corrected, and polished solution/answer. Ignore any internal debate artifacts in your final output, just provide the best possible result."
 
                     # Move search context to system prompt as requested
                     if search_context:
                         # Append to system prompt
                         active_personality.system_prompt += f"\n\n{search_context}\n\n[INSTRUCTION]: Use the Web Search Context above to answer the user's question. Cite sources using [1], [2] format corresponding to the numbered list in the context."
 
-                    if herd_debate_context:
-                         final_user_message += f"\n\n[HERD DEBATE CONTEXT]:\n{herd_debate_context}\n\n[INSTRUCTION]: Act as the Leader. Based on the user's request and the debate above, synthesize the best solution. Start with a description of the problem and the best solution distilled from the debate."
-                    
                     # FIX: Pass add_user_message=not is_resend to prevent duplication on regeneration
                     # FIX: Pass generation_tip_id which was set correctly above
                     result = discussion_obj.chat(

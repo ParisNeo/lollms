@@ -1,4 +1,3 @@
-<!-- frontend/webui/src/components/modals/ManageModelsModal.vue -->
 <template>
     <GenericModal modal-name="manageModels" :title="binding ? `Manage Models for: ${binding.alias}` : 'Manage Models'" maxWidthClass="max-w-5xl">
         <template #body>
@@ -137,8 +136,8 @@
                             </div>
                             
                             <!-- TTI/TTS Model Parameters -->
-                            <div v-if="['tti', 'tts'].includes(bindingType) && modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700">
-                                <h4 class="font-medium mb-4">{{ bindingType.toUpperCase() }} Generation Parameters</h4>
+                            <div v-if="['tti', 'tts', 'stt'].includes(bindingType) && modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700">
+                                <h4 class="font-medium mb-4">{{ bindingType.toUpperCase() }} Model Parameters</h4>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div v-for="param in modelParameters" :key="param.name">
                                         <label :for="`param-${param.name}`" class="label text-xs">{{ param.title || param.name.replace(/_/g, ' ') }}</label>
@@ -274,7 +273,7 @@ const isTtiConfigured = computed(() => ttiBindings.value && ttiBindings.value.so
 const getInitialFormState = () => ({
     icon: '',
     title: '',
-    name: '', // Added name for backward compatibility and to solve the required field issue
+    name: '',
     description: '',
     has_vision: true,
     ctx_size: null,
@@ -374,7 +373,8 @@ function selectModel(model) {
     const bindingName = binding.value?.name;
     if (bindingName) {
         const bindingDesc = bindingTypes.find(b => (b.binding_name || b.name) === bindingName);
-        const params = bindingDesc?.model_parameters || bindingDesc?.input_parameters || [];
+        // STRICT SEPARATION: Only use model_parameters for aliases (removed input_parameters fallback)
+        const params = bindingDesc?.model_parameters || [];
         modelParameters.value = params;
         params.forEach(param => { if (!(param.name in newForm)) newForm[param.name] = param.default; });
     } else {
@@ -480,7 +480,7 @@ async function setAsBindingDefault() {
             case 'llm': await adminStore.updateBinding(binding.value.id, payload); break;
             case 'tti': await adminStore.updateTtiBinding(binding.value.id, payload); break;
             case 'tts': await adminStore.updateTtsBinding(binding.value.id, payload); break;
-            // RAG bindings do not have a default model concept
+            case 'stt': await adminStore.updateSttBinding(binding.value.id, payload); break;
         }
         uiStore.addNotification('Binding default model updated.', 'success');
     } finally {

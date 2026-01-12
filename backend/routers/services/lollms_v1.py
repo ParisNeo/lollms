@@ -143,7 +143,8 @@ async def detokenize_tokens(request: DetokenizeRequest, user: DBUser = Depends(g
 async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(get_user_for_lollms_service), db: Session = Depends(get_db)):
     alias, name = resolve_model_name(db, request.model)
     lc = build_lollms_client_from_params(user.username, alias, name, load_llm=True)
-    return ContextSizeResponse(context_size=lc.get_ctx_size(name))
+    context_size = lc.get_ctx_size(name)
+    return ContextSizeResponse(context_size=context_size if context_size else lc.llm.default_ctx_size)
 
 @lollms_v1_router.post("/long_context_process")
 async def process_long_context(request: LongContextRequest, user: DBUser = Depends(get_user_for_lollms_service), db: Session = Depends(get_db)):

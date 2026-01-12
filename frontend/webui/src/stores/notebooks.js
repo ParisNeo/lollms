@@ -1,4 +1,3 @@
-// frontend/webui/src/stores/notebooks.js
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import apiClient from '../services/api';
@@ -21,6 +20,16 @@ export const useNotebookStore = defineStore('notebooks', () => {
             }
         } finally {
             isLoading.value = false;
+        }
+    }
+
+    async function searchArxiv(query) {
+        try {
+            const res = await apiClient.post('/api/notebooks/search/arxiv', { query, max_results: 10 });
+            return res.data;
+        } catch (e) {
+            uiStore.addNotification("Arxiv search failed.", "error");
+            throw e;
         }
     }
 
@@ -102,10 +111,23 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
-    async function importSources(payload) {
-        if (!activeNotebook.value) return;
+    async function importSources(arg1, arg2) {
+        // Handle overload: importSources(payload) OR importSources(id, payload)
+        let notebookId = activeNotebook.value?.id;
+        let payload = arg1;
+
+        if (typeof arg1 === 'string') {
+            notebookId = arg1;
+            payload = arg2;
+        }
+
+        if (!notebookId) {
+            console.error("importSources: No notebook ID provided or active.");
+            return;
+        }
+
         try {
-            const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/import_sources`, payload);
+            const res = await apiClient.post(`/api/notebooks/${notebookId}/import_sources`, payload);
             uiStore.addNotification("Knowledge ingestion started.", "info");
             return res.data;
         } catch (e) {
@@ -166,6 +188,61 @@ export const useNotebookStore = defineStore('notebooks', () => {
             uiStore.addNotification(`${type} deleted.`, "success");
         } catch (e) {
             uiStore.addNotification("Failed to delete asset.", "error");
+        }
+    }
+    async function cancelTask(taskId) {
+        try {
+            await apiClient.post(`/api/tasks/${taskId}/cancel`);
+            return true;
+        } catch (e) {
+            uiStore.addNotification("Failed to cancel task.", "error");
+            return false;
+        }
+    }
+
+    async function deleteSlideImage(tabId, slideId, imageIndex) {
+        if (!activeNotebook.value) return;
+        try {
+            await apiClient.delete(`/api/notebooks/${activeNotebook.value.id}/generated_asset`, {
+                params: { type: 'image', tab_id: tabId, slide_id: slideId, image_index: imageIndex }
+            });
+            await selectNotebook(activeNotebook.value.id);
+            uiStore.addNotification("Image version deleted.", "success");
+        } catch (e) {
+            uiStore.addNotification("Failed to delete image.", "error");
+        }
+    }
+
+    async function setSlideImageIndex(tabId, slideId, index) {
+        if (!activeNotebook.value) return;
+        try {
+            await apiClient.put(`/api/notebooks/${activeNotebook.value.id}/tabs/${tabId}/slides/${slideId}/select_image`, { index });
+            const tab = activeNotebook.value.tabs.find(t => t.id === tabId);
+            if (tab) {
+                try {
+                    const content = JSON.parse(tab.content);
+                    const slide = content.slides_data.find(s => s.id === slideId);
+                    if (slide) {
+                        slide.selected_image_index = index;
+                        tab.content = JSON.stringify(content);
+                    }
+                } catch {}
+            }
+        } catch (e) {
+            uiStore.addNotification("Failed to set active image.", "error");
+        }
+    }
+
+    async function regenerateSlideImage(tabId, slideId, prompt = null, negativePrompt = "") {
+        if (!activeNotebook.value) return;
+        try {
+            const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/regenerate_slide_image`, {
+                tab_id: tabId, slide_id: slideId, prompt, negative_prompt: negativePrompt
+            });
+            tasksStore.addTask(res.data);
+            uiStore.addNotification("Image regeneration started.", "info");
+        } catch (e) {
+            uiStore.addNotification("Regeneration failed.", "error");
         }
     }
 
@@ -278,7 +355,6 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
-    // --- NEW TAB MANAGEMENT ACTIONS ---
     function addTab(type = 'markdown') {
         if (!activeNotebook.value) return;
         if (!activeNotebook.value.tabs) activeNotebook.value.tabs = [];
@@ -300,7 +376,6 @@ export const useNotebookStore = defineStore('notebooks', () => {
         activeNotebook.value.tabs = activeNotebook.value.tabs.filter(t => t.id !== tabId);
         saveActive();
     }
-    // --------------------------------
 
     function $reset() {
         notebooks.value = [];
@@ -312,10 +387,11 @@ export const useNotebookStore = defineStore('notebooks', () => {
         notebooks, activeNotebook, isLoading, 
         fetchNotebooks, createStructuredNotebook, selectNotebook, setActiveNotebook, saveActive, generateTitle, deleteNotebook,
         uploadSource, importSources, createManualArtefact, updateArtefact, deleteArtefact, deleteGeneratedAsset,
-        describeAsset,
+        deleteSlideImage, setSlideImageIndex, regenerateSlideImage,
+        describeAsset, searchArxiv,
         sendSlideMessage, brainstormSlide, processWithAi, generateSlideNotes, generateSlideTitle, generateSlideAudio,
         enhancePrompt, generateSummary,
-        addTab, removeTab, // Export new actions
+        addTab, removeTab, cancelTask,
         $reset 
     };
 });

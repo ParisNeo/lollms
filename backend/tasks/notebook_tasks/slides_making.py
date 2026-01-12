@@ -71,9 +71,7 @@ def _extract_json(text: str, task: Task = None) -> Any:
 def _clean_text_for_tts(text: str) -> str:
     """Removes special characters and emojis that confuse TTS engines."""
     if not text: return ""
-    # Remove markdown bold/italic (*) and headers (#)
     text = re.sub(r'[*#]', '', text)
-    # Remove unicode emojis (Supplementary Multilingual Plane)
     text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
     return text.strip()
 
@@ -110,6 +108,15 @@ def _extract_knowledge_from_artefacts(task: Task, lc, notebook: DBNotebook, sele
         system_prompt="Research Specialist"
     )
     
+    if isinstance(research_results, dict):
+        if 'error' in research_results:
+            task.log(f"Context Error: {research_results['error']}", "WARNING")
+            return ""
+        research_results = research_results.get('content', research_results.get('text', str(research_results)))
+    
+    if not isinstance(research_results, str):
+        research_results = str(research_results)
+
     task.log("Research step complete.")
     return research_results
 
@@ -152,21 +159,37 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
             task.log("Processing long context from artefacts...")
             research_prompt = f"Extract all key facts, narratives, statistics, and logical steps relevant to producing a slide deck about: '{prompt}'."
             
-            knowledge_core = lc.long_context_processing(
-                text_to_process=context_text,
-                contextual_prompt=research_prompt,
-                context_fill_percentage=0.7,
-                overlap_tokens=200,
-                max_generation_tokens=2048
-            )
+            try:
+                knowledge_core = lc.long_context_processing(
+                    text_to_process=context_text,
+                    contextual_prompt=research_prompt,
+                    context_fill_percentage=0.7,
+                    overlap_tokens=200,
+                    max_generation_tokens=2048
+                )
+            except Exception as e:
+                task.log(f"Error during context processing: {e}", "ERROR")
+                knowledge_core = ""
+
+            # Robust handling for Dict return (Error or Structured)
+            if isinstance(knowledge_core, dict):
+                if 'error' in knowledge_core:
+                    task.log(f"LCP Error: {knowledge_core['error']}", "ERROR")
+                    knowledge_core = ""
+                else:
+                    knowledge_core = knowledge_core.get('content', knowledge_core.get('text', ""))
             
-            if not knowledge_core or not knowledge_core.strip():
+            # Ensure it's a string
+            if not isinstance(knowledge_core, str):
+                knowledge_core = str(knowledge_core) if knowledge_core else ""
+            
+            if not knowledge_core.strip():
                 task.log("Context extraction returned empty result.", "ERROR")
                 tab_data['slides_data'] = [{
                     "id": str(uuid.uuid4()),
                     "title": "Extraction Failed",
                     "layout": "TitleImageBody",
-                    "bullets": ["The AI could not extract meaningful information from the source documents.", "Please check the input files."],
+                    "bullets": ["The AI could not extract meaningful information from the source documents.", "Please check if the context files are empty or unreadable."],
                     "notes": "System error during context processing."
                 }]
                 if target_tab: target_tab['content'] = json.dumps(tab_data)
@@ -192,15 +215,26 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
         task.log("Phase 2: Structured Deck Design...")
         task.set_progress(30)
 
-        pref_style = metadata.get('style_preset', 'Corporate')
-        pref_layout = metadata.get('slide_format', 'TitleImageBody')
-        num_slides = metadata.get('num_slides', 8)
-        template = metadata.get('template_name', 'Modern')
-        custom_inst = metadata.get('custom_template_instructions', '')
-        directives = metadata.get('general_instructions', '')
+        # Retrieve Metadata Configurations
+        pref_style = metadata.get('style_preset', 'Corporate Vector')
+        pref_format = metadata.get('slide_format', 'TitleImageBody')
+        num_slides = int(metadata.get('num_slides', 10))
+        
+        task.log(f"Config: {num_slides} slides, Format: {pref_format}, Style: {pref_style}")
 
         system_prompt = f"You are a master {pref_style} Presentation Designer."
         
+        # Build strict rules based on format
+        format_instructions = ""
+        if pref_format == 'ImageOnly':
+            format_instructions = "STRICT RULE: Every slide MUST have 'layout': 'ImageOnly'. Focus heavily on 'image_prompt' and 'notes'. 'bullets' should be empty."
+        elif pref_format == 'TextOnly':
+            format_instructions = "STRICT RULE: Every slide MUST have 'layout': 'TextOnly'. 'image_prompt' should be empty."
+        elif pref_format == 'HTML_Graph':
+            format_instructions = "STRICT RULE: Identify slides that require data visualization. For those slides, include a note in 'bullets' saying '[DATA VIZ REQUIRED]: <description>'."
+        else:
+            format_instructions = f"Preferred Layout: {pref_format}. You may vary layouts if necessary, but default to {pref_format}."
+
         design_prompt = f"""
         Based on this Knowledge Core:
         {knowledge_core}
@@ -209,19 +243,16 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
         
         CONSTRAINTS:
         - Total Slides: {num_slides}
-        - Preferred Layout: {pref_layout}
-        - Style: {pref_style}
-        - Template: {template}
-        - Directives: {directives}
-        {f"- Template Rules: {custom_inst}" if custom_inst else ""}
+        - Visual Style: {pref_style}
+        - {format_instructions}
 
         TASK: Generate a complete slide deck structure. 
         Each slide must include:
         1. A compelling Title.
         2. Content bullets (unless layout is ImageOnly).
-        3. A highly detailed Visual Prompt for an AI image generator.
+        3. A highly detailed Visual Prompt for an AI image generator (consistent with {pref_style}).
         4. Detailed Speaker Notes (Notes must be the exact speech/script for the presenter).
-        5. The Layout type (use: TitleImageBody, ImageOnly, TextOnly).
+        5. The Layout type (use: TitleImageBody, ImageOnly, TextOnly, TitleOnly).
         """
 
         schema = {
@@ -236,7 +267,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                             "bullets": {"type": "array", "items": {"type": "string"}},
                             "image_prompt": {"type": "string", "description": "Detailed prompt for DALL-E/Stable Diffusion"},
                             "notes": {"type": "string", "description": "Full speaker script"},
-                            "layout": {"type": "string", "enum": ["TitleImageBody", "ImageOnly", "TextOnly"]}
+                            "layout": {"type": "string", "enum": ["TitleImageBody", "ImageOnly", "TextOnly", "TitleOnly"]}
                         },
                         "required": ["title", "bullets", "image_prompt", "notes", "layout"]
                     }
@@ -279,10 +310,12 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
 
         if notebook.title == "New Production" and generated_slides and len(generated_slides) > 0:
             first_title = generated_slides[0].get('title', 'Untitled')
-            clean_title = first_title.split(':')[0].strip()
-            if clean_title and len(clean_title) < 50:
-                task.log(f"Updating generic notebook title to: {clean_title}")
-                notebook.title = clean_title
+            # Ensure title is a string
+            if isinstance(first_title, str):
+                clean_title = first_title.split(':')[0].strip()
+                if clean_title and len(clean_title) < 50:
+                    task.log(f"Updating generic notebook title to: {clean_title}")
+                    notebook.title = clean_title
 
         task.log(f"Phase 3: Visual Production ({len(generated_slides)} visuals)...")
         task.set_progress(50)
@@ -295,6 +328,18 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
         for i, s in enumerate(generated_slides):
             task.log(f"Processing slide {i+1}: {s.get('title', 'Untitled')}")
             
+            # Auto-HTML Generation for Graph Heavy mode
+            html_content = ""
+            if pref_format == 'HTML_Graph' and any("DATA VIZ REQUIRED" in b for b in s.get('bullets', [])):
+                try:
+                    viz_prompt = f"Create an HTML5 widget to visualize: {s.get('title')}. {', '.join(s.get('bullets', []))}"
+                    html_sys = "You are a data visualization expert. Output ONLY valid HTML code for a responsive widget."
+                    html_out = lc.generate_text(viz_prompt, system_prompt=html_sys)
+                    code_match = re.search(r'```html(.*?)```', html_out, re.DOTALL)
+                    html_content = code_match.group(1).strip() if code_match else html_out
+                    task.log("Generated HTML data viz.")
+                except Exception: pass
+
             img_list = []
             if lc_tti.tti and s.get('layout') != 'TextOnly':
                 try:
@@ -320,6 +365,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                 "images": img_list,
                 "selected_image_index": 0,
                 "notes": s.get('notes', ''),
+                "html_content": html_content,
                 "messages": []
             })
             task.set_progress(50 + (i * step_inc))
@@ -352,7 +398,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
             img_list = []
             
             if slide_config.get('image_prompt') and lc_tti.tti:
-                style = metadata.get('style_prompt', '')
+                style = metadata.get('style_preset', '')
                 final_p = slide_config['image_prompt']
                 if knowledge_summary:
                     prompt_enhancement = f"Refine this image prompt: '{final_p}'. Incorporate visual details from this context: {knowledge_summary}. Ensure the style '{style}' is respected."
@@ -551,7 +597,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                     source_img_b64 = base64.b64encode(local_path.read_bytes()).decode('utf-8')
 
         task.log("Executing visual generation...")
-        style = metadata.get('style_prompt', '')
+        style = metadata.get('style_preset', 'Corporate Vector')
         final_p = user_prompt
         
         if research_data:
@@ -592,11 +638,11 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
 
     return target_tab_id if target_tab else None
 
+# ... (generate_deck_summary_task and generate_presentation_video_task remain unchanged)
 def generate_deck_summary_task(task: Task, username: str, notebook_id: str):
     """
     Analyzes all slides in the notebook and generates a comprehensive summary context.
     """
-    # (Same as before, simplified for brevity but keep existing logic)
     task.log("Loading notebook...")
     with task.db_session_factory() as db:
         notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id).first()

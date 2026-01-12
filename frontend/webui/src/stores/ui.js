@@ -2,7 +2,6 @@ import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
 import apiClient from '../services/api';
 
-
 export const useUiStore = defineStore('ui', {
   state: () => ({
     mainView: 'chat',
@@ -50,6 +49,11 @@ export const useUiStore = defineStore('ui', {
     },
     pageTitle: '',
     pageTitleIcon: null,
+
+    // Maintenance & System State
+    isMaintenanceMode: false,
+    maintenanceMessage: '',
+    appVersion: '',
   }),
 
   getters: {
@@ -138,20 +142,24 @@ export const useUiStore = defineStore('ui', {
         try {
             const res = await apiClient.get('/api/public/version');
             const currentVer = res.data.version;
-            appVersion.value = currentVer;
+            this.appVersion = currentVer;
 
             const lastSeenVer = localStorage.getItem('lollms_last_seen_version');
             
-            // Only show for major/minor updates, not patch levels if preferred, 
-            // but here we check for any version change
             if (lastSeenVer !== currentVer) {
-                const changelogRes = await apiClient.get('/api/public/changelog', { params: { version: currentVer } });
-                
-                // Open a "What's New" modal (using WhatsNextModal as a template or a new one)
-                openModal('whatsNext', { 
-                    isUpdate: true, 
-                    changelog: changelogRes.data 
-                });
+                try {
+                    const changelogRes = await apiClient.get('/api/public/changelog', { params: { version: currentVer } });
+                    this.openModal('whatsNext', { 
+                        isUpdate: true, 
+                        changelog: changelogRes.data 
+                    });
+                } catch(e) {
+                     // Fallback if changelog endpoint missing or fails
+                     this.openModal('whatsNext', { 
+                        isUpdate: true, 
+                        changelog: { title: `Updated to v${currentVer}`, content: "Check the GitHub repository for detailed release notes." } 
+                    });
+                }
                 
                 localStorage.setItem('lollms_last_seen_version', currentVer);
             }
@@ -260,7 +268,7 @@ export const useUiStore = defineStore('ui', {
 
     async fetchLanguages() {
         try {
-            const apiClient = (await import('../services/api')).default;
+            // Using apiClient directly as imported
             const response = await apiClient.get('/api/languages/');
             this.availableLanguages = response.data;
         } catch (error) {
@@ -271,7 +279,6 @@ export const useUiStore = defineStore('ui', {
     async fetchKeywords() {
         if (this.keywords.length > 0) return;
         try {
-            const apiClient = (await import('../services/api')).default;
             const response = await apiClient.get('/api/help/keywords');
             this.keywords = response.data;
         } catch (error) {
@@ -328,5 +335,10 @@ export const useUiStore = defineStore('ui', {
         this.pageTitle = title;
         this.pageTitleIcon = icon ? markRaw(icon) : null;
     },
+
+    setMaintenanceMode(enabled, message = "") {
+        this.isMaintenanceMode = enabled;
+        this.maintenanceMessage = message;
+    }
   }
 });

@@ -220,7 +220,15 @@ class UserAuthDetails(BaseModel):
     # Herd Mode Settings
     herd_mode_enabled: bool = False
     herd_participants: List[Dict[str, str]] = Field(default_factory=list)
+    herd_precode_participants: List[Dict[str, str]] = Field(default_factory=list)
+    herd_postcode_participants: List[Dict[str, str]] = Field(default_factory=list)
     herd_rounds: int = 2
+    
+    # New Dynamic Herd Settings
+    herd_dynamic_mode: bool = False
+    herd_model_pool: List[Dict[str, str]] = Field(default_factory=list)
+
+
 
     preferred_name: Optional[str] = None
     
@@ -323,7 +331,13 @@ class UserUpdate(BaseModel):
     # Herd Mode Settings
     herd_mode_enabled: Optional[bool] = None
     herd_participants: Optional[List[Dict[str, str]]] = None
+    herd_precode_participants: Optional[List[Dict[str, str]]] = None
+    herd_postcode_participants: Optional[List[Dict[str, str]]] = None
     herd_rounds: Optional[int] = None
+    
+    # New Dynamic Herd Settings
+    herd_dynamic_mode: Optional[bool] = None
+    herd_model_pool: Optional[List[Dict[str, str]]] = None
     
     reasoning_activation: Optional[bool] = None
     reasoning_effort: Optional[str] = None

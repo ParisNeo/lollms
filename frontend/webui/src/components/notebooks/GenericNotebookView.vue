@@ -6,7 +6,6 @@ import { useTasksStore } from '../../stores/tasks';
 import { storeToRefs } from 'pinia';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
-import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
 
 // Icons
 import IconPlus from '../../assets/icons/IconPlus.vue';
@@ -24,7 +23,6 @@ import IconWeb from '../../assets/icons/IconWeb.vue';
 import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
 import IconVideoCamera from '../../assets/icons/IconVideoCamera.vue';
 import IconArrowRight from '../../assets/icons/IconArrowRight.vue';
-import IconPhoto from '../../assets/icons/IconPhoto.vue';
 
 const props = defineProps({
     notebook: { type: Object, required: true }
@@ -79,11 +77,12 @@ const youtubeData = computed(() => {
     return null;
 });
 
-
 const initTabs = () => {
     if (props.notebook.tabs?.length > 0) {
         if (!activeTabId.value || !props.notebook.tabs.find(t => t.id === activeTabId.value)) {
-            activeTabId.value = props.notebook.tabs[0].id;
+            // Prefer "Research Report" or Main
+            const reportTab = props.notebook.tabs.find(t => t.title === "Research Report" || t.title === "Main");
+            activeTabId.value = reportTab ? reportTab.id : props.notebook.tabs[0].id;
         }
     }
 };
@@ -91,6 +90,7 @@ const initTabs = () => {
 watch(() => props.notebook.id, initTabs, { immediate: true });
 watch(() => props.notebook.tabs, initTabs, { deep: true });
 
+// Auto-scroll logs
 watch(() => activeTask.value?.logs?.length, () => {
     if (logsContainerRef.value) {
         nextTick(() => {
@@ -108,8 +108,13 @@ async function handleAction(actionType) {
     if (actionType === 'summarize' && !prompt) {
         prompt = "Summarize the selected information.";
     }
+    if (actionType === 'generate_report' && !prompt) {
+        prompt = "Analyze all sources and generate a comprehensive research report.";
+        // Force target to current if it's the main report tab
+        if (currentTab.value?.title === "Research Report") modifyCurrentTab.value = true;
+    }
     
-    if (!prompt.trim() && !selectedArtefactNames.value.length) {
+    if (!prompt.trim() && !selectedArtefactNames.value.length && actionType !== 'generate_report') {
         uiStore.addNotification("Please enter a prompt or select artefacts.", "warning");
         return;
     }
@@ -118,18 +123,48 @@ async function handleAction(actionType) {
     aiPrompt.value = '';
 }
 
+// --- SLIDE IMAGE ACTIONS ---
+function navSlideImage(slide, dir) {
+    const info = getSlideImageInfo(slide);
+    if (!info) return;
+    let newIdx = info.index + dir;
+    if (newIdx < 0) newIdx = info.total - 1;
+    if (newIdx >= info.total) newIdx = 0;
+    notebookStore.setSlideImageIndex(currentTab.value.id, slide.id, newIdx);
+}
+
+function regenerateSlide(slide) {
+    notebookStore.regenerateSlideImage(currentTab.value.id, slide.id);
+}
+
+function deleteSlideImage(slide) {
+    const info = getSlideImageInfo(slide);
+    if (!info) return;
+    if (confirm("Delete this version of the image?")) {
+        notebookStore.deleteSlideImage(currentTab.value.id, slide.id, info.index);
+    }
+}
+
+function downloadSlideImage(slide) {
+    const info = getSlideImageInfo(slide);
+    if (!info || !info.path) return;
+    // Simple download trigger
+    const link = document.createElement('a');
+    link.href = info.path;
+    link.download = `slide_image_${slide.id}_${info.index}.png`;
+    link.target = "_blank";
+    link.click();
+}
+
+async function cancelActiveTask() {
+    if(activeTask.value) {
+        await notebookStore.cancelTask(activeTask.value.id);
+    }
+}
 function handleProcess() {
     handleAction('text_processing');
 }
 
-// --- HELPERS ---
-function getSlideImage(slide) {
-    if (slide.images && slide.images.length > 0) {
-        const idx = slide.selected_image_index || 0;
-        return slide.images[idx]?.path;
-    }
-    return null;
-}
 
 // --- ARTEFACTS & CONVERSION ---
 
@@ -180,8 +215,8 @@ async function convertToProject(type) {
     const newNotebook = await notebookStore.createStructuredNotebook({
         title: title,
         type: type,
-        initialPrompt: "Initialize project from previous research.", // This triggers the ingestion/setup task
-        raw_text: context // This puts the gathered context into the new notebook's artefacts immediately
+        initialPrompt: "Initialize project from previous research.", 
+        raw_text: context 
     });
 
     if (newNotebook) {
@@ -216,6 +251,7 @@ async function saveArtefactEdit() {
 async function deleteArtefact(filename) {
     await notebookStore.deleteArtefact(filename);
 }
+
 </script>
 
 <template>
@@ -244,7 +280,7 @@ async function deleteArtefact(filename) {
 
                     <div class="flex-grow flex flex-col min-h-0 bg-black rounded-3xl shadow-2xl border border-gray-800 overflow-hidden">
                         <div class="px-6 py-3 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
-                            <span class="text-[10px] font-black uppercase text-gray-500 tracking-widest">Process Terminal Output</span>
+                            <span class="text-[10px] font-black uppercase text-gray-500 tracking-widest">Research Operation Terminal</span>
                             <div class="flex gap-1.5">
                                 <div class="w-2 h-2 rounded-full bg-red-500/50"></div>
                                 <div class="w-2 h-2 rounded-full bg-yellow-500/50"></div>
@@ -259,6 +295,14 @@ async function deleteArtefact(filename) {
                                 </span>
                             </div>
                         </div>
+                    </div>
+                    
+                    <!-- Cancel Action -->
+                    <div v-if="activeTask.status === 'running' || activeTask.status === 'pending'" class="mt-6 flex justify-end">
+                        <button @click="cancelActiveTask" class="btn btn-warning px-6 py-2 flex items-center gap-2 rounded-xl shadow-lg border border-red-500/30">
+                            <IconXMark class="w-4 h-4" />
+                            Stop Operation
+                        </button>
                     </div>
                 </div>
             </div>
@@ -279,28 +323,29 @@ async function deleteArtefact(filename) {
         </transition>
 
         <!-- Sidebar -->
-        <div class="w-72 border-r dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col flex-shrink-0 transition-all">
+        <div class="w-72 border-r dark:border-gray-800 bg-gray-100 dark:bg-gray-900 flex flex-col flex-shrink-0 transition-all z-10">
             <div class="p-4 border-b dark:border-gray-800 font-black text-[10px] uppercase tracking-widest text-gray-500 flex justify-between items-center">
-                <span>Research Data</span>
+                <span>Data Sources</span>
                 <button @click="openImportWizard" class="text-green-500 hover:text-green-600 p-1 rounded hover:bg-green-50 dark:hover:bg-green-900/20"><IconPlus class="w-4 h-4" /></button>
             </div>
             
             <div class="flex-grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
-                <div v-if="notebook.artefacts.length === 0" class="text-center p-4 text-xs text-gray-400 italic">
+                <div v-if="notebook.artefacts.length === 0" class="text-center p-8 text-xs text-gray-400 italic">
+                    <div class="mb-2 opacity-50"><IconFileText class="w-8 h-8 mx-auto"/></div>
                     No data sources yet.<br>Click + to import content.
                 </div>
                 <div v-for="art in notebook.artefacts" :key="art.filename" 
                      @click="toggleArtefact(art.filename)"
-                     class="flex items-center gap-2 p-2 rounded cursor-pointer group transition-colors border border-transparent"
-                     :class="selectedArtefactNames.includes(art.filename) ? 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800' : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'">
+                     class="flex items-center gap-2 p-3 rounded-lg cursor-pointer group transition-all border border-transparent shadow-sm"
+                     :class="selectedArtefactNames.includes(art.filename) ? 'bg-white dark:bg-gray-800 border-green-500 shadow-md ring-1 ring-green-500/20' : 'bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600'">
                     <div class="flex-shrink-0">
-                        <IconCheckCircle v-if="selectedArtefactNames.includes(art.filename)" class="w-4 h-4" />
-                        <IconFileText v-else class="w-4 h-4 opacity-50" />
+                        <IconCheckCircle v-if="selectedArtefactNames.includes(art.filename)" class="w-4 h-4 text-green-500" />
+                        <IconFileText v-else class="w-4 h-4 text-gray-400" />
                     </div>
-                    <span class="truncate text-xs font-medium flex-grow">{{ art.filename }}</span>
+                    <span class="truncate text-xs font-bold text-gray-700 dark:text-gray-300 flex-grow">{{ art.filename }}</span>
                     
                     <!-- Actions -->
-                    <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 bg-white/50 dark:bg-black/50 rounded px-1 backdrop-blur-sm">
+                    <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 bg-gray-100 dark:bg-gray-700 rounded px-1">
                         <button @click.stop="viewArtefact(art)" class="p-1 hover:text-blue-500" title="View"><IconEye class="w-3 h-3" /></button>
                         <button @click.stop="openArtefactEditor(art)" class="p-1 hover:text-orange-500" title="Edit"><IconPencil class="w-3 h-3" /></button>
                         <button @click.stop="deleteArtefact(art.filename)" class="p-1 hover:text-red-500" title="Delete"><IconTrash class="w-3 h-3" /></button>
@@ -309,14 +354,14 @@ async function deleteArtefact(filename) {
             </div>
 
             <!-- Conversion Tools -->
-            <div class="p-4 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-850">
-                <p class="text-[9px] font-black uppercase text-gray-400 mb-2">Create Project from Selection</p>
+            <div class="p-4 border-t dark:border-gray-800 bg-gray-200 dark:bg-black/20">
+                <p class="text-[9px] font-black uppercase text-gray-500 mb-2">Convert Selection To Project</p>
                 <div class="grid grid-cols-2 gap-2">
-                    <button @click="convertToProject('slides_making')" class="flex flex-col items-center justify-center p-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded hover:border-blue-500 transition-colors text-center group">
+                    <button @click="convertToProject('slides_making')" class="flex flex-col items-center justify-center p-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg hover:border-blue-500 hover:shadow-lg transition-all text-center group">
                         <IconPresentationChartBar class="w-5 h-5 text-gray-400 group-hover:text-blue-500 mb-1" />
                         <span class="text-[10px] font-bold">Slides</span>
                     </button>
-                    <button @click="convertToProject('youtube_video')" class="flex flex-col items-center justify-center p-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded hover:border-pink-500 transition-colors text-center group">
+                    <button @click="convertToProject('youtube_video')" class="flex flex-col items-center justify-center p-2 bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg hover:border-pink-500 hover:shadow-lg transition-all text-center group">
                         <IconVideoCamera class="w-5 h-5 text-gray-400 group-hover:text-pink-500 mb-1" />
                         <span class="text-[10px] font-bold">Video</span>
                     </button>
@@ -325,37 +370,46 @@ async function deleteArtefact(filename) {
         </div>
 
         <!-- Main -->
-        <div class="flex-grow flex flex-col overflow-hidden">
+        <div class="flex-grow flex flex-col overflow-hidden bg-gray-100 dark:bg-gray-950">
             <!-- Tab Bar -->
-            <div class="bg-gray-100 dark:bg-gray-900 border-b dark:border-gray-700 pt-1 px-4 flex gap-1 overflow-x-auto no-scrollbar">
+            <div class="bg-white dark:bg-gray-900 border-b dark:border-gray-800 pt-2 px-4 flex gap-2 overflow-x-auto no-scrollbar shadow-sm z-20">
                 <div v-for="tab in notebook.tabs" :key="tab.id" @click="activeTabId = tab.id" 
-                     class="group relative px-4 py-2 rounded-t-lg cursor-pointer text-xs font-bold uppercase transition-all flex items-center gap-2 min-w-[100px] justify-between" 
-                     :class="activeTabId === tab.id ? 'bg-white dark:bg-gray-950 text-blue-600 border-t border-x border-gray-300 dark:border-gray-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 bg-gray-200/50 dark:bg-gray-800/50 hover:bg-gray-200 dark:hover:bg-gray-800'">
+                     class="group relative px-4 py-2 rounded-t-lg cursor-pointer text-xs font-bold uppercase transition-all flex items-center gap-2 min-w-[120px] justify-between border-t border-x" 
+                     :class="activeTabId === tab.id ? 'bg-gray-100 dark:bg-gray-950 border-gray-200 dark:border-gray-700 text-blue-600 dark:text-blue-400 translate-y-px' : 'bg-gray-50 dark:bg-gray-900 border-transparent text-gray-500 hover:bg-gray-100 hover:text-gray-700'">
                     <span class="truncate">{{ tab.title }}</span>
                     <button @click.stop="handleCloseTab(tab.id)" class="opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity"><IconXMark class="w-3 h-3" /></button>
                 </div>
-                <button @click="notebookStore.addTab('markdown')" class="px-3 py-2 text-gray-400 hover:text-blue-500"><IconPlus class="w-4 h-4"/></button>
+                <button @click="notebookStore.addTab('markdown')" class="px-3 py-2 text-gray-400 hover:text-blue-500 transition-colors"><IconPlus class="w-4 h-4"/></button>
             </div>
 
             <!-- Editor / Viewer -->
-            <div class="flex-grow flex flex-col relative min-h-0 bg-white dark:bg-gray-950">
+            <div class="flex-grow flex flex-col relative min-h-0 bg-gray-100 dark:bg-gray-950">
                 <template v-if="currentTab">
                     <!-- Tab Actions Toolbar -->
-                    <div class="p-2 border-b dark:border-gray-700 flex justify-between items-center shadow-sm bg-white dark:bg-gray-950 z-10">
-                        <input v-model="currentTab.title" @blur="notebookStore.saveActive" class="font-bold bg-transparent border-none focus:ring-0 text-gray-800 dark:text-gray-100 text-sm ml-2" />
+                    <div class="p-3 border-b dark:border-gray-800 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/50 z-10 backdrop-blur-sm sticky top-0">
+                        <div class="flex items-center gap-2">
+                             <input v-model="currentTab.title" @blur="notebookStore.saveActive" class="font-black bg-transparent border-none focus:ring-0 text-gray-800 dark:text-gray-100 text-sm" />
+                             <span class="text-[10px] uppercase font-bold text-gray-400 px-2 py-0.5 bg-gray-200 dark:bg-gray-800 rounded">{{ currentTab.type }}</span>
+                        </div>
                         
                         <div class="flex items-center gap-2">
-                            <button @click="saveTabAsArtefact" class="btn btn-secondary btn-sm text-xs" title="Save this content as a reusable artefact">
-                                <IconSave class="w-3 h-3 mr-1" /> To Artefact
+                            <button v-if="currentTab.title === 'Research Report'" @click="handleAction('generate_report')" class="btn btn-primary btn-sm flex items-center gap-1 shadow-md">
+                                <IconSparkles class="w-3 h-3" />
+                                Regenerate Report
                             </button>
-                            <div class="h-4 w-px bg-gray-300 dark:bg-gray-700 mx-1"></div>
+
+                            <div class="h-4 w-px bg-gray-300 dark:bg-gray-700 mx-2"></div>
+                            
+                            <button @click="saveTabAsArtefact" class="btn btn-secondary btn-sm text-xs" title="Save this content as a reusable artefact">
+                                <IconSave class="w-3 h-3 mr-1" /> Save Source
+                            </button>
                             
                             <!-- Toggle View/Edit only for non-structured types -->
-                            <div class="flex gap-1 bg-gray-100 dark:bg-gray-800 p-0.5 rounded border dark:border-gray-700" v-if="!['html', 'slides', 'youtube_storyboard', 'youtube_script'].includes(currentTab.type)">
-                                <button @click="isRenderMode = true" class="p-1.5 rounded transition-colors" :class="isRenderMode ? 'bg-white dark:bg-gray-700 shadow text-blue-600' : 'text-gray-400 hover:text-gray-600'"><IconEye class="w-3.5 h-3.5"/></button>
-                                <button @click="isRenderMode = false" class="p-1.5 rounded transition-colors" :class="!isRenderMode ? 'bg-white dark:bg-gray-700 shadow text-blue-600' : 'text-gray-400 hover:text-gray-600'"><IconPencil class="w-3.5 h-3.5"/></button>
+                            <div class="flex gap-1 bg-white dark:bg-gray-800 p-0.5 rounded-lg border dark:border-gray-700 shadow-sm" v-if="!['html', 'slides', 'youtube_storyboard', 'youtube_script'].includes(currentTab.type)">
+                                <button @click="isRenderMode = true" class="p-1.5 rounded transition-colors" :class="isRenderMode ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'text-gray-400 hover:text-gray-600'"><IconEye class="w-3.5 h-3.5"/></button>
+                                <button @click="isRenderMode = false" class="p-1.5 rounded transition-colors" :class="!isRenderMode ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-600' : 'text-gray-400 hover:text-gray-600'"><IconPencil class="w-3.5 h-3.5"/></button>
                             </div>
-                            <button @click="notebookStore.saveActive" class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500" title="Save changes"><IconSave class="w-4 h-4" /></button>
+                            <button @click="notebookStore.saveActive" class="p-1.5 rounded hover:bg-white text-gray-500" title="Save changes"><IconSave class="w-4 h-4" /></button>
                         </div>
                     </div>
 
@@ -366,94 +420,44 @@ async function deleteArtefact(filename) {
                             <iframe v-if="currentHtmlSrc" :src="currentHtmlSrc" class="w-full h-full border-none bg-white"></iframe>
                             <div v-else class="flex items-center justify-center h-full text-gray-400">No HTML Content</div>
                         </template>
-
-                        <!-- SLIDES VIEWER -->
-                        <template v-else-if="currentTab.type === 'slides' && slideData">
-                            <div class="p-6 overflow-y-auto custom-scrollbar h-full bg-gray-50 dark:bg-gray-900">
-                                <div class="max-w-4xl mx-auto space-y-6 pb-20">
-                                    <div v-if="slideData.summary" class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg text-sm">
-                                        <h3 class="font-bold text-blue-700 dark:text-blue-300 mb-1">Deck Summary</h3>
-                                        <p class="text-gray-700 dark:text-gray-300">{{ slideData.summary }}</p>
-                                    </div>
-
-                                    <div v-for="(slide, index) in slideData.slides_data" :key="index" class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl overflow-hidden shadow-sm flex flex-col md:flex-row h-auto md:h-56">
-                                        <div class="w-full md:w-1/3 bg-black relative flex-shrink-0">
-                                             <AuthenticatedImage v-if="getSlideImage(slide)" :src="getSlideImage(slide)" class="w-full h-full object-cover" />
-                                             <div v-else class="w-full h-full flex flex-col items-center justify-center text-gray-500 gap-2 bg-gray-100 dark:bg-gray-900"><IconPhoto class="w-8 h-8 opacity-20"/></div>
-                                        </div>
-                                        <div class="p-4 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
-                                            <div class="flex justify-between items-start mb-2">
-                                                 <h4 class="font-bold text-lg text-gray-900 dark:text-white leading-tight">{{ slide.title }}</h4>
-                                                 <span class="text-xs font-mono text-gray-400 ml-2">#{{ index + 1 }}</span>
-                                            </div>
-                                            <ul class="list-disc list-inside text-sm space-y-1 text-gray-600 dark:text-gray-300 mb-3 flex-grow">
-                                                <li v-for="(bullet, bIdx) in slide.bullets" :key="bIdx">{{ bullet }}</li>
-                                            </ul>
-                                            <div v-if="slide.notes" class="text-xs text-gray-500 italic bg-gray-50 dark:bg-gray-900/50 p-2 rounded mt-auto border dark:border-gray-700">
-                                                <span class="font-semibold not-italic text-gray-600 dark:text-gray-400">Speaker Notes:</span> {{ slide.notes }}
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="text-center text-xs text-gray-400">To edit these slides, use the "Create Project > Slides" option in the sidebar.</div>
-                                </div>
-                            </div>
-                        </template>
-
-                        <!-- STORYBOARD VIEWER -->
-                        <template v-else-if="(currentTab.type === 'youtube_storyboard' || currentTab.type === 'youtube_script') && youtubeData">
-                            <div class="p-6 overflow-y-auto custom-scrollbar h-full bg-gray-50 dark:bg-gray-900">
-                                <div class="max-w-4xl mx-auto space-y-6 pb-20">
-                                    <div v-for="(scene, index) in youtubeData.scenes" :key="index" class="bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-xl overflow-hidden shadow-sm p-5">
-                                        <div class="flex justify-between items-center mb-3 border-b dark:border-gray-700 pb-2">
-                                            <h4 class="font-black text-base text-gray-900 dark:text-white">{{ scene.title }}</h4>
-                                            <span class="px-2 py-0.5 bg-gray-100 dark:bg-gray-700 rounded text-[10px] uppercase font-bold text-gray-500">Scene {{ index + 1 }}</span>
-                                        </div>
-                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                            <div>
-                                                <p class="text-[10px] font-bold uppercase text-blue-500 mb-1">Visual</p>
-                                                <p class="text-sm text-gray-600 dark:text-gray-300 italic">{{ scene.visual_description }}</p>
-                                            </div>
-                                            <div>
-                                                <p class="text-[10px] font-bold uppercase text-green-500 mb-1">Audio</p>
-                                                <p class="text-sm text-gray-800 dark:text-gray-200">{{ scene.audio_script }}</p>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="text-center text-xs text-gray-400">To produce this video, use the "Create Project > Video" option in the sidebar.</div>
-                                </div>
-                            </div>
-                        </template>
                         
                         <!-- Standard Markdown/Code -->
                         <template v-else>
-                            <div v-if="isRenderMode" class="absolute inset-0 overflow-y-auto p-8 custom-scrollbar">
-                                <MessageContentRenderer :content="currentTab.content" :key="currentTab.id + currentTab.content?.length" class="prose dark:prose-invert max-w-none" />
+                            <div v-if="isRenderMode" class="absolute inset-0 overflow-y-auto p-4 md:p-8 custom-scrollbar">
+                                <div class="max-w-5xl mx-auto bg-white dark:bg-gray-900 shadow-xl border border-gray-200 dark:border-gray-800 min-h-[80vh] p-8 md:p-12 rounded-xl">
+                                    <MessageContentRenderer :content="currentTab.content" :key="currentTab.id + currentTab.content?.length" class="prose prose-lg dark:prose-invert max-w-none" />
+                                </div>
                             </div>
                             <CodeMirrorEditor v-else v-model="currentTab.content" @blur="notebookStore.saveActive" class="h-full" :language="currentTab.type === 'code' ? 'python' : 'markdown'" />
                         </template>
                     </div>
                 </template>
-                <div v-else class="flex-grow flex items-center justify-center text-gray-400 italic">Select a tab or create a new one.</div>
+                <div v-else class="flex-grow flex items-center justify-center text-gray-400 italic flex-col gap-4">
+                    <div class="w-20 h-20 bg-gray-200 dark:bg-gray-800 rounded-full flex items-center justify-center">
+                        <IconSparkles class="w-10 h-10 opacity-30"/>
+                    </div>
+                    <p>Select a tab or create a new one to begin.</p>
+                </div>
             </div>
 
             <!-- Prompt Bar -->
-            <div class="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col gap-2 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.1)] z-20">
+            <div class="p-4 bg-gray-50 dark:bg-gray-900 flex flex-col gap-2 border-t dark:border-gray-800 z-20">
                 <div class="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
                     <span class="text-[10px] font-black uppercase text-gray-400 whitespace-nowrap">Quick Actions:</span>
-                    <button @click="handleAction('summarize')" class="px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-full text-xs font-bold border border-blue-100 dark:border-blue-900/30 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors whitespace-nowrap"><IconFileText class="w-3 h-3 inline mr-1"/>Summarize</button>
-                    <button @click="handleAction('generate_html')" class="px-3 py-1 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400 rounded-full text-xs font-bold border border-purple-100 dark:border-purple-900/30 hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors whitespace-nowrap"><IconWeb class="w-3 h-3 inline mr-1"/>Visualize (HTML)</button>
-                    <button @click="handleAction('generate_code')" class="px-3 py-1 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400 rounded-full text-xs font-bold border border-yellow-100 dark:border-yellow-900/30 hover:bg-yellow-100 dark:hover:bg-yellow-900/40 transition-colors whitespace-nowrap"><IconCode class="w-3 h-3 inline mr-1"/>Generate Code</button>
+                    <button @click="handleAction('summarize')" class="px-3 py-1 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-full text-xs font-bold border hover:border-blue-500 hover:text-blue-500 transition-all whitespace-nowrap shadow-sm"><IconFileText class="w-3 h-3 inline mr-1"/>Summarize</button>
+                    <button @click="handleAction('generate_html')" class="px-3 py-1 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-full text-xs font-bold border hover:border-purple-500 hover:text-purple-500 transition-all whitespace-nowrap shadow-sm"><IconWeb class="w-3 h-3 inline mr-1"/>Visualize (HTML)</button>
+                    <button @click="handleAction('generate_code')" class="px-3 py-1 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 rounded-full text-xs font-bold border hover:border-yellow-500 hover:text-yellow-500 transition-all whitespace-nowrap shadow-sm"><IconCode class="w-3 h-3 inline mr-1"/>Generate Code</button>
                 </div>
-                <div class="flex gap-2 relative">
-                    <input v-model="aiPrompt" @keyup.enter="handleProcess" placeholder="Ask AI to process selected data or write content..." class="input-field flex-grow pr-32" />
+                <div class="flex gap-2 relative shadow-lg rounded-xl">
+                    <input v-model="aiPrompt" @keyup.enter="handleProcess" placeholder="Ask AI to analyze data or write content..." class="input-field flex-grow pr-36 h-14 rounded-xl text-base pl-4 border-none focus:ring-2 ring-blue-500" />
                     
-                    <div class="flex items-center gap-2 px-2 border-l dark:border-gray-700 absolute right-16 top-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 pl-2">
-                        <input type="checkbox" id="mod-tab" v-model="modifyCurrentTab" class="h-3 w-3 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"/>
+                    <div class="flex items-center gap-2 px-2 border-l dark:border-gray-700 absolute right-16 top-1/2 -translate-y-1/2 h-8 pl-3">
+                        <input type="checkbox" id="mod-tab" v-model="modifyCurrentTab" class="h-4 w-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"/>
                         <label for="mod-tab" class="text-[9px] font-black uppercase text-gray-400 cursor-pointer select-none whitespace-nowrap">Edit Active</label>
                     </div>
                     
-                    <button @click="handleProcess" class="btn btn-primary px-4 absolute right-1 top-1 bottom-1 flex items-center justify-center rounded-lg" :disabled="(!aiPrompt.trim() && !selectedArtefactNames.length) || activeTask">
-                        <IconArrowRight class="w-4 h-4"/>
+                    <button @click="handleProcess" class="absolute right-2 top-2 bottom-2 btn btn-primary w-10 flex items-center justify-center rounded-lg shadow-md" :disabled="(!aiPrompt.trim() && !selectedArtefactNames.length) || activeTask">
+                        <IconArrowRight class="w-5 h-5"/>
                     </button>
                 </div>
             </div>
@@ -468,4 +472,6 @@ async function deleteArtefact(filename) {
   animation: progress-animation 1s linear infinite;
 }
 @keyframes progress-animation { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 </style>

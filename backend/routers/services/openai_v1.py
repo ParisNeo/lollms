@@ -61,7 +61,7 @@ class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
     personality: Optional[str] = None 
-    temperature: Optional[float] = 0.7
+    temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     stream: Optional[bool] = False
     tools: Optional[List[Dict[str, Any]]] = None

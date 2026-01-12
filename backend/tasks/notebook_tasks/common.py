@@ -28,3 +28,32 @@ def get_notebook_metadata(notebook: DBNotebook) -> Dict[str, Any]:
     except:
         pass
     return {}
+
+
+def handle_partial_notebook(db, notebook_id, username):
+    """
+    Ensures a partially created notebook is properly saved and accessible.
+    """
+    from backend.db.models.notebook import Notebook as DBNotebook
+
+    notebook = db.query(DBNotebook).filter(
+        DBNotebook.id == notebook_id,
+        DBNotebook.owner_user_id == db.query(DBUser).filter(DBUser.username == username).first().id
+    ).first()
+
+    if notebook:
+        # Ensure the notebook has at least one tab if it doesn't have any
+        if not notebook.tabs:
+            notebook.tabs = [{
+                "id": str(uuid.uuid4()),
+                "title": "Main",
+                "type": "markdown",
+                "content": "This notebook was partially created. Some content may be missing.",
+                "images": []
+            }]
+
+        # Commit any changes
+        db.commit()
+        db.refresh(notebook)
+
+    return notebook

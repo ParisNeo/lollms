@@ -1,6 +1,7 @@
 <script setup>
-import { ref, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import { useAdminStore } from '../../stores/admin';
 import apiClient from '../../services/api';
 
 // Icons
@@ -13,16 +14,59 @@ import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconArchiveBox from '../../assets/icons/IconArchiveBox.vue';
 import IconClock from '../../assets/icons/IconClock.vue';
 import IconLock from '../../assets/icons/IconLock.vue';
+import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
+import IconPower from '../../assets/icons/IconPower.vue';
 
 const uiStore = useUiStore();
+const adminStore = useAdminStore();
 
-// State
+// --- Maintenance Mode State ---
+const maintenanceMode = ref(false);
+const maintenanceMessage = ref("");
+const isSavingMaintenance = ref(false);
+
+const maintenanceSetting = computed(() => adminStore.globalSettings.find(s => s.key === 'maintenance_mode'));
+const messageSetting = computed(() => adminStore.globalSettings.find(s => s.key === 'maintenance_message'));
+
+// --- Server Action State ---
 const isActionInProgress = ref(false);
 const actionStatus = ref(''); // 'rebooting', 'updating', 'reconnecting', 'success'
 const pingInterval = ref(null);
 const backupPassword = ref('');
 
-// --- Actions ---
+// --- Initialization ---
+onMounted(() => {
+    if (adminStore.globalSettings.length === 0) {
+        adminStore.fetchGlobalSettings();
+    } else {
+        syncMaintenanceState();
+    }
+});
+
+watch(() => adminStore.globalSettings, syncMaintenanceState, { deep: true });
+
+function syncMaintenanceState() {
+    if (maintenanceSetting.value) maintenanceMode.value = maintenanceSetting.value.value;
+    if (messageSetting.value) maintenanceMessage.value = messageSetting.value.value;
+}
+
+// --- Maintenance Mode Actions ---
+async function saveMaintenanceSettings() {
+    isSavingMaintenance.value = true;
+    try {
+        await adminStore.updateGlobalSettings({
+            maintenance_mode: maintenanceMode.value,
+            maintenance_message: maintenanceMessage.value
+        });
+        uiStore.addNotification('Maintenance settings updated.', 'success');
+    } catch (e) {
+        uiStore.addNotification('Failed to save maintenance settings.', 'error');
+    } finally {
+        isSavingMaintenance.value = false;
+    }
+}
+
+// --- Server Actions ---
 
 async function handleReboot() {
     const confirmed = await uiStore.showConfirmation({
@@ -32,7 +76,7 @@ async function handleReboot() {
         isDanger: true
     });
     
-    if (confirmed) {
+    if (confirmed.confirmed) {
         performServerAction('/api/admin/system/reboot', 'rebooting');
     }
 }
@@ -45,7 +89,7 @@ async function handleUpdate() {
         isDanger: true
     });
 
-    if (confirmed) {
+    if (confirmed.confirmed) {
         performServerAction('/api/admin/system/update', 'updating');
     }
 }
@@ -57,7 +101,7 @@ async function handlePurge() {
         confirmText: 'Purge'
     });
 
-    if (confirmed) {
+    if (confirmed.confirmed) {
         try {
             await apiClient.post('/api/admin/purge-unused-uploads');
             uiStore.addNotification('Purge task started.', 'success');
@@ -74,7 +118,7 @@ async function handlePruneTasks() {
         confirmText: 'Prune'
     });
 
-    if (confirmed) {
+    if (confirmed.confirmed) {
         try {
             await apiClient.post('/api/admin/tasks/prune');
             uiStore.addNotification('Pruning task started.', 'success');
@@ -106,8 +150,13 @@ async function performServerAction(endpoint, mode) {
     actionStatus.value = mode;
     
     try {
-        await apiClient.post(endpoint);
-        // If successful, the server will die shortly. Start waiting for reconnection.
+        // The server might not respond if it restarts immediately, so catch error but assume success if network fails
+        try {
+            await apiClient.post(endpoint, {}, { timeout: 5000 });
+        } catch (e) {
+            console.log("Server likely restarting...", e);
+        }
+        
         actionStatus.value = 'reconnecting';
         startPinging();
     } catch (error) {
@@ -124,7 +173,7 @@ function startPinging() {
     setTimeout(() => {
         pingInterval.value = setInterval(async () => {
             try {
-                // Try a lightweight endpoint
+                // Try a lightweight public endpoint
                 await apiClient.get('/api/public/version', { timeout: 2000 });
                 
                 // If successful, we are back!
@@ -151,10 +200,47 @@ onUnmounted(() => {
 
 <template>
     <div class="space-y-8">
-        <!-- SERVER CONTROL SECTION -->
+        
+        <!-- SECTION 1: MAINTENANCE MODE -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-orange-200 dark:border-orange-900/50 overflow-hidden">
+            <div class="p-6 bg-orange-50 dark:bg-orange-900/20 border-b border-orange-100 dark:border-orange-900/30">
+                <div class="flex items-center gap-4">
+                    <div class="p-3 bg-orange-100 dark:bg-orange-900/50 rounded-full text-orange-600">
+                        <IconWrenchScrewdriver class="w-8 h-8" />
+                    </div>
+                    <div>
+                        <h4 class="text-lg font-bold text-gray-900 dark:text-white">Maintenance Mode</h4>
+                        <p class="text-sm text-gray-600 dark:text-gray-300">
+                            Block access for non-admin users and show a maintenance page.
+                        </p>
+                    </div>
+                    <div class="ml-auto">
+                         <button @click="maintenanceMode = !maintenanceMode" type="button" :class="[maintenanceMode ? 'bg-orange-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-8 w-14 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <span :class="[maintenanceMode ? 'translate-x-6' : 'translate-x-0', 'pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Conditional Settings Area -->
+            <div v-if="maintenanceMode || (maintenanceSetting && maintenanceMode !== maintenanceSetting.value)" class="p-6 space-y-4 animate-in fade-in slide-in-from-top-2">
+                <div v-if="maintenanceMode">
+                    <label class="block text-sm font-medium mb-1">Maintenance Message</label>
+                    <textarea v-model="maintenanceMessage" rows="3" class="input-field w-full" placeholder="We are performing maintenance..."></textarea>
+                    <p class="text-xs text-gray-500 mt-1">This message will be displayed to users on the splash screen.</p>
+                </div>
+                <div class="flex justify-end">
+                    <button @click="saveMaintenanceSettings" class="btn btn-primary" :disabled="isSavingMaintenance">
+                        {{ isSavingMaintenance ? 'Saving...' : 'Save Changes' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- SECTION 2: SERVER CONTROL -->
         <div>
             <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                <IconServer class="w-5 h-5 text-blue-500"/> Server Control
+                <IconPower class="w-5 h-5 text-red-500"/> Server Control
             </h3>
             
             <!-- Progress Overlay (Only visible during Reboot/Update) -->
@@ -178,8 +264,8 @@ onUnmounted(() => {
                 </h3>
                 <p class="text-gray-500 dark:text-gray-400 max-w-md">
                     <span v-if="actionStatus === 'rebooting'">The application process is restarting. This usually takes 5-10 seconds.</span>
-                    <span v-if="actionStatus === 'updating'">Downloading updates and reinstalling requirements. This may take a few minutes depending on your internet connection.</span>
-                    <span v-if="actionStatus === 'reconnecting'">The server is starting up. We are pinging it automatically and will refresh the page once it responds.</span>
+                    <span v-if="actionStatus === 'updating'">Downloading updates and reinstalling requirements. This may take a few minutes.</span>
+                    <span v-if="actionStatus === 'reconnecting'">The server is starting up. We are pinging it automatically.</span>
                     <span v-if="actionStatus === 'success'">Redirecting you to the dashboard...</span>
                 </p>
             </div>
@@ -225,7 +311,7 @@ onUnmounted(() => {
             <!-- MAINTENANCE SECTION -->
             <div>
                 <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                    <IconArchiveBox class="w-5 h-5 text-purple-500"/> Maintenance
+                    <IconArchiveBox class="w-5 h-5 text-purple-500"/> Data Operations
                 </h3>
                 <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 divide-y divide-gray-200 dark:divide-gray-700">
                     <div class="p-5 flex items-center justify-between">

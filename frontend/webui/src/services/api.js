@@ -1,82 +1,71 @@
 import axios from 'axios';
 import { useAuthStore } from '../stores/auth';
 import { useUiStore } from '../stores/ui';
+import router from '../router';
 
-const apiClient = axios.create({
-  // The base URL can be inferred from the window origin.
-  // Vite's proxy will handle API calls during development.
-  baseURL: import.meta.env.VITE_API_BASE_URL || '',
+const api = axios.create({
+    baseURL: '',
+    headers: {
+        'Content-Type': 'application/json',
+    },
 });
 
-// --- Request Interceptor ---
-// This runs BEFORE every request is sent. Its job is to ensure
-// the latest authentication token is attached.
-apiClient.interceptors.request.use(
-  (config) => {
-    // We get a fresh instance of the auth store each time.
-    const authStore = useAuthStore();
-    const token = authStore.token; // Get the current token from the store
-
-    if (token) {
-      // Attach the token as a Bearer token.
-      config.headers['Authorization'] = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => {
-    // If there's an error setting up the request, reject the promise.
-    return Promise.reject(error);
-  }
-);
-
-// --- Response Interceptor ---
-// This runs AFTER a response is received. Its job is to handle
-// global responses, especially errors like 401, 403, etc.
-apiClient.interceptors.response.use(
-  (response) => {
-    // If the response is successful (status 2xx), just return it.
-    return response;
-  },
-  (error) => {
-    const uiStore = useUiStore();
-    const authStore = useAuthStore();
-
-    if (error.response) {
-      // The server responded with an error status code (4xx or 5xx)
-      const { status, data, config } = error.response;
-      const detail = data?.detail || 'An unexpected error occurred.';
-
-      if (status === 401) {
-        // If we get a 401 Unauthorized, it means the token is invalid or expired.
-        // We trigger a logout, but prevent loops by excluding auth-related endpoints.
-        const isAuthEndpoint = config.url.includes('/api/auth/token') || config.url.includes('/api/auth/logout');
-        
-        if (!isAuthEndpoint) {
-            console.error("Authentication error (401), logging out.");
-            authStore.logout();
+api.interceptors.request.use(
+    (config) => {
+        const authStore = useAuthStore();
+        if (authStore.token) {
+            config.headers.Authorization = `Bearer ${authStore.token}`;
         }
-      } else if (status === 403) {
-        // 403 Forbidden means the user is authenticated but not authorized for this action.
-        uiStore.addNotification(detail, 'error');
-      } else if (status === 409) {
-        // 409 Conflict is often used for duplicate entries (e.g., username already exists).
-        uiStore.addNotification(detail, 'warning');
-      } else {
-        // For other server errors (e.g., 404, 500), show a generic error notification.
-        const errorMessage = typeof detail === 'object' ? JSON.stringify(detail, null, 2) : detail;
-        uiStore.addNotification(errorMessage, 'error');
-      }
-    } else if (error.request) {
-      // The request was made but no response was received (e.g., network error, server down).
-      uiStore.addNotification('Could not connect to the server. Please check your network.', 'error');
-    } else {
-      // Something else went wrong setting up the request.
-      uiStore.addNotification(`Request Error: ${error.message}`, 'error');
+        return config;
+    },
+    (error) => {
+        return Promise.reject(error);
     }
-
-    // Reject the promise so that component-level .catch() blocks can still run if needed.
-    return Promise.reject(error);
-  }
 );
 
-export default apiClient;
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        const uiStore = useUiStore();
+        const authStore = useAuthStore();
+        
+        // Handle Maintenance Mode (503)
+        if (error.response && error.response.status === 503) {
+            const detail = error.response.data?.detail || "System under maintenance.";
+            // Only trigger maintenance overlay if it's the specific maintenance message
+            // OR if it's a generic 503 which usually means maintenance/overload
+            if (typeof detail === 'string') {
+                 uiStore.setMaintenanceMode(true, detail);
+            } else {
+                 uiStore.setMaintenanceMode(true, "System Unavailable");
+            }
+            return Promise.reject(error);
+        }
+
+        // Handle Auth Failures (401/403)
+        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
+            // Special handling for login endpoint to not auto-logout/redirect on failure
+            if (!error.config.url.includes('/auth/token')) {
+                authStore.logout();
+                uiStore.activeModal = 'login';
+                // Only redirect if not already on a public page
+                if (router.currentRoute.value.path !== '/') {
+                     router.push('/');
+                }
+            }
+        }
+        
+        // Don't show notification for 401/403 as they handle themselves (login modal)
+        // or for 503 as it shows the overlay.
+        if (error.response && ![401, 403, 503].includes(error.response.status)) {
+            const message = error.response?.data?.detail || 'An unexpected error occurred.';
+            uiStore.addNotification(message, 'error');
+        } else if (!error.response) {
+            uiStore.addNotification('Network error. Please check your connection.', 'error');
+        }
+        
+        return Promise.reject(error);
+    }
+);
+
+export default api;

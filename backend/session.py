@@ -1,4 +1,3 @@
-# backend/session.py
 import json
 import traceback
 import datetime
@@ -98,6 +97,16 @@ async def get_current_db_user_from_token(
 def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_token)) -> UserAuthDetails:
     if not db_user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive.")
+
+    # Maintenance Mode Check
+    # If maintenance is on AND the user is NOT an admin, block access.
+    is_maintenance = settings.get("maintenance_mode", False)
+    if is_maintenance and not db_user.is_admin:
+        msg = settings.get("maintenance_message", "System under maintenance.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=msg
+        )
 
     username = db_user.username
     db = object_session(db_user)

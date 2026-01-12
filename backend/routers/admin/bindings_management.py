@@ -1,4 +1,3 @@
-# [UPDATE] backend/routers/admin/bindings_management.py
 import json
 import io
 import base64
@@ -11,11 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
-from lollms_client import LollmsClient
-from lollms_client.lollms_llm_binding import get_available_bindings
-from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
-from lollms_client.lollms_tts_binding import get_available_bindings as get_available_tts_bindings
-from lollms_client.lollms_stt_binding import get_available_bindings as get_available_stt_bindings
+from lollms_client import LollmsClient, list_bindings, get_binding_desc
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -43,9 +38,6 @@ from ascii_colors import trace_exception, ASCIIColors
 
 bindings_management_router = APIRouter()
 
-# ... (Previous helper functions: BindingCommandRequest, ZooInstallRequest, _process_binding_config, _get_binding_instance, _install_from_zoo_task, _execute_binding_command_task, _generate_model_icon_task remain unchanged)
-# Keeping them here for completeness but minimizing output size where possible.
-
 class BindingCommandRequest(BaseModel):
     command_name: str
     parameters: Dict[str, Any] = {}
@@ -53,26 +45,44 @@ class BindingCommandRequest(BaseModel):
 class ZooInstallRequest(BaseModel):
     index: int
 
-def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
-    if binding_type == "llm":
-        available_bindings = get_available_bindings()
-    elif binding_type == "tti":
-        available_bindings = get_available_tti_bindings()
-    elif binding_type == "stt":
-        available_bindings = get_available_stt_bindings()
-    else: # tts
-        available_bindings = get_available_tts_bindings()
-        
-    binding_desc = next((b for b in available_bindings if b.get("binding_name") == binding_name), None)
+def _normalize_binding_desc(name: str, desc: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Normalizes binding description to ensure frontend compatibility.
+    Maps new 'global_input_parameters' to legacy 'input_parameters'
+    and ensures 'binding_name' exists.
+    """
+    if not desc:
+        return {"name": name, "binding_name": name, "input_parameters": [], "model_parameters": []}
     
-    parameters_key = "input_parameters"
-    if binding_type in ["tti", "tts", "stt"] and binding_desc and "model_parameters" in binding_desc:
-        parameters_key = "model_parameters"
+    # 1. Identifiers
+    if 'binding_name' not in desc:
+        desc['binding_name'] = name
+    if 'name' not in desc:
+        desc['name'] = name
+        
+    # 2. Global Parameters (legacy: input_parameters)
+    if 'input_parameters' not in desc:
+        desc['input_parameters'] = desc.get('global_input_parameters', [])
+        
+    # 3. Model Parameters (legacy: model_parameters)
+    if 'model_parameters' not in desc:
+        desc['model_parameters'] = desc.get('model_input_parameters', [])
+        
+    return desc
 
-    if not binding_desc or parameters_key not in binding_desc:
+def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
+    # Fetch description
+    raw_desc = get_binding_desc(binding_name, binding_type)
+    binding_desc = _normalize_binding_desc(binding_name, raw_desc)
+    
+    if "error" in binding_desc:
+        ASCIIColors.warning(f"Could not load description for binding {binding_name}: {binding_desc.get('error')}")
         return config
 
-    param_types = {p["name"]: p["type"] for p in binding_desc[parameters_key]}
+    # Merge all possible parameters to check types against
+    all_params = binding_desc.get("input_parameters", []) + binding_desc.get("model_parameters", [])
+
+    param_types = {p["name"]: p["type"] for p in all_params}
     
     processed_config = {}
     for key, value in config.items():
@@ -99,6 +109,44 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
             processed_config[key] = value
 
     return processed_config
+
+def _get_effective_config(binding_data: Any) -> Dict[str, Any]:
+    """
+    Merges global binding config with model-specific alias config if a default model is set.
+    Supports both dict and ORM object.
+    """
+    # Extract data depending on type
+    if isinstance(binding_data, dict):
+        config = binding_data.get('config', {}).copy() if binding_data.get('config') else {}
+        default_model = binding_data.get('default_model_name')
+        model_aliases = binding_data.get('model_aliases')
+    else: # SQLAlchemy Object
+        config = binding_data.config.copy() if binding_data.config else {}
+        default_model = binding_data.default_model_name
+        model_aliases = binding_data.model_aliases
+
+    if default_model and model_aliases:
+        try:
+            if isinstance(model_aliases, str):
+                model_aliases = json.loads(model_aliases)
+            
+            if isinstance(model_aliases, dict) and default_model in model_aliases:
+                alias_wrapper = model_aliases[default_model]
+                alias_config = alias_wrapper.get('alias', {})
+                
+                # Exclude standard metadata fields, keep only potential model parameters
+                metadata_keys = ['title', 'description', 'icon', 'original_model_name', 'name', 'ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_effort', 'reasoning_activation', 'reasoning_summary', 'has_vision', 'ctx_size_locked', 'allow_parameters_override']
+                
+                # Helper to merge - prioritize valid values from alias
+                for k, v in alias_config.items():
+                    # We merge EVERYTHING that isn't standard metadata
+                    if k not in metadata_keys and v is not None:
+                        config[k] = v
+                        
+        except Exception as e:
+            ASCIIColors.warning(f"Error merging alias config for {default_model}: {e}")
+            
+    return config
 
 def _get_binding_instance(binding_type: str, binding_name: str, config: Dict[str, Any]):
     safe_config = config.copy() if config else {}
@@ -143,9 +191,6 @@ def _install_from_zoo_task(task: Task, binding_type: str, binding_name: str, con
         task.log("Installation completed successfully.")
         task.set_progress(100)
         
-        # Invalidate cache after installation
-        # We can't easily access DB session here to clear specific cache key without passing it
-        # But installation is rare event, user will likely refresh manually or restart.
         return {"message": "Model installed."}
 
     except Exception as e:
@@ -158,20 +203,27 @@ def _execute_binding_command_task(task: Task, binding_type: str, binding_data: D
     task.set_progress(10)
     
     try:
+        # FUSE CONFIGURATION: Merge global config with alias config if default model is set
+        effective_config = _get_effective_config(binding_data)
+        
         service = None
         if binding_type == "llm":
-            lc = get_user_lollms_client(username, binding_data['alias'], load_mcp=False) # Skip MCP loading for commands
+            # For LLM, we use get_user_lollms_client which usually handles this, 
+            # but for consistency we use the alias from binding_data.
+            # However, get_user_lollms_client loads from DB. 
+            # If we want to use the FUSED config here specifically:
+            lc = build_lollms_client_from_params(username=username, binding_alias=binding_data['alias'], llm_params=None, load_mcp=False)
             service = lc.llm
         elif binding_type == "tti":
-            client_params = { "tti_binding_name": binding_data['name'], "tti_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_tti": True }
+            client_params = { "tti_binding_name": binding_data['name'], "tti_binding_config": { **effective_config, "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_tti": True }
             lc = LollmsClient(**client_params)
             service = lc.tti
         elif binding_type == "tts":
-            client_params = { "tts_binding_name": binding_data['name'], "tts_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_tts": True }
+            client_params = { "tts_binding_name": binding_data['name'], "tts_binding_config": { **effective_config, "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_tts": True }
             lc = LollmsClient(**client_params)
             service = lc.tts
         elif binding_type == "stt":
-            client_params = { "stt_binding_name": binding_data['name'], "stt_binding_config": { **binding_data['config'], "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_stt": True }
+            client_params = { "stt_binding_name": binding_data['name'], "stt_binding_config": { **effective_config, "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_stt": True }
             lc = LollmsClient(**client_params)
             service = lc.stt
         else:
@@ -256,7 +308,13 @@ def _generate_model_icon_task(task: Task, username: str, prompt: str):
 @bindings_management_router.get("/bindings/available_types", response_model=List[Dict])
 async def get_available_binding_types():
     try:
-        return get_available_bindings()
+        names = list_bindings("llm")
+        desc_list = []
+        for name in names:
+            raw = get_binding_desc(name, "llm")
+            if raw:
+                desc_list.append(_normalize_binding_desc(name, raw))
+        return desc_list
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to get available binding types: {e}")
@@ -336,7 +394,6 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
-# ... (Command execution endpoints omitted for brevity, they are fine) ...
 
 @bindings_management_router.get("/available-models", response_model=List[ModelInfo])
 async def get_available_models(
@@ -382,9 +439,7 @@ async def get_available_models(
     
     return sorted_models
 
-# ... (Rest of TTI/TTS/STT CRUD endpoints, force-settings, etc. same pattern)
-# Ensure any TTI/TTS binding changes update their respective caches if you implement caching for them later.
-# For now, only LLM model list was the main bottleneck.
+# --- TTI Bindings ---
 
 @bindings_management_router.post("/bindings/{binding_id}/execute_command", response_model=TaskInfo, status_code=202)
 async def execute_llm_binding_command(binding_id: int, payload: BindingCommandRequest, current_user: UserAuthDetails = Depends(get_current_admin_user), db: Session = Depends(get_db)):
@@ -396,7 +451,8 @@ async def execute_llm_binding_command(binding_id: int, payload: BindingCommandRe
         "name": binding.name,
         "alias": binding.alias,
         "config": binding.config,
-        "default_model_name": binding.default_model_name
+        "default_model_name": binding.default_model_name,
+        "model_aliases": binding.model_aliases
     }
     
     task = task_manager.submit_task(
@@ -439,7 +495,13 @@ async def install_llm_from_zoo(binding_id: int, payload: ZooInstallRequest, curr
 @bindings_management_router.get("/tti-bindings/available_types", response_model=List[Dict])
 async def get_available_tti_binding_types():
     try:
-        return get_available_tti_bindings()
+        names = list_bindings("tti")
+        desc_list = []
+        for name in names:
+            raw = get_binding_desc(name, "tti")
+            if raw:
+                desc_list.append(_normalize_binding_desc(name, raw))
+        return desc_list
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to get available TTI binding types: {e}")
@@ -523,7 +585,8 @@ async def execute_tti_binding_command(binding_id: int, payload: BindingCommandRe
         "name": binding.name,
         "alias": binding.alias,
         "config": binding.config,
-        "default_model_name": binding.default_model_name
+        "default_model_name": binding.default_model_name,
+        "model_aliases": binding.model_aliases
     }
     
     task = task_manager.submit_task(
@@ -541,7 +604,8 @@ async def get_tti_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
     if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
     
     try:
-        service = _get_binding_instance("tti", binding.name, binding.config)
+        effective_config = _get_effective_config(binding)
+        service = _get_binding_instance("tti", binding.name, effective_config)
         if service and hasattr(service, 'get_zoo'):
             return service.get_zoo()
         return []
@@ -570,7 +634,8 @@ async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="TTI Binding not found.")
     
     try:
-        client_params = { "tti_binding_name": binding.name, "tti_binding_config": { **binding.config, "model_name": binding.default_model_name }, "load_llm": False, "load_tti": True }
+        effective_config = _get_effective_config(binding)
+        client_params = { "tti_binding_name": binding.name, "tti_binding_config": { **effective_config, "model_name": binding.default_model_name }, "load_llm": False, "load_tti": True }
         lc = LollmsClient(**client_params)
         if not lc.tti:
             raise Exception("Could not build a tti instance from the configuration. make sure you have set all configuration parameters correctly")
@@ -617,10 +682,18 @@ async def delete_tti_model_alias(binding_id: int, payload: ModelAliasDelete, db:
     db.refresh(binding)
     return binding
 
+# --- TTS Bindings ---
+
 @bindings_management_router.get("/tts-bindings/available_types", response_model=List[Dict])
 async def get_available_tts_binding_types():
     try:
-        return get_available_tts_bindings()
+        names = list_bindings("tts")
+        desc_list = []
+        for name in names:
+            raw = get_binding_desc(name, "tts")
+            if raw:
+                desc_list.append(_normalize_binding_desc(name, raw))
+        return desc_list
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to get available TTS binding types: {e}")
@@ -704,7 +777,8 @@ async def execute_tts_binding_command(binding_id: int, payload: BindingCommandRe
         "name": binding.name,
         "alias": binding.alias,
         "config": binding.config,
-        "default_model_name": binding.default_model_name
+        "default_model_name": binding.default_model_name,
+        "model_aliases": binding.model_aliases
     }
     
     task = task_manager.submit_task(
@@ -722,7 +796,8 @@ async def get_tts_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
     if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
     
     try:
-        service = _get_binding_instance("tts", binding.name, binding.config)
+        effective_config = _get_effective_config(binding)
+        service = _get_binding_instance("tts", binding.name, effective_config)
         if service and hasattr(service, 'get_zoo'):
             return service.get_zoo()
         return []
@@ -751,7 +826,8 @@ async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="TTS Binding not found.")
     
     try:
-        client_params = { "tts_binding_name": binding.name, "tts_binding_config": { **binding.config, "model_name": binding.default_model_name }, "load_llm": False, "load_tts": True }
+        effective_config = _get_effective_config(binding)
+        client_params = { "tts_binding_name": binding.name, "tts_binding_config": { **effective_config, "model_name": binding.default_model_name }, "load_llm": False, "load_tts": True }
         lc = LollmsClient(**client_params)
         if not lc.tts:
             raise Exception("Could not build a tts instance from the configuration.")
@@ -803,7 +879,13 @@ async def delete_tts_model_alias(binding_id: int, payload: ModelAliasDelete, db:
 @bindings_management_router.get("/stt-bindings/available_types", response_model=List[Dict])
 async def get_available_stt_binding_types():
     try:
-        return get_available_stt_bindings()
+        names = list_bindings("stt")
+        desc_list = []
+        for name in names:
+            raw = get_binding_desc(name, "stt")
+            if raw:
+                desc_list.append(_normalize_binding_desc(name, raw))
+        return desc_list
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to get available STT binding types: {e}")
@@ -887,7 +969,8 @@ async def execute_stt_binding_command(binding_id: int, payload: BindingCommandRe
         "name": binding.name,
         "alias": binding.alias,
         "config": binding.config,
-        "default_model_name": binding.default_model_name
+        "default_model_name": binding.default_model_name,
+        "model_aliases": binding.model_aliases
     }
     
     task = task_manager.submit_task(
@@ -905,7 +988,8 @@ async def get_stt_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
     if not binding: raise HTTPException(status_code=404, detail="Binding not found.")
     
     try:
-        service = _get_binding_instance("stt", binding.name, binding.config)
+        effective_config = _get_effective_config(binding)
+        service = _get_binding_instance("stt", binding.name, effective_config)
         if service and hasattr(service, 'get_zoo'):
             return service.get_zoo()
         return []
@@ -934,7 +1018,8 @@ async def get_stt_binding_models(binding_id: int, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="STT Binding not found.")
     
     try:
-        client_params = { "stt_binding_name": binding.name, "stt_binding_config": { **binding.config, "model_name": binding.default_model_name }, "load_llm": False, "load_stt": True }
+        effective_config = _get_effective_config(binding)
+        client_params = { "stt_binding_name": binding.name, "stt_binding_config": { **effective_config, "model_name": binding.default_model_name }, "load_llm": False, "load_stt": True }
         lc = LollmsClient(**client_params)
         if not lc.stt:
             raise Exception("Could not build an STT instance from the configuration.")

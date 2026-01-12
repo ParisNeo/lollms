@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-12 02:34]
+
+- feat(notebook): enhance notebook system with tab support
+
+## [2026-01-12 01:55]
+
+- feat(notebooks): implement herd mode functionality
+
 ## [2.1.0] - "Restart" - 2025-12-28
 
 This version marks a complete architectural evolution from the legacy `lollms_webui` (v1.16.0 "Twins"). LoLLMs is now a full-scale, multi-user AI orchestration platform.

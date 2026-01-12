@@ -1,4 +1,3 @@
-# backend/db/models/user.py
 from sqlalchemy import (
     Column, Integer, String, Boolean,
     ForeignKey, UniqueConstraint, CheckConstraint,
@@ -79,8 +78,15 @@ class User(Base):
     
     # Herd Mode Settings
     herd_mode_enabled = Column(Boolean, default=False, nullable=False)
-    herd_participants = Column(JSON, nullable=True) # List of {model: str, personality: str}
+    herd_participants = Column(JSON, nullable=True) # Legacy/Fallback list
+    herd_precode_participants = Column(JSON, nullable=True) # List of {model: str, personality: str}
+    herd_postcode_participants = Column(JSON, nullable=True) # List of {model: str, personality: str}
     herd_rounds = Column(Integer, default=2, nullable=False)
+    
+    # New Dynamic Herd Settings
+    herd_dynamic_mode = Column(Boolean, default=False, nullable=False)
+    herd_model_pool = Column(JSON, nullable=True) # List of {model: str, description: str}
+
 
     max_image_width = Column(Integer, default=-1, nullable=True)
     max_image_height = Column(Integer, default=-1, nullable=True)
@@ -209,3 +215,4 @@ class Friendship(Base):
     user2 = relationship("User", foreign_keys=[user2_id], backref="received_friend_requests_or_friendships")
     action_user = relationship("User", foreign_keys=[action_user_id])
     __table__args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)
+

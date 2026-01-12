@@ -145,7 +145,8 @@ function selectModel(model) {
     const bindingName = props.binding?.name;
     if (bindingName) {
         const bindingDesc = bindingTypes.find(b => (b.binding_name || b.name) === bindingName);
-        const params = bindingDesc?.model_parameters || bindingDesc?.input_parameters || [];
+        // STRICT SEPARATION: Only use model_parameters for aliases
+        const params = bindingDesc?.model_parameters || [];
         modelParameters.value = params;
         params.forEach(param => { if (!(param.name in newForm)) newForm[param.name] = param.default; });
     } else {
@@ -198,6 +199,12 @@ async function saveAlias() {
             ['ctx_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
                 const value = payload[key];
                 payload[key] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
+            });
+             modelParameters.value.forEach(param => {
+                if (['int', 'float'].includes(param.type)) {
+                    const value = payload[param.name];
+                    payload[param.name] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
+                }
             });
             aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
             await adminStore.saveModelAlias(props.binding.id, aliasPayload);
@@ -450,9 +457,9 @@ watch(() => props.binding, (newBinding) => {
                             </div>
                         </div>
                         
-                        <!-- Other Binding Types Params -->
-                        <div v-if="['tti', 'tts', 'stt'].includes(bindingType) && modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                             <h4 class="font-medium mb-3 text-sm">Parameters</h4>
+                        <!-- Dynamic Params for ALL Types (including LLM if defined) -->
+                        <div v-if="modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                             <h4 class="font-medium mb-3 text-sm">Model Parameters</h4>
                              <div class="grid grid-cols-2 gap-4">
                                 <div v-for="param in modelParameters" :key="param.name">
                                     <label :for="`p-${param.name}`" class="label text-xs">{{ param.title || param.name }}</label>
@@ -533,3 +540,4 @@ watch(() => props.binding, (newBinding) => {
         </div>
     </div>
 </template>
+

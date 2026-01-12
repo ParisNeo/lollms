@@ -17,6 +17,7 @@ import NotificationPanel from './components/ui/NotificationPanel.vue';
 import ModalContainer from './components/modals/ModalContainer.vue';
 import ImageViewerModal from './components/ui/ImageViewerModal.vue';
 import ConnectionOverlay from './components/ui/ConnectionOverlay.vue';
+import MaintenanceOverlay from './components/ui/MaintenanceOverlay.vue';
 
 // Async Modals
 const SlideshowModal = defineAsyncComponent(() => import('./components/modals/SlideshowModal.vue'));
@@ -41,6 +42,7 @@ const isAuthenticated = computed(() => authStore.isAuthenticated);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const user = computed(() => authStore.user);
 const wsConnected = computed(() => authStore.wsConnected);
+const isMaintenanceMode = computed(() => uiStore.isMaintenanceMode);
 
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
@@ -63,6 +65,7 @@ const funFactStyle = computed(() => {
 });
 
 const layoutState = computed(() => {
+    if (isMaintenanceMode.value && !authStore.isAdmin) return 'maintenance';
     if (isAuthenticating.value || isFunFactHanging.value) return 'loading';
     return isAuthenticated.value ? 'authenticated' : 'guest';
 });
@@ -137,6 +140,9 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-gray-800 dark:text-gray-100 bg-gray-50 dark:bg-gray-900 flex flex-col">
     
+    <!-- Maintenance Overlay -->
+    <MaintenanceOverlay v-if="layoutState === 'maintenance'" />
+
     <!-- Connection Lost Overlay -->
     <Transition
         enter-active-class="transition ease-out duration-300"
@@ -147,7 +153,7 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
         leave-to-class="opacity-0"
     >
         <ConnectionOverlay 
-            v-if="(!wsConnected && isAuthenticated && hasConnectedOnce) || isReconnecting" 
+            v-if="(!wsConnected && isAuthenticated && hasConnectedOnce && layoutState !== 'maintenance') || isReconnecting" 
             :message="isReconnecting ? 'Synchronizing data...' : 'Searching for server'"
             :sub-message="isReconnecting ? 'Reconnected' : 'Connection Lost'"
         />
@@ -279,7 +285,6 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     <ImageViewerModal />
     <SlideshowModal />
     <CommandOutputModal />
-    <!-- NotebookWizardModal has been moved to ModalContainer.vue -->
     <ArtefactImportWizardModal /> 
     <ArtefactViewerModal />       
     <NotificationPanel /><AudioPlayer />

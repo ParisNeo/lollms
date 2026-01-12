@@ -1,15 +1,11 @@
-# [UPDATE] backend/routers/lollms_config.py
 # backend/routers/lollms_config.py
 import json
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from lollms_client import LollmsClient
+from lollms_client import LollmsClient, list_bindings, get_binding_desc
 from ascii_colors import trace_exception
-from lollms_client.lollms_tti_binding import get_available_bindings as get_available_tti_bindings
-from lollms_client.lollms_tts_binding import get_available_bindings as get_available_tts_bindings
-from lollms_client.lollms_stt_binding import get_available_bindings as get_available_stt_bindings
 from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
 from lollms_client.lollms_tti_binding import list_binding_models as list_tti_binding_models
 from lollms_client.lollms_tts_binding import list_binding_models as list_tts_binding_models
@@ -32,7 +28,7 @@ class ModelInfo(BaseModel):
     alias: Optional[Dict[str, Any]] = None
     binding_params: Optional[Dict[str, List[Dict[str, Any]]]] = None
 
-@lollms_config_router.get("/lollms-models", response_model=List[ModelInfo])
+@lollms_config_router.get("/llm-models", response_model=List[ModelInfo])
 async def get_lollms_models(
     db: Session = Depends(get_db)
 ):
@@ -95,12 +91,6 @@ async def get_lollms_tti_models(
     active_tti_bindings = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).all()
     model_display_mode = settings.get("tti_model_display_mode", "mixed")
 
-    try:
-        available_binding_descs = {b['binding_name']: b for b in get_available_tti_bindings()}
-    except Exception as e:
-        trace_exception(e)
-        available_binding_descs = {}
-
     for binding in active_tti_bindings:
         try:
             models_from_binding = list_tti_binding_models(tti_binding_name=binding.name, tti_binding_config=binding.config)
@@ -118,7 +108,13 @@ async def get_lollms_tti_models(
                 except Exception:
                     model_aliases = {}
             
-            binding_desc = available_binding_descs.get(binding.name)
+            # Use new get_binding_desc from lollms_client
+            try:
+                binding_desc = get_binding_desc(binding.name, "tti")
+                if "error" in binding_desc:
+                    binding_desc = None
+            except Exception:
+                binding_desc = None
 
             for model_name in raw_model_names:
                 alias_data = model_aliases.get(model_name)
@@ -203,12 +199,6 @@ async def get_tts_models(
     active_bindings = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).all()
     model_display_mode = settings.get("tts_model_display_mode", "mixed")
     
-    try:
-        available_binding_descs = {b['binding_name']: b for b in get_available_tts_bindings()}
-    except Exception as e:
-        trace_exception(e)
-        available_binding_descs = {}
-
     for binding in active_bindings:
         model_aliases = binding.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -219,6 +209,14 @@ async def get_tts_models(
         try:
             models = list_tts_binding_models(tts_binding_name=binding.name, tts_binding_config=binding.config)
             
+            # Use new get_binding_desc from lollms_client
+            try:
+                binding_desc = get_binding_desc(binding.name, "tts")
+                if "error" in binding_desc:
+                    binding_desc = None
+            except Exception:
+                binding_desc = None
+
             if isinstance(models, list):
                 for item in models:
                     model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
@@ -232,7 +230,6 @@ async def get_tts_models(
                         if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
                             display_name = alias_data.get('title', model_id)
 
-                        binding_desc = available_binding_descs.get(binding.name)
                         binding_params = {}
                         if binding_desc:
                             binding_params['class_parameters'] = binding_desc.get('input_parameters', [])
@@ -262,12 +259,6 @@ async def get_stt_models(
     active_bindings = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).all()
     model_display_mode = settings.get("stt_model_display_mode", "mixed")
     
-    try:
-        available_binding_descs = {b['binding_name']: b for b in get_available_stt_bindings()}
-    except Exception as e:
-        trace_exception(e)
-        available_binding_descs = {}
-
     for binding in active_bindings:
         model_aliases = binding.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -278,6 +269,14 @@ async def get_stt_models(
         try:
             models = list_stt_binding_models(stt_binding_name=binding.name, stt_binding_config=binding.config)
             
+            # Use new get_binding_desc from lollms_client
+            try:
+                binding_desc = get_binding_desc(binding.name, "stt")
+                if "error" in binding_desc:
+                    binding_desc = None
+            except Exception:
+                binding_desc = None
+
             if isinstance(models, list):
                 for item in models:
                     model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
@@ -291,7 +290,6 @@ async def get_stt_models(
                         if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
                             display_name = alias_data.get('title', model_id)
 
-                        binding_desc = available_binding_descs.get(binding.name)
                         binding_params = {}
                         if binding_desc:
                             binding_params['class_parameters'] = binding_desc.get('input_parameters', [])

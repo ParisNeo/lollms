@@ -31,6 +31,12 @@ class EnhanceRequest(BaseModel):
     prompt: str
     context: Optional[str] = ""
 
+class RegenerateImageRequest(BaseModel):
+    tab_id: str
+    slide_id: str
+    prompt: Optional[str] = None
+    negative_prompt: Optional[str] = ""
+
 @router.post("/{notebook_id}/slide_chat")
 async def chat_with_slide(
     notebook_id: str,
@@ -229,5 +235,25 @@ def generate_summary_endpoint(
         target=generate_deck_summary_task,
         args=(current_user.username, notebook_id),
         description="Analyzing slides to generate a coherent summary...",
+        owner_username=current_user.username
+    )
+
+@router.post("/{notebook_id}/regenerate_slide_image", response_model=TaskInfo)
+def regenerate_slide_image_endpoint(
+    notebook_id: str,
+    payload: RegenerateImageRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    from backend.task_manager import task_manager
+    from backend.tasks.notebook_tasks.image_gen import _regenerate_slide_image_task
+    
+    exists = db.query(DBNotebook.id).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not exists: raise HTTPException(status_code=404)
+
+    return task_manager.submit_task(
+        name=f"Regenerate Slide Image",
+        target=_regenerate_slide_image_task,
+        args=(current_user.username, notebook_id, payload.tab_id, payload.slide_id, payload.prompt, payload.negative_prompt),
         owner_username=current_user.username
     )

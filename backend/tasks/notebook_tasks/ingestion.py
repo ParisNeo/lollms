@@ -1,3 +1,4 @@
+
 import uuid
 import json
 import traceback
@@ -7,6 +8,33 @@ from backend.db.models.notebook import Notebook as DBNotebook
 from backend.db.models.user import User as DBUser
 from backend.task_manager import Task
 from ascii_colors import trace_exception
+
+def handle_partial_notebook(db, notebook_id, username):
+    """
+    Ensures a partially created notebook is properly saved and accessible.
+    """
+    notebook = db.query(DBNotebook).filter(
+        DBNotebook.id == notebook_id,
+        DBNotebook.owner_user_id == db.query(DBUser).filter(DBUser.username == username).first().id
+    ).first()
+
+    if notebook:
+        # Ensure the notebook has at least one tab if it doesn't have any
+        if not notebook.tabs:
+            notebook.tabs = [{
+                "id": str(uuid.uuid4()),
+                "title": "Main",
+                "type": "markdown",
+                "content": "This notebook was partially created. Some content may be missing.",
+                "images": []
+            }]
+
+        # Commit any changes
+        db.commit()
+        db.refresh(notebook)
+
+    return notebook
+
 
 def _add_artefact(notebook, title, content):
     """Helper to add a text artefact to a notebook."""
@@ -32,7 +60,9 @@ def _ingest_notebook_sources_task(
     google_search_queries: List[str] = None,
     arxiv_queries: List[str] = None,
     initial_prompt: Optional[str] = None,
-    target_tab_id: Optional[str] = None
+    target_tab_id: Optional[str] = None,
+    arxiv_config: Optional[Dict[str, Any]] = None,
+    arxiv_selected_list: Optional[List[Dict[str, Any]]] = None
 ):
     task.log("Starting production ingestion...")
     task.set_progress(5)
@@ -42,7 +72,7 @@ def _ingest_notebook_sources_task(
     google_list = google_search_queries or []
     arxiv_list = arxiv_queries or []
     
-    total_ops = len(urls) + len(yt_list) + len(wiki_list) + len(google_list) + len(arxiv_list)
+    total_ops = len(urls) + len(yt_list) + len(wiki_list) + len(google_list) + len(arxiv_list) + (len(arxiv_selected_list) if arxiv_selected_list else 0)
     current_op = 0
 
     with task.db_session_factory() as db:
@@ -118,15 +148,21 @@ def _ingest_notebook_sources_task(
                         elif "youtu.be/" in url: vid = url.split("youtu.be/")[1]
                         
                         if vid:
-                            ytt = YouTubeTranscriptApi()
                             try:
-                                # Updated to use instance method per doc
-                                ts = ytt.fetch(vid, languages=[lang])
+                                ts = YouTubeTranscriptApi.get_transcript(vid, languages=[lang])
                             except:
-                                # Fallback or retry
-                                ts = ytt.fetch(vid)
+                                ytt = YouTubeTranscriptApi()
+                                try:
+                                    ts = ytt.fetch(vid, languages=[lang])
+                                except:
+                                    ts = ytt.fetch(vid)
                             
-                            txt = " ".join([t['text'] for t in ts])
+                            def extract_text(item):
+                                if isinstance(item, dict):
+                                    return item.get('text', '')
+                                return getattr(item, 'text', '')
+
+                            txt = " ".join([extract_text(t) for t in ts])
                             _add_artefact(notebook, f"YouTube: {url}", txt)
                             flag_modified(notebook, "artefacts")
                             db.commit()
@@ -159,11 +195,9 @@ def _ingest_notebook_sources_task(
                             items = res.get('items', [])
                             
                             if items:
-                                # Add search result summary as one artefact
                                 summary_text = f"Search Results for '{query}':\n\n" + "\n".join([f"## {item.get('title')}\nLink: {item.get('link')}\n{item.get('snippet')}\n" for item in items])
                                 _add_artefact(notebook, f"Search Summary: {query}", summary_text)
                                 
-                                # Deep scrape top 3 results
                                 for i, item in enumerate(items[:3]):
                                     if task.cancellation_event.is_set(): break
                                     link = item.get('link')
@@ -191,7 +225,7 @@ def _ingest_notebook_sources_task(
                 except Exception as e:
                     task.log(f"Google Search system error: {e}", "ERROR")
 
-        # 5. Arxiv Ingestion
+        # 5. Arxiv Queries (Legacy/Manual list)
         if arxiv_list:
             try:
                 import pipmaster as pm
@@ -210,20 +244,17 @@ def _ingest_notebook_sources_task(
                             max_results = 3,
                             sort_by = arxiv.SortCriterion.Relevance
                         )
-                        
                         results = client.results(search)
                         found_any = False
                         
                         for r in results:
                             found_any = True
-                            # Format metadata
                             content = f"# {r.title}\n\n"
                             content += f"**Authors:** {', '.join([a.name for a in r.authors])}\n"
                             content += f"**Published:** {r.published.strftime('%Y-%m-%d')}\n"
                             content += f"**PDF:** {r.pdf_url}\n\n"
                             content += "## Abstract\n"
                             content += r.summary
-                            
                             _add_artefact(notebook, f"Arxiv: {r.title}", content)
                         
                         if found_any:
@@ -231,7 +262,6 @@ def _ingest_notebook_sources_task(
                             db.commit()
                         else:
                             task.log(f"No Arxiv results for: {query}", "INFO")
-                            
                     except Exception as e:
                         task.log(f"Error searching Arxiv for '{query}': {e}", "ERROR")
                     
@@ -240,16 +270,70 @@ def _ingest_notebook_sources_task(
             except Exception as e:
                 task.log(f"Arxiv system error: {e}", "ERROR")
 
+        # 6. Selected Arxiv Ingestion (Specific user selection)
+        if arxiv_selected_list:
+            try:
+                import pipmaster as pm
+                if not pm.is_installed("arxiv"):
+                    pm.install("arxiv")
+                import requests
+                
+                for item in arxiv_selected_list:
+                    if task.cancellation_event.is_set(): break
+                    title = item.get('title')
+                    pdf_url = item.get('pdf_url')
+                    summary = item.get('summary')
+                    ingest_full = item.get('ingest_full', False)
+                    task.log(f"Processing Arxiv Selection: {title}")
+                    
+                    if not ingest_full:
+                        content = f"# {title}\n\n**Authors:** {', '.join(item.get('authors',[]))}\n**PDF:** {pdf_url}\n\n## Abstract\n{summary}"
+                        _add_artefact(notebook, f"Arxiv Abstract: {title}", content)
+                    else:
+                        task.log(f"Downloading PDF: {pdf_url}")
+                        try:
+                            response = requests.get(pdf_url, stream=True)
+                            if response.status_code == 200:
+                                import tempfile
+                                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
+                                    for chunk in response.iter_content(chunk_size=8192):
+                                        tf.write(chunk)
+                                    tf_path = tf.name
+                                
+                                try:
+                                    from docling.document_converter import DocumentConverter
+                                    converter = DocumentConverter()
+                                    res = converter.convert(tf_path)
+                                    md = res.document.export_to_markdown()
+                                    _add_artefact(notebook, f"Arxiv Paper: {title}", md)
+                                except ImportError:
+                                    task.log("Docling not available, cannot convert PDF.", "WARNING")
+                                except Exception as e:
+                                    task.log(f"Conversion failed: {e}", "ERROR")
+                                finally:
+                                    import os
+                                    if os.path.exists(tf_path): os.unlink(tf_path)
+                            else:
+                                task.log(f"Failed to download PDF {pdf_url}", "WARNING")
+                        except Exception as e:
+                            task.log(f"Error processing PDF {pdf_url}: {e}", "ERROR")
+                    
+                    flag_modified(notebook, "artefacts")
+                    db.commit()
+                    current_op += 1
+                    if total_ops > 0: task.set_progress(int(current_op / total_ops * 90))
+            except Exception as e:
+                task.log(f"Arxiv selected error: {e}", "ERROR")
+        # Check for cancellation at key points
+        if task.cancellation_event.is_set():
+            task.log("Task cancelled by user. Saving partial notebook state.", "WARNING")
+            with task.db_session_factory() as db:
+                handle_partial_notebook(db, notebook_id, username)
+            return
         # --- TASK CHAINING: Trigger Production Phase ---
         if not task.cancellation_event.is_set():
-            # Refresh notebook artefacts to check what we actually have
             db.refresh(notebook)
             has_artefacts = len(notebook.artefacts) > 0
-            
-            # Logic: 
-            # 1. If user provided prompt, go ahead.
-            # 2. If no prompt, but we have data, use default prompt.
-            # 3. If no prompt and no data, skip.
             
             effective_prompt = initial_prompt
             if not effective_prompt:
@@ -264,11 +348,9 @@ def _ingest_notebook_sources_task(
             task.log(f"Transitioning to Production Phase: {notebook.type}")
             task.set_progress(95)
             
-            # Local import to avoid circular dependency
             from backend.tasks.notebook_tasks import _process_notebook_task
             
-            # Determine production action based on notebook type
-            action = 'initial_process' # default for slides and generic
+            action = 'initial_process' 
             if notebook.type == 'youtube_video':
                 action = 'generate_script'
             elif notebook.type == 'book_building':
@@ -283,7 +365,7 @@ def _ingest_notebook_sources_task(
                     input_tab_ids=[],
                     action=action,
                     target_tab_id=target_tab_id,
-                    selected_artefacts=[] # Implies use all available
+                    selected_artefacts=[]
                 )
             except Exception as e:
                 task.log(f"Chained Production Task Failed: {str(e)}", "ERROR")
@@ -291,7 +373,6 @@ def _ingest_notebook_sources_task(
 
     task.set_progress(100)
     task.log("Pipeline processing completed.")
-
 
 def _convert_file_with_docling_task(task: Task, username: str, notebook_id: str, file_path: str, original_filename: str):
     task.log(f"Converting document: {original_filename}...")

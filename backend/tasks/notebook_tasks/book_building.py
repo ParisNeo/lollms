@@ -24,14 +24,29 @@ def process_book_building(task: Task, notebook: DBNotebook, username: str, promp
             f"Topic: {prompt}"
         )
         
-        response = lc.long_context_processing(
-            text_to_process=context,
-            contextual_prompt=contextual_prompt,
-            system_prompt=system_prompt
-        )
+        try:
+            response = lc.long_context_processing(
+                text_to_process=context,
+                contextual_prompt=contextual_prompt,
+                system_prompt=system_prompt
+            )
+        except Exception as e:
+            task.log(f"Plan generation error: {e}", "ERROR")
+            response = "[]"
+
+        # Robust handling for dict response
+        if isinstance(response, dict):
+            if 'error' in response:
+                task.log(f"LCP Error: {response['error']}", "ERROR")
+                response = "[]"
+            else:
+                response = response.get('content', response.get('text', str(response)))
         
-        json_match = re.search(r'\[.*\]', response, re.DOTALL)
-        content = json_match.group(0) if json_match else response
+        # Ensure response is a string before regex search
+        response_str = str(response)
+        
+        json_match = re.search(r'\[.*\]', response_str, re.DOTALL)
+        content = json_match.group(0) if json_match else response_str
         
         if target_tab:
             target_tab['content'] = content
@@ -62,19 +77,34 @@ def process_book_building(task: Task, notebook: DBNotebook, username: str, promp
         system_prompt = "You are a professional Ghostwriter. Write immersive, high-quality book chapters in Markdown."
         contextual_prompt = f"{plan_content}Write the following chapter in full detail: {prompt}"
         
-        response = lc.long_context_processing(
-            text_to_process=context,
-            contextual_prompt=contextual_prompt,
-            system_prompt=system_prompt
-        )
+        try:
+            response = lc.long_context_processing(
+                text_to_process=context,
+                contextual_prompt=contextual_prompt,
+                system_prompt=system_prompt
+            )
+        except Exception as e:
+            task.log(f"Writing error: {e}", "ERROR")
+            response = f"Error generating chapter: {e}"
+
+        # Robust handling for dict response
+        if isinstance(response, dict):
+            if 'error' in response:
+                task.log(f"LCP Error: {response['error']}", "ERROR")
+                response = f"Error: {response['error']}"
+            else:
+                response = response.get('content', response.get('text', str(response)))
         
+        if not isinstance(response, str):
+            response = str(response)
+
         if target_tab:
             target_tab['content'] = response
             return target_tab['id']
         else:
             new_tab = {
                 "id": str(uuid.uuid4()),
-                "title": prompt.split('\n')[0][:30],
+                "title": prompt.split('\n')[0][:30] if prompt else "New Chapter",
                 "type": "markdown",
                 "content": response,
                 "images": []

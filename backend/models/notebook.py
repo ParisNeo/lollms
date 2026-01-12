@@ -1,4 +1,3 @@
-# backend/models/notebook.py
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -7,6 +6,30 @@ class StructureItem(BaseModel):
     title: str
     type: str = "markdown" 
     content: Optional[str] = ""
+
+class ArxivConfig(BaseModel):
+    max_results: int = 3
+    sort_by: str = "Relevance" # Relevance, SubmittedDate, LastUpdatedDate
+
+class ArxivSearchRequest(BaseModel):
+    query: str
+    max_results: int = 5
+
+class ArxivResult(BaseModel):
+    entry_id: str
+    title: str
+    authors: List[str]
+    summary: str
+    published: str
+    pdf_url: str
+
+class ArxivSelected(BaseModel):
+    entry_id: str
+    title: str
+    authors: List[str]
+    summary: str
+    pdf_url: str
+    ingest_full: bool = False
 
 class NotebookCreate(BaseModel):
     title: str
@@ -20,9 +43,12 @@ class NotebookCreate(BaseModel):
     wikipedia_urls: Optional[List[str]] = None
     google_search_queries: Optional[List[str]] = None
     arxiv_queries: Optional[List[str]] = None
-    youtube_configs: Optional[List[Dict[str, str]]] = None # List of {url, lang}
+    arxiv_selected: Optional[List[ArxivSelected]] = None
+    arxiv_config: Optional[ArxivConfig] = None
+    youtube_configs: Optional[List[Dict[str, str]]] = None
     raw_text: Optional[str] = None
-    metadata: Optional[Dict[str, Any]] = None 
+    metadata: Optional[Dict[str, Any]] = None
+    delay_processing: bool = False # Flag to skip auto-ingestion
 
 class NotebookUpdate(BaseModel):
     title: Optional[str] = None

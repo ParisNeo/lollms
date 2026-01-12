@@ -158,6 +158,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
                 case 'step_start':
                     generationState.value = { status: 'thinking', details: data.content || 'Thinking...' };
+                    // Push to events so it renders in the chat bubble
+                    if (!messageToUpdate.events) messageToUpdate.events = [];
+                    messageToUpdate.events.push(data);
                     break;
                 case 'info':
                     // Handle general info messages in status bar
@@ -189,12 +192,15 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     break;
                 case 'step_end':
-                    // Similar logic to preserve TTFT info if desired
+                    // Revert to streaming status
                     if (generationInProgress.value) {
                          const oldDetails = generationState.value.details;
                          const newDetails = oldDetails.includes('ttft') ? oldDetails : 'generating...';
                          generationState.value = { status: 'streaming', details: newDetails };
                     }
+                    // Push to events so it renders in the chat bubble
+                    if (!messageToUpdate.events) messageToUpdate.events = [];
+                    messageToUpdate.events.push(data);
                     break;
                 case 'sources':
                     if (!messageToUpdate.sources) messageToUpdate.sources = [];

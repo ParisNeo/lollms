@@ -93,6 +93,24 @@ const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 const isGoogleSearchConfigured = computed(() => !!user.value?.google_api_key && !!user.value?.google_cse_id);
 
+// --- Herd Mode Validation ---
+const canEnableHerd = computed(() => {
+    if (!user.value) return false;
+    const u = user.value;
+    
+    // If Dynamic Mode is set, we need at least one model in the pool
+    if (u.herd_dynamic_mode) {
+        return Array.isArray(u.herd_model_pool) && u.herd_model_pool.length > 0;
+    }
+    
+    // If Static Mode (default), we need at least one participant in any crew list
+    const hasPre = Array.isArray(u.herd_precode_participants) && u.herd_precode_participants.length > 0;
+    const hasPost = Array.isArray(u.herd_postcode_participants) && u.herd_postcode_participants.length > 0;
+    const hasLegacy = Array.isArray(u.herd_participants) && u.herd_participants.length > 0;
+    
+    return hasPre || hasPost || hasLegacy;
+});
+
 // ... (Context Bar Logic, Rag Selection, Mcp Selection - Unchanged)
 const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
 const maxTokens = computed(() => activeDiscussionContextStatus.value?.max_tokens || 1);
@@ -166,6 +184,12 @@ function toggleWebSearch() {
 
 // Function to toggle global user preferences from the menu shortcut
 async function toggleUserPref(key, currentValue) {
+    // Prevent toggle if herd is disabled and we try to enable it without config
+    if (key === 'herd_mode_enabled' && !currentValue && !canEnableHerd.value) {
+        uiStore.addNotification("Please configure Herd participants in Settings > User Context first.", "warning");
+        return;
+    }
+
     try {
         await authStore.updateUserPreferences({ [key]: !currentValue }, false);
     } catch (e) {
@@ -186,9 +210,9 @@ const activeFeatures = computed(() => {
         features.push({
             id: 'herd',
             icon: IconUserGroup,
-            label: `Herd (${user.value.herd_participants?.length || 0})`,
+            label: `Herd (${user.value.herd_rounds} rnds)`,
             colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800',
-            title: `Herd Mode Active. ${user.value.herd_rounds} Rounds.`
+            title: `Herd Mode Active. Phase 1 & 3 enabled.`
         });
     }
 
@@ -642,7 +666,13 @@ onUnmounted(() => {
                                 <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Reasoning</div>
                                 
                                 <!-- Herd Mode Toggle -->
-                                <button @click.stop="toggleUserPref('herd_mode_enabled', user.herd_mode_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button 
+                                    @click.stop="toggleUserPref('herd_mode_enabled', user.herd_mode_enabled)" 
+                                    class="menu-item flex justify-between items-center group/item"
+                                    :disabled="!canEnableHerd"
+                                    :class="{'opacity-50 cursor-not-allowed': !canEnableHerd}"
+                                    :title="!canEnableHerd ? 'Configure Herd participants in Settings > User Context first' : 'Toggle Herd Mode'"
+                                >
                                     <span class="flex items-center gap-2">
                                         <IconUserGroup class="w-4 h-4 text-amber-500" />
                                         <span>Herd Mode</span>

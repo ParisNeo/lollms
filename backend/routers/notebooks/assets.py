@@ -1,5 +1,4 @@
-# backend/routers/notebooks/assets.py
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
@@ -76,13 +75,14 @@ def get_notebook_asset(
 @router.delete("/{notebook_id}/generated_asset")
 def delete_generated_asset(
     notebook_id: str,
-    type: str, # 'video' or 'audio'
+    type: str, # 'video', 'audio', 'image'
     tab_id: str,
     slide_id: Optional[str] = None,
+    image_index: Optional[int] = Query(None),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Deletes a generated video or audio file and removes its reference from the notebook JSON."""
+    """Deletes a generated asset (video, audio, or image version) and updates references."""
     notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
     if not notebook: raise HTTPException(status_code=404, detail="Notebook not found")
 
@@ -99,7 +99,6 @@ def delete_generated_asset(
 
     if type == 'video':
         if 'video_src' in tab_data:
-            # Extract filename from URL (e.g. /api/notebooks/123/assets/presentation.mp4)
             url = tab_data['video_src']
             filename = url.split('/')[-1]
             file_to_remove = assets_path / filename
@@ -114,6 +113,25 @@ def delete_generated_asset(
                 file_to_remove = assets_path / filename
                 del slide['audio_src']
 
+    elif type == 'image' and slide_id and image_index is not None:
+        if 'slides_data' in tab_data:
+            slide = next((s for s in tab_data['slides_data'] if s['id'] == slide_id), None)
+            if slide and 'images' in slide and 0 <= image_index < len(slide['images']):
+                img_entry = slide['images'][image_index]
+                if isinstance(img_entry, dict) and 'path' in img_entry:
+                     filename = img_entry['path'].split('/')[-1]
+                     file_to_remove = assets_path / filename
+                
+                # Remove from list
+                slide['images'].pop(image_index)
+                
+                # Adjust selected index if needed
+                current_sel = slide.get('selected_image_index', 0)
+                if current_sel == image_index:
+                    slide['selected_image_index'] = max(0, len(slide['images']) - 1) if slide['images'] else 0
+                elif current_sel > image_index:
+                    slide['selected_image_index'] = current_sel - 1
+
     if file_to_remove and file_to_remove.exists():
         try:
             os.remove(file_to_remove)
@@ -125,6 +143,37 @@ def delete_generated_asset(
     db.commit()
     
     return {"status": "success"}
+
+@router.put("/{notebook_id}/tabs/{tab_id}/slides/{slide_id}/select_image")
+def select_slide_image(
+    notebook_id: str,
+    tab_id: str,
+    slide_id: str,
+    payload: Dict[str, int], # { "index": 1 }
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Sets the active image index for a specific slide."""
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    if not notebook: raise HTTPException(status_code=404)
+
+    target_tab = next((t for t in notebook.tabs if t['id'] == tab_id), None)
+    if not target_tab: raise HTTPException(status_code=404)
+
+    try:
+        tab_data = json.loads(target_tab['content'])
+        slide = next((s for s in tab_data.get('slides_data', []) if s['id'] == slide_id), None)
+        if slide:
+            slide['selected_image_index'] = payload.get('index', 0)
+            target_tab['content'] = json.dumps(tab_data)
+            flag_modified(notebook, "tabs")
+            db.commit()
+            return {"status": "success"}
+    except:
+        pass
+    
+    raise HTTPException(status_code=400, detail="Failed to update selection")
+
 
 @router.post("/{notebook_id}/describe_image")
 async def describe_notebook_image(
@@ -167,7 +216,7 @@ def scrape_url_to_notebook(
     return task_manager.submit_task(
         name=f"Scrape: {payload['url']}",
         target=_ingest_notebook_sources_task,
-        args=(current_user.username, notebook_id, [payload['url']], []),
+        args=(current_user.username, notebook_id, [payload['url']], [], [], [], [], "", None, {}, []),
         owner_username=current_user.username
     )
 
@@ -188,18 +237,36 @@ def create_text_artefact(
     db.commit()
     return {"filename": fn}
 
-
 @router.post("/{notebook_id}/import_sources")
 def import_sources_to_notebook(
     notebook_id: str,
-    payload: Dict[str, Any], # expects urls, wikipedia_urls, youtube_configs
+    payload: Dict[str, Any], # expects urls, wikipedia_urls, youtube_configs, arxiv_selected, initialPrompt, target_tab_id
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """Triggers a background ingestion task for an existing notebook."""
     from backend.task_manager import task_manager
+    from backend.tasks.notebook_tasks import _ingest_notebook_sources_task
+    
+    prompt = payload.get('initialPrompt')
+    # Use a generic name if no prompt is provided (Scrape only mode)
+    task_name = f"Building: {prompt[:30]}..." if prompt else "Ingesting Sources (No Generation)"
+
     return task_manager.submit_task(
-        name=f"Ingesting New Context for Notebook",
+        name=task_name,
         target=_ingest_notebook_sources_task,
-        args=(current_user.username, notebook_id, payload.get('urls', []), payload.get('youtube_configs', []), payload.get('wikipedia_urls', [])),
-        owner_username=current_user.username
+        args=(
+            current_user.username,
+            notebook_id,
+            payload.get('urls', []),
+            payload.get('youtube_configs', []),
+            payload.get('wikipedia_urls', []),
+            payload.get('google_search_queries', []),
+            payload.get('arxiv_queries', []),
+            prompt, 
+            payload.get('target_tab_id', None),
+            payload.get('arxiv_config', {}),
+            payload.get('arxiv_selected', [])
+        ),
+        owner_username=current_user.username,
+        description=notebook_id 
     )

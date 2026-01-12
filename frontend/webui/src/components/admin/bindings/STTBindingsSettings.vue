@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../../stores/admin';
 import { useUiStore } from '../../../stores/ui';
 import { useTasksStore } from '../../../stores/tasks';
+import { parsedMarkdown as parseMarkdown } from '../../../services/markdownParser';
 import IconEye from '../../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconTerminal from '../../../assets/icons/ui/IconTerminal.vue';
@@ -70,8 +71,18 @@ const allFormParameters = computed(() => {
     const paramsFromDesc = selectedBindingType.value.input_parameters || [];
     const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
     
+    // Model Params to exclude
+    const modelParams = selectedBindingType.value.model_parameters || [];
+    const modelParamNames = new Set(modelParams.map(p => p.name));
+
     const paramsFromConfig = Object.keys(form.value.config || {})
-        .filter(key => !paramNamesFromDesc.has(key) && key !== 'model_name')
+        .filter(key => 
+            !paramNamesFromDesc.has(key) && 
+            !modelParamNames.has(key) && 
+            key !== 'model_name' &&
+            key !== 'model' &&
+            key !== 'class'
+        )
         .map(key => ({
             name: key,
             type: typeof form.value.config[key] === 'boolean' ? 'bool' : (typeof form.value.config[key] === 'number' ? 'float' : 'str'),
@@ -79,8 +90,10 @@ const allFormParameters = computed(() => {
             mandatory: false,
         }));
         
+    const filteredGlobals = paramsFromDesc.filter(p => !modelParamNames.has(p.name) && p.name !== 'model_name');
+
     return [
-        ...paramsFromDesc.filter(p => p.name !== 'model_name'), 
+        ...filteredGlobals, 
         ...paramsFromConfig
     ];
 });
@@ -282,7 +295,7 @@ async function executeCommand(cmd, bindingId, params) {
                     </div>
 
                     <div v-if="selectedBindingType" class="space-y-6 border-t dark:border-gray-700 pt-6">
-                        <p class="text-sm text-gray-600 dark:text-gray-400">{{ selectedBindingType.description }}</p>
+                        <div class="text-sm text-gray-600 dark:text-gray-400 prose dark:prose-invert max-w-none" v-html="parseMarkdown(selectedBindingType.description || '')"></div>
                         <div v-for="param in allFormParameters" :key="param.name" class="space-y-1">
                             <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">
                                 {{ param.name.replace(/_/g, ' ') }}

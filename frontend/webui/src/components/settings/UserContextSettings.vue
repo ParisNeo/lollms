@@ -1,4 +1,3 @@
-<!-- frontend/webui/src/components/settings/UserContextSettings.vue -->
 <script setup>
 import { computed, ref, watch, nextTick, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
@@ -9,11 +8,12 @@ import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
+import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore(); // Use data store
 const { user } = storeToRefs(authStore);
-const { availableLollmsModels, allPersonalities } = storeToRefs(dataStore); // Get lists
+const { availableLollmsModels, allPersonalities, availableMcpToolsForSelector } = storeToRefs(dataStore);
 
 // Local state for form fields
 const preferredName = ref('');
@@ -49,10 +49,17 @@ const webSearchEnabled = ref(false);
 const webSearchDeepAnalysis = ref(false);
 const isKeyVisible = ref(false);
 
+
 // Herd Mode States
 const herdModeEnabled = ref(false);
 const herdRounds = ref(2);
-const herdParticipants = ref([]); // Array of { model: string, personality: string }
+const herdPrecodeParticipants = ref([]);
+const herdPostcodeParticipants = ref([]);
+
+// Dynamic Herd States
+const herdDynamicMode = ref(false);
+const herdModelPool = ref([]); // List of {model: '', description: ''}
+
 
 const hasChanges = ref(false);
 const isSaving = ref(false);
@@ -97,7 +104,12 @@ function populateForm() {
     // Herd Mode
     herdModeEnabled.value = user.value.herd_mode_enabled || false;
     herdRounds.value = user.value.herd_rounds || 2;
-    herdParticipants.value = user.value.herd_participants ? JSON.parse(JSON.stringify(user.value.herd_participants)) : [];
+    herdPrecodeParticipants.value = user.value.herd_precode_participants ? JSON.parse(JSON.stringify(user.value.herd_precode_participants)) : [];
+    herdPostcodeParticipants.value = user.value.herd_postcode_participants ? JSON.parse(JSON.stringify(user.value.herd_postcode_participants)) : [];
+    
+    // Dynamic Herd
+    herdDynamicMode.value = user.value.herd_dynamic_mode || false;
+    herdModelPool.value = user.value.herd_model_pool ? JSON.parse(JSON.stringify(user.value.herd_model_pool)) : [];
     
     // Reset change tracker
     nextTick(() => {
@@ -122,7 +134,8 @@ watch([
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
     memoryEnabled, autoMemoryEnabled, reasoningActivation, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
     googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis,
-    herdModeEnabled, herdRounds, herdParticipants // Add herd fields
+    herdModeEnabled, herdRounds, herdPrecodeParticipants, herdPostcodeParticipants,
+    herdDynamicMode, herdModelPool
 ], () => {
   hasChanges.value = true;
 }, { deep: true }); // Need deep watch for array
@@ -134,12 +147,29 @@ const staticInfo = [
   { label: 'Username', placeholder: '{{user_name}}' },
 ];
 
-function addHerdParticipant() {
-    herdParticipants.value.push({ model: '', personality: '' });
+// --- HERD PARTICIPANT MANAGEMENT ---
+
+function addPrecodeParticipant() {
+    herdPrecodeParticipants.value.push({ model: '', personality: '' });
+}
+function removePrecodeParticipant(index) {
+    herdPrecodeParticipants.value.splice(index, 1);
 }
 
-function removeHerdParticipant(index) {
-    herdParticipants.value.splice(index, 1);
+function addPostcodeParticipant() {
+    herdPostcodeParticipants.value.push({ model: '', personality: '' });
+}
+function removePostcodeParticipant(index) {
+    herdPostcodeParticipants.value.splice(index, 1);
+}
+
+// --- DYNAMIC HERD MODEL POOL MANAGEMENT ---
+function addModelToPool() {
+    herdModelPool.value.push({ model: '', description: '' });
+}
+
+function removeModelFromPool(index) {
+    herdModelPool.value.splice(index, 1);
 }
 
 async function handleSaveChanges() {
@@ -178,7 +208,10 @@ async function handleSaveChanges() {
             web_search_deep_analysis: webSearchDeepAnalysis.value,
             herd_mode_enabled: herdModeEnabled.value,
             herd_rounds: herdRounds.value,
-            herd_participants: herdParticipants.value
+            herd_precode_participants: herdPrecodeParticipants.value,
+            herd_postcode_participants: herdPostcodeParticipants.value,
+            herd_dynamic_mode: herdDynamicMode.value,
+            herd_model_pool: herdModelPool.value
         });
         hasChanges.value = false;
     } finally {
@@ -257,7 +290,7 @@ async function handleSaveChanges() {
             <div class="flex items-center justify-between">
                 <div>
                     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Herd Mode</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Combine multiple AI models/personalities to debate and refine solutions.</p>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Advanced 4-phase workflow: Brainstorm > Draft > Critique > Final.</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
                     <input type="checkbox" v-model="herdModeEnabled" class="sr-only peer">
@@ -265,42 +298,131 @@ async function handleSaveChanges() {
                 </label>
             </div>
             
-            <div v-if="herdModeEnabled" class="space-y-4 pl-2 border-l-2 border-purple-200 dark:border-purple-800">
+            <div v-if="herdModeEnabled" class="space-y-6 pl-2 border-l-2 border-purple-200 dark:border-purple-800">
+                
                 <div class="flex items-center gap-4">
-                    <label class="text-sm font-medium whitespace-nowrap">Rounds</label>
-                    <input type="number" v-model.number="herdRounds" min="1" max="10" class="input-field w-20 text-center">
-                    <span class="text-xs text-gray-500">Number of debate cycles before final synthesis.</span>
+                    <label class="text-sm font-medium whitespace-nowrap">Iterations</label>
+                    <input type="number" v-model.number="herdRounds" min="1" max="5" class="input-field w-20 text-center">
+                    <span class="text-xs text-gray-500">Number of critique rounds.</span>
                 </div>
                 
-                <div>
-                    <div class="flex justify-between items-center mb-2">
-                        <label class="text-sm font-medium">Herd Participants</label>
-                        <button @click="addHerdParticipant" class="btn btn-secondary btn-sm flex items-center gap-1">
-                            <IconPlus class="w-4 h-4"/> Add
-                        </button>
+                <!-- Dynamic Herd Mode Toggle -->
+                <div class="p-3 bg-white dark:bg-gray-800 rounded-lg border border-purple-100 dark:border-purple-900">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-bold uppercase text-purple-600 dark:text-purple-400">Auto-Build Crews</span>
+                            <span class="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 rounded">AI Driven</span>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" v-model="herdDynamicMode" class="sr-only peer">
+                            <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-purple-500"></div>
+                        </label>
                     </div>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                        If enabled, the AI will dynamically create specific personalities for the Pre-code and Post-code crews based on your prompt, assigning roles to the models in your pool below.
+                    </p>
                     
-                    <div v-if="herdParticipants.length === 0" class="text-center p-3 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-sm text-gray-500">
-                        No participants. Add models to join the herd.
-                    </div>
-                    
-                    <div v-else class="space-y-2">
-                        <div v-for="(participant, index) in herdParticipants" :key="index" class="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded border dark:border-gray-700">
-                             <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <select v-model="participant.model" class="input-field text-xs">
-                                    <option value="" disabled>Select Model</option>
-                                    <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
-                                </select>
-                                <select v-model="participant.personality" class="input-field text-xs">
-                                    <option value="">Default Personality</option>
-                                    <option v-for="p in allPersonalities" :key="p.name" :value="p.name">{{ p.name }}</option>
-                                </select>
-                             </div>
-                             <button @click="removeHerdParticipant(index)" class="text-red-500 hover:text-red-700 p-1">
-                                 <IconTrash class="w-4 h-4" />
-                             </button>
+                    <!-- Dynamic Model Pool Section -->
+                    <div v-if="herdDynamicMode" class="mt-4 animate-in fade-in slide-in-from-top-2">
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="text-xs font-bold text-gray-700 dark:text-gray-300">Model Pool</label>
+                            <button type="button" @click.prevent="addModelToPool" class="btn btn-secondary btn-xs flex items-center">
+                                <IconPlus class="w-3 h-3 mr-1"/> Add Model
+                            </button>
+                        </div>
+                        
+                        <div v-if="herdModelPool.length === 0" class="text-center p-4 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-xs text-gray-500 italic">
+                            No models in pool. Add models for the AI to use.
+                        </div>
+                        
+                        <div v-else class="space-y-3">
+                            <div v-for="(item, index) in herdModelPool" :key="'pool-'+index" class="flex items-start gap-2 bg-gray-50 dark:bg-gray-700/50 p-3 rounded border dark:border-gray-600">
+                                <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                    <div>
+                                        <label class="text-[10px] text-gray-500 block mb-1">Model Binding</label>
+                                        <select v-model="item.model" class="input-field text-xs w-full">
+                                            <option value="" disabled>Select Model</option>
+                                            <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label class="text-[10px] text-gray-500 block mb-1">Role/Strength Description</label>
+                                        <input type="text" v-model="item.description" class="input-field text-xs w-full" placeholder="e.g. Fast, Logic, Creative...">
+                                    </div>
+                                </div>
+                                <button type="button" @click.prevent="removeModelFromPool(index)" class="text-red-500 hover:text-red-700 p-1.5 mt-4 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
+                                    <IconTrash class="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>                    
+                </div>
+
+                <!-- Static Crews (Only visible if Dynamic Mode is OFF) -->
+                <div v-if="!herdDynamicMode" class="space-y-6">
+                    <!-- Pre-code Crew -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="text-sm font-bold text-blue-600 dark:text-blue-400">Phase 1: Pre-code Crew (Idea Generation)</label>
+                            <button @click="addPrecodeParticipant" class="btn btn-secondary btn-sm flex items-center gap-1">
+                                <IconPlus class="w-4 h-4"/> Add Agent
+                            </button>
+                        </div>
+                        <div v-if="herdPrecodeParticipants.length === 0" class="text-center p-2 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-xs text-gray-500 italic">
+                            No agents selected.
+                        </div>
+                        <div v-else class="space-y-2">
+                            <div v-for="(participant, index) in herdPrecodeParticipants" :key="'pre-'+index" class="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded border dark:border-gray-700">
+                                 <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <select v-model="participant.model" class="input-field text-xs">
+                                        <option value="" disabled>Select Model</option>
+                                        <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
+                                    </select>
+                                    <select v-model="participant.personality" class="input-field text-xs">
+                                        <option value="">Default Personality</option>
+                                        <option v-for="p in allPersonalities" :key="p.name" :value="p.name">{{ p.name }}</option>
+                                    </select>
+                                 </div>
+                                 <button @click="removePrecodeParticipant(index)" class="text-red-500 hover:text-red-700 p-1">
+                                     <IconTrash class="w-4 h-4" />
+                                 </button>
+                            </div>
                         </div>
                     </div>
+
+                    <!-- Post-code Crew -->
+                    <div>
+                        <div class="flex justify-between items-center mb-2">
+                            <label class="text-sm font-bold text-green-600 dark:text-green-400">Phase 3: Post-code Crew (Critique & Review)</label>
+                            <button @click="addPostcodeParticipant" class="btn btn-secondary btn-sm flex items-center gap-1">
+                                <IconPlus class="w-4 h-4"/> Add Agent
+                            </button>
+                        </div>
+                        <div v-if="herdPostcodeParticipants.length === 0" class="text-center p-2 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-xs text-gray-500 italic">
+                            No agents selected.
+                        </div>
+                        <div v-else class="space-y-2">
+                            <div v-for="(participant, index) in herdPostcodeParticipants" :key="'post-'+index" class="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded border dark:border-gray-700">
+                                 <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <select v-model="participant.model" class="input-field text-xs">
+                                        <option value="" disabled>Select Model</option>
+                                        <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
+                                    </select>
+                                    <select v-model="participant.personality" class="input-field text-xs">
+                                        <option value="">Default Personality</option>
+                                        <option v-for="p in allPersonalities" :key="p.name" :value="p.name">{{ p.name }}</option>
+                                    </select>
+                                 </div>
+                                 <button @click="removePostcodeParticipant(index)" class="text-red-500 hover:text-red-700 p-1">
+                                     <IconTrash class="w-4 h-4" />
+                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="text-[10px] text-gray-500 italic">
+                    Note: Phase 2 (Draft) and Phase 4 (Final) are handled by the currently active "Leader" model/personality selected in the header.
                 </div>
             </div>
         </div>

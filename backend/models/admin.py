@@ -1,4 +1,3 @@
-# backend/models/admin.py
 from typing import List, Dict, Optional, Any
 from pydantic import BaseModel, Field, EmailStr
 import datetime
@@ -144,11 +143,17 @@ class ModelAlias(BaseModel):
     reasoning_effort: Optional[str] = None # low, medium, high
     reasoning_summary: Optional[bool] = False
 
+    class Config:
+        extra = "allow"
+
 class TtiModelAlias(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+    
+    class Config:
+        extra = "allow"
 
 class TtsModelAlias(BaseModel):
     title: Optional[str] = None
@@ -156,17 +161,26 @@ class TtsModelAlias(BaseModel):
     icon: Optional[str] = None
     allow_parameters_override: bool = True
 
+    class Config:
+        extra = "allow"
+
 class SttModelAlias(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+
+    class Config:
+        extra = "allow"
     
 class RagModelAlias(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+
+    class Config:
+        extra = "allow"
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str

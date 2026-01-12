@@ -8,7 +8,7 @@ import json
 from backend.db import get_db
 from backend.db.models.notebook import Notebook as DBNotebook
 from backend.models import UserAuthDetails
-from backend.models.notebook import NotebookResponse, NotebookCreate
+from backend.models.notebook import NotebookResponse, NotebookCreate, ArxivSearchRequest, ArxivResult
 from backend.session import get_current_active_user
 
 # Sub-router imports
@@ -47,13 +47,13 @@ def create_notebook(
     if payload.type == 'slides_making':
         main_tab_id = str(uuid.uuid4())
         initial_tabs.append({
-            "id": main_tab_id, "title": "Presentation", "type": "slides", 
+            "id": main_tab_id, "title": "Presentation", "type": "slides",
             "content": json.dumps({"slides_data": [], "mode": "hybrid", "summary": ""}), "images": []
         })
     elif payload.type == 'youtube_video':
         main_tab_id = str(uuid.uuid4())
         initial_tabs.append({
-            "id": main_tab_id, "title": "Script", "type": "youtube_script", 
+            "id": main_tab_id, "title": "Script", "type": "youtube_script",
             "content": json.dumps({"scenes": []}), "images": []
         })
     elif payload.type == 'book_building':
@@ -61,7 +61,7 @@ def create_notebook(
         initial_tabs.append({
             "id": main_tab_id, "title": "Outline", "type": "book_plan", "content": "[]", "images": []
         })
-    
+
     if not initial_tabs:
          main_tab_id = str(uuid.uuid4())
          initial_tabs.append({
@@ -86,7 +86,7 @@ def create_notebook(
         google_search_queries=payload.google_search_queries or [],
         arxiv_queries=payload.arxiv_queries or []
     )
-    
+
     if payload.raw_text:
         new_notebook.artefacts = [{
             "filename": "Initial Research Notes",
@@ -98,30 +98,59 @@ def create_notebook(
     db.add(new_notebook)
     db.commit()
     db.refresh(new_notebook)
-    
-    # Trigger ingestion WITH chaining support
-    from backend.task_manager import task_manager
-    from backend.tasks.notebook_tasks import _ingest_notebook_sources_task
-    
-    task_manager.submit_task(
-        name=f"Ingesting Production Context: {new_notebook.title}",
-        target=_ingest_notebook_sources_task,
-        args=(
-            current_user.username, 
-            new_notebook.id, 
-            payload.urls or [], 
-            payload.youtube_configs or [], 
-            payload.wikipedia_urls or [],
-            payload.google_search_queries or [],
-            payload.arxiv_queries or [],
-            payload.initialPrompt, # Passed to enable auto-generation after ingestion
-            main_tab_id # Target tab for output
-        ),
-        owner_username=current_user.username,
-        description=new_notebook.id # Ensure overlay finds it
-    )
+
+    # Trigger ingestion WITH chaining support ONLY if not delayed
+    if not payload.delay_processing:
+        from backend.task_manager import task_manager
+        from backend.tasks.notebook_tasks import _ingest_notebook_sources_task
+
+        task_manager.submit_task(
+            name=f"Ingesting Production Context: {new_notebook.title}",
+            target=_ingest_notebook_sources_task,
+            args=(
+                current_user.username,
+                new_notebook.id,
+                payload.urls or [],
+                payload.youtube_configs or [],
+                payload.wikipedia_urls or [],
+                payload.google_search_queries or [],
+                payload.arxiv_queries or [],
+                payload.initialPrompt, # Passed to enable auto-generation after ingestion
+                main_tab_id, # Target tab for output
+                payload.arxiv_config.dict() if payload.arxiv_config else {},
+                [a.dict() for a in payload.arxiv_selected] if payload.arxiv_selected else []
+            ),
+            owner_username=current_user.username,
+            description=new_notebook.id # Ensure overlay finds it
+        )
 
     return new_notebook
+
+# Add Arxiv search endpoint
+@router.post("/search/arxiv", response_model=List[ArxivResult])
+def search_arxiv_endpoint(
+    payload: ArxivSearchRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Searches Arxiv for papers matching the query."""
+    import arxiv
+    client = arxiv.Client()
+    search = arxiv.Search(
+        query=payload.query,
+        max_results=payload.max_results,
+        sort_by=arxiv.SortCriterion.Relevance
+    )
+    results = []
+    for r in client.results(search):
+        results.append(ArxivResult(
+            entry_id=r.entry_id,
+            title=r.title,
+            authors=[a.name for a in r.authors],
+            summary=r.summary,
+            published=r.published.strftime("%Y-%m-%d"),
+            pdf_url=r.pdf_url
+        ))
+    return results
 
 # --- INCLUDE SUB-ROUTERS ---
 router.include_router(core_router)

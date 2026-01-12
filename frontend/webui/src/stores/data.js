@@ -339,7 +339,7 @@ export const useDataStore = defineStore('data', () => {
     async function fetchAvailableLollmsModels() {
         isLoadingLollmsModels.value = true;
         try {
-            const response = await apiClient.get('/api/config/lollms-models');
+            const response = await apiClient.get('/api/config/llm-models');
             availableLollmsModels.value = Array.isArray(response.data) ? response.data : [];
         } catch (error) {
             if (error.response && error.response.status === 404) {
