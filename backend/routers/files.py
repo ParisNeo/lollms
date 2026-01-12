@@ -460,44 +460,117 @@ def html_to_docx_bytes(html: str) -> bytes:
 
     bio = io.BytesIO(); doc.save(bio); return bio.getvalue()
 
-def md_to_pdf_bytes(md_text: str, toc_level: int = 3, extra_images: List[str] = None) -> bytes:
-    # Special Handling: If text is empty/minimal but we have images, treat as image-only PDF (slideshow style)
-    if (not md_text or not md_text.strip()) and extra_images and len(extra_images) > 0:
-        pdf = MarkdownPdf(toc_level=0)
-        # Create a page for each image
+def _save_pdf(pdf: MarkdownPdf, out_path: str) -> None:
+    """
+    Helper that saves the PDF and removes the temporary file.
+    """
+    try:
+        pdf.save(out_path)
+    except ValueError as exc:
+        # Hierarchy error – retry without TOC
+        if "hierarchy level of item 0 must be 1" in str(exc):
+            pdf = MarkdownPdf(toc_level=0)
+            # Re‑add the original section(s).  The caller must
+            # keep a reference to the Markdown text used.
+            # In this helper we simply re‑raise to let the caller
+            # rebuild the PDF.  For simplicity we assume the caller
+            # will call this helper again with toc_level=0.
+            raise RuntimeError(
+                "PDF generation failed due to invalid TOC hierarchy. "
+                "Retry with toc_level=0."
+            ) from exc
+        else:
+            raise
+
+    # Read the PDF data
+    with open(out_path, "rb") as f:
+        pdf_bytes = f.read()
+
+    # Clean up temporary file
+    try:
+        os.unlink(out_path)
+    except Exception:
+        pass
+
+    return pdf_bytes
+
+def md_to_pdf_bytes(
+    md_text: str,
+    toc_level: int = 3,
+    extra_images: Optional[List[str]] = None,
+) -> bytes:
+    """
+    Convert Markdown (with optional base64 images) to a PDF byte stream.
+
+    Parameters
+    ----------
+    md_text : str
+        Markdown source.  Can be empty or only whitespace.
+    toc_level : int, default 3
+        Maximum heading level to include in the TOC.
+        Set to 0 to disable the TOC.
+    extra_images : list[str] | None, default None
+        List of base64‑encoded PNG images (data‑URI or raw string).
+        If `md_text` is empty, each image will be placed on its own page.
+        Otherwise, images are appended at the end of the markdown.
+
+    Returns
+    -------
+    bytes
+        PDF document as a byte string.
+    """
+    if extra_images is None:
+        extra_images = []
+
+    # ---------- 1️⃣  Image‑only PDF ----------
+    if not md_text.strip() and extra_images:
+        pdf = MarkdownPdf(toc_level=0)  # no TOC for a slideshow
         for img_b64 in extra_images:
-             if "base64," in img_b64: img_b64 = img_b64.split("base64,")[1]
-             # Markdown PDF handles images via markdown syntax
-             # We add a page break between images
-             section_content = f"![](data:image/png;base64,{img_b64})\n"
-             pdf.add_section(Section(section_content, toc=False))
-        
+            if "base64," in img_b64:
+                img_b64 = img_b64.split("base64,")[1]
+            section_md = f"![](data:image/png;base64,{img_b64})\n"
+            pdf.add_section(Section(section_md, toc=False))
+
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
             out_path = tf.name
-        pdf.save(out_path)
-        with open(out_path, "rb") as f:
-            data = f.read()
-        try: os.unlink(out_path)
-        except Exception: pass
-        return data
+        return _save_pdf(pdf, out_path)
 
-    # Default Behavior: Append extra images at the end
+    # ---------- 2️⃣  Append images at the end ----------
     if extra_images:
         for img_b64 in extra_images:
             if "base64," in img_b64:
                 img_b64 = img_b64.split("base64,")[1]
             md_text += f"\n\n![](data:image/png;base64,{img_b64})\n"
 
+    # ---------- 3️⃣  Normal PDF generation ----------
     pdf = MarkdownPdf(toc_level=toc_level)
     pdf.add_section(Section(md_text))
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tf:
         out_path = tf.name
-    pdf.save(out_path)
+
+    try:
+        pdf.save(out_path)
+    except ValueError as exc:
+        # Hierarchy error – retry with no TOC
+        if "hierarchy level of item 0 must be 1" in str(exc):
+            pdf = MarkdownPdf(toc_level=0)
+            pdf.add_section(Section(md_text))
+            pdf.save(out_path)
+        else:
+            raise
+
+    # Read the PDF data
     with open(out_path, "rb") as f:
-        data = f.read()
-    try: os.unlink(out_path)
-    except Exception: pass
-    return data
+        pdf_bytes = f.read()
+
+    # Clean up temporary file
+    try:
+        os.unlink(out_path)
+    except Exception:
+        pass
+
+    return pdf_bytes
 
 def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
     """
