@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-12 21:18]
+
+- build(frontend): regenerate production build assets
+
 ## [2026-01-12 02:34]
 
 - feat(notebook): enhance notebook system with tab support
