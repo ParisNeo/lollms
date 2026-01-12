@@ -36,13 +36,23 @@ const allKeysSelected = computed({
 
 onMounted(() => {
     if (isAnyServiceEnabled.value && dataStore.apiKeys.length === 0) {
-        dataStore.fetchApiKeys();
+        try{
+            dataStore.fetchApiKeys();
+        }
+        catch{
+            console.log("couldn't fetch api key (this is expected if the service is not enabled by the admin)")
+        }
     }
 });
 
 watch(isAnyServiceEnabled, (newValue) => {
     if (newValue && dataStore.apiKeys.length === 0) {
-        dataStore.fetchApiKeys();
+        try{
+            dataStore.fetchApiKeys();
+        }
+        catch{
+            console.log("couldn't fetch api key (this is expected if the service is not enabled by the admin)")
+        }
     }
 });
 
