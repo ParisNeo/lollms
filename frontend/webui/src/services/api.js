@@ -24,48 +24,61 @@ api.interceptors.request.use(
 );
 
 api.interceptors.response.use(
-    (response) => response,
-    (error) => {
-        const uiStore = useUiStore();
-        const authStore = useAuthStore();
-        
-        // Handle Maintenance Mode (503)
-        if (error.response && error.response.status === 503) {
-            const detail = error.response.data?.detail || "System under maintenance.";
-            // Only trigger maintenance overlay if it's the specific maintenance message
-            // OR if it's a generic 503 which usually means maintenance/overload
-            if (typeof detail === 'string') {
-                 uiStore.setMaintenanceMode(true, detail);
-            } else {
-                 uiStore.setMaintenanceMode(true, "System Unavailable");
-            }
-            return Promise.reject(error);
-        }
-
-        // Handle Auth Failures (401/403)
-        if (error.response && (error.response.status === 401 || error.response.status === 403)) {
-            // Special handling for login endpoint to not auto-logout/redirect on failure
-            if (!error.config.url.includes('/auth/token')) {
-                authStore.logout();
-                uiStore.activeModal = 'login';
-                // Only redirect if not already on a public page
-                if (router.currentRoute.value.path !== '/') {
-                     router.push('/');
-                }
-            }
-        }
-        
-        // Don't show notification for 401/403 as they handle themselves (login modal)
-        // or for 503 as it shows the overlay.
-        if (error.response && ![401, 403, 503].includes(error.response.status)) {
-            const message = error.response?.data?.detail || 'An unexpected error occurred.';
-            uiStore.addNotification(message, 'error');
-        } else if (!error.response) {
-            uiStore.addNotification('Network error. Please check your connection.', 'error');
-        }
-        
+    response => response,
+    error => {
+      const uiStore = useUiStore();
+      const authStore = useAuthStore();
+  
+      // -----------------------------------------------------------------
+      // 1️⃣  Maintenance mode (503) – unchanged
+      // -----------------------------------------------------------------
+      if (error.response && error.response.status === 503) {
+        const detail = error.response.data?.detail || "System under maintenance.";
+        uiStore.setMaintenanceMode(true, typeof detail === 'string' ? detail : "System Unavailable");
         return Promise.reject(error);
+      }
+  
+      // -----------------------------------------------------------------
+      // 2️⃣  **Whitelist** – skip auth‑failure handling for known endpoints
+      // -----------------------------------------------------------------
+      const whitelist403 = [
+        '/api/api-keys',          // API‑keys service disabled
+        // add any other “feature‑disabled” paths here, e.g.
+        // '/api/feature-x',
+      ];
+  
+      const isWhitelisted = error.response &&
+                           error.response.status === 403 &&
+                           whitelist403.some(path => error.config?.url?.includes(path));
+  
+      // -----------------------------------------------------------------
+      // 3️⃣  Auth failures (401/403) – only if NOT whitelisted
+      // -----------------------------------------------------------------
+      if (!isWhitelisted && error.response && (error.response.status === 401 || error.response.status === 403)) {
+        // do not run this for the whitelisted routes
+        if (!error.config?.url?.includes('/auth/token')) {
+          authStore.logout();
+          uiStore.activeModal = 'login';
+          if (router.currentRoute.value.path !== '/') {
+            router.push('/');
+          }
+        }
+        // No notification – login modal will inform the user
+        return Promise.reject(error);
+      }
+  
+      // -----------------------------------------------------------------
+      // 4️⃣  All other errors – show a toast / console warning
+      // -----------------------------------------------------------------
+      if (error.response && ![401, 403, 503].includes(error.response.status)) {
+        const message = error.response?.data?.detail || 'An unexpected error occurred.';
+        uiStore.addNotification(message, 'error');
+      } else if (!error.response) {
+        uiStore.addNotification('Network error. Please check your connection.', 'error');
+      }
+  
+      return Promise.reject(error);
     }
-);
+  );
 
 export default api;
