@@ -311,26 +311,34 @@ export const useAuthStore = defineStore('auth', () => {
 
     async function login(username, password) {
         try {
-            const formData = new FormData();
-            formData.append('username', username);
-            formData.append('password', password);
-            const response = await apiClient.post('/api/auth/token', formData);
-            
-            token.value = response.data.access_token;
-            localStorage.setItem('lollms-token', token.value);
-
-            useUiStore().closeModal();
-            isAuthenticating.value = true;
-            await fetchUserAndInitialData();
-            isAuthenticating.value = false;
-            window.location.reload(); 
+          // 1️⃣  Préparer les paramètres
+          const params = new URLSearchParams();
+          params.append('username', username);
+          params.append('password', password);
+      
+          // 2️⃣  Envoyer avec le bon header
+          const response = await apiClient.post(
+            '/api/auth/token',
+            params,
+            { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
+          );
+      
+          // 3️⃣  Traiter le token
+          token.value = response.data.access_token;
+          localStorage.setItem('lollms-token', token.value);
+      
+          // 4️⃣  UI & data
+          useUiStore().closeModal();
+          isAuthenticating.value = true;
+          await fetchUserAndInitialData();
+          isAuthenticating.value = false;
+      
         } catch (error) {
-            isAuthenticating.value = false;
-            useUiStore().addNotification('Login failed.', 'error');
-            throw error;
+          isAuthenticating.value = false;
+          useUiStore().addNotification('Login failed.', 'error');
+          throw error;
         }
-    }
-
+      }
     function clearAuthData() {
         user.value = null;
         token.value = null;
