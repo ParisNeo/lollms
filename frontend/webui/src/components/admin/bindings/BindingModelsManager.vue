@@ -1,4 +1,4 @@
-<!-- frontend/webui/src/components/admin/bindings/BindingModelsManager.vue -->
+<!-- [UPDATE] frontend/webui/src/components/admin/bindings/BindingModelsManager.vue -->
 <script setup>
 import { ref, watch, computed, onMounted } from 'vue';
 import { useUiStore } from '../../../stores/ui';
@@ -16,14 +16,14 @@ import IconEye from '../../../assets/icons/IconEye.vue';
 
 const props = defineProps({
     binding: { type: Object, required: true },
-    bindingType: { type: String, required: true } // 'llm', 'tti', 'tts', 'stt', 'rag'
+    bindingType: { type: String, required: true } // 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm', 'rag'
 });
 
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
 const dataStore = useDataStore();
 const tasksStore = useTasksStore();
-const { globalSettings, availableBindingTypes, availableTtiBindingTypes, availableTtsBindingTypes, ttiBindings } = storeToRefs(adminStore);
+const { globalSettings, availableBindingTypes, availableTtiBindingTypes, availableTtsBindingTypes, availableTtvBindingTypes, availableTtmBindingTypes, ttiBindings } = storeToRefs(adminStore);
 const { tasks } = storeToRefs(tasksStore);
 
 const isLoading = ref(true);
@@ -121,6 +121,8 @@ async function fetchModels() {
             case 'tti': models.value = await adminStore.fetchTtiBindingModels(props.binding.id); break;
             case 'tts': models.value = await adminStore.fetchTtsBindingModels(props.binding.id); break;
             case 'stt': models.value = await adminStore.fetchSttBindingModels(props.binding.id); break;
+            case 'ttv': models.value = await adminStore.fetchTtvBindingModels(props.binding.id); break;
+            case 'ttm': models.value = await adminStore.fetchTtmBindingModels(props.binding.id); break;
             case 'rag': models.value = await adminStore.fetchRagBindingModels(props.binding.id); break;
 
             default: models.value = [];
@@ -139,13 +141,14 @@ function selectModel(model) {
     let bindingTypes;
     if (props.bindingType === 'tti') bindingTypes = availableTtiBindingTypes.value;
     else if (props.bindingType === 'tts') bindingTypes = availableTtsBindingTypes.value;
+    else if (props.bindingType === 'ttv') bindingTypes = availableTtvBindingTypes.value;
+    else if (props.bindingType === 'ttm') bindingTypes = availableTtmBindingTypes.value;
     else if (props.bindingType === 'rag') bindingTypes = adminStore.availableRagBindingTypes;
-    else bindingTypes = availableBindingTypes.value; // Fallback for llm
+    else bindingTypes = availableBindingTypes.value; 
     
     const bindingName = props.binding?.name;
     if (bindingName) {
         const bindingDesc = bindingTypes.find(b => (b.binding_name || b.name) === bindingName);
-        // STRICT SEPARATION: Only use model_parameters for aliases
         const params = bindingDesc?.model_parameters || [];
         modelParameters.value = params;
         params.forEach(param => { if (!(param.name in newForm)) newForm[param.name] = param.default; });
@@ -216,9 +219,12 @@ async function saveAlias() {
                 }
             });
             aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
+            
             if (props.bindingType === 'tti') await adminStore.saveTtiModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'tts') await adminStore.saveTtsModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'stt') await adminStore.saveSttModelAlias(props.binding.id, aliasPayload);
+            else if (props.bindingType === 'ttv') await adminStore.saveTtvModelAlias(props.binding.id, aliasPayload);
+            else if (props.bindingType === 'ttm') await adminStore.saveTtmModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'rag') await adminStore.saveRagModelAlias(props.binding.id, aliasPayload);
         }
         await fetchModels();
@@ -240,6 +246,8 @@ async function deleteAlias() {
                 case 'tti': await adminStore.deleteTtiModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
                 case 'tts': await adminStore.deleteTtsModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
                 case 'stt': await adminStore.deleteSttModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
+                case 'ttv': await adminStore.deleteTtvModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
+                case 'ttm': await adminStore.deleteTtmModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
                 case 'rag': await adminStore.deleteRagModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
             }
             await fetchModels();
@@ -262,6 +270,8 @@ async function setAsBindingDefault() {
             case 'tti': await adminStore.updateTtiBinding(props.binding.id, payload); break;
             case 'tts': await adminStore.updateTtsBinding(props.binding.id, payload); break;
             case 'stt': await adminStore.updateSttBinding(props.binding.id, payload); break;
+            case 'ttv': await adminStore.updateTtvBinding(props.binding.id, payload); break;
+            case 'ttm': await adminStore.updateTtmBinding(props.binding.id, payload); break;
         }
         uiStore.addNotification('Binding default model updated.', 'success');
     } finally {
@@ -408,6 +418,7 @@ watch(() => props.binding, (newBinding) => {
                         </div>
 
                         <div v-if="bindingType === 'llm'" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                            <!-- LLM Specific Fields -->
                             <h4 class="font-medium mb-3 text-sm">Generation Parameters</h4>
                             <div class="grid grid-cols-2 gap-4">
                                 <div class="col-span-2 sm:col-span-1">
@@ -426,38 +437,9 @@ watch(() => props.binding, (newBinding) => {
                                 <div><label class="label text-xs">Repeat Penalty</label><input v-model="form.repeat_penalty" type="number" step="0.1" class="input-field"></div>
                                 <div><label class="label text-xs">Repeat Last N</label><input v-model="form.repeat_last_n" type="number" class="input-field"></div>
                             </div>
-                            
-                            <div class="mt-4 pt-3 border-t dark:border-gray-600">
-                                <div class="flex items-center justify-between mb-2">
-                                     <span class="text-sm font-medium">Reasoning</span>
-                                     <div class="flex items-center gap-2">
-                                        <label class="text-xs text-gray-500">Enable</label>
-                                         <button type="button" @click="form.reasoning_activation = !form.reasoning_activation" :class="[form.reasoning_activation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
-                                            <span :class="[form.reasoning_activation ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                                        </button>
-                                     </div>
-                                </div>
-                                <div v-if="form.reasoning_activation" class="grid grid-cols-2 gap-4">
-                                     <div>
-                                        <label class="label text-xs">Effort</label>
-                                        <select v-model="form.reasoning_effort" class="input-field">
-                                            <option :value="null">Default</option>
-                                            <option value="low">Low</option>
-                                            <option value="medium">Medium</option>
-                                            <option value="high">High</option>
-                                        </select>
-                                    </div>
-                                    <div class="flex items-center justify-between pt-6">
-                                        <span class="text-xs font-medium">Summary</span>
-                                        <button type="button" @click="form.reasoning_summary = !form.reasoning_summary" :class="[form.reasoning_summary ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
-                                            <span :class="[form.reasoning_summary ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
                         </div>
                         
-                        <!-- Dynamic Params for ALL Types (including LLM if defined) -->
+                        <!-- Dynamic Params for ALL Types -->
                         <div v-if="modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                              <h4 class="font-medium mb-3 text-sm">Model Parameters</h4>
                              <div class="grid grid-cols-2 gap-4">
@@ -540,4 +522,3 @@ watch(() => props.binding, (newBinding) => {
         </div>
     </div>
 </template>
-

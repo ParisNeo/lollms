@@ -1,4 +1,3 @@
-// [UPDATE] frontend/webui/src/stores/admin.js
 import { defineStore } from 'pinia';
 import { ref, reactive, watch } from 'vue';
 import apiClient from '../services/api';
@@ -36,13 +35,11 @@ const castSettingValue = (value, type) => {
     return value;
 };
 
-
 export const useAdminStore = defineStore('admin', () => {
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
     const { on } = useEventBus();
 
-    // ... (existing state refs)
     // Dashboard & Users
     const dashboardStats = ref(null);
     const isLoadingDashboardStats = ref(false);
@@ -63,15 +60,28 @@ export const useAdminStore = defineStore('admin', () => {
     const bindings = ref([]);
     const isLoadingBindings = ref(false);
     const availableBindingTypes = ref([]);
+    
     const ttiBindings = ref([]);
     const isLoadingTtiBindings = ref(false);
     const availableTtiBindingTypes = ref([]);
+    
     const ttsBindings = ref([]);
     const isLoadingTtsBindings = ref(false);
     const availableTtsBindingTypes = ref([]);
+    
     const sttBindings = ref([]);
     const isLoadingSttBindings = ref(false);
     const availableSttBindingTypes = ref([]);
+    
+    // NEW: TTV and TTM State Definitions
+    const ttvBindings = ref([]);
+    const isLoadingTtvBindings = ref(false);
+    const availableTtvBindingTypes = ref([]);
+    
+    const ttmBindings = ref([]);
+    const isLoadingTtmBindings = ref(false);
+    const availableTtmBindingTypes = ref([]);
+    
     const ragBindings = ref([]);
     const isLoadingRagBindings = ref(false);
     const availableRagBindingTypes = ref([]);
@@ -139,8 +149,6 @@ export const useAdminStore = defineStore('admin', () => {
     watch(mcpFilters, (newFilters) => { localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(promptFilters, (newFilters) => { localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters)); }, { deep: true });
 
-    // ... (existing handlers)
-    
     async function handleTaskCompletion(task) {
         if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
         const taskName = (task.name || '').toLowerCase();
@@ -178,7 +186,6 @@ export const useAdminStore = defineStore('admin', () => {
     }
     on('task:completed', handleTaskCompletion);
 
-    // ... (existing actions)
     async function forceAllUsersConfig(payload) {
         try {
             const res = await apiClient.post('/api/admin/system/force-all-users-config', payload);
@@ -289,7 +296,7 @@ export const useAdminStore = defineStore('admin', () => {
         uiStore.addNotification('AI Bot user settings updated.', 'success'); 
     }
     
-    // ... (Bindings actions - keeping them concise to save space but they are same as before)
+    // Bindings Actions
     async function fetchBindings(force = false) { if (!force && bindings.value.length > 0) return; isLoadingBindings.value = true; try { const r = await apiClient.get('/api/admin/bindings'); bindings.value = r.data; } finally { isLoadingBindings.value = false; } }
     async function fetchAvailableBindingTypes(force = false) { if (!force && availableBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/bindings/available_types'); availableBindingTypes.value = r.data; }
     async function addBinding(payload) { const r = await apiClient.post('/api/admin/bindings', payload); bindings.value.push(r.data); uiStore.addNotification(`Binding '${r.data.alias}' created.`, 'success'); }
@@ -317,6 +324,20 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateSttBinding(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; uiStore.addNotification(`STT Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteSttBinding(id) { await apiClient.delete(`/api/admin/stt-bindings/${id}`); sttBindings.value = sttBindings.value.filter(b => b.id !== id); uiStore.addNotification('STT Binding deleted.', 'success'); }
     
+    // TTV (NEW)
+    async function fetchTtvBindings(force = false) { if (!force && ttvBindings.value.length > 0) return; isLoadingTtvBindings.value = true; try { const r = await apiClient.get('/api/admin/ttv-bindings'); ttvBindings.value = r.data; } finally { isLoadingTtvBindings.value = false; } }
+    async function fetchAvailableTtvBindingTypes(force = false) { if (!force && availableTtvBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttv-bindings/available_types'); availableTtvBindingTypes.value = r.data; }
+    async function addTtvBinding(payload) { const r = await apiClient.post('/api/admin/ttv-bindings', payload); ttvBindings.value.push(r.data); uiStore.addNotification(`TTV Binding '${r.data.alias}' created.`, 'success'); }
+    async function updateTtvBinding(id, payload) { const r = await apiClient.put(`/api/admin/ttv-bindings/${id}`, payload); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; uiStore.addNotification(`TTV Binding '${r.data.alias}' updated.`, 'success'); }
+    async function deleteTtvBinding(id) { await apiClient.delete(`/api/admin/ttv-bindings/${id}`); ttvBindings.value = ttvBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTV Binding deleted.', 'success'); }
+
+    // TTM (NEW)
+    async function fetchTtmBindings(force = false) { if (!force && ttmBindings.value.length > 0) return; isLoadingTtmBindings.value = true; try { const r = await apiClient.get('/api/admin/ttm-bindings'); ttmBindings.value = r.data; } finally { isLoadingTtmBindings.value = false; } }
+    async function fetchAvailableTtmBindingTypes(force = false) { if (!force && availableTtmBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttm-bindings/available_types'); availableTtmBindingTypes.value = r.data; }
+    async function addTtmBinding(payload) { const r = await apiClient.post('/api/admin/ttm-bindings', payload); ttmBindings.value.push(r.data); uiStore.addNotification(`TTM Binding '${r.data.alias}' created.`, 'success'); }
+    async function updateTtmBinding(id, payload) { const r = await apiClient.put(`/api/admin/ttm-bindings/${id}`, payload); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) ttmBindings.value[i] = r.data; uiStore.addNotification(`TTM Binding '${r.data.alias}' updated.`, 'success'); }
+    async function deleteTtmBinding(id) { await apiClient.delete(`/api/admin/ttm-bindings/${id}`); ttmBindings.value = ttmBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTM Binding deleted.', 'success'); }
+
     // RAG
     async function fetchRagBindings(force = false) { if (!force && ragBindings.value.length > 0) return; isLoadingRagBindings.value = true; try { const r = await apiClient.get('/api/admin/rag-bindings'); ragBindings.value = r.data; } catch(e) { console.error(e); } finally { isLoadingRagBindings.value = false; } }
     async function fetchAvailableRagBindingTypes(force = false) { if (!force && availableRagBindingTypes.value.length > 0) return; try { const r = await apiClient.get('/api/admin/rag-bindings/available_types'); availableRagBindingTypes.value = r.data; } catch(e) { console.error(e); } }
@@ -342,6 +363,17 @@ export const useAdminStore = defineStore('admin', () => {
     async function saveSttModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}/alias`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; }
     async function deleteSttModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/stt-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; }
     async function executeSttBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/stt-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
+    
+    async function fetchTtvBindingModels(id) { const r = await apiClient.get(`/api/admin/ttv-bindings/${id}/models`); return r.data; }
+    async function saveTtvModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/ttv-bindings/${id}/alias`, payload); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; }
+    async function deleteTtvModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/ttv-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; }
+    async function executeTtvBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/ttv-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
+
+    async function fetchTtmBindingModels(id) { const r = await apiClient.get(`/api/admin/ttm-bindings/${id}/models`); return r.data; }
+    async function saveTtmModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/ttm-bindings/${id}/alias`, payload); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) ttmBindings.value[i] = r.data; }
+    async function deleteTtmModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/ttm-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) ttmBindings.value[i] = r.data; }
+    async function executeTtmBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/ttm-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
+
     async function fetchRagBindingModels(id) { const r = await apiClient.get(`/api/admin/rag-bindings/${id}/models`); return r.data; }
     async function saveRagModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/rag-bindings/${id}/alias`, payload); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
     async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
@@ -350,7 +382,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function deleteRagAlias(name) { await apiClient.delete('/api/admin/rag/aliases', { data: { alias_name: name } }); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${name}' deleted.`, 'success'); }
     async function fetchAvailableRagVectorizers(force=false) { if(!force && availableRagVectorizers.value.length > 0) return; try { const r = await apiClient.get('/api/admin/rag/available-vectorizers'); availableRagVectorizers.value = r.data; } catch(e) { console.error(e); } }
 
-    // Zoos (Keeping it brief)
+    // Zoos
     async function fetchZooRepositories(force = false) { if (!force && zooRepositories.value.length > 0) return; isLoadingZooRepositories.value = true; try { const res = await apiClient.get('/api/apps_zoo/repositories'); zooRepositories.value = res.data; } finally { isLoadingZooRepositories.value = false; } }
     async function addZooRepository(payload) { const res = await apiClient.post('/api/apps_zoo/repositories', payload); zooRepositories.value.push(res.data); }
     async function deleteZooRepository(repoId) { await apiClient.delete(`/api/apps_zoo/repositories/${repoId}`); zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId); }
@@ -383,6 +415,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchZooPersonalities(params = {}, force=false) { if(!force && zooPersonalities.value.items.length > 0) return; isLoadingZooPersonalities.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } }
     async function installZooPersonality(payload) { const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+    
     async function fetchBindingZoo(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/zoo`); return r.data; }
     async function installLlmFromZoo(id, index) { const r = await apiClient.post(`/api/admin/bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
     async function fetchTtiBindingZoo(id) { const r = await apiClient.get(`/api/admin/tti-bindings/${id}/zoo`); return r.data; }
@@ -391,6 +424,10 @@ export const useAdminStore = defineStore('admin', () => {
     async function installTtsFromZoo(id, index) { const r = await apiClient.post(`/api/admin/tts-bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
     async function fetchSttBindingZoo(id) { const r = await apiClient.get(`/api/admin/stt-bindings/${id}/zoo`); return r.data; }
     async function installSttFromZoo(id, index) { const r = await apiClient.post(`/api/admin/stt-bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
+    async function fetchTtvBindingZoo(id) { const r = await apiClient.get(`/api/admin/ttv-bindings/${id}/zoo`); return r.data; }
+    async function installTtvFromZoo(id, index) { const r = await apiClient.post(`/api/admin/ttv-bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
+    async function fetchTtmBindingZoo(id) { const r = await apiClient.get(`/api/admin/ttm-bindings/${id}/zoo`); return r.data; }
+    async function installTtmFromZoo(id, index) { const r = await apiClient.post(`/api/admin/ttm-bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
 
     async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); const response = await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); return response.data; }
     async function updateSystemPrompt(promptId, promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); await usePromptsStore().fetchPrompts(); }
@@ -431,18 +468,7 @@ export const useAdminStore = defineStore('admin', () => {
     async function exportCategory(categoryId, categoryName) { const response = await apiClient.get(`/api/admin/fun-facts/categories/${categoryId}/export`, { responseType: 'blob' }); const url = URL.createObjectURL(new Blob([response.data])); const a = document.createElement('a'); a.href = url; a.download = `fun_facts_${categoryName}.json`; a.click(); URL.revokeObjectURL(url); }
     async function importFunFacts(data) { const payload = { fun_facts: data }; const response = await apiClient.post('/api/admin/fun-facts/import', payload); await Promise.all([fetchFunFacts(true), fetchFunFactCategories(true)]); uiStore.addNotification(`Imported ${response.data.facts_created} facts and ${response.data.categories_created} new categories.`, 'success'); }
     async function importCategoryFromFile(file) { const formData = new FormData(); formData.append('file', file); const response = await apiClient.post('/api/admin/fun-facts/categories/import', formData); await Promise.all([fetchFunFacts(true), fetchFunFactCategories(true)]); uiStore.addNotification(`Imported ${response.data.facts_created} facts for category.`, 'success'); }
-    // UPDATED to support object payload
-    async function generateFunFacts(content, category) { 
-        let payload;
-        if(typeof content === 'object') {
-             payload = content;
-        } else {
-             payload = { content, category, source_type: 'topic' };
-        }
-        const res = await apiClient.post('/api/admin/fun-facts/generate-from-prompt', payload); 
-        tasksStore.addTask(res.data); 
-        return res.data; 
-    }
+    async function generateFunFacts(content, category) { let payload; if(typeof content === 'object') { payload = content; } else { payload = { content, category, source_type: 'topic' }; } const res = await apiClient.post('/api/admin/fun-facts/generate-from-prompt', payload); tasksStore.addTask(res.data); return res.data; }
     
     async function fetchNewsArticles(force=false) { if(!force && newsArticles.value.length > 0) return; isLoadingNewsArticles.value = true; try { const response = await apiClient.get('/api/admin/news-articles'); newsArticles.value = response.data; } finally { isLoadingNewsArticles.value = false; } }
     async function updateNewsArticle(id, payload) { await apiClient.put(`/api/admin/news-articles/${id}`, payload); await fetchNewsArticles(true); uiStore.addNotification('Article updated.', 'success'); }
@@ -467,7 +493,42 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchModerationQueue(filter = null) { const params = {}; if (filter) params.status_filter = filter; const response = await apiClient.get('/api/admin/moderation/queue', { params }); return response.data; }
     async function approveContent(type, id) { await apiClient.post(`/api/admin/moderation/${type}/${id}/approve`); }
     async function deleteContent(type, id) { await apiClient.delete(`/api/admin/moderation/${type}/${id}`); }
-
+    async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); const response = await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); return response.data; }
+    async function updateSystemPrompt(promptId, promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); await usePromptsStore().fetchPrompts(); }
+    async function deleteSystemPrompt(promptId) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); await usePromptsStore().fetchPrompts(); await fetchZooPrompts({}, true); }
+    async function updateSystemPromptFromZoo(promptId) { const response = await apiClient.post(`/api/prompts_zoo/installed/${promptId}/update`); tasksStore.addTask(response.data); }
+    async function generateSystemPrompt(prompt) { const res = await apiClient.post('/api/prompts_zoo/generate_from_prompt', { prompt }); tasksStore.addTask(res.data); return res.data; }
+    async function fetchZooApps(force=false) { if(!force && zooApps.value.items.length > 0) return; isLoadingZooApps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/apps_zoo/categories'), apiClient.get('/api/apps_zoo/available') ]); zooApps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooApps.value = false; } }
+    async function installZooApp(payload) { const res = await apiClient.post('/api/apps_zoo/install', payload); tasksStore.addTask(res.data); }
+    async function fetchAppReadme(repo, folder) { const res = await apiClient.get('/api/apps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+    async function fetchZooMcps(force=false) { if(!force && zooMcps.value.items.length > 0) return; isLoadingZooMcps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/mcps_zoo/categories'), apiClient.get('/api/mcps_zoo/available') ]); zooMcps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooMcps.value = false; } }
+    async function installZooMcp(payload) { const res = await apiClient.post('/api/mcps_zoo/install', payload); tasksStore.addTask(res.data); }
+    async function fetchMcpReadme(repo, folder) { const res = await apiClient.get('/api/mcps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+    async function fetchZooPrompts(params = {}, force=false) { if(!force && zooPrompts.value.items.length > 0) return; isLoadingZooPrompts.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); zooPrompts.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooPrompts.value = false; } }
+    async function installZooPrompt(payload) { const res = await apiClient.post('/api/prompts_zoo/install', payload); tasksStore.addTask(res.data); }
+    async function fetchPromptReadme(repo, folder) { const res = await apiClient.get('/api/prompts_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+    async function fetchZooPersonalities(params = {}, force=false) { if(!force && zooPersonalities.value.items.length > 0) return; isLoadingZooPersonalities.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } }
+    async function installZooPersonality(payload) { const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
+    async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+    async function fetchMcpZooRepositories(force=false) { if(!force && mcpZooRepositories.value.length > 0) return; isLoadingMcpZooRepositories.value = true; try { const res = await apiClient.get('/api/mcps_zoo/repositories'); mcpZooRepositories.value = res.data; } finally { isLoadingMcpZooRepositories.value = false; } }
+    async function addMcpZooRepository(payload) { const res = await apiClient.post('/api/mcps_zoo/repositories', payload); mcpZooRepositories.value.push(res.data); }
+    async function deleteMcpZooRepository(repoId) { await apiClient.delete(`/api/mcps_zoo/repositories/${repoId}`); mcpZooRepositories.value = mcpZooRepositories.value.filter(r => r.id !== repoId); }
+    async function pullMcpZooRepository(repoId) { const res = await apiClient.post(`/api/mcps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
+    async function pullAllMcpZooRepositories() { for (const repo of mcpZooRepositories.value) await pullMcpZooRepository(repo.id); }
+    async function fetchPromptZooRepositories(force=false) { if(!force && promptZooRepositories.value.length > 0) return; isLoadingPromptZooRepositories.value = true; try { const res = await apiClient.get('/api/prompts_zoo/repositories'); promptZooRepositories.value = res.data; } finally { isLoadingPromptZooRepositories.value = false; } }
+    async function addPromptZooRepository(repoData) { const res = await apiClient.post('/api/prompts_zoo/repositories', repoData); promptZooRepositories.value.push(res.data); }
+    async function deletePromptZooRepository(repoId) { await apiClient.delete(`/api/prompts_zoo/repositories/${repoId}`); promptZooRepositories.value = promptZooRepositories.value.filter(r => r.id !== repoId); }
+    async function pullPromptZooRepository(repoId) { const res = await apiClient.post(`/api/prompts_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
+    async function pullAllPromptZooRepositories() { for (const repo of promptZooRepositories.value) await pullPromptZooRepository(repo.id); }
+    async function fetchPersonalityZooRepositories(force=false) { if(!force && personalityZooRepositories.value.length > 0) return; isLoadingPersonalityZooRepositories.value = true; try { const res = await apiClient.get('/api/personalities_zoo/repositories'); personalityZooRepositories.value = res.data; } catch(e){ console.error(e) } finally { isLoadingPersonalityZooRepositories.value = false; } }
+    async function addPersonalityZooRepository(payload) { const res = await apiClient.post('/api/personalities_zoo/repositories', payload); personalityZooRepositories.value.push(res.data); }
+    async function deletePersonalityZooRepository(repoId) { await apiClient.delete(`/api/personalities_zoo/repositories/${repoId}`); personalityZooRepositories.value = personalityZooRepositories.value.filter(r => r.id !== repoId); }
+    async function pullPersonalityZooRepository(repoId) { const res = await apiClient.post(`/api/personalities_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
+    async function addZooRepository(payload) { const res = await apiClient.post('/api/apps_zoo/repositories', payload); zooRepositories.value.push(res.data); }
+    async function deleteZooRepository(repoId) { await apiClient.delete(`/api/apps_zoo/repositories/${repoId}`); zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId); }
+    async function pullZooRepository(repoId) { const res = await apiClient.post(`/api/apps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
+    async function pullAllZooRepositories() { for (const repo of zooRepositories.value) await pullZooRepository(repo.id); }
+    
     // Requirements
     async function fetchRequirements() {
         isLoadingRequirements.value = true;
@@ -483,7 +544,6 @@ export const useAdminStore = defineStore('admin', () => {
         const res = await apiClient.post('/api/admin/system/requirements/install', { name, version });
         tasksStore.addTask(res.data);
     }
-
     // Services
     async function fetchServiceDashboard() { isLoadingServiceStats.value = true; try { const res = await apiClient.get('/api/admin/services/dashboard'); serviceStats.value = res.data; } finally { isLoadingServiceStats.value = false; } }
     async function resetServiceUsage() { await apiClient.post('/api/admin/services/reset-usage'); await fetchServiceDashboard(); uiStore.addNotification('Usage statistics reset.', 'success'); }
@@ -495,6 +555,10 @@ export const useAdminStore = defineStore('admin', () => {
     async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
     async function killProcess(pid) { await apiClient.post('/api/admin/system/kill-process', { pid }); uiStore.addNotification(`Process ${pid} killed.`, 'success'); fetchSystemStatus(); }
 
+    async function fixAllRequirements() {
+        const res = await apiClient.post('/api/admin/system/requirements/fix-all');
+        tasksStore.addTask(res.data);
+    }
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
@@ -504,6 +568,8 @@ export const useAdminStore = defineStore('admin', () => {
         ttiBindings, isLoadingTtiBindings, availableTtiBindingTypes,
         ttsBindings, isLoadingTtsBindings, availableTtsBindingTypes,
         sttBindings, isLoadingSttBindings, availableSttBindingTypes,
+        ttvBindings, isLoadingTtvBindings, availableTtvBindingTypes,
+        ttmBindings, isLoadingTtmBindings, availableTtmBindingTypes,
         ragBindings, isLoadingRagBindings, availableRagBindingTypes, availableRagVectorizers,
         zooRepositories, isLoadingZooRepositories, mcpZooRepositories, isLoadingMcpZooRepositories, promptZooRepositories, isLoadingPromptZooRepositories, personalityZooRepositories, isLoadingPersonalityZooRepositories,
         zooApps, isLoadingZooApps, zooMcps, isLoadingZooMcps, zooPrompts, isLoadingZooPrompts, zooPersonalities, isLoadingZooPersonalities,
@@ -527,6 +593,8 @@ export const useAdminStore = defineStore('admin', () => {
         fetchTtiBindings, fetchAvailableTtiBindingTypes, addTtiBinding, updateTtiBinding, deleteTtiBinding, fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias, executeTtiBindingCommand,
         fetchTtsBindings, fetchAvailableTtsBindingTypes, addTtsBinding, updateTtsBinding, deleteTtsBinding, fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias, executeTtsBindingCommand,
         fetchSttBindings, fetchAvailableSttBindingTypes, addSttBinding, updateSttBinding, deleteSttBinding, fetchSttBindingModels, saveSttModelAlias, deleteSttModelAlias, executeSttBindingCommand,
+        fetchTtvBindings, fetchAvailableTtvBindingTypes, addTtvBinding, updateTtvBinding, deleteTtvBinding, fetchTtvBindingModels, saveTtvModelAlias, deleteTtvModelAlias, executeTtvBindingCommand,
+        fetchTtmBindings, fetchAvailableTtmBindingTypes, addTtmBinding, updateTtmBinding, deleteTtmBinding, fetchTtmBindingModels, saveTtmModelAlias, deleteTtmModelAlias, executeTtmBindingCommand,
         fetchRagBindings, fetchAvailableRagBindingTypes, addRagBinding, updateRagBinding, deleteRagBinding, fetchRagBindingModels, saveRagModelAlias, deleteRagModelAlias, fetchRagModelsForType, addOrUpdateRagAlias, deleteRagAlias, fetchAvailableRagVectorizers,
 
         fetchZooRepositories, addZooRepository, deleteZooRepository, pullZooRepository, pullAllZooRepositories,
@@ -547,8 +615,9 @@ export const useAdminStore = defineStore('admin', () => {
         
         sendEmailToUsers, enhanceEmail, triggerRssScraping, refreshZooCache, generateSelfSignedCert, downloadCertificate, downloadTrustScript,
         fetchBindingZoo, installLlmFromZoo, fetchTtiBindingZoo, installTtiFromZoo, fetchTtsBindingZoo, installTtsFromZoo, fetchSttBindingZoo, installSttFromZoo,
+        fetchTtvBindingZoo, installTtvFromZoo, fetchTtmBindingZoo, installTtmFromZoo,
 
         fetchModerationQueue, approveContent, deleteContent,
-        fetchRequirements, installRequirement
+        fetchRequirements, installRequirement, fixAllRequirements
     };
 });

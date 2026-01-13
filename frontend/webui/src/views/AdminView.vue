@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/views/AdminView.vue -->
 <script setup>
 import { computed, defineAsyncComponent, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -32,7 +31,9 @@ import IconEye from '../assets/icons/IconEye.vue';
 import IconGpu from '../assets/icons/IconGpu.vue';
 import IconHardDrive from '../assets/icons/IconHardDrive.vue';
 import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
-import IconCode from '../assets/icons/IconCode.vue'; // New icon for requirements
+import IconCode from '../assets/icons/IconCode.vue';
+import IconVideoCamera from '../assets/icons/IconVideoCamera.vue'; // NEW
+import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue'; // NEW
 
 const route = useRoute();
 const router = useRouter();
@@ -54,7 +55,7 @@ const sections = [
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
   { type: 'link', id: 'services_mgmt', name: 'Services & Usage', icon: markRaw(IconServer) },
-  { type: 'link', id: 'email_marketing', name: 'Email Campaigns', icon: markRaw(IconMail) }, // ADDED
+  { type: 'link', id: 'email_marketing', name: 'Email Campaigns', icon: markRaw(IconMail) },
   { type: 'link', id: 'tasks', name: 'Tasks', icon: markRaw(IconTasks) },
   { type: 'divider', label: 'Content' },
   { type: 'link', id: 'news_management', name: 'News Articles', icon: markRaw(IconFileText) },
@@ -68,6 +69,8 @@ const sections = [
   { type: 'divider', label: 'Bindings & Services' },
   { type: 'link', id: 'llm_bindings', name: 'LLM Bindings', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'tti_bindings', name: 'TTI Bindings', icon: markRaw(IconPhoto) },
+  { type: 'link', id: 'ttv_bindings', name: 'TTV Bindings', icon: markRaw(IconVideoCamera) }, // NEW
+  { type: 'link', id: 'ttm_bindings', name: 'TTM Bindings', icon: markRaw(IconSpeakerWave) }, // NEW
   { type: 'link', id: 'tts_bindings', name: 'TTS Bindings', icon: markRaw(IconMicrophone) },
   { type: 'link', id: 'stt_bindings', name: 'STT Bindings', icon: markRaw(IconMicrophone) },
   { type: 'link', id: 'rag_bindings', name: 'RAG Bindings', icon: markRaw(IconDatabase) },
@@ -75,7 +78,6 @@ const sections = [
   { type: 'link', id: 'ai_bot', name: 'AI Bot', icon: markRaw(IconLollms) },
   { type: 'divider', label: 'System & Tools' },
   { type: 'link', id: 'welcome_settings', name: 'Welcome Page', icon: markRaw(IconHome) },
-  // global_settings link REMOVED
   { type: 'link', id: 'email', name: 'Email Settings', icon: markRaw(IconMail) },
   { type: 'link', id: 'sso_client_settings', name: 'SSO Client', icon: markRaw(IconKey) },
   { type: 'link', id: 'scim_settings', name: 'SCIM Provisioning', icon: markRaw(IconUserGroup) },
@@ -121,4 +123,3 @@ const activeSectionId = computed({
         </template>
     </PageViewLayout>
 </template>
-

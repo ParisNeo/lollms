@@ -20,7 +20,8 @@ import fitz  # PyMuPDF
 from docx import Document as DocxDocument
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query,
-    UploadFile, status)
+    UploadFile, status, Body
+)
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                PlainTextResponse, StreamingResponse)
@@ -41,7 +42,7 @@ from backend.db.models.user import (User as DBUser, UserMessageGrade,
                                      UserStarredDiscussion)
 from backend.discussion import get_user_discussion, get_user_discussion_manager
 from backend.tasks.image_generation_tasks import _generate_image_task, _generate_slides_task, _image_studio_edit_task
-from backend.tasks.utils import _to_task_info   
+from backend.tasks.utils import _to_task_info
 from backend.models import (UserAuthDetails, ArtefactInfo, ContextStatusResponse,
                             DataZones, DiscussionBranchSwitchRequest,
                             DiscussionDataZoneUpdate, DiscussionExportRequest,
@@ -62,6 +63,14 @@ from backend.session import (get_current_active_user,
                              get_user_temp_uploads_path, user_sessions)
 from backend.task_manager import task_manager, Task
 
+class TriggerTagRequest(BaseModel):
+    tag_content: str
+    tag_type: str  # generate, slides, edit
+    width: int = 1024
+    height: int = 1024
+    num_images: int = 1
+    custom_prompt: Optional[str] = None
+    source_image_index: Optional[int] = None  # For edit operations
 
 def build_tti_generation_router(router: APIRouter):
     @router.post("/{discussion_id}/generate_image", response_model=TaskInfo, status_code=202)
@@ -97,54 +106,57 @@ def build_tti_generation_router(router: APIRouter):
     def trigger_message_tag_generation(
         discussion_id: str,
         message_id: str,
-        tag_content: str = Form(...),
-        tag_type: str = Form(...), # generate, slides, edit
-        width: int = Form(1024),
-        height: int = Form(1024),
-        num_images: int = Form(1),
-        custom_prompt: Optional[str] = Form(None), # NEW: Added support for prompt override
+        request: TriggerTagRequest = Body(...),
         current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
         """
         Manually triggers a generation task based on a tag found in a message.
-        Allows prompt control by accepting a custom_prompt parameter.
+        Supports generate, slides, and edit operations.
         """
         discussion = get_user_discussion(current_user.username, discussion_id)
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
-        
+
         msg = discussion.get_message(message_id)
         if not msg:
             raise HTTPException(status_code=404, detail="Message not found")
 
         task = None
         # Use custom_prompt if provided, otherwise fallback to the tag's inner content
-        final_prompt = custom_prompt if custom_prompt and custom_prompt.strip() else tag_content
-        
-        if tag_type == 'slides':
+        final_prompt = request.custom_prompt if request.custom_prompt and request.custom_prompt.strip() else request.tag_content
+
+        if request.tag_type == 'slides':
             task = task_manager.submit_task(
                 name="Generating Slides (Regenerate)",
                 target=_generate_slides_task,
-                args=(current_user.username, discussion_id, message_id, final_prompt, width, height, num_images),
+                args=(current_user.username, discussion_id, message_id, final_prompt, request.width, request.height, request.num_images),
                 description=f"Regenerating slides for: {final_prompt[:30]}...",
                 owner_username=current_user.username
             )
-        elif tag_type == 'generate':
+        elif request.tag_type == 'generate':
             task = task_manager.submit_task(
                 name="Generating Image (Regenerate)",
                 target=_generate_image_task,
                 # Passing the existing message_id as parent to preserve history
-                args=(current_user.username, discussion_id, final_prompt, "", width, height, {}, msg.id),
+                args=(current_user.username, discussion_id, final_prompt, "", request.width, request.height, {}, msg.id),
                 description=f"Regenerating image for: {final_prompt[:30]}...",
                 owner_username=current_user.username
             )
-        elif tag_type == 'edit':
-             # For edit, logic would involve resolving the source image from the tag index
-             # and passing it to the _image_studio_edit_task logic. 
-             # Implementation depends on the task signature.
-             pass
+        elif request.tag_type == 'edit':
+            if request.source_image_index is None:
+                raise HTTPException(status_code=400, detail="source_image_index is required for edit operations")
+
+            task = task_manager.submit_task(
+                name="Editing Image",
+                target=_image_studio_edit_task,
+                args=(current_user.username, discussion_id, message_id, request.source_image_index, final_prompt, request.width, request.height),
+                description=f"Editing image with prompt: {final_prompt[:30]}...",
+                owner_username=current_user.username
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported tag type: {request.tag_type}")
 
         if not task:
-             raise HTTPException(status_code=400, detail=f"Unsupported tag type or configuration for regeneration: {tag_type}")
+            raise HTTPException(status_code=500, detail="Failed to create generation task")
 
         return task

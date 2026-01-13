@@ -10,7 +10,7 @@ import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 
 const props = defineProps({
     binding: { type: Object, required: true },
-    bindingType: { type: String, required: true } // 'llm', 'tti', 'tts', 'stt'
+    bindingType: { type: String, required: true } // 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm'
 });
 
 const uiStore = useUiStore();
@@ -37,6 +37,8 @@ async function fetchZoo() {
         else if (props.bindingType === 'tti') models = await adminStore.fetchTtiBindingZoo(props.binding.id);
         else if (props.bindingType === 'tts') models = await adminStore.fetchTtsBindingZoo(props.binding.id);
         else if (props.bindingType === 'stt') models = await adminStore.fetchSttBindingZoo(props.binding.id);
+        else if (props.bindingType === 'ttv') models = await adminStore.fetchTtvBindingZoo(props.binding.id);
+        else if (props.bindingType === 'ttm') models = await adminStore.fetchTtmBindingZoo(props.binding.id);
         
         zooModels.value = models || [];
     } catch (e) {
@@ -56,10 +58,11 @@ async function installModel(model, index) {
         else if (props.bindingType === 'tti') task = await adminStore.installTtiFromZoo(props.binding.id, index);
         else if (props.bindingType === 'tts') task = await adminStore.installTtsFromZoo(props.binding.id, index);
         else if (props.bindingType === 'stt') task = await adminStore.installSttFromZoo(props.binding.id, index);
+        else if (props.bindingType === 'ttv') task = await adminStore.installTtvFromZoo(props.binding.id, index);
+        else if (props.bindingType === 'ttm') task = await adminStore.installTtmFromZoo(props.binding.id, index);
         
         if (task) {
             uiStore.addNotification(`Installing ${model.name}...`, 'info');
-            // We can optionally track task progress here or just let global notification handle it
         }
     } catch (e) {
         console.error(e);
@@ -67,13 +70,6 @@ async function installModel(model, index) {
     } finally {
         installingIndex.value = null;
     }
-}
-
-function getActiveInstallTask(index) {
-    // This is tricky because we don't have a direct link between index and task ID easily 
-    // unless we store task ID when starting. 
-    // For simplicity, we just rely on task notifications for now.
-    return null; 
 }
 
 onMounted(() => {

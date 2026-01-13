@@ -9,6 +9,7 @@ import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconError from '../../assets/icons/IconError.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -16,6 +17,7 @@ const uiStore = useUiStore();
 const { systemRequirements, isLoadingRequirements } = storeToRefs(adminStore);
 const searchTerm = ref('');
 const installingPackage = ref(null);
+const isFixingAll = ref(false);
 
 onMounted(() => {
     adminStore.fetchRequirements();
@@ -25,6 +27,10 @@ const filteredRequirements = computed(() => {
     if (!searchTerm.value) return systemRequirements.value;
     const lowerQuery = searchTerm.value.toLowerCase();
     return systemRequirements.value.filter(req => req.name.toLowerCase().includes(lowerQuery));
+});
+
+const hasRequirementsToFix = computed(() => {
+    return systemRequirements.value.some(req => req.status !== 'ok');
 });
 
 async function handleInstall(req, version) {
@@ -37,6 +43,24 @@ async function handleInstall(req, version) {
         uiStore.addNotification('Installation failed to start', 'error');
     } finally {
         installingPackage.value = null;
+    }
+}
+
+async function handleFixAll() {
+    if (!hasRequirementsToFix.value) {
+        uiStore.addNotification('All requirements are already satisfied.', 'info');
+        return;
+    }
+
+    isFixingAll.value = true;
+    try {
+        await adminStore.fixAllRequirements();
+        uiStore.addNotification('Fix all requirements task started. Check tasks for progress.', 'info');
+    } catch (e) {
+        console.error(e);
+        uiStore.addNotification('Failed to start fix all requirements task', 'error');
+    } finally {
+        isFixingAll.value = false;
     }
 }
 
@@ -70,14 +94,24 @@ function getStatusLabel(status) {
                 <p class="text-sm text-gray-500 dark:text-gray-400">Monitor and manage python dependencies.</p>
             </div>
             <div class="flex items-center gap-2">
-                 <input 
-                    type="text" 
-                    v-model="searchTerm" 
-                    placeholder="Search libraries..." 
+                 <input
+                    type="text"
+                    v-model="searchTerm"
+                    placeholder="Search libraries..."
                     class="input-field-sm w-48"
                 />
                 <button @click="adminStore.fetchRequirements()" class="btn btn-secondary btn-sm" :disabled="isLoadingRequirements">
                     <IconRefresh class="w-4 h-4 mr-2" :class="{'animate-spin': isLoadingRequirements}" /> Refresh
+                </button>
+                <button
+                    @click="handleFixAll"
+                    class="btn btn-primary btn-sm"
+                    :disabled="isFixingAll || !hasRequirementsToFix"
+                    title="Install correct versions for all requirements that are not satisfied"
+                >
+                    <IconWrenchScrewdriver v-if="!isFixingAll" class="w-4 h-4 mr-2" />
+                    <IconAnimateSpin v-else class="w-4 h-4 mr-2 animate-spin" />
+                    {{ isFixingAll ? 'Fixing...' : 'Fix All' }}
                 </button>
             </div>
         </div>
@@ -115,9 +149,9 @@ function getStatusLabel(status) {
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                 <div class="flex justify-end gap-2">
-                                     <button 
+                                     <button
                                         v-if="req.status !== 'ok' && req.required_version !== 'Any'"
-                                        @click="handleInstall(req, req.required_version)" 
+                                        @click="handleInstall(req, req.required_version)"
                                         :disabled="installingPackage === req.name"
                                         class="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300 disabled:opacity-50"
                                         title="Install Required Version"
@@ -126,8 +160,8 @@ function getStatusLabel(status) {
                                         <span v-else>Fix Version</span>
                                     </button>
 
-                                    <button 
-                                        @click="handleInstall(req, null)" 
+                                    <button
+                                        @click="handleInstall(req, null)"
                                         :disabled="installingPackage === req.name"
                                         class="text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-300 disabled:opacity-50 ml-2"
                                         title="Update to Latest (May be incompatible)"

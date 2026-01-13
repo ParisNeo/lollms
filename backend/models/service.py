@@ -3,10 +3,10 @@ import datetime
 from typing import List, Optional, Any, Dict
 from pydantic import BaseModel, Field, constr, field_validator, model_validator
 
-# --- NEW: Model for dynamic LLM Binding config ---
+# --- LLM Binding Models ---
 class LLMBindingBase(BaseModel):
     alias: constr(min_length=1, max_length=100)
-    name: constr(min_length=1, max_length=100) # binding_name
+    name: constr(min_length=1, max_length=100)
     config: Dict[str, Any] = Field(default_factory=dict)
     default_model_name: Optional[str] = None
     is_active: bool = True
@@ -23,17 +23,17 @@ class LLMBindingUpdate(BaseModel):
 
 class LLMBindingPublicAdmin(LLMBindingBase):
     id: int
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
 
-# --- NEW: TTI Binding Models ---
+# --- TTI Binding Models ---
 class TTIBindingBase(BaseModel):
     alias: constr(min_length=1, max_length=100)
-    name: constr(min_length=1, max_length=100) # binding_name
+    name: constr(min_length=1, max_length=100)
     config: Dict[str, Any] = Field(default_factory=dict)
     default_model_name: Optional[str] = None
     is_active: bool = True
@@ -50,16 +50,122 @@ class TTIBindingUpdate(BaseModel):
 
 class TTIBindingPublicAdmin(TTIBindingBase):
     id: int
-    created_at: datetime.datetime
-    updated_at: datetime.datetime
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True
-# --- END TTI Binding Models ---
 
+# --- TTS Binding Models ---
+class TTSBindingBase(BaseModel):
+    alias: constr(min_length=1, max_length=100)
+    name: constr(min_length=1, max_length=100)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
 
-# --- NEW: Model Alias Management Models ---
+class TTSBindingCreate(TTSBindingBase):
+    pass
+
+class TTSBindingUpdate(BaseModel):
+    alias: Optional[constr(min_length=1, max_length=100)] = None
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class TTSBindingPublicAdmin(TTSBindingBase):
+    id: int
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+    model_aliases: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
+# --- STT Binding Models ---
+class STTBindingBase(BaseModel):
+    alias: constr(min_length=1, max_length=100)
+    name: constr(min_length=1, max_length=100)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class STTBindingCreate(STTBindingBase):
+    pass
+
+class STTBindingUpdate(BaseModel):
+    alias: Optional[constr(min_length=1, max_length=100)] = None
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class STTBindingPublicAdmin(STTBindingBase):
+    id: int
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+    model_aliases: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
+# --- TTV Binding Models (New) ---
+class TTVBindingBase(BaseModel):
+    alias: constr(min_length=1, max_length=100)
+    name: constr(min_length=1, max_length=100)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class TTVBindingCreate(TTVBindingBase):
+    pass
+
+class TTVBindingUpdate(BaseModel):
+    alias: Optional[constr(min_length=1, max_length=100)] = None
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class TTVBindingPublicAdmin(TTVBindingBase):
+    id: int
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+    model_aliases: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
+# --- TTM Binding Models (New) ---
+class TTMBindingBase(BaseModel):
+    alias: constr(min_length=1, max_length=100)
+    name: constr(min_length=1, max_length=100)
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class TTMBindingCreate(TTMBindingBase):
+    pass
+
+class TTMBindingUpdate(BaseModel):
+    alias: Optional[constr(min_length=1, max_length=100)] = None
+    name: Optional[constr(min_length=1, max_length=100)] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class TTMBindingPublicAdmin(TTMBindingBase):
+    id: int
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+    model_aliases: Optional[Dict[str, Any]] = None
+
+    class Config:
+        from_attributes = True
+
+# --- Model Alias Models ---
 class ModelAlias(BaseModel):
     icon: Optional[str] = None
     title: Optional[str] = None
@@ -73,17 +179,31 @@ class ModelAlias(BaseModel):
     repeat_penalty: Optional[float] = Field(None, ge=0.0)
     repeat_last_n: Optional[int] = Field(None, ge=0)
     allow_parameters_override: bool = True
-    # NEW REASONING FIELDS
     reasoning_activation: Optional[bool] = False
-    reasoning_effort: Optional[str] = None # low, medium, high
+    reasoning_effort: Optional[str] = None
     reasoning_summary: Optional[bool] = False
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: ModelAlias
 
-# --- NEW: Flexible TTI Alias Update Model ---
 class TtiModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: Dict[str, Any]
+
+class TtsModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: Dict[str, Any]
+
+class SttModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: Dict[str, Any]
+
+class TtvModelAliasUpdate(BaseModel):
+    original_model_name: str
+    alias: Dict[str, Any]
+
+class TtmModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: Dict[str, Any]
 
@@ -92,13 +212,12 @@ class ModelAliasDelete(BaseModel):
 
 class BindingModel(BaseModel):
     original_model_name: str
-    alias: Optional[Dict[str, Any]] = None # FIX: Changed from ModelAlias to support flexible TTI/LLM params
+    alias: Optional[Dict[str, Any]] = None
 
 class ModelNamePayload(BaseModel):
     model_name: str
-# --- END NEW ---
 
-
+# --- Zoo Models ---
 class MCPBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     client_id: Optional[str] = None
@@ -114,8 +233,7 @@ class MCPBase(BaseModel):
     @field_validator('sso_user_infos_to_share', mode='before')
     @classmethod
     def validate_sso_user_infos(cls, v: Any) -> List[str]:
-        if v is None:
-            return []
+        if v is None: return []
         return v
         
 class MCPCreate(MCPBase):
@@ -259,7 +377,7 @@ class ZooAppInfo(BaseModel):
     port: Optional[int] = None
     url: Optional[str] = None
     autostart: bool = False
-    has_config_schema: bool = False # ADDED THIS LINE
+    has_config_schema: bool = False
     has_dot_env_config: bool = False
     
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
@@ -303,7 +421,7 @@ class ZooMCPInfo(BaseModel):
     port: Optional[int] = None
     url: Optional[str] = None
     autostart: bool = False
-    has_config_schema: bool = False # ADDED THIS LINE
+    has_config_schema: bool = False
     has_dot_env_config: bool = False
 
     @field_validator('version', 'creation_date', 'last_update_date', mode='before')
@@ -355,7 +473,6 @@ class ZooPromptInfoResponse(BaseModel):
     total: int
     page: int
     pages: int
-
 
 class AppInstallRequest(BaseModel):
     repository: str
@@ -435,7 +552,7 @@ class AppPublic(AppBase):
     autostart: bool = False
     update_available: bool = False
     repo_version: Optional[str] = None
-    has_config_schema: bool = False # ADDED THIS LINE
+    has_config_schema: bool = False
     has_dot_env_config: bool = False
     item_type: Optional[str] = 'app'
 

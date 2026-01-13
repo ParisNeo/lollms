@@ -608,3 +608,119 @@ async def update_server(current_admin: UserAuthDetails = Depends(get_current_adm
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to initiate update: {str(e)}")
+
+@system_management_router.post("/system/requirements/fix-all", response_model=TaskInfo, status_code=202)
+async def fix_all_requirements(current_user: UserAuthDetails = Depends(get_current_admin_user)):
+    """
+    Installs the correct version for all requirements that are not 'ok'.
+    Returns a task that can be monitored for progress.
+    """
+    def _fix_all_task(task: Task):
+        task.log("Starting to fix all requirements...")
+
+        # Get requirements directly from the requirements.txt file
+        requirements_path = PROJECT_ROOT / "requirements.txt"
+        if not requirements_path.exists():
+            task.log("requirements.txt not found", level="ERROR")
+            raise Exception("requirements.txt not found")
+
+        # Parse requirements
+        requirements_to_fix = []
+        with open(requirements_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
+                    continue
+
+                if line.startswith("-e") or "://" in line:
+                    continue
+
+                try:
+                    req = Requirement(line)
+                    name = req.name
+
+                    # Extract required version from specs if == is present
+                    required_version = None
+                    for spec in req.specifier:
+                        if spec.operator == '==':
+                            required_version = spec.version
+                            break
+
+                    installed_version = None
+                    try:
+                        installed_version = get_installed_version(name)
+                    except PackageNotFoundError:
+                        pass
+
+                    status = 'missing'
+                    if installed_version:
+                        if not required_version:
+                            status = 'ok'  # No specific version required
+                        else:
+                            inst_v = parse_version(installed_version)
+                            req_v = parse_version(required_version)
+
+                            if inst_v == req_v:
+                                status = 'ok'
+                            elif inst_v > req_v:
+                                status = 'newer'
+                            else:
+                                status = 'older'
+
+                    if status != 'ok':
+                        requirements_to_fix.append({
+                            "name": name,
+                            "required_version": required_version
+                        })
+                except Exception as e:
+                    task.log(f"Error parsing requirement line '{line}': {e}", level="ERROR")
+                    continue
+
+        if not requirements_to_fix:
+            task.log("All requirements are already satisfied.")
+            task.set_progress(100)
+            return {"message": "All requirements are already satisfied."}
+
+        total_reqs = len(requirements_to_fix)
+        fixed_count = 0
+
+        for i, req in enumerate(requirements_to_fix):
+            if task.cancellation_event.is_set():
+                task.log("Fix all requirements task cancelled.", level="WARNING")
+                break
+
+            task.log(f"Fixing {req['name']} (required: {req['required_version'] or 'latest'})...")
+            try:
+                cmd = [sys.executable, "-m", "pip", "install"]
+                if req['required_version']:
+                    cmd.append(f"{req['name']}=={req['required_version']}")
+                else:
+                    cmd.append("--upgrade")
+                    cmd.append(req['name'])
+
+                process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                task.process = process
+                for line in process.stdout:
+                    task.log(line.strip())
+
+                process.wait()
+                if process.returncode == 0:
+                    task.log(f"Successfully installed {req['name']}")
+                    fixed_count += 1
+                else:
+                    task.log(f"Installation failed for {req['name']} with code {process.returncode}", level="ERROR")
+            except Exception as e:
+                task.log(f"Failed to install {req['name']}: {str(e)}", level="ERROR")
+
+            task.set_progress(int(90 * (i + 1) / total_reqs))
+
+        task.set_progress(100)
+        return {"message": f"Fixed {fixed_count} out of {total_reqs} requirements."}
+
+    db_task = task_manager.submit_task(
+        name="Fix All Requirements",
+        target=_fix_all_task,
+        description="Installing correct versions for all requirements that are not satisfied.",
+        owner_username=current_user.username
+    )
+    return db_task
