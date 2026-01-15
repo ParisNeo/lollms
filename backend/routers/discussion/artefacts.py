@@ -4,8 +4,11 @@ import base64
 import io
 import asyncio
 import json
+import requests
+import re
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse, unquote
 from typing import List, Optional, Dict
 
 try:
@@ -28,8 +31,8 @@ from backend.session import get_current_active_user, get_user_lollms_client
 from backend.discussion import get_user_discussion
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.task_manager import task_manager
-from ...tasks.artefact_tasks import _import_artefact_from_url_task
-from ...tasks.utils import _to_task_info
+from backend.tasks.artefact_tasks import _import_artefact_from_url_task
+from backend.tasks.utils import _to_task_info
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 # .msg handling
 try:
@@ -37,7 +40,22 @@ try:
 except ImportError:
     extract_msg = None
 
+# YouTube Transcript handling
+try:
+    from youtube_transcript_api import YouTubeTranscriptApi
+except ImportError:
+    YouTubeTranscriptApi = None
+
 from backend.db import get_db
+from pydantic import BaseModel
+
+class WikipediaImportRequest(BaseModel):
+    query: str
+    auto_load: bool = True
+
+class YoutubeTranscriptImportRequest(BaseModel):
+    video_url: str
+    auto_load: bool = True
 
 def build_artefacts_router(router: APIRouter):
      # safe_store is needed for RAG callbacks
@@ -63,6 +81,7 @@ def build_artefacts_router(router: APIRouter):
         discussion_id: str,
         file: UploadFile = File(...),
         extract_images: bool = Form(True),
+        auto_load: bool = Form(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db) 
     ):
@@ -107,7 +126,6 @@ def build_artefacts_router(router: APIRouter):
                                 images.append(base64.b64encode(image_bytes).decode('utf-8'))
                     content = "\n".join(text_parts).strip()
                     pdf_doc.close()
-                    # If the document has no text but does have images, it's likely a scanned PDF.
                     if not content and image_count > 0:
                         raise HTTPException(
                             status_code=400,
@@ -180,8 +198,6 @@ def build_artefacts_router(router: APIRouter):
                                 msg_date = getattr(msg, "date", "")
                                 msg_subject = getattr(msg, "subject", "") or title
                                 msg_body = (getattr(msg, "body", "") or "").strip()
-
-                                # Prefer body (plain) over HTML to avoid markup; if body empty, fallback to htmlBody text
                                 html_body = getattr(msg, "htmlBody", None)
                                 if not msg_body and html_body:
                                     try:
@@ -200,21 +216,17 @@ def build_artefacts_router(router: APIRouter):
                                 if meta: header_lines.append("\n".join(meta))
                                 header = "\n\n".join(header_lines)
 
-                                # Attachments
                                 attachment_text_parts: List[str] = []
                                 for att in msg.attachments:
-                                    # att has .longFilename, .data (bytes), possibly .mimetype
                                     att_name = getattr(att, "longFilename", None) or getattr(att, "shortFilename", None) or "attachment"
                                     att_bytes = att.data or b""
                                     att_ext = Path(att_name).suffix.lower()
 
                                     if extract_images:
-                                        # Handle images directly
                                         if att_ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]:
                                             images.append(base64.b64encode(att_bytes).decode("utf-8"))
                                             continue
 
-                                    # Text-like attachments
                                     try:
                                         text_guess = att_bytes.decode("utf-8")
                                     except UnicodeDecodeError:
@@ -223,7 +235,6 @@ def build_artefacts_router(router: APIRouter):
                                         except Exception:
                                             text_guess = ""
 
-                                    # If looks like Markdown or plain text/code, include as fenced block
                                     if att_ext in [".txt", ".md", ".py", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html", ".js", ".ts", ".css"]:
                                         lang = {
                                             ".md": "markdown", ".py": "python", ".json": "json", ".csv": "csv",
@@ -233,7 +244,6 @@ def build_artefacts_router(router: APIRouter):
                                         fence = f"````{lang}\n{text_guess}\n````"
                                         attachment_text_parts.append(f"### Attachment: {att_name}\n\n{fence}")
                                     else:
-                                        # Other binaries: just list the name
                                         attachment_text_parts.append(f"- Attachment: {att_name} ({len(att_bytes)} bytes)")
 
                                 attachments_md = "\n\n".join(attachment_text_parts)
@@ -261,6 +271,12 @@ def build_artefacts_router(router: APIRouter):
                 images=images,
                 author=current_user.username
             )
+            
+            # --- Auto Load Logic ---
+            if auto_load:
+                discussion.load_artefact_into_data_zone(title=title, version=artefact_info['version'])
+            # -----------------------
+
             discussion.commit()
 
             all_images_info = discussion.get_discussion_images()
@@ -279,10 +295,223 @@ def build_artefacts_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to add artefact: {e}")
 
-    @router.post("/{discussion_id}/artefacts/manual", response_model=ArtefactInfo, status_code=status.HTTP_201_CREATED)
+    @router.post("/{discussion_id}/artefacts/wikipedia", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def import_wikipedia_artefact(
+        discussion_id: str,
+        request: WikipediaImportRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        try:
+            query = request.query.strip()
+            lang = "en"
+            title = None
+            
+            # Detect if it's a URL and parse it
+            if query.startswith("http://") or query.startswith("https://"):
+                try:
+                    parsed = urlparse(query)
+                    if "wikipedia.org" in parsed.netloc:
+                        # Extract language (e.g., fr.wikipedia.org -> fr)
+                        domain_parts = parsed.netloc.split('.')
+                        
+                        # Logic to handle language subdomains correctly including m.wikipedia.org
+                        if len(domain_parts) >= 3:
+                            # e.g., en.wikipedia.org or en.m.wikipedia.org
+                            if 'm' in domain_parts:
+                                m_idx = domain_parts.index('m')
+                                if m_idx > 0:
+                                    lang = domain_parts[m_idx - 1]
+                            elif domain_parts[0] != 'www':
+                                lang = domain_parts[0]
+
+                        # Extract title from path /wiki/Title
+                        path_parts = parsed.path.split('/')
+                        if len(path_parts) > 2 and path_parts[1] == 'wiki':
+                            title = unquote(path_parts[2])
+                except Exception:
+                    pass # Fallback to search
+
+            api_url = f"https://{lang}.wikipedia.org/w/api.php"
+            
+            headers = {
+                "User-Agent": "Lollms/1.0 (https://github.com/ParisNeo/lollms; contact@lollms.com)"
+            }
+
+            with requests.Session() as session:
+                # If no title extracted, search for it
+                if not title:
+                    search_params = {
+                        "action": "opensearch",
+                        "search": query,
+                        "limit": 1,
+                        "namespace": 0,
+                        "format": "json"
+                    }
+                    resp = session.get(api_url, params=search_params, headers=headers)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    
+                    if not data or len(data) < 2 or not data[1]:
+                        raise HTTPException(status_code=404, detail=f"No Wikipedia article found for '{request.query}'")
+                    
+                    title = data[1][0]
+                
+                # Fetch Content
+                content_params = {
+                    "action": "query",
+                    "prop": "extracts",
+                    "exlimit": 1,
+                    "titles": title,
+                    "explaintext": 1,
+                    "format": "json"
+                }
+                
+                resp_content = session.get(api_url, params=content_params, headers=headers)
+                resp_content.raise_for_status()
+                cdata = resp_content.json()
+                
+                pages = cdata.get("query", {}).get("pages", {})
+                page_id = list(pages.keys())[0]
+                if page_id == "-1":
+                     raise HTTPException(status_code=404, detail=f"Article content not found for title: {title}")
+                
+                page_content = pages[page_id].get("extract", "")
+                
+                final_url = f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}"
+                
+                full_content = f"# {title}\nSource: {final_url}\n\n{page_content}"
+                
+                # 3. Create Artefact
+                artefact_name = f"{title}.md"
+                artefact_info = discussion.add_artefact(
+                    title=artefact_name,
+                    content=full_content,
+                    author=current_user.username
+                )
+                
+                # 4. Auto Load
+                if request.auto_load:
+                     discussion.load_artefact_into_data_zone(title=artefact_name, version=artefact_info['version'])
+                
+                discussion.commit()
+                
+                artefacts = discussion.list_artefacts()
+                for artefact in artefacts:
+                    if isinstance(artefact.get('created_at'), datetime):
+                        artefact['created_at'] = artefact['created_at'].isoformat()
+                    if isinstance(artefact.get('updated_at'), datetime):
+                        artefact['updated_at'] = artefact['updated_at'].isoformat()
+
+                lc = get_user_lollms_client(current_user.username)
+                token_count = len(lc.tokenize(discussion.discussion_data_zone))
+                all_images_info = discussion.get_discussion_images()
+
+                return {
+                    "discussion_data_zone": discussion.discussion_data_zone,
+                    "artefacts": artefacts,
+                    "discussion_data_zone_tokens": token_count,
+                    "discussion_images": [img['data'] for img in all_images_info],
+                    "active_discussion_images": [img['active'] for img in all_images_info]
+                }
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to import from Wikipedia: {e}")
+
+    @router.post("/{discussion_id}/artefacts/youtube", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def import_youtube_transcript(
+        discussion_id: str,
+        request: YoutubeTranscriptImportRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        if YouTubeTranscriptApi is None:
+            raise HTTPException(status_code=501, detail="youtube_transcript_api is not installed on the server.")
+
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        # Extract Video ID
+        video_id = None
+        # Standard formats: v=VIDEO_ID, youtu.be/VIDEO_ID, embed/VIDEO_ID
+        match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", request.video_url)
+        if match:
+            video_id = match.group(1)
+        else:
+            raise HTTPException(status_code=400, detail="Could not extract a valid YouTube Video ID from the provided URL.")
+
+        try:
+            # Fetch Transcript
+            try:
+                transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+            except Exception as e:
+                # Try getting list and picking manually if simple get fails (e.g. autogenerated vs manual)
+                try:
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                    # Prefer english or first available
+                    transcript = transcript_list.find_generated_transcript(['en']) or transcript_list.find_manually_created_transcript(['en'])
+                    if not transcript:
+                        transcript = next(iter(transcript_list))
+                    transcript_list = transcript.fetch()
+                except Exception as inner_e:
+                    raise HTTPException(status_code=400, detail=f"Could not retrieve transcript: {str(e)}")
+
+            # Format Transcript
+            lines = []
+            for entry in transcript_list:
+                start = int(entry['start'])
+                minutes = start // 60
+                seconds = start % 60
+                text = entry['text']
+                lines.append(f"[{minutes:02d}:{seconds:02d}] {text}")
+            
+            full_content = f"# YouTube Transcript\nSource: {request.video_url}\n\n" + "\n".join(lines)
+            
+            # Create Artefact
+            artefact_name = f"Youtube_Transcript_{video_id}.md"
+            artefact_info = discussion.add_artefact(
+                title=artefact_name,
+                content=full_content,
+                author=current_user.username
+            )
+            
+            # Auto Load
+            if request.auto_load:
+                 discussion.load_artefact_into_data_zone(title=artefact_name, version=artefact_info['version'])
+            
+            discussion.commit()
+            
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime):
+                    artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime):
+                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            all_images_info = discussion.get_discussion_images()
+
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
+
+        except HTTPException as he:
+            raise he
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to process YouTube transcript: {str(e)}")
+
+    @router.post("/{discussion_id}/artefacts/manual", response_model=ArtefactAndDataZoneUpdateResponse, status_code=status.HTTP_201_CREATED)
     async def create_manual_artefact(
         discussion_id: str,
         payload: ArtefactCreateManual,
+        auto_load: bool = Query(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
@@ -293,13 +522,36 @@ def build_artefacts_router(router: APIRouter):
             artefact_info = discussion.add_artefact(
                 title=payload.title, content=payload.content, images=payload.images_b64, author=current_user.username
             )
+            
+            if auto_load:
+                discussion.load_artefact_into_data_zone(title=payload.title, version=artefact_info['version'])
+                
             discussion.commit()
+            
             if isinstance(artefact_info.get('created_at'), datetime):
                 artefact_info['created_at'] = artefact_info['created_at'].isoformat()
             if isinstance(artefact_info.get('updated_at'), datetime):
                 artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
-            return artefact_info
+            
+            # Return updated context info
+            artefacts = discussion.list_artefacts()
+            for art in artefacts:
+                if isinstance(art.get('created_at'), datetime): art['created_at'] = art['created_at'].isoformat()
+                if isinstance(art.get('updated_at'), datetime): art['updated_at'] = art['updated_at'].isoformat()
+
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            all_images_info = discussion.get_discussion_images()
+
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
         except Exception as e:
+            trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to create artefact: {e}")
 
     @router.put("/{discussion_id}/artefacts/{artefact_title}", response_model=ArtefactInfo)

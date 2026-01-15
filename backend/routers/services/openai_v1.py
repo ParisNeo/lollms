@@ -706,7 +706,7 @@ async def chat_completions(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    ASCIIColors.info(f"------------ Open AI V1 --------------")
+    ASCIIColors.info("------------ Open AI V1 --------------")
     ASCIIColors.bold(f"Received Chat Completion Request. Model: {request.model}, Stream: {request.stream}")
 
     try:

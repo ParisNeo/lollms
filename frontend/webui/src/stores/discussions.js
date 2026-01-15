@@ -306,6 +306,79 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             console.error(error);
         }
     }
+
+    async function importWikipediaArtefact(discussionId, query) {
+        if (!discussionId) return;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/wikipedia`, { query });
+            const data = response.data;
+            
+            getActions().handleDataZoneUpdate({
+                discussion_id: discussionId,
+                zone: 'discussion',
+                new_content: data.discussion_data_zone,
+                discussion_images: data.discussion_images,
+                active_discussion_images: data.active_discussion_images
+            });
+            
+            activeDiscussionArtefacts.value = data.artefacts;
+            uiStore.addNotification('Wikipedia article imported and loaded.', 'success');
+        } catch (error) {
+            console.error(error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to import Wikipedia article.', 'error');
+            throw error;
+        }
+    }
+
+    async function importYoutubeTranscript(discussionId, videoUrl) {
+        if (!discussionId) return;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/youtube`, { video_url: videoUrl });
+            const data = response.data;
+            
+            getActions().handleDataZoneUpdate({
+                discussion_id: discussionId,
+                zone: 'discussion',
+                new_content: data.discussion_data_zone,
+                discussion_images: data.discussion_images,
+                active_discussion_images: data.active_discussion_images
+            });
+            
+            activeDiscussionArtefacts.value = data.artefacts;
+            uiStore.addNotification('YouTube transcript imported and loaded.', 'success');
+        } catch (error) {
+            console.error(error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to import YouTube transcript.', 'error');
+            throw error;
+        }
+    }
+
+    async function createManualArtefact(discussionId, title, content) {
+        if (!discussionId) return;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/manual?auto_load=true`, {
+                title,
+                content,
+                images_b64: []
+            });
+            const data = response.data;
+            
+            getActions().handleDataZoneUpdate({
+                discussion_id: discussionId,
+                zone: 'discussion',
+                new_content: data.discussion_data_zone,
+                discussion_images: data.discussion_images,
+                active_discussion_images: data.active_discussion_images
+            });
+            
+            activeDiscussionArtefacts.value = data.artefacts;
+            uiStore.addNotification('Document created and loaded.', 'success');
+        } catch (error) {
+            console.error(error);
+            uiStore.addNotification('Failed to create manual artefact.', 'error');
+            throw error;
+        }
+    }
     
     function $reset() {
         discussions.value = {};
@@ -356,6 +429,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         handleDiscussionImagesUpdated,
         toggleDiscussionImage,
         triggerTagGeneration,
+        importWikipediaArtefact,
+        importYoutubeTranscript,
+        createManualArtefact,
         $reset,
     };
 });

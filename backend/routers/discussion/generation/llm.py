@@ -1475,7 +1475,16 @@ def build_llm_generation_router(router: APIRouter):
                         event_title_building = jsonable_encoder({"type": "new_title_end", "new_title": new_title})
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(event_title_building) + "\n")
                     
-                    finalize_payload = {"type": "finalize", "data": final_messages_payload}
+                    finalize_payload = {
+                        "type": "finalize",
+                        "data": final_messages_payload,
+                        "discussion": {
+                            "id": discussion_id,
+                            "discussion_data_zone": discussion_obj.discussion_data_zone,
+                            "discussion_images": discussion_obj.get_discussion_images(),
+                            "active_discussion_images": discussion_obj.get_active_discussion_images()
+                        }
+                    }
                     if new_title:
                         finalize_payload["new_title"] = new_title
                     json_compatible_event = jsonable_encoder(finalize_payload)

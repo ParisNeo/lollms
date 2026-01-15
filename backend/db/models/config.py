@@ -19,7 +19,7 @@ class GlobalConfig(Base):
     value = Column(JSON, nullable=False)
     description = Column(String, nullable=True)
     category = Column(String, nullable=True, index=True)
-    
+
 class LLMBinding(Base):
     __tablename__ = 'llm_bindings'
     id = Column(Integer, primary_key=True, index=True)
@@ -98,7 +98,7 @@ class RAGBinding(Base):
     alias = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     config = Column(JSON)
-    default_model_name = Column(String, nullable=True) 
+    default_model_name = Column(String, nullable=True)
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())

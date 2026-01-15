@@ -213,7 +213,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
                 case 'finalize': {
                     flushBuffer(); // Ensure any remaining text is written before finalizing
-                    
+
                     const finalData = data.data;
                     const userMsgIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
                     if (userMsgIndex !== -1 && finalData.user_message) {
@@ -224,17 +224,36 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     if (aiMsgIndex !== -1 && finalData.ai_message) {
                         const processedAiMsg = processSingleMessage(finalData.ai_message);
                         messages.value.splice(aiMsgIndex, 1, processedAiMsg);
-                        
+
                         // NEW: Check if the AI message has triggered a background task (like slides)
                         // and register it as active for UI blocking logic
                         if (processedAiMsg.metadata && processedAiMsg.metadata.active_task_id) {
-                            state.activeAiTasks.value[currentDiscussionId.value] = { 
-                                type: 'background_generation', 
-                                taskId: processedAiMsg.metadata.active_task_id 
+                            state.activeAiTasks.value[currentDiscussionId.value] = {
+                                type: 'background_generation',
+                                taskId: processedAiMsg.metadata.active_task_id
                             };
                             console.log(`[Frontend] Registered active background task ${processedAiMsg.metadata.active_task_id} for discussion ${currentDiscussionId.value}`);
                         }
                     }
+
+                    // NEW: Handle discussion data zone updates if included in the finalize event
+                    if (data.discussion) {
+                        getActions().handleDataZoneUpdate({
+                            discussion_id: data.discussion.id,
+                            zone: 'discussion',
+                            new_content: data.discussion.discussion_data_zone,
+                            discussion_images: data.discussion.discussion_images,
+                            active_discussion_images: data.discussion.active_discussion_images
+                        });
+                    }
+
+                    // Handle new title if present
+                    if (data.new_title) {
+                        if (state.discussions.value[currentDiscussionId.value]) {
+                            state.discussions.value[currentDiscussionId.value].title = data.new_title;
+                        }
+                    }
+
                     break;
                 }
                 default:

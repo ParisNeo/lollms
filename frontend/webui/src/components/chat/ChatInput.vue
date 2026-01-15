@@ -44,6 +44,7 @@ import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import IconObservation from '../../assets/icons/IconObservation.vue';
 import IconUserGroup from '../../assets/icons/IconUserGroup.vue'; 
 import IconSettings from '../../assets/icons/IconSettings.vue'; // Added IconSettings
+import IconFilePlus from '../../assets/icons/IconPlusCircle.vue'; // Reusing PlusCircle as FilePlus for manual doc
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -405,7 +406,8 @@ async function handleFilesInput(files) {
         if (activeDiscussion.value) {
             isUploading.value = true;
             try {
-                await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true })));
+                // Modified to use auto_load logic implicitly (default backend behavior updated to auto_load=True)
+                await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true })));
             } finally { isUploading.value = false; }
         }
     }
@@ -431,9 +433,13 @@ async function handlePaste(event) {
         await handleFilesInput(imageFiles);
     }
 }
-async function handleAddFromUrl() {
+async function handleImportFromInternet() {
     if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; }
-    uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id });
+    uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id, mode: 'url' });
+}
+async function handleCreateManualArtefact() {
+    if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; }
+    uiStore.openModal('createArtefact', { discussionId: activeDiscussion.value.id });
 }
 function handlePromptSelection(content) { messageText.value += (messageText.value ? '\n' : '') + content; }
 
@@ -619,7 +625,9 @@ onUnmounted(() => {
                          <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
                         <button @click="triggerFileUpload" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Add File</span></button>
                         <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>
-                        <button @click="handleAddFromUrl" class="menu-item"><IconWeb class="w-4 h-4 mr-3 text-cyan-500" /> <span>Scrape URL</span></button>
+                        <button @click="handleCreateManualArtefact" class="menu-item"><IconFilePlus class="w-4 h-4 mr-3 text-green-500" /> <span>Create Document</span></button>
+                        <button @click="handleImportFromInternet" class="menu-item"><IconWeb class="w-4 h-4 mr-3 text-cyan-500" /> <span>Import from Internet</span></button>
+                        
                         <div class="menu-divider"></div>
                         
                         <!-- NEW Context Options Submenu -->

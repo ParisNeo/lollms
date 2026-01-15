@@ -69,6 +69,7 @@ const ScrapeUrlModal = defineAsyncComponent(() => import('./ScrapeUrlModal.vue')
 const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactImportWizardModal.vue'));
 // Registered the NotebookWizardModal here
 const NotebookWizardModal = defineAsyncComponent(() => import('./NotebookWizardModal.vue'));
+
 </script>
 
 <template>
