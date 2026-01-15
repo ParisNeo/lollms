@@ -432,9 +432,11 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
     all_available_images = []
     
     # 1. Load historical messages if needed to ensure we have the images
-    if not discussion_obj.messages:
-        discussion_obj.load_messages()
-    
+    if discussion_obj.messages is None:
+        if hasattr(discussion_obj, 'load_messages'):
+            discussion_obj.load_messages()
+        else:
+            discussion_obj.messages = []
     # 2. Iterate chronologically through all messages
     for msg in discussion_obj.messages:
         # Check for images in 'images' list or 'image_references'
@@ -679,8 +681,12 @@ Return ONLY a valid JSON object. No markdown formatting.
     # [FIX] Load previous discussion history to provide context to agents
     history_text = ""
     # Ensure messages are loaded
-    if not discussion_obj.messages:
-        discussion_obj.load_messages()
+    if discussion_obj.messages is None:
+        if hasattr(discussion_obj, 'load_messages'):
+            discussion_obj.load_messages()
+        else:
+            discussion_obj.messages = []
+
     
     # Simple approach: Take last 10 messages for context
     recent_messages = discussion_obj.messages[-10:] 
