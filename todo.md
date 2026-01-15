@@ -193,3 +193,7 @@ Use SCIM for group management
 Create a prompt optimizer app
 
 Add note building and reloading to the discussion (add a new code environment with save note button and add a notes list with open note and a use note in discussion options), add CRUD for notes.
+
+
+URGENT
+Fix the context size setting from lollms when used as a service (force the configured context size in lollms)
