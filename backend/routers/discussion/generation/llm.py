@@ -1482,7 +1482,7 @@ def build_llm_generation_router(router: APIRouter):
                             "id": discussion_id,
                             "discussion_data_zone": discussion_obj.discussion_data_zone,
                             "discussion_images": discussion_obj.get_discussion_images(),
-                            "active_discussion_images": discussion_obj.get_active_discussion_images()
+                            "active_discussion_images": discussion_obj.get_active_images()
                         }
                     }
                     if new_title:
