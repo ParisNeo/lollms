@@ -756,7 +756,7 @@ async def chat_completions(
             try:
                 if request.tools:
                     ASCIIColors.info("Tools requested in stream mode. Buffering generation for safe parsing...")
-                    
+                    generation_kwargs["ctx_size"]=user.llm_ctx_size
                     result_content = await asyncio.to_thread(
                         lc.generate_from_messages,
                         openai_messages,
@@ -839,6 +839,7 @@ async def chat_completions(
 
                     def blocking_gen():
                         try:
+                            generation_kwargs["ctx_size"]=user.llm_ctx_size
                             lc.generate_from_messages(
                                 openai_messages,
                                 streaming_callback=llm_callback,
@@ -888,6 +889,7 @@ async def chat_completions(
     else:
         try:
             ASCIIColors.info("Generating non-streaming response...")
+            generation_kwargs["ctx_size"]=user.llm_ctx_size
             result_content = lc.generate_from_messages(
                 openai_messages,
                 temperature=request.temperature,
