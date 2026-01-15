@@ -149,7 +149,8 @@ def _ingest_notebook_sources_task(
                         
                         if vid:
                             try:
-                                ts = YouTubeTranscriptApi.get_transcript(vid, languages=[lang])
+                                vtapi = YouTubeTranscriptApi()
+                                ts = vtapi.fetch(vid, languages=[lang])
                             except:
                                 ytt = YouTubeTranscriptApi()
                                 try:

@@ -55,6 +55,7 @@ class WikipediaImportRequest(BaseModel):
 
 class YoutubeTranscriptImportRequest(BaseModel):
     video_url: str
+    language: Optional[str] = None
     auto_load: bool = True
 
 def build_artefacts_router(router: APIRouter):
@@ -314,25 +315,19 @@ def build_artefacts_router(router: APIRouter):
                 try:
                     parsed = urlparse(query)
                     if "wikipedia.org" in parsed.netloc:
-                        # Extract language (e.g., fr.wikipedia.org -> fr)
                         domain_parts = parsed.netloc.split('.')
-                        
-                        # Logic to handle language subdomains correctly including m.wikipedia.org
                         if len(domain_parts) >= 3:
-                            # e.g., en.wikipedia.org or en.m.wikipedia.org
                             if 'm' in domain_parts:
                                 m_idx = domain_parts.index('m')
-                                if m_idx > 0:
-                                    lang = domain_parts[m_idx - 1]
+                                if m_idx > 0: lang = domain_parts[m_idx - 1]
                             elif domain_parts[0] != 'www':
                                 lang = domain_parts[0]
 
-                        # Extract title from path /wiki/Title
                         path_parts = parsed.path.split('/')
                         if len(path_parts) > 2 and path_parts[1] == 'wiki':
                             title = unquote(path_parts[2])
                 except Exception:
-                    pass # Fallback to search
+                    pass
 
             api_url = f"https://{lang}.wikipedia.org/w/api.php"
             
@@ -341,7 +336,6 @@ def build_artefacts_router(router: APIRouter):
             }
 
             with requests.Session() as session:
-                # If no title extracted, search for it
                 if not title:
                     search_params = {
                         "action": "opensearch",
@@ -359,7 +353,6 @@ def build_artefacts_router(router: APIRouter):
                     
                     title = data[1][0]
                 
-                # Fetch Content
                 content_params = {
                     "action": "query",
                     "prop": "extracts",
@@ -379,20 +372,14 @@ def build_artefacts_router(router: APIRouter):
                      raise HTTPException(status_code=404, detail=f"Article content not found for title: {title}")
                 
                 page_content = pages[page_id].get("extract", "")
-                
                 final_url = f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}"
-                
                 full_content = f"# {title}\nSource: {final_url}\n\n{page_content}"
                 
-                # 3. Create Artefact
                 artefact_name = f"{title}.md"
                 artefact_info = discussion.add_artefact(
-                    title=artefact_name,
-                    content=full_content,
-                    author=current_user.username
+                    title=artefact_name, content=full_content, author=current_user.username
                 )
                 
-                # 4. Auto Load
                 if request.auto_load:
                      discussion.load_artefact_into_data_zone(title=artefact_name, version=artefact_info['version'])
                 
@@ -400,10 +387,8 @@ def build_artefacts_router(router: APIRouter):
                 
                 artefacts = discussion.list_artefacts()
                 for artefact in artefacts:
-                    if isinstance(artefact.get('created_at'), datetime):
-                        artefact['created_at'] = artefact['created_at'].isoformat()
-                    if isinstance(artefact.get('updated_at'), datetime):
-                        artefact['updated_at'] = artefact['updated_at'].isoformat()
+                    if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
+                    if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
 
                 lc = get_user_lollms_client(current_user.username)
                 token_count = len(lc.tokenize(discussion.discussion_data_zone))
@@ -432,43 +417,93 @@ def build_artefacts_router(router: APIRouter):
 
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
-        # Extract Video ID
+        # 1. Improved Video ID Extraction
         video_id = None
-        # Standard formats: v=VIDEO_ID, youtu.be/VIDEO_ID, embed/VIDEO_ID
-        match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11})", request.video_url)
-        if match:
-            video_id = match.group(1)
-        else:
+        patterns = [
+            r'(?:v=|\/)([0-9A-Za-z_-]{11}).*', # v=... or /...
+            r'(?:youtu\.be\/)([0-9A-Za-z_-]{11})', # youtu.be/ID
+            r'(?:embed\/)([0-9A-Za-z_-]{11})' # embed/ID
+        ]
+        
+        for p in patterns:
+             match = re.search(p, request.video_url)
+             if match:
+                 video_id = match.group(1)
+                 break
+        
+        # Fallback: check if the whole string is an ID
+        if not video_id:
+             if len(request.video_url) == 11 and re.match(r'^[0-9A-Za-z_-]{11}$', request.video_url):
+                 video_id = request.video_url
+        
+        if not video_id:
             raise HTTPException(status_code=400, detail="Could not extract a valid YouTube Video ID from the provided URL.")
 
         try:
-            # Fetch Transcript
+            # 2. Retrieve Transcript List
             try:
-                transcript_list = YouTubeTranscriptApi.get_transcript(video_id)
+                yvt = YouTubeTranscriptApi()
+                transcript_list_obj = yvt.list(video_id)
             except Exception as e:
-                # Try getting list and picking manually if simple get fails (e.g. autogenerated vs manual)
-                try:
-                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-                    # Prefer english or first available
-                    transcript = transcript_list.find_generated_transcript(['en']) or transcript_list.find_manually_created_transcript(['en'])
-                    if not transcript:
-                        transcript = next(iter(transcript_list))
-                    transcript_list = transcript.fetch()
-                except Exception as inner_e:
-                    raise HTTPException(status_code=400, detail=f"Could not retrieve transcript: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Failed to retrieve transcript list. Video may not have captions or is restricted. Error: {e}")
 
-            # Format Transcript
+            target_transcript = None
+            requested_lang = request.language.lower().strip() if request.language else None
+
+            # 3. Smart Selection Logic
+            if requested_lang:
+                # Try finding exact match
+                try:
+                    target_transcript = transcript_list_obj.find_transcript([requested_lang])
+                except:
+                    # Try finding a translation
+                    try:
+                        # Translate the first available transcript
+                        first_available = next(iter(transcript_list_obj))
+                        if first_available.is_translatable:
+                            target_transcript = first_available.translate(requested_lang)
+                    except:
+                        pass # Translation failed or not available
+            
+            # If no specific language requested OR specific lookup failed
+            if not target_transcript:
+                # Priority: English -> First Available
+                try:
+                    target_transcript = transcript_list_obj.find_generated_transcript(['en'])
+                except:
+                    pass
+                
+                if not target_transcript:
+                    try:
+                        target_transcript = transcript_list_obj.find_manually_created_transcript(['en'])
+                    except:
+                        pass
+                
+                if not target_transcript:
+                    try:
+                        target_transcript = next(iter(transcript_list_obj))
+                    except:
+                        pass
+
+            if not target_transcript:
+                raise HTTPException(status_code=400, detail="No suitable transcript found.")
+
+            # 4. Fetch
+            transcript_data = target_transcript.fetch()
+
+            # 5. Format
             lines = []
-            for entry in transcript_list:
-                start = int(entry['start'])
+            for entry in transcript_data.snippets:
+                start = int(entry.start)
                 minutes = start // 60
                 seconds = start % 60
-                text = entry['text']
+                text = entry.text
                 lines.append(f"[{minutes:02d}:{seconds:02d}] {text}")
             
-            full_content = f"# YouTube Transcript\nSource: {request.video_url}\n\n" + "\n".join(lines)
+            lang_label = target_transcript.language if hasattr(target_transcript, 'language') else (requested_lang or 'unknown')
+            full_content = f"# YouTube Transcript ({lang_label})\nSource: {request.video_url}\n\n" + "\n".join(lines)
             
-            # Create Artefact
+            # 6. Save
             artefact_name = f"Youtube_Transcript_{video_id}.md"
             artefact_info = discussion.add_artefact(
                 title=artefact_name,
@@ -476,7 +511,6 @@ def build_artefacts_router(router: APIRouter):
                 author=current_user.username
             )
             
-            # Auto Load
             if request.auto_load:
                  discussion.load_artefact_into_data_zone(title=artefact_name, version=artefact_info['version'])
             
@@ -484,10 +518,8 @@ def build_artefacts_router(router: APIRouter):
             
             artefacts = discussion.list_artefacts()
             for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime):
-                    artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime):
-                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
 
             lc = get_user_lollms_client(current_user.username)
             token_count = len(lc.tokenize(discussion.discussion_data_zone))

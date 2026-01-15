@@ -21,6 +21,7 @@ const isLoading = ref(false);
 const mode = ref('url');
 const wikiQuery = ref('');
 const youtubeUrl = ref('');
+const youtubeLanguage = ref(''); // Added for language input
 
 watch(() => uiStore.isModalOpen('scrapeUrl'), async (isOpen) => {
     if (isOpen) {
@@ -29,6 +30,7 @@ watch(() => uiStore.isModalOpen('scrapeUrl'), async (isOpen) => {
         processWithAi.value = false;
         wikiQuery.value = '';
         youtubeUrl.value = '';
+        youtubeLanguage.value = ''; // Reset language
         
         await nextTick();
         const data = uiStore.modalData('scrapeUrl');
@@ -80,7 +82,8 @@ async function handleSubmit() {
         try {
             await discussionsStore.importYoutubeTranscript(
                 discussionId.value,
-                youtubeUrl.value.trim()
+                youtubeUrl.value.trim(),
+                youtubeLanguage.value.trim() // Pass language code
             );
             uiStore.closeModal('scrapeUrl');
         } finally {
@@ -218,6 +221,22 @@ async function handleSubmit() {
                                 @keyup.enter="handleSubmit"
                             />
                         </div>
+                    </div>
+
+                    <!-- New Language Input -->
+                    <div>
+                        <label for="youtube-lang" class="label">Language Code (Optional)</label>
+                        <input
+                            id="youtube-lang"
+                            v-model="youtubeLanguage"
+                            type="text"
+                            class="input-field mt-1"
+                            placeholder="e.g. en, fr, es"
+                            @keyup.enter="handleSubmit"
+                        />
+                        <p class="text-[10px] text-gray-500 mt-1">
+                            Leave empty for auto-detect (English priority).
+                        </p>
                     </div>
                 </div>
             </div>

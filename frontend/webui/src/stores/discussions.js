@@ -330,10 +330,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function importYoutubeTranscript(discussionId, videoUrl) {
+    async function importYoutubeTranscript(discussionId, videoUrl, language) {
         if (!discussionId) return;
+        const payload = { video_url: videoUrl };
+        if (language) payload.language = language;
+
         try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/youtube`, { video_url: videoUrl });
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/youtube`, payload);
             const data = response.data;
             
             getActions().handleDataZoneUpdate({
