@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-17 12:55]
+
+- refactor(config): use ASCIIColors for security logs
+
 ## [2026-01-17 09:13]
 
 - fix(config): auto‑rotate weak or missing SECRET_KEY

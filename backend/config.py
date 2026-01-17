@@ -125,11 +125,11 @@ def _ensure_secure_secret_key():
             with open(env_path, "w", encoding="utf-8") as f:
                 f.write(content)
                 
-            print(f"[SECURITY] Success: .env file updated with new secure SECRET_KEY.")
+            ASCIIColors.success(f"[SECURITY] Success: .env file updated with new secure SECRET_KEY.")
             
         except Exception as e:
-            print(f"[CRITICAL] Failed to update .env file with secure key: {e}")
-            print(f"[CRITICAL] The application is running with a temporary secure key, but it will be lost on restart.")
+            ASCIIColors.error(f"[CRITICAL] Failed to update .env file with secure key: {e}")
+            ASCIIColors.error(f"[CRITICAL] The application is running with a temporary secure key, but it will be lost on restart.")
 
 # --- Load Environment Variables ---
 _migrate_toml_to_env_if_needed()
