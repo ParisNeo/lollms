@@ -1,4 +1,4 @@
-# [UPDATE] backend/routers/social/dm.py
+# backend/routers/social/dm.py
 import uuid
 import json
 import shutil
@@ -11,7 +11,6 @@ from sqlalchemy import or_, desc, func, update, and_
 from werkzeug.utils import secure_filename
 from datetime import datetime
 from pydantic import BaseModel, Field
-import bleach
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -21,28 +20,9 @@ from backend.session import get_current_active_user, get_user_dm_assets_path
 from backend.ws_manager import manager
 from backend.config import DM_ASSETS_DIR_NAME
 from backend.task_manager import task_manager, Task
+from backend.security import sanitize_content
 
 dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
-
-# --- Security: Sanitization Config (Shared config could be moved to utils, but keeping localized for now) ---
-ALLOWED_TAGS = [
-    'p', 'b', 'i', 'u', 'em', 'strong', 'a', 'br', 'ul', 'ol', 'li', 
-    'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'table', 'thead', 'tbody', 'tr', 'th', 'td', 'strike', 'hr', 'span', 'div'
-]
-ALLOWED_ATTRS = {
-    'a': ['href', 'title', 'target', 'rel'],
-    'img': ['src', 'alt', 'title', 'width', 'height'],
-    'span': ['class'],
-    'div': ['class'],
-    'code': ['class'],
-    'pre': ['class']
-}
-
-def sanitize_content(content: str) -> str:
-    if not content:
-        return content
-    return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
 
 class BroadcastDMRequest(BaseModel):
     content: str = Field(..., min_length=1)

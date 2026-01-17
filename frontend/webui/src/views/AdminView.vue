@@ -32,8 +32,9 @@ import IconGpu from '../assets/icons/IconGpu.vue';
 import IconHardDrive from '../assets/icons/IconHardDrive.vue';
 import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
 import IconCode from '../assets/icons/IconCode.vue';
-import IconVideoCamera from '../assets/icons/IconVideoCamera.vue'; // NEW
-import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue'; // NEW
+import IconVideoCamera from '../assets/icons/IconVideoCamera.vue';
+import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue';
+import IconShieldCheck from '../assets/icons/IconShieldCheck.vue'; // NEW
 
 const route = useRoute();
 const router = useRouter();
@@ -51,6 +52,7 @@ const sections = [
   { type: 'link', id: 'logs_analysis', name: 'Logs & Analysis', icon: markRaw(IconFileText) },
   { type: 'link', id: 'requirements', name: 'Requirements', icon: markRaw(IconCode) },
   { type: 'link', id: 'operations', name: 'Operations', icon: markRaw(IconWrenchScrewdriver) },
+  { type: 'link', id: 'security', name: 'Security', icon: markRaw(IconShieldCheck) }, // NEW
   { type: 'divider', label: 'Management' },
   { type: 'link', id: 'users', name: 'Users', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
@@ -69,8 +71,8 @@ const sections = [
   { type: 'divider', label: 'Bindings & Services' },
   { type: 'link', id: 'llm_bindings', name: 'LLM Bindings', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'tti_bindings', name: 'TTI Bindings', icon: markRaw(IconPhoto) },
-  { type: 'link', id: 'ttv_bindings', name: 'TTV Bindings', icon: markRaw(IconVideoCamera) }, // NEW
-  { type: 'link', id: 'ttm_bindings', name: 'TTM Bindings', icon: markRaw(IconSpeakerWave) }, // NEW
+  { type: 'link', id: 'ttv_bindings', name: 'TTV Bindings', icon: markRaw(IconVideoCamera) }, 
+  { type: 'link', id: 'ttm_bindings', name: 'TTM Bindings', icon: markRaw(IconSpeakerWave) }, 
   { type: 'link', id: 'tts_bindings', name: 'TTS Bindings', icon: markRaw(IconMicrophone) },
   { type: 'link', id: 'stt_bindings', name: 'STT Bindings', icon: markRaw(IconMicrophone) },
   { type: 'link', id: 'rag_bindings', name: 'RAG Bindings', icon: markRaw(IconDatabase) },

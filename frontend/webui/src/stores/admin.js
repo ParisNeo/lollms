@@ -183,6 +183,10 @@ export const useAdminStore = defineStore('admin', () => {
             fetchRequirements();
             uiStore.addNotification('Requirement installed successfully.', 'success');
         }
+        
+        if (taskName.includes('sanitization') && task.status === 'completed') {
+            uiStore.addNotification(task.result?.message || 'Sanitization completed.', 'success', 8000);
+        }
     }
     on('task:completed', handleTaskCompletion);
 
@@ -224,6 +228,11 @@ export const useAdminStore = defineStore('admin', () => {
     
     async function triggerFullRemoderation() {
         const response = await apiClient.post('/api/admin/trigger-full-remoderation');
+        tasksStore.addTask(response.data);
+    }
+    
+    async function sanitizeDatabase() {
+        const response = await apiClient.post('/api/admin/security/sanitize-content');
         tasksStore.addTask(response.data);
     }
 
@@ -493,41 +502,6 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchModerationQueue(filter = null) { const params = {}; if (filter) params.status_filter = filter; const response = await apiClient.get('/api/admin/moderation/queue', { params }); return response.data; }
     async function approveContent(type, id) { await apiClient.post(`/api/admin/moderation/${type}/${id}/approve`); }
     async function deleteContent(type, id) { await apiClient.delete(`/api/admin/moderation/${type}/${id}`); }
-    async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); const response = await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); return response.data; }
-    async function updateSystemPrompt(promptId, promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); await usePromptsStore().fetchPrompts(); }
-    async function deleteSystemPrompt(promptId) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); await usePromptsStore().fetchPrompts(); await fetchZooPrompts({}, true); }
-    async function updateSystemPromptFromZoo(promptId) { const response = await apiClient.post(`/api/prompts_zoo/installed/${promptId}/update`); tasksStore.addTask(response.data); }
-    async function generateSystemPrompt(prompt) { const res = await apiClient.post('/api/prompts_zoo/generate_from_prompt', { prompt }); tasksStore.addTask(res.data); return res.data; }
-    async function fetchZooApps(force=false) { if(!force && zooApps.value.items.length > 0) return; isLoadingZooApps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/apps_zoo/categories'), apiClient.get('/api/apps_zoo/available') ]); zooApps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooApps.value = false; } }
-    async function installZooApp(payload) { const res = await apiClient.post('/api/apps_zoo/install', payload); tasksStore.addTask(res.data); }
-    async function fetchAppReadme(repo, folder) { const res = await apiClient.get('/api/apps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    async function fetchZooMcps(force=false) { if(!force && zooMcps.value.items.length > 0) return; isLoadingZooMcps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/mcps_zoo/categories'), apiClient.get('/api/mcps_zoo/available') ]); zooMcps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooMcps.value = false; } }
-    async function installZooMcp(payload) { const res = await apiClient.post('/api/mcps_zoo/install', payload); tasksStore.addTask(res.data); }
-    async function fetchMcpReadme(repo, folder) { const res = await apiClient.get('/api/mcps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    async function fetchZooPrompts(params = {}, force=false) { if(!force && zooPrompts.value.items.length > 0) return; isLoadingZooPrompts.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); zooPrompts.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooPrompts.value = false; } }
-    async function installZooPrompt(payload) { const res = await apiClient.post('/api/prompts_zoo/install', payload); tasksStore.addTask(res.data); }
-    async function fetchPromptReadme(repo, folder) { const res = await apiClient.get('/api/prompts_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    async function fetchZooPersonalities(params = {}, force=false) { if(!force && zooPersonalities.value.items.length > 0) return; isLoadingZooPersonalities.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } }
-    async function installZooPersonality(payload) { const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
-    async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    async function fetchMcpZooRepositories(force=false) { if(!force && mcpZooRepositories.value.length > 0) return; isLoadingMcpZooRepositories.value = true; try { const res = await apiClient.get('/api/mcps_zoo/repositories'); mcpZooRepositories.value = res.data; } finally { isLoadingMcpZooRepositories.value = false; } }
-    async function addMcpZooRepository(payload) { const res = await apiClient.post('/api/mcps_zoo/repositories', payload); mcpZooRepositories.value.push(res.data); }
-    async function deleteMcpZooRepository(repoId) { await apiClient.delete(`/api/mcps_zoo/repositories/${repoId}`); mcpZooRepositories.value = mcpZooRepositories.value.filter(r => r.id !== repoId); }
-    async function pullMcpZooRepository(repoId) { const res = await apiClient.post(`/api/mcps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
-    async function pullAllMcpZooRepositories() { for (const repo of mcpZooRepositories.value) await pullMcpZooRepository(repo.id); }
-    async function fetchPromptZooRepositories(force=false) { if(!force && promptZooRepositories.value.length > 0) return; isLoadingPromptZooRepositories.value = true; try { const res = await apiClient.get('/api/prompts_zoo/repositories'); promptZooRepositories.value = res.data; } finally { isLoadingPromptZooRepositories.value = false; } }
-    async function addPromptZooRepository(repoData) { const res = await apiClient.post('/api/prompts_zoo/repositories', repoData); promptZooRepositories.value.push(res.data); }
-    async function deletePromptZooRepository(repoId) { await apiClient.delete(`/api/prompts_zoo/repositories/${repoId}`); promptZooRepositories.value = promptZooRepositories.value.filter(r => r.id !== repoId); }
-    async function pullPromptZooRepository(repoId) { const res = await apiClient.post(`/api/prompts_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
-    async function pullAllPromptZooRepositories() { for (const repo of promptZooRepositories.value) await pullPromptZooRepository(repo.id); }
-    async function fetchPersonalityZooRepositories(force=false) { if(!force && personalityZooRepositories.value.length > 0) return; isLoadingPersonalityZooRepositories.value = true; try { const res = await apiClient.get('/api/personalities_zoo/repositories'); personalityZooRepositories.value = res.data; } catch(e){ console.error(e) } finally { isLoadingPersonalityZooRepositories.value = false; } }
-    async function addPersonalityZooRepository(payload) { const res = await apiClient.post('/api/personalities_zoo/repositories', payload); personalityZooRepositories.value.push(res.data); }
-    async function deletePersonalityZooRepository(repoId) { await apiClient.delete(`/api/personalities_zoo/repositories/${repoId}`); personalityZooRepositories.value = personalityZooRepositories.value.filter(r => r.id !== repoId); }
-    async function pullPersonalityZooRepository(repoId) { const res = await apiClient.post(`/api/personalities_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
-    async function addZooRepository(payload) { const res = await apiClient.post('/api/apps_zoo/repositories', payload); zooRepositories.value.push(res.data); }
-    async function deleteZooRepository(repoId) { await apiClient.delete(`/api/apps_zoo/repositories/${repoId}`); zooRepositories.value = zooRepositories.value.filter(r => r.id !== repoId); }
-    async function pullZooRepository(repoId) { const res = await apiClient.post(`/api/apps_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
-    async function pullAllZooRepositories() { for (const repo of zooRepositories.value) await pullZooRepository(repo.id); }
     
     // Requirements
     async function fetchRequirements() {
@@ -544,21 +518,11 @@ export const useAdminStore = defineStore('admin', () => {
         const res = await apiClient.post('/api/admin/system/requirements/install', { name, version });
         tasksStore.addTask(res.data);
     }
-    // Services
-    async function fetchServiceDashboard() { isLoadingServiceStats.value = true; try { const res = await apiClient.get('/api/admin/services/dashboard'); serviceStats.value = res.data; } finally { isLoadingServiceStats.value = false; } }
-    async function resetServiceUsage() { await apiClient.post('/api/admin/services/reset-usage'); await fetchServiceDashboard(); uiStore.addNotification('Usage statistics reset.', 'success'); }
-    async function createBackup(password) { const response = await apiClient.post('/api/admin/backup/create', { password }); tasksStore.addTask(response.data); return response.data; }
-    async function analyzeSystemLogs() { try { const response = await apiClient.post('/api/admin/system/analyze-logs'); tasksStore.addTask(response.data); return response.data; } catch (error) { uiStore.addNotification('Failed to start log analysis.', 'error'); throw error; } }
-    async function purgeUnusedUploads() { const response = await apiClient.post('/api/admin/purge-unused-uploads'); tasksStore.addTask(response.data); }
-    async function triggerBatchModeration() { const response = await apiClient.post('/api/admin/trigger-moderation'); tasksStore.addTask(response.data); }
-    async function triggerFullRemoderation() { const response = await apiClient.post('/api/admin/trigger-full-remoderation'); tasksStore.addTask(response.data); }
-    async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
-    async function killProcess(pid) { await apiClient.post('/api/admin/system/kill-process', { pid }); uiStore.addNotification(`Process ${pid} killed.`, 'success'); fetchSystemStatus(); }
-
     async function fixAllRequirements() {
         const res = await apiClient.post('/api/admin/system/requirements/fix-all');
         tasksStore.addTask(res.data);
     }
+
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
@@ -618,6 +582,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchTtvBindingZoo, installTtvFromZoo, fetchTtmBindingZoo, installTtmFromZoo,
 
         fetchModerationQueue, approveContent, deleteContent,
-        fetchRequirements, installRequirement, fixAllRequirements
+        fetchRequirements, installRequirement, fixAllRequirements,
+        sanitizeDatabase // EXPORTED
     };
 });

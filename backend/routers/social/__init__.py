@@ -5,7 +5,6 @@ from sqlalchemy import or_, and_, exists, select, insert, delete, func
 from fastapi import APIRouter, Depends, HTTPException, status
 from ascii_colors import trace_exception
 import re
-import bleach
 from backend.settings import settings
 from backend.task_manager import task_manager
 from backend.tasks.social_tasks import _respond_to_mention_task, _moderate_content_task
@@ -25,6 +24,7 @@ from backend.models import (
 )
 from backend.session import get_current_active_user, get_current_db_user_from_token
 from backend.routers.social.mentions import mentions_router
+from backend.security import sanitize_content
 
 social_router = APIRouter(
     prefix="/api/social",
@@ -32,32 +32,6 @@ social_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 social_router.include_router(mentions_router, prefix="/mentions")
-
-# --- Security: Sanitization Config ---
-ALLOWED_TAGS = [
-    'p', 'b', 'i', 'u', 'em', 'strong', 'a', 'br', 'ul', 'ol', 'li', 
-    'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'table', 'thead', 'tbody', 'tr', 'th', 'td', 'strike', 'hr', 'span', 'div'
-]
-
-ALLOWED_ATTRS = {
-    'a': ['href', 'title', 'target', 'rel'],
-    'img': ['src', 'alt', 'title', 'width', 'height'],
-    'span': ['class'],
-    'div': ['class'],
-    'code': ['class'],
-    'pre': ['class']
-}
-
-def sanitize_content(content: str) -> str:
-    """
-    Sanitizes user input to prevent XSS while allowing basic formatting.
-    """
-    if not content:
-        return content
-    # bleach.clean will strip or escape tags not in ALLOWED_TAGS
-    # and strip attributes not in ALLOWED_ATTRS.
-    return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
 
 # --- Helpers ---
 def get_post_public(db: Session, post: DBPost, current_user_id: int) -> PostPublic:

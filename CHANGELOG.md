@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-17 17:53]
+
+- feat(admin): add admin & social routes, update security and UI assets
+
 ## [2026-01-17 14:28]
 
 - feat(social,dm): add input sanitization with bleach

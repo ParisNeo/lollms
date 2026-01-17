@@ -1,4 +1,3 @@
-# backend/security.py
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import secrets
@@ -12,6 +11,7 @@ import html
 import platform
 import tempfile
 import os
+import bleach
 
 from fastapi import Depends
 from fastapi.security import OAuth2PasswordBearer
@@ -26,6 +26,33 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
+
+# --- Sanitization Configuration ---
+ALLOWED_TAGS = [
+    'p', 'b', 'i', 'u', 'em', 'strong', 'a', 'br', 'ul', 'ol', 'li', 
+    'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td', 'strike', 'hr', 'span', 'div'
+]
+
+ALLOWED_ATTRS = {
+    'a': ['href', 'title', 'target', 'rel'],
+    'img': ['src', 'alt', 'title', 'width', 'height'],
+    'span': ['class'],
+    'div': ['class'],
+    'code': ['class'],
+    'pre': ['class']
+}
+
+def sanitize_content(content: str) -> str:
+    """
+    Sanitizes user input to prevent XSS while allowing basic formatting.
+    Centralized logic used by Routers and Maintenance Tasks.
+    """
+    if not content:
+        return content
+    # bleach.clean will strip or escape tags not in ALLOWED_TAGS
+    # and strip attributes not in ALLOWED_ATTRS.
+    return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies a plain password against a hashed one."""

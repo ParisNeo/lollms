@@ -16,6 +16,7 @@ const GPULoad = defineAsyncComponent(() => import('./GPULoad.vue'));
 const LogsAndAnalysis = defineAsyncComponent(() => import('./LogsAndAnalysis.vue'));
 const RequirementsManagement = defineAsyncComponent(() => import('./RequirementsManagement.vue'));
 const Operations = defineAsyncComponent(() => import('./Operations.vue'));
+const SecurityTools = defineAsyncComponent(() => import('./SecurityTools.vue')); // NEW
 
 const UserTable = defineAsyncComponent(() => import('./UserTable.vue'));
 
@@ -23,8 +24,8 @@ const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBin
 const TTIBindingsSettings = defineAsyncComponent(() => import('./bindings/TTIBindingsSettings.vue'));
 const TTSBindingsSettings = defineAsyncComponent(() => import('./bindings/TTSBindingsSettings.vue'));
 const STTBindingsSettings = defineAsyncComponent(() => import('./bindings/STTBindingsSettings.vue'));
-const TTVBindingsSettings = defineAsyncComponent(() => import('./bindings/TTVBindingsSettings.vue')); // NEW
-const TTMBindingsSettings = defineAsyncComponent(() => import('./bindings/TTMBindingsSettings.vue')); // NEW
+const TTVBindingsSettings = defineAsyncComponent(() => import('./bindings/TTVBindingsSettings.vue'));
+const TTMBindingsSettings = defineAsyncComponent(() => import('./bindings/TTMBindingsSettings.vue'));
 const RAGBindingsSettings = defineAsyncComponent(() => import('./bindings/RAGBindingsSettings.vue'));
 const AiBotSettings = defineAsyncComponent(() => import('./AiBotSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
@@ -52,14 +53,15 @@ const tabs = [
     { id: 'logs_analysis', component: LogsAndAnalysis },
     { id: 'requirements', component: RequirementsManagement },
     { id: 'operations', component: Operations },
+    { id: 'security', component: SecurityTools }, // NEW
     { id: 'users', component: UserTable },
     { id: 'tasks', component: TaskManager },
     { id: 'llm_bindings', component: LLMBindingsSettings },
     { id: 'tti_bindings', component: TTIBindingsSettings },
     { id: 'tts_bindings', component: TTSBindingsSettings },
     { id: 'stt_bindings', component: STTBindingsSettings },
-    { id: 'ttv_bindings', component: TTVBindingsSettings }, // NEW
-    { id: 'ttm_bindings', component: TTMBindingsSettings }, // NEW
+    { id: 'ttv_bindings', component: TTVBindingsSettings },
+    { id: 'ttm_bindings', component: TTMBindingsSettings },
     { id: 'rag_bindings', component: RAGBindingsSettings },
     { id: 'builders', component: BuildersSettings },
     { id: 'ai_bot', component: AiBotSettings },
