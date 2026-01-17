@@ -47,7 +47,7 @@ wcwidth==0.2.14
 # safe_store
 # sentence-transformers  # For 'st:' vectorizers like all-MiniLM-L6-v2
 # cryptography          # For safe_store encryption if encryption_key is used
-# beautifulsoup4        # For HTML parsing
+# beautifulsoup4       # For HTML parsing
 # lxml                  # Often used with beautifulsoup4 for parsing
 # pypdf                 # For PDF parsing
 # python-docx           # For DOCX parsing
@@ -97,3 +97,6 @@ google-api-python-client==2.184.0
 
 # New Wikipedia Library
 wikipedia==1.4.0
+
+# --- Security library for sanitization (added) ---
+bleach==6.1.0
