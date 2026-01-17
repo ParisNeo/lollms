@@ -11,6 +11,7 @@ from sqlalchemy import or_, desc, func, update, and_
 from werkzeug.utils import secure_filename
 from datetime import datetime
 from pydantic import BaseModel, Field
+import bleach
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -23,6 +24,26 @@ from backend.task_manager import task_manager, Task
 
 dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
 
+# --- Security: Sanitization Config (Shared config could be moved to utils, but keeping localized for now) ---
+ALLOWED_TAGS = [
+    'p', 'b', 'i', 'u', 'em', 'strong', 'a', 'br', 'ul', 'ol', 'li', 
+    'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td', 'strike', 'hr', 'span', 'div'
+]
+ALLOWED_ATTRS = {
+    'a': ['href', 'title', 'target', 'rel'],
+    'img': ['src', 'alt', 'title', 'width', 'height'],
+    'span': ['class'],
+    'div': ['class'],
+    'code': ['class'],
+    'pre': ['class']
+}
+
+def sanitize_content(content: str) -> str:
+    if not content:
+        return content
+    return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
+
 class BroadcastDMRequest(BaseModel):
     content: str = Field(..., min_length=1)
 
@@ -33,6 +54,9 @@ def _broadcast_dm_task(task: Task, sender_id: int, content: str):
         if not sender:
             raise Exception("Sender not found")
         
+        # Sanitize broadcast content
+        clean_content = sanitize_content(content)
+
         # Get all active users except sender
         users = db.query(DBUser).filter(DBUser.id != sender_id, DBUser.is_active == True).all()
         total = len(users)
@@ -47,7 +71,7 @@ def _broadcast_dm_task(task: Task, sender_id: int, content: str):
             new_message = DBDirectMessage(
                 sender_id=sender_id,
                 receiver_id=user.id,
-                content=content
+                content=clean_content
             )
             db.add(new_message)
             # Commit frequently to ensure messages are saved
@@ -89,7 +113,10 @@ async def create_group_conversation(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    new_conv = DBConversation(name=payload.name, is_group=1)
+    # Sanitize group name
+    clean_name = sanitize_content(payload.name)
+    
+    new_conv = DBConversation(name=clean_name, is_group=1)
     db.add(new_conv)
     db.commit()
     db.refresh(new_conv)
@@ -198,6 +225,9 @@ async def send_direct_message(
     if not receiver_user_id and not conversation_id:
         raise HTTPException(status_code=400, detail="Either receiverUserId or conversationId must be provided.")
 
+    # Sanitize DM content
+    clean_content = sanitize_content(content)
+
     image_paths = []
     if files:
         dm_assets_path = get_user_dm_assets_path(current_user.username)
@@ -216,7 +246,7 @@ async def send_direct_message(
 
     new_message = DBDirectMessage(
         sender_id=current_user.id,
-        content=content,
+        content=clean_content,
         image_references=image_paths if image_paths else None
     )
 

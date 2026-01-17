@@ -44,6 +44,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 ## [2026-01-17 14:28]
 
+- feat(social,dm): add input sanitization with bleach
+
+## [2026-01-17 14:28]
+
 - feat(social): add missing imports and update comments
 
 ## [2026-01-17 12:55]

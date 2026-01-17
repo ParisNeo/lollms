@@ -5,6 +5,7 @@ from sqlalchemy import or_, and_, exists, select, insert, delete, func
 from fastapi import APIRouter, Depends, HTTPException, status
 from ascii_colors import trace_exception
 import re
+import bleach
 from backend.settings import settings
 from backend.task_manager import task_manager
 from backend.tasks.social_tasks import _respond_to_mention_task, _moderate_content_task
@@ -31,6 +32,32 @@ social_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 social_router.include_router(mentions_router, prefix="/mentions")
+
+# --- Security: Sanitization Config ---
+ALLOWED_TAGS = [
+    'p', 'b', 'i', 'u', 'em', 'strong', 'a', 'br', 'ul', 'ol', 'li', 
+    'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'thead', 'tbody', 'tr', 'th', 'td', 'strike', 'hr', 'span', 'div'
+]
+
+ALLOWED_ATTRS = {
+    'a': ['href', 'title', 'target', 'rel'],
+    'img': ['src', 'alt', 'title', 'width', 'height'],
+    'span': ['class'],
+    'div': ['class'],
+    'code': ['class'],
+    'pre': ['class']
+}
+
+def sanitize_content(content: str) -> str:
+    """
+    Sanitizes user input to prevent XSS while allowing basic formatting.
+    """
+    if not content:
+        return content
+    # bleach.clean will strip or escape tags not in ALLOWED_TAGS
+    # and strip attributes not in ALLOWED_ATTRS.
+    return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
 
 # --- Helpers ---
 def get_post_public(db: Session, post: DBPost, current_user_id: int) -> PostPublic:
@@ -149,9 +176,12 @@ def create_post(
     moderation_enabled = settings.get("ai_bot_moderation_enabled", False)
     initial_status = "pending" if moderation_enabled else "validated"
 
+    # Sanitize content to prevent Stored XSS
+    clean_content = sanitize_content(post_data.content)
+
     new_post = DBPost(
         author_id=current_user.id,
-        content=post_data.content,
+        content=clean_content,
         visibility=post_data.visibility,
         media=post_data.media,
         moderation_status=initial_status
@@ -162,7 +192,7 @@ def create_post(
     
     # --- NEW: Check for @lollms mention ---
     if settings.get("ai_bot_enabled", False):
-        if re.search(r'\B@lollms\b', post_data.content, re.IGNORECASE):
+        if re.search(r'\B@lollms\b', clean_content, re.IGNORECASE):
             task_manager.submit_task(
                 name=f"AI Bot responding to post by {current_user.username}",
                 target=_respond_to_mention_task,
@@ -241,6 +271,11 @@ def update_post(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own posts.")
 
     update_data = post_data.model_dump(exclude_unset=True)
+    
+    # Sanitize content update
+    if 'content' in update_data and update_data['content']:
+        update_data['content'] = sanitize_content(update_data['content'])
+
     for key, value in update_data.items():
         setattr(post, key, value)
     
@@ -439,10 +474,13 @@ def add_comment_to_post(
     moderation_enabled = settings.get("ai_bot_moderation_enabled", False)
     initial_status = "pending" if moderation_enabled else "validated"
 
+    # Sanitize comment content
+    clean_content = sanitize_content(comment_data.content)
+
     new_comment = DBComment(
         post_id=post_id,
         author_id=current_user.id,
-        content=comment_data.content,
+        content=clean_content,
         moderation_status=initial_status
     )
     db.add(new_comment)
@@ -452,7 +490,7 @@ def add_comment_to_post(
     # Mention Response
     if settings.get("ai_bot_enabled", False):
         if current_user.username != 'lollms':
-            is_explicit_mention = re.search(r'\B@lollms\b', comment_data.content, re.IGNORECASE)
+            is_explicit_mention = re.search(r'\B@lollms\b', clean_content, re.IGNORECASE)
             post_author_username = post.author.username if post.author else db.query(DBUser.username).filter(DBUser.id == post.author_id).scalar()
             is_bot_post = (post_author_username == 'lollms')
             was_mentioned_in_post = re.search(r'\B@lollms\b', post.content, re.IGNORECASE)
