@@ -74,49 +74,62 @@ def _migrate_toml_to_env_if_needed():
             print(f"CRITICAL: Failed to migrate config.toml to .env file. Error: {e}")
 
 # --- Security: Auto-rotate weak keys ---
+
 def _ensure_secure_secret_key():
     """
-    Checks if the current SECRET_KEY is weak or default.
-    If so, generates a new secure key and updates .env.
+    SECURITY FIX: 
+    Checks if the current SECRET_KEY is weak/default or missing.
+    If vulnerable, generates a new CSPRNG key, updates the runtime, and persists it to .env.
     """
+    # 1. Define known weak defaults from previous versions
     weak_keys = [
         "changeme",
         "a_very_secret_key_that_should_be_changed_for_production",
-        "a_very_secret_key_for_flask_sessions_or_jwt"
+        "a_very_secret_key_for_flask_sessions_or_jwt",
+        "your_secret_key_here",
+        "" # Empty key is also a risk
     ]
     
-    # Load raw value without default fallback first
+    # 2. Get current key directly from environment
     current_key = os.environ.get("SECRET_KEY", "")
     
+    # 3. Check for vulnerability
     if not current_key or current_key in weak_keys:
-        print("WARNING: Weak or missing SECRET_KEY detected. Generating a new secure key...")
+        ASCIIColors.red("[SECURITY] Vulnerable SECRET_KEY detected. Automatically rotating to a secure key...")
+        
+        # 4. Generate a high-entropy secure key (32 bytes -> 43 base64 chars)
         new_key = secrets.token_urlsafe(32)
         
-        # Update runtime environment
+        # 5. Update runtime environment immediately
         os.environ["SECRET_KEY"] = new_key
         
-        # Update .env file
+        # 6. Persist to .env file for future restarts
         try:
             content = ""
             if env_path.exists():
                 with open(env_path, "r", encoding="utf-8") as f:
                     content = f.read()
             
-            # Check if SECRET_KEY exists in file
-            if "SECRET_KEY=" in content:
-                # Regex replace to handle potential quoting or spacing
-                content = re.sub(r'^SECRET_KEY=.*$', f'SECRET_KEY="{new_key}"', content, flags=re.MULTILINE)
+            # Regex to find and replace the existing SECRET_KEY line
+            # Handles: SECRET_KEY=val, SECRET_KEY="val", SECRET_KEY = val
+            pattern = re.compile(r'^SECRET_KEY\s*=.*$', re.MULTILINE)
+            
+            if pattern.search(content):
+                content = pattern.sub(f'SECRET_KEY="{new_key}"', content)
             else:
-                # Append if not found
+                # If variable doesn't exist, append it
                 if content and not content.endswith('\n'):
                     content += '\n'
                 content += f'SECRET_KEY="{new_key}"\n'
                 
             with open(env_path, "w", encoding="utf-8") as f:
                 f.write(content)
-            print("INFO: .env file updated with new secure SECRET_KEY.")
+                
+            print(f"[SECURITY] Success: .env file updated with new secure SECRET_KEY.")
+            
         except Exception as e:
-            print(f"ERROR: Failed to update .env with secure key: {e}")
+            print(f"[CRITICAL] Failed to update .env file with secure key: {e}")
+            print(f"[CRITICAL] The application is running with a temporary secure key, but it will be lost on restart.")
 
 # --- Load Environment Variables ---
 _migrate_toml_to_env_if_needed()
