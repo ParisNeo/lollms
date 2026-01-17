@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-17 09:02]
+
+- feat(security): auto‑rotate and generate secure SECRET_KEY
+
 ## [2026-01-15 01:16]
 
 - chore(build): rebuild frontend assets and update deps

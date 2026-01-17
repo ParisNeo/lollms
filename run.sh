@@ -132,21 +132,10 @@ if [ ! -f ".env" ]; then
         print_info "Configuring '.env' file for the first time..."
         cp ".env.example" ".env"
         
-        # Only prompt for key if running interactively
-        if [ -t 0 ]; then
-             echo "A SECRET_KEY is required."
-             read -p "Enter a random secret string (or press Enter to auto-generate): " user_secret || true
-        else
-             user_secret=""
-        fi
-        
-        if [ -z "$user_secret" ]; then
-            if command -v openssl >/dev/null 2>&1; then
-                user_secret=$(openssl rand -hex 32)
-            else
-                user_secret=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 64 | head -n 1)
-            fi
-        fi
+        print_info "Generating secure SECRET_KEY..."
+        # Security Fix: Generate a cryptographically secure key using Python (CSPRNG).
+        # This removes reliance on user input or system tools like openssl which might be missing.
+        user_secret=$($PYTHON_EXECUTABLE -c "import secrets; print(secrets.token_urlsafe(32))")
         
         echo "SECRET_KEY=$user_secret" >> .env
         print_success "Security key configured."

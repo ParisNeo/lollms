@@ -81,7 +81,9 @@ if not exist ".env" (
     if exist ".env.example" (
         echo [INFO] Creating .env file...
         copy .env.example .env >nul
-        echo SECRET_KEY=changeme>>.env
+        echo [INFO] Generating secure SECRET_KEY...
+        for /f "delims=" %%i in ('%PYTHON_EXECUTABLE% -c "import secrets; print(secrets.token_urlsafe(32))"') do set SECURE_KEY=%%i
+        echo SECRET_KEY=!SECURE_KEY!>>.env
     )
 )
 

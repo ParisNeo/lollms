@@ -2,6 +2,8 @@
 # Standard Library Imports
 import os
 import shutil
+import secrets
+import re
 from pathlib import Path
 import toml
 from dotenv import load_dotenv
@@ -71,9 +73,57 @@ def _migrate_toml_to_env_if_needed():
         except Exception as e:
             print(f"CRITICAL: Failed to migrate config.toml to .env file. Error: {e}")
 
+# --- Security: Auto-rotate weak keys ---
+def _ensure_secure_secret_key():
+    """
+    Checks if the current SECRET_KEY is weak or default.
+    If so, generates a new secure key and updates .env.
+    """
+    weak_keys = [
+        "changeme",
+        "a_very_secret_key_that_should_be_changed_for_production",
+        "a_very_secret_key_for_flask_sessions_or_jwt"
+    ]
+    
+    # Load raw value without default fallback first
+    current_key = os.environ.get("SECRET_KEY", "")
+    
+    if not current_key or current_key in weak_keys:
+        print("WARNING: Weak or missing SECRET_KEY detected. Generating a new secure key...")
+        new_key = secrets.token_urlsafe(32)
+        
+        # Update runtime environment
+        os.environ["SECRET_KEY"] = new_key
+        
+        # Update .env file
+        try:
+            content = ""
+            if env_path.exists():
+                with open(env_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            
+            # Check if SECRET_KEY exists in file
+            if "SECRET_KEY=" in content:
+                # Regex replace to handle potential quoting or spacing
+                content = re.sub(r'^SECRET_KEY=.*$', f'SECRET_KEY="{new_key}"', content, flags=re.MULTILINE)
+            else:
+                # Append if not found
+                if content and not content.endswith('\n'):
+                    content += '\n'
+                content += f'SECRET_KEY="{new_key}"\n'
+                
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("INFO: .env file updated with new secure SECRET_KEY.")
+        except Exception as e:
+            print(f"ERROR: Failed to update .env with secure key: {e}")
+
 # --- Load Environment Variables ---
 _migrate_toml_to_env_if_needed()
 load_dotenv(env_path, override=True)
+
+# Ensure secure key exists after loading env
+_ensure_secure_secret_key()
 
 # --- Application Version ---
 APP_VERSION = "2.1.0"
@@ -117,7 +167,9 @@ os.environ['HF_HOME'] = str(HUGGINGFACE_CACHE_DIR)
 
 DATABASE_URL_CONFIG_KEY = "database_url"
 APP_DB_URL = get_env_var("DATABASE_URL", f"sqlite:///{APP_DATA_DIR / 'app_main.db'}")
-SECRET_KEY = get_env_var("SECRET_KEY", "a_very_secret_key_that_should_be_changed_for_production")
+
+# Secret Key is now guaranteed to be secure by _ensure_secure_secret_key
+SECRET_KEY = get_env_var("SECRET_KEY", "")
 
 APP_SETTINGS = {
     "data_dir": str(APP_DATA_DIR),
