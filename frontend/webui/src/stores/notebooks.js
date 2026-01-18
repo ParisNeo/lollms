@@ -233,11 +233,16 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
+
+
     async function regenerateSlideImage(tabId, slideId, prompt = null, negativePrompt = "") {
         if (!activeNotebook.value) return;
         try {
             const res = await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/regenerate_slide_image`, {
-                tab_id: tabId, slide_id: slideId, prompt, negative_prompt: negativePrompt
+                tab_id: tabId, 
+                slide_id: slideId, 
+                prompt, 
+                negative_prompt: negativePrompt
             });
             tasksStore.addTask(res.data);
             uiStore.addNotification("Image regeneration started.", "info");
@@ -272,12 +277,27 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
-    async function processWithAi(prompt, inputTabIds, outputType, targetTabId = null, skipLlm = false, selectedArtefacts = []) {
+
+    async function processWithAi(prompt, inputTabIds, outputType, targetTabId = null, skipLlm = false, selectedArtefacts = [], negativePrompt = "") {
         if (!activeNotebook.value) return;
+        
+        let finalPrompt = prompt;
+        // For image-related actions, we pack negative prompt into the string if it's a task prompt
+        if (['images', 'refine_image', 'generate_scene_image'].includes(outputType)) {
+            // Check if prompt already contains separators, if not, append negative prompt
+            if (!prompt.includes('|')) {
+                finalPrompt = `${prompt}||${negativePrompt}`;
+            }
+        }
+
         try {
             await apiClient.post(`/api/notebooks/${activeNotebook.value.id}/process`, {
-                prompt, input_tab_ids: inputTabIds, output_type: outputType,
-                target_tab_id: targetTabId, selected_artefacts: selectedArtefacts, skip_llm: skipLlm
+                prompt: finalPrompt, 
+                input_tab_ids: inputTabIds, 
+                output_type: outputType,
+                target_tab_id: targetTabId, 
+                selected_artefacts: selectedArtefacts, 
+                skip_llm: skipLlm
             });
             uiStore.addNotification(`Task: ${outputType} started.`, "info");
         } catch (e) {

@@ -62,7 +62,7 @@ const isEditMode = computed(() => editingBinding.value !== null);
 
 const selectedBindingType = computed(() => {
     if (!form.value.name || !Array.isArray(availableSttBindingTypes.value)) return null;
-    return availableSttBindingTypes.value.find(b => b.binding_name === form.value.name);
+    return availableSttBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
 });
 
 const allFormParameters = computed(() => {
@@ -71,7 +71,6 @@ const allFormParameters = computed(() => {
     const paramsFromDesc = selectedBindingType.value.input_parameters || [];
     const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
     
-    // Model Params to exclude
     const modelParams = selectedBindingType.value.model_parameters || [];
     const modelParamNames = new Set(modelParams.map(p => p.name));
 
@@ -116,7 +115,7 @@ function handleDisplayModeChange(event) {
 watch(() => form.value.name, (newName, oldName) => {
     if (newName !== oldName && !isEditMode.value) {
         if (!Array.isArray(availableSttBindingTypes.value)) return;
-        const bindingDesc = availableSttBindingTypes.value.find(b => b.binding_name === newName);
+        const bindingDesc = availableSttBindingTypes.value.find(b => (b.binding_name || b.name) === newName);
         const newConfig = {};
         if (bindingDesc && bindingDesc.input_parameters) {
             bindingDesc.input_parameters.forEach(param => {
@@ -151,7 +150,7 @@ function showEditForm(binding) {
     }
     isKeyVisible.value = {};
     
-    const bindingType = availableSttBindingTypes.value.find(b => b.binding_name === binding.name);
+    const bindingType = availableSttBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
     if(bindingType && bindingType.commands){
         const params = {};
         bindingType.commands.forEach(cmd => {
@@ -167,7 +166,6 @@ function showEditForm(binding) {
         commandParams.value = {};
     }
 
-    // Reset execution state
     currentCommandTaskId.value = null;
     activeCommandResult.value = null;
     lastExecutedCommandName.value = null;
@@ -240,8 +238,8 @@ function getBindingTitle(name) {
     if (!Array.isArray(availableSttBindingTypes.value)) {
         return name;
     }
-    const bindingType = availableSttBindingTypes.value.find(b => b.binding_name === name);
-    return bindingType ? bindingType.title : name;
+    const bindingType = availableSttBindingTypes.value.find(b => (b.binding_name || b.name) === name);
+    return bindingType ? (bindingType.title || bindingType.name) : name;
 }
 
 async function executeCommand(cmd, bindingId, params) {
@@ -289,7 +287,7 @@ async function executeCommand(cmd, bindingId, params) {
                             <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
                             <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
                                 <option disabled value="">Select a type</option>
-                                <option v-for="type in availableSttBindingTypes" :key="type.binding_name" :value="type.binding_name">{{ type.title }}</option>
+                                <option v-for="type in availableSttBindingTypes" :key="type.binding_name || type.name" :value="type.binding_name || type.name">{{ type.title || type.name }}</option>
                             </select>
                         </div>
                     </div>

@@ -57,14 +57,27 @@ class ZooInstallRequest(BaseModel):
     index: int
 
 def _normalize_binding_desc(name: str, desc: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensures binding description has consistent keys for the frontend."""
     if not desc:
-        return {"name": name, "binding_name": name, "input_parameters": [], "model_parameters": []}
+        return {
+            "name": name, 
+            "binding_name": name, 
+            "title": name.replace('_', ' ').title(),
+            "input_parameters": [], 
+            "model_parameters": []
+        }
     
+    # Ensure identifier keys exist
     if 'binding_name' not in desc:
         desc['binding_name'] = name
     if 'name' not in desc:
         desc['name'] = name
         
+    # Ensure UI title exists
+    if 'title' not in desc:
+        desc['title'] = desc.get('name', name).replace('_', ' ').title()
+        
+    # Standardize parameter keys
     if 'input_parameters' not in desc:
         desc['input_parameters'] = desc.get('global_input_parameters', [])
         
@@ -300,8 +313,7 @@ async def get_available_binding_types():
         desc_list = []
         for name in names:
             raw = get_binding_desc(name, "llm")
-            if raw:
-                desc_list.append(_normalize_binding_desc(name, raw))
+            desc_list.append(_normalize_binding_desc(name, raw))
         return desc_list
     except Exception as e:
         trace_exception(e)
@@ -463,8 +475,7 @@ async def get_available_tti_binding_types():
         desc_list = []
         for name in names:
             raw = get_binding_desc(name, "tti")
-            if raw:
-                desc_list.append(_normalize_binding_desc(name, raw))
+            desc_list.append(_normalize_binding_desc(name, raw))
         return desc_list
     except Exception as e:
         trace_exception(e)
@@ -623,8 +634,7 @@ async def get_available_tts_binding_types():
         desc_list = []
         for name in names:
             raw = get_binding_desc(name, "tts")
-            if raw:
-                desc_list.append(_normalize_binding_desc(name, raw))
+            desc_list.append(_normalize_binding_desc(name, raw))
         return desc_list
     except Exception as e:
         trace_exception(e)
@@ -783,8 +793,7 @@ async def get_available_stt_binding_types():
         desc_list = []
         for name in names:
             raw = get_binding_desc(name, "stt")
-            if raw:
-                desc_list.append(_normalize_binding_desc(name, raw))
+            desc_list.append(_normalize_binding_desc(name, raw))
         return desc_list
     except Exception as e:
         trace_exception(e)
@@ -943,8 +952,7 @@ async def get_available_ttv_binding_types():
         desc_list = []
         for name in names:
             raw = get_binding_desc(name, "ttv")
-            if raw:
-                desc_list.append(_normalize_binding_desc(name, raw))
+            desc_list.append(_normalize_binding_desc(name, raw))
         return desc_list
     except Exception as e:
         trace_exception(e)
@@ -1103,8 +1111,7 @@ async def get_available_ttm_binding_types():
         desc_list = []
         for name in names:
             raw = get_binding_desc(name, "ttm")
-            if raw:
-                desc_list.append(_normalize_binding_desc(name, raw))
+            desc_list.append(_normalize_binding_desc(name, raw))
         return desc_list
     except Exception as e:
         trace_exception(e)

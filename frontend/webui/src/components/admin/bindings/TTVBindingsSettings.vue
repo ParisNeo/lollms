@@ -1,4 +1,3 @@
-<!-- [CREATE] frontend/webui/src/components/admin/bindings/TTVBindingsSettings.vue -->
 <script setup>
 import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -60,7 +59,7 @@ const isEditMode = computed(() => editingBinding.value !== null);
 
 const selectedBindingType = computed(() => {
     if (!form.value.name || !Array.isArray(availableTtvBindingTypes.value)) return null;
-    return availableTtvBindingTypes.value.find(b => b.binding_name === form.value.name);
+    return availableTtvBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
 });
 
 const allFormParameters = computed(() => {
@@ -87,7 +86,7 @@ const allFormParameters = computed(() => {
 watch(() => form.value.name, (newName, oldName) => {
     if (newName !== oldName && !isEditMode.value) {
         if (!Array.isArray(availableTtvBindingTypes.value)) return;
-        const bindingDesc = availableTtvBindingTypes.value.find(b => b.binding_name === newName);
+        const bindingDesc = availableTtvBindingTypes.value.find(b => (b.binding_name || b.name) === newName);
         const newConfig = {};
         if (bindingDesc && bindingDesc.input_parameters) {
             bindingDesc.input_parameters.forEach(param => { newConfig[param.name] = param.default; });
@@ -117,7 +116,7 @@ function showEditForm(binding) {
     if (!form.value.config) form.value.config = {};
     isKeyVisible.value = {};
     
-    const bindingType = availableTtvBindingTypes.value.find(b => b.binding_name === binding.name);
+    const bindingType = availableTtvBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
     if(bindingType && bindingType.commands){
         const params = {};
         bindingType.commands.forEach(cmd => {
@@ -189,8 +188,8 @@ async function toggleBindingActive(binding) {
 
 function getBindingTitle(name) {
     if (!Array.isArray(availableTtvBindingTypes.value)) return name;
-    const bindingType = availableTtvBindingTypes.value.find(b => b.binding_name === name);
-    return bindingType ? bindingType.title : name;
+    const bindingType = availableTtvBindingTypes.value.find(b => (b.binding_name || b.name) === name);
+    return bindingType ? (bindingType.title || bindingType.name) : name;
 }
 
 async function executeCommand(cmd, bindingId, params) {
@@ -236,7 +235,7 @@ async function executeCommand(cmd, bindingId, params) {
                             <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
                             <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
                                 <option disabled value="">Select a type</option>
-                                <option v-for="type in availableTtvBindingTypes" :key="type.binding_name" :value="type.binding_name">{{ type.title }}</option>
+                                <option v-for="type in availableTtvBindingTypes" :key="type.binding_name || type.name" :value="type.binding_name || type.name">{{ type.title || type.name }}</option>
                             </select>
                         </div>
                     </div>
@@ -293,7 +292,6 @@ async function executeCommand(cmd, bindingId, params) {
                             <div><h5 class="font-bold text-md flex items-center gap-2"><IconTerminal class="w-4 h-4 text-gray-500"/>{{ cmd.title || cmd.name }}</h5><p class="text-sm text-gray-600 dark:text-gray-400 mt-1">{{ cmd.description }}</p></div>
                             <button type="button" @click="executeCommand(cmd, editingBinding.id, commandParams[cmd.name])" class="btn btn-primary btn-sm flex items-center gap-2" :disabled="currentTask && currentTask.status === 'running'"><IconPlayCircle class="w-4 h-4" />Execute</button>
                         </div>
-                        <!-- ... (same command parameter logic as others) ... -->
                     </div>
                 </div>
                 <div v-else class="text-center text-gray-500 py-8 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-lg">No commands available.</div>
@@ -315,7 +313,7 @@ async function executeCommand(cmd, bindingId, params) {
             <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
                 <h2 class="text-2xl font-bold">Text-to-Video Bindings</h2>
                 <div class="flex items-center gap-4">
-                    <button @click="showAddForm" class="btn btn-primary self-end">+ Add New TTV Binding</button>
+                    <button @click="showAddForm" class="btn btn-primary self-end" v-if="!isFormVisible">+ Add New TTV Binding</button>
                 </div>
             </div>
 

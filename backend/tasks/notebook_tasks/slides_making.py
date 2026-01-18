@@ -227,7 +227,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
         # Build strict rules based on format
         format_instructions = ""
         if pref_format == 'ImageOnly':
-            format_instructions = "STRICT RULE: Every slide MUST have 'layout': 'ImageOnly'. Focus heavily on 'image_prompt' and 'notes'. 'bullets' should be empty."
+            format_instructions = "STRICT RULE: Every slide MUST have 'layout': 'ImageOnly'. Focus heavily on 'image_prompt' and 'notes'. 'bullets' should be empty. DISCLAIMER: Standard TTI tools (Stable Diffusion/DALL-E 3) struggle with generating legible text inside images. Focus prompts on visual symbolism, not text content."
         elif pref_format == 'TextOnly':
             format_instructions = "STRICT RULE: Every slide MUST have 'layout': 'TextOnly'. 'image_prompt' should be empty."
         elif pref_format == 'HTML_Graph':
@@ -250,9 +250,10 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
         Each slide must include:
         1. A compelling Title.
         2. Content bullets (unless layout is ImageOnly).
-        3. A highly detailed Visual Prompt for an AI image generator (consistent with {pref_style}).
-        4. Detailed Speaker Notes (Notes must be the exact speech/script for the presenter).
-        5. The Layout type (use: TitleImageBody, ImageOnly, TextOnly, TitleOnly).
+        3. A highly detailed Visual Prompt ('image_prompt').
+        4. A 'negative_image_prompt' (to suppress text, blur, deformation, or low quality).
+        5. Detailed Speaker Notes (Notes must be the exact speech/script for the presenter).
+        6. The Layout type (use: TitleImageBody, ImageOnly, TextOnly, TitleOnly).
         """
 
         schema = {
@@ -265,11 +266,12 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                         "properties": {
                             "title": {"type": "string"},
                             "bullets": {"type": "array", "items": {"type": "string"}},
-                            "image_prompt": {"type": "string", "description": "Detailed prompt for DALL-E/Stable Diffusion"},
+                            "image_prompt": {"type": "string", "description": "Detailed prompt for TTI generator"},
+                            "negative_image_prompt": {"type": "string", "description": "What to exclude: text, letters, blurry, deformed"},
                             "notes": {"type": "string", "description": "Full speaker script"},
                             "layout": {"type": "string", "enum": ["TitleImageBody", "ImageOnly", "TextOnly", "TitleOnly"]}
                         },
-                        "required": ["title", "bullets", "image_prompt", "notes", "layout"]
+                        "required": ["title", "bullets", "image_prompt", "negative_image_prompt", "notes", "layout"]
                     }
                 }
             },
@@ -304,13 +306,13 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                 "title": "Generation Failed",
                 "bullets": ["Could not generate structure from the LLM.", "Please check the logs for errors."],
                 "image_prompt": "Abstract error visual",
+                "negative_image_prompt": "text, letters, blurry",
                 "notes": "I apologize, but I encountered an issue generating the deck.",
                 "layout": "TitleImageBody"
             }]
 
         if notebook.title == "New Production" and generated_slides and len(generated_slides) > 0:
             first_title = generated_slides[0].get('title', 'Untitled')
-            # Ensure title is a string
             if isinstance(first_title, str):
                 clean_title = first_title.split(':')[0].strip()
                 if clean_title and len(clean_title) < 50:
@@ -328,7 +330,6 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
         for i, s in enumerate(generated_slides):
             task.log(f"Processing slide {i+1}: {s.get('title', 'Untitled')}")
             
-            # Auto-HTML Generation for Graph Heavy mode
             html_content = ""
             if pref_format == 'HTML_Graph' and any("DATA VIZ REQUIRED" in b for b in s.get('bullets', [])):
                 try:
@@ -344,13 +345,15 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
             if lc_tti.tti and s.get('layout') != 'TextOnly':
                 try:
                     visual_p = f"{s.get('image_prompt', '')}, {pref_style} style, high quality presentation visual."
-                    img_bytes = lc_tti.tti.generate_image(visual_p, width=1280, height=720)
+                    neg_p = s.get('negative_image_prompt', "text, letters, words, watermark, blurry, deformed")
+                    img_bytes = lc_tti.tti.generate_image(prompt=visual_p, negative_prompt=neg_p, width=1280, height=720)
                     if img_bytes:
                         fname = f"auto_v_{uuid.uuid4().hex[:8]}.png"
                         (assets_path / fname).write_bytes(img_bytes)
                         img_list.append({
                             "path": f"/api/notebooks/{notebook.id}/assets/{fname}",
                             "prompt": visual_p,
+                            "negative_prompt": neg_p,
                             "created_at": str(base64.b64encode(fname.encode()))
                         })
                 except Exception as e:
@@ -362,6 +365,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                 "layout": s.get('layout', 'TitleImageBody'),
                 "bullets": s.get('bullets', []),
                 "image_prompt": s.get('image_prompt', ''),
+                "negative_image_prompt": s.get('negative_image_prompt', ''),
                 "images": img_list,
                 "selected_image_index": 0,
                 "notes": s.get('notes', ''),
@@ -400,6 +404,8 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
             if slide_config.get('image_prompt') and lc_tti.tti:
                 style = metadata.get('style_preset', '')
                 final_p = slide_config['image_prompt']
+                neg_p = slide_config.get('negative_image_prompt', "text, letters, words, blurry, watermark")
+
                 if knowledge_summary:
                     prompt_enhancement = f"Refine this image prompt: '{final_p}'. Incorporate visual details from this context: {knowledge_summary}. Ensure the style '{style}' is respected."
                     final_p = lc.generate_text(prompt_enhancement, max_new_tokens=150).strip()
@@ -407,7 +413,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                     final_p = f"{final_p}, {style}".strip()
 
                 try:
-                    img_bytes = lc_tti.tti.generate_image(final_p, width=1280, height=720)
+                    img_bytes = lc_tti.tti.generate_image(prompt=final_p, negative_prompt=neg_p, width=1280, height=720)
                     if img_bytes:
                         fname = f"slide_{uuid.uuid4().hex[:8]}.png"
                         full_path = assets_path / fname
@@ -415,6 +421,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                         img_list.append({
                             "path": f"/api/notebooks/{notebook.id}/assets/{fname}",
                             "prompt": final_p,
+                            "negative_prompt": neg_p,
                             "created_at": str(full_path.stat().st_mtime)
                         })
                 except Exception as e:
@@ -426,9 +433,9 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                 "layout": slide_config.get('layout', 'TitleImageBody'),
                 "bullets": slide_config.get('bullets', []),
                 "image_prompt": slide_config.get('image_prompt', ''),
+                "negative_image_prompt": slide_config.get('negative_image_prompt', ''),
                 "images": img_list,
                 "selected_image_index": 0,
-                "last_prompt": slide_config.get('image_prompt', ''),
                 "messages": [],
                 "notes": slide_config.get('notes', '')
             }
@@ -524,7 +531,6 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
             fname = f"audio_slide_{slide['id']}_{uuid.uuid4().hex[:6]}.wav"
             full_path = assets_path / fname
             
-            # Clean text for TTS
             clean_text = _clean_text_for_tts(text_to_speak)
             
             if hasattr(lc_tts.tts, 'generate_audio'):
@@ -569,11 +575,20 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
     # --- ACTION: REGENERATE / REFINE ---
     elif action in ['images', 'refine_image']:
         if not target_tab: return None
-        match = re.match(r"SLIDE_INDEX:(\d+)\|\s*(.*)", prompt, re.DOTALL)
-        if not match: return target_tab['id']
-            
-        slide_idx = int(match.group(1))
-        user_prompt = match.group(2).strip()
+        # Parsing: SLIDE_INDEX:idx|positive|negative
+        match = re.match(r"SLIDE_INDEX:(\d+)\|(.*?)\|(.*)", prompt, re.DOTALL)
+        if not match:
+            # Fallback for simple prompts
+            match = re.match(r"SLIDE_INDEX:(\d+)\|\s*(.*)", prompt, re.DOTALL)
+            if not match: return target_tab['id']
+            slide_idx = int(match.group(1))
+            pos_prompt = match.group(2).strip()
+            neg_prompt = "text, letters, words, blurry, deformed, low quality, watermark"
+        else:
+            slide_idx = int(match.group(1))
+            pos_prompt = match.group(2).strip()
+            neg_prompt = match.group(3).strip()
+
         if slide_idx >= len(tab_data['slides_data']): return target_tab['id']
 
         slide = tab_data['slides_data'][slide_idx]
@@ -582,7 +597,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
         
         research_data = ""
         if selected_artefacts:
-            research_data = _extract_knowledge_from_artefacts(task, lc, notebook, selected_artefacts, slide.get('title', user_prompt), deck_summary, mini_discussion)
+            research_data = _extract_knowledge_from_artefacts(task, lc, notebook, selected_artefacts, slide.get('title', pos_prompt), deck_summary, mini_discussion)
         
         lc_tti = build_lollms_client_from_params(username, load_llm=False, load_tti=True)
         source_img_b64 = None
@@ -598,10 +613,10 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
 
         task.log("Executing visual generation...")
         style = metadata.get('style_preset', 'Corporate Vector')
-        final_p = user_prompt
+        final_p = pos_prompt
         
         if research_data:
-            fusion_prompt = f"Combine user instruction '{user_prompt}' with extracted facts: {research_data}. Create a detailed visual prompt for AI generation."
+            fusion_prompt = f"Combine user instruction '{pos_prompt}' with extracted facts: {research_data}. Create a detailed visual prompt for AI generation."
             final_p = lc.generate_text(fusion_prompt, max_new_tokens=256).strip()
 
         if style and style not in final_p:
@@ -611,11 +626,11 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
             img_bytes = None
             if action == 'refine_image' and source_img_b64:
                 if hasattr(lc_tti.tti, 'edit_image'):
-                    img_bytes = lc_tti.tti.edit_image(images=source_img_b64, prompt=final_p, width=1280, height=720)
+                    img_bytes = lc_tti.tti.edit_image(images=source_img_b64, prompt=final_p, negative_prompt=neg_p, width=1280, height=720)
                 else:
-                    img_bytes = lc_tti.tti.generate_image(prompt=final_p, image=source_img_b64, width=1280, height=720)
+                    img_bytes = lc_tti.tti.generate_image(prompt=final_p, negative_prompt=neg_p, image=source_img_b64, width=1280, height=720)
             else:
-                img_bytes = lc_tti.tti.generate_image(final_p, width=1280, height=720)
+                img_bytes = lc_tti.tti.generate_image(final_p, negative_prompt=neg_p, width=1280, height=720)
                 
             if img_bytes:
                 fname = f"v_{uuid.uuid4().hex[:8]}.png"
@@ -626,6 +641,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                 slide['images'].append({
                     "path": f"/api/notebooks/{notebook.id}/assets/{fname}",
                     "prompt": final_p,
+                    "negative_prompt": neg_p,
                     "created_at": str(full_path.stat().st_mtime)
                 })
                 slide['selected_image_index'] = len(slide['images']) - 1
@@ -638,11 +654,7 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
 
     return target_tab_id if target_tab else None
 
-# ... (generate_deck_summary_task and generate_presentation_video_task remain unchanged)
 def generate_deck_summary_task(task: Task, username: str, notebook_id: str):
-    """
-    Analyzes all slides in the notebook and generates a comprehensive summary context.
-    """
     task.log("Loading notebook...")
     with task.db_session_factory() as db:
         notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id).first()
@@ -677,9 +689,6 @@ def generate_deck_summary_task(task: Task, username: str, notebook_id: str):
         return {"summary": summary}
 
 def generate_presentation_video_task(task: Task, username: str, notebook_id: str):
-    """
-    Generates a video from the slides using TTS for notes and slide images as visuals.
-    """
     try:
         from moviepy import ImageClip, concatenate_videoclips, AudioFileClip
     except (ImportError, ModuleNotFoundError) as e:
@@ -739,7 +748,6 @@ def generate_presentation_video_task(task: Task, username: str, notebook_id: str
         
         try:
             audio_file = temp_dir / f"slide_{i}.wav"
-            # Clean text before generating audio
             clean_text = _clean_text_for_tts(text)
             
             if hasattr(lc_tts.tts, 'generate_audio'):

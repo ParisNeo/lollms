@@ -62,7 +62,7 @@ const isEditMode = computed(() => editingBinding.value !== null);
 
 const selectedBindingType = computed(() => {
     if (!form.value.name) return null;
-    return availableBindingTypes.value.find(b => b.binding_name === form.value.name);
+    return availableBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
 });
 
 const allFormParameters = computed(() => {
@@ -103,7 +103,7 @@ const allFormParameters = computed(() => {
 
 watch(() => form.value.name, (newName, oldName) => {
     if (newName !== oldName && !isEditMode.value) {
-        const bindingDesc = availableBindingTypes.value.find(b => b.binding_name === newName);
+        const bindingDesc = availableBindingTypes.value.find(b => (b.binding_name || b.name) === newName);
         const newConfig = {};
         if (bindingDesc && bindingDesc.input_parameters) {
             bindingDesc.input_parameters.forEach(param => {
@@ -151,7 +151,7 @@ function showEditForm(binding) {
     }
     isKeyVisible.value = {};
     
-    const bindingType = availableBindingTypes.value.find(b => b.binding_name === binding.name);
+    const bindingType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
     if(bindingType && bindingType.commands){
         const params = {};
         bindingType.commands.forEach(cmd => {
@@ -237,8 +237,8 @@ async function toggleBindingActive(binding) {
 }
 
 function getBindingTitle(name) {
-    const bindingType = availableBindingTypes.value.find(b => b.binding_name === name);
-    return bindingType ? bindingType.title : name;
+    const bindingType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === name);
+    return bindingType ? (bindingType.title || bindingType.name) : name;
 }
 
 async function executeCommand(cmd, bindingId, params) {
@@ -288,7 +288,7 @@ async function executeCommand(cmd, bindingId, params) {
                             <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
                             <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
                                 <option disabled value="">Select a type</option>
-                                <option v-for="type in availableBindingTypes" :key="type.binding_name" :value="type.binding_name">{{ type.title }}</option>
+                                <option v-for="type in availableBindingTypes" :key="type.binding_name || type.name" :value="type.binding_name || type.name">{{ type.title || type.name }}</option>
                             </select>
                         </div>
                     </div>

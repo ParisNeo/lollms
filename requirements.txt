@@ -99,4 +99,4 @@ google-api-python-client==2.184.0
 wikipedia==1.4.0
 
 # --- Security library for sanitization (added) ---
-bleach==6.1.0
+bleach==6.3.0

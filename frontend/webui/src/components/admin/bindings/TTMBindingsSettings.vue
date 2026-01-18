@@ -1,4 +1,3 @@
-<!-- [CREATE] frontend/webui/src/components/admin/bindings/TTMBindingsSettings.vue -->
 <script setup>
 import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
 import { storeToRefs } from 'pinia';
@@ -60,7 +59,7 @@ const isEditMode = computed(() => editingBinding.value !== null);
 
 const selectedBindingType = computed(() => {
     if (!form.value.name || !Array.isArray(availableTtmBindingTypes.value)) return null;
-    return availableTtmBindingTypes.value.find(b => b.binding_name === form.value.name);
+    return availableTtmBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
 });
 
 const allFormParameters = computed(() => {
@@ -87,7 +86,7 @@ const allFormParameters = computed(() => {
 watch(() => form.value.name, (newName, oldName) => {
     if (newName !== oldName && !isEditMode.value) {
         if (!Array.isArray(availableTtmBindingTypes.value)) return;
-        const bindingDesc = availableTtmBindingTypes.value.find(b => b.binding_name === newName);
+        const bindingDesc = availableTtmBindingTypes.value.find(b => (b.binding_name || b.name) === newName);
         const newConfig = {};
         if (bindingDesc && bindingDesc.input_parameters) {
             bindingDesc.input_parameters.forEach(param => { newConfig[param.name] = param.default; });
@@ -117,7 +116,7 @@ function showEditForm(binding) {
     if (!form.value.config) form.value.config = {};
     isKeyVisible.value = {};
     
-    const bindingType = availableTtmBindingTypes.value.find(b => b.binding_name === binding.name);
+    const bindingType = availableTtmBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
     if(bindingType && bindingType.commands){
         const params = {};
         bindingType.commands.forEach(cmd => {
@@ -189,8 +188,8 @@ async function toggleBindingActive(binding) {
 
 function getBindingTitle(name) {
     if (!Array.isArray(availableTtmBindingTypes.value)) return name;
-    const bindingType = availableTtmBindingTypes.value.find(b => b.binding_name === name);
-    return bindingType ? bindingType.title : name;
+    const bindingType = availableTtmBindingTypes.value.find(b => (b.binding_name || b.name) === name);
+    return bindingType ? (bindingType.title || bindingType.name) : name;
 }
 
 async function executeCommand(cmd, bindingId, params) {
@@ -236,7 +235,7 @@ async function executeCommand(cmd, bindingId, params) {
                             <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
                             <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
                                 <option disabled value="">Select a type</option>
-                                <option v-for="type in availableTtmBindingTypes" :key="type.binding_name" :value="type.binding_name">{{ type.title }}</option>
+                                <option v-for="type in availableTtmBindingTypes" :key="type.binding_name || type.name" :value="type.binding_name || type.name">{{ type.title || type.name }}</option>
                             </select>
                         </div>
                     </div>

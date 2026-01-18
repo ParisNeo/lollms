@@ -313,14 +313,27 @@ async function enhanceGenPrompt() {
     } finally { isEnhancing.value = false; }
 }
 
+
+const genNegativePrompt = ref('text, words, blurry, deformed, low quality, watermark');
+
 async function submitGenModal() {
     const p = (genPrompt.value || '').trim();
+    const np = (genNegativePrompt.value || '').trim();
     if (!p) return;
+    
     const newData = { ...slideData.value };
-    if (genModalMode.value === 'refine_image') newData.slides_data[selectedSlideIdx.value].last_edit_prompt = p;
-    else newData.slides_data[selectedSlideIdx.value].last_prompt = p;
+    if (genModalMode.value === 'refine_image') {
+        newData.slides_data[selectedSlideIdx.value].last_edit_prompt = p;
+    } else {
+        newData.slides_data[selectedSlideIdx.value].last_prompt = p;
+    }
+    newData.slides_data[selectedSlideIdx.value].negative_prompt = np;
+    
     await updateContent(newData);
-    await notebookStore.processWithAi(`SLIDE_INDEX:${selectedSlideIdx.value}| ${p}`, [], genModalMode.value, currentTab.value.id, false, selectedArtefactNames.value);
+    
+    // Format: SLIDE_INDEX:idx|positive|negative
+    const fullTaskPrompt = `SLIDE_INDEX:${selectedSlideIdx.value}|${p}|${np}`;
+    await notebookStore.processWithAi(fullTaskPrompt, [], genModalMode.value, currentTab.value.id, false, selectedArtefactNames.value);
     isGenModalOpen.value = false;
 }
 
@@ -729,6 +742,11 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                     <div class="p-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50 flex justify-between items-center"><h3 class="font-black text-sm uppercase tracking-widest text-blue-600">{{ genModalMode === 'refine_image' ? 'Refine Image' : 'New Variant' }}</h3><button @click="isGenModalOpen = false" class="btn-icon-flat"><IconXMark class="w-5 h-5"/></button></div>
                     <div class="p-6 space-y-4">
                         <div><label class="text-[10px] font-bold uppercase text-gray-500 mb-1 block">Prompt</label><textarea v-model="genPrompt" class="input-field w-full h-32 resize-none" placeholder="Describe the image..."></textarea></div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-red-500 mb-1 block">Negative Prompt (Avoid)</label>
+                            <textarea v-model="genNegativePrompt" class="input-field w-full h-16 resize-none border-red-100 dark:border-red-900/30" placeholder="e.g. text, letters, blurry, deformed..."></textarea>
+                        </div>
+
                         <div class="flex items-center justify-between"><div class="flex items-center gap-2"><span class="text-xs font-bold text-gray-500">Research Context:</span><span v-if="isResearchActive" class="px-2 py-0.5 bg-green-100 text-green-700 rounded text-[10px] font-bold">{{ selectedArtefactNames.length }} Active</span><span v-else class="text-[10px] text-gray-400 italic">None selected</span></div><button @click="enhanceGenPrompt" class="btn btn-secondary btn-sm" :disabled="isEnhancing || !(genPrompt || '').trim()"><IconSparkles class="w-3 h-3 mr-1" /> Enhance Prompt</button></div>
                     </div>
                     <div class="p-4 border-t dark:border-gray-800 flex justify-end gap-2 bg-gray-50 dark:bg-gray-900/50"><button @click="isGenModalOpen = false" class="btn btn-secondary">Cancel</button><button @click="submitGenModal" class="btn btn-primary" :disabled="!(genPrompt || '').trim()">Generate</button></div>

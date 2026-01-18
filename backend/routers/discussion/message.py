@@ -216,10 +216,19 @@ def build_message_router(router: APIRouter):
         try:
             # Pass explicit active state if provided
             active_arg = payload.active if payload else None
-            # The client library method updates internal state
+            
+            # 1. Update internal state in the message object
             msg.toggle_image_pack_activation(image_index, active=active_arg)
             
-            # Persist changes
+            # 2. FORCE PERSISTENCE: 
+            # Ensure the metadata (where active_images is stored) is explicitly reassigned 
+            # to trigger SQLAlchemy's dirty tracking on the JSON/Blob column.
+            if msg.metadata:
+                metadata_copy = dict(msg.metadata)
+                metadata_copy['active_images'] = list(msg.active_images)
+                msg.metadata = metadata_copy
+            
+            # Persist changes to database
             discussion_obj.commit()
             
         except IndexError:
@@ -235,7 +244,6 @@ def build_message_router(router: APIRouter):
         full_image_refs = [f"data:image/png;base64,{img}" for img in msg.images or []]
         msg_metadata = msg.metadata or {}
 
-        # Ensure we return the *updated* active_images list from the message object
         return MessageOutput(
             id=msg.id, sender=msg.sender, sender_type=msg.sender_type,
             content=msg.content, parent_message_id=msg.parent_id,
@@ -245,6 +253,7 @@ def build_message_router(router: APIRouter):
             active_images=msg.active_images, user_grade=grade,
             created_at=msg.created_at, branch_id=discussion_obj.active_branch_id
         )
+
 
     @router.post("/{discussion_id}/messages/{message_id}/images/{image_index}/regenerate", response_model=TaskInfo, status_code=202)
     async def regenerate_message_image(
