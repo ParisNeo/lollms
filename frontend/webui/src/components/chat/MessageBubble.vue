@@ -1,6 +1,5 @@
-<!-- [UPDATE] frontend/webui/src/components/chat/MessageBubble.vue -->
 <script setup>
-import { computed, ref, onMounted, watch, markRaw } from 'vue';
+import { computed, ref, onMounted, watch, markRaw, nextTick } from 'vue';
 import { marked } from 'marked';
 import { useAuthStore } from '../../stores/auth';
 import { useDiscussionsStore } from '../../stores/discussions';
@@ -319,10 +318,16 @@ const imageGroups = computed(() => {
 });
 
 const isImageActive = (index) => {
-    if (!props.message.active_images || props.message.active_images.length <= index) {
+    // If array doesn't exist or is too short, default to active
+    if (!props.message.active_images || !Array.isArray(props.message.active_images) || props.message.active_images.length <= index) {
         return true; 
     }
-    return props.message.active_images[index];
+    const val = props.message.active_images[index];
+    // Handle potential string boolean from backend serialization
+    if (typeof val === 'string') {
+        return val.toLowerCase() === 'true';
+    }
+    return !!val;
 };
 
 const toggleImage = (index) => {
@@ -688,15 +693,6 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                                 :title="isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'Deactivate (Hide from LLM)' : 'Activate (Show to LLM)'">
                                             <IconEye v-if="isImageActive(selectedViewIndices[group.id] ?? group.indices[0])" class="w-6 h-6" />
                                             <IconEyeOff v-else class="w-6 h-6 text-red-300" />
-                                        </button>
-
-                                        <!-- Regenerate (Only for generated) -->
-                                        <button v-if="(group.type === 'generated' || group.type === 'slideshow' || group.type === 'slide_item') && canRegenerateImage(selectedViewIndices[group.id] ?? group.indices[0], group.type)" 
-                                                @click.stop="handleRegenerateImage(selectedViewIndices[group.id] ?? group.indices[0])" 
-                                                class="pointer-events-auto p-3 bg-white/20 hover:bg-green-500/80 text-white rounded-full backdrop-blur-md shadow-xl transition-all active:scale-90 disabled:opacity-50" 
-                                                :disabled="areActionsDisabled"
-                                                title="Regenerate another iteration">
-                                            <IconRefresh class="w-6 h-6" />
                                         </button>
                                     </div>
 

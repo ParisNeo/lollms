@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-18 19:57]
+
+- chore(build): remove obsolete dist assets
+
 ## [2026-01-18 14:58]
 
 - refactor(discussion): update generation and service routers

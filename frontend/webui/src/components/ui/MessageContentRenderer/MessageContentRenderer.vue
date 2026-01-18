@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/components/ui/MessageContentRenderer/MessageContentRenderer.vue -->
 <script setup>
 import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../../services/markdownParser';
@@ -124,71 +123,154 @@ const parsedStreamingContent = computed(() => {
     return parsedMarkdown(content);
 });
 
+// Helper to parse a raw special block string into a structured object
+const parseSpecialBlock = (rawBlock, match = null) => {
+    if (!match) {
+        // Fallback regex if match not provided
+         const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))/;
+         match = regex.exec(rawBlock);
+    }
+    
+    if (!match) return { type: 'content', content: rawBlock };
+
+    if (match[1]) { // think
+        const content = match[1].replace(/<think>|<\/think>/g, '').trim();
+        return { type: 'think', content };
+    } 
+    else if (match[2]) { // annotate
+        let annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
+        const jsonMatch = annotateContent.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+        if (jsonMatch) annotateContent = jsonMatch[0];
+        try {
+            return { type: 'annotate', annotations: JSON.parse(annotateContent) };
+        } catch (e) {
+            return { type: 'content', content: `[Invalid annotation data]` };
+        }
+    } 
+    else if (match[3]) { // generate_image
+        const fullTag = match[3];
+        const promptContent = fullTag.replace(/<generate_image[^>]*>|<\/generate_image>/g, '').trim();
+        return { type: 'image_tool', mode: 'generate', prompt: promptContent, raw: fullTag };
+    } 
+    else if (match[4]) { // edit_image
+        const fullTag = match[4];
+        const promptContent = fullTag.replace(/<edit_image[^>]*>|<\/edit_image>/g, '').trim();
+        return { type: 'image_tool', mode: 'edit', prompt: promptContent, raw: fullTag };
+    } 
+    else if (match[5]) { // generate_slides
+        const fullTag = match[5];
+        const innerContent = fullTag.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
+        const slideRegex = /<Slide>(.*?)<\/Slide>/gis;
+        const slides = [];
+        let sMatch;
+        while ((sMatch = slideRegex.exec(innerContent)) !== null) {
+            slides.push(sMatch[1].trim());
+        }
+        return { type: 'image_tool', mode: 'slides', prompt: innerContent, slides: slides, raw: fullTag };
+    }
+    return { type: 'content', content: rawBlock };
+};
+
 const messageParts = computed(() => {
     if (!props.content || props.isStreaming) return [];
-    const parts = [];
+    
     const content = props.content;
-    
-    const specialBlockRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))/g;
-    
-    let lastIndex = 0;
-    let match;
+    const parts = [];
 
-    while ((match = specialBlockRegex.exec(content)) !== null) {
-        if (match.index > lastIndex) {
-            parts.push({ type: 'content', content: content.substring(lastIndex, match.index) });
-        }
-
-        if (match[1]) { // <think>
-            const thinkContent = match[1].replace(/<think>|<\/think>/g, '').trim();
-            if (thinkContent) {
-                parts.push({ type: 'think', content: thinkContent });
-            }
-        } else if (match[2]) { // <annotate>
-            let annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
-            const jsonMatch = annotateContent.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
-            if (jsonMatch) annotateContent = jsonMatch[0];
-            
-            if (annotateContent) {
-                try {
-                    parts.push({ type: 'annotate', annotations: JSON.parse(annotateContent) });
-                } catch (e) {
-                    parts.push({ type: 'content', content: `[Invalid annotation data]` });
-                }
-            }
-        } else if (match[3]) { // <generate_image>
-            const fullTag = match[3];
-            const promptContent = fullTag.replace(/<generate_image[^>]*>|<\/generate_image>/g, '').trim();
-            parts.push({ type: 'image_tool', mode: 'generate', prompt: promptContent, raw: fullTag });
-        } else if (match[4]) { // <edit_image>
-            const fullTag = match[4];
-            const promptContent = fullTag.replace(/<edit_image[^>]*>|<\/edit_image>/g, '').trim();
-            parts.push({ type: 'image_tool', mode: 'edit', prompt: promptContent, raw: fullTag });
-        } else if (match[5]) { // <generate_slides>
-            const fullTag = match[5];
-            const innerContent = fullTag.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
-            
-            const slideRegex = /<Slide>(.*?)<\/Slide>/gis;
-            const slides = [];
-            let sMatch;
-            while ((sMatch = slideRegex.exec(innerContent)) !== null) {
-                slides.push(sMatch[1].trim());
-            }
-            
-            parts.push({ 
-                type: 'image_tool', 
-                mode: 'slides', 
-                prompt: innerContent, 
-                slides: slides,       
-                raw: fullTag 
-            });
-        }
-        
-        lastIndex = match.index + match[0].length;
+    // 1. Identify all Markdown Code Blocks first to respect their boundaries
+    // Regex matches: ```lang? [content] ```
+    const codeBlockRegex = /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm; 
+    const codeBlocks = [];
+    let cbMatch;
+    
+    while ((cbMatch = codeBlockRegex.exec(content)) !== null) {
+        codeBlocks.push({
+            start: cbMatch.index,
+            end: cbMatch.index + cbMatch[0].length,
+            lang: cbMatch[2] || 'plaintext',
+            inner: cbMatch[3], // The content inside fences
+            full: cbMatch[0]
+        });
     }
 
-    if (lastIndex < content.length) {
-        parts.push({ type: 'content', content: content.substring(lastIndex) });
+    // 2. Identify all Tool Blocks
+    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))/g;
+    const tools = [];
+    let toolMatch;
+
+    while ((toolMatch = toolRegex.exec(content)) !== null) {
+        tools.push({
+            start: toolMatch.index,
+            end: toolMatch.index + toolMatch[0].length,
+            raw: toolMatch[0],
+            match: toolMatch
+        });
+    }
+
+    // 3. Reconcile Tools vs Code Blocks
+    // Logic: If a Tool is strictly inside a code block AND consumes the entire code block content, 
+    // we "unwrap" it (treat code block as the tool). Otherwise, code block takes precedence.
+    const activeTools = [];
+
+    for (const tool of tools) {
+        let isInsideCode = false;
+        let isValidTool = true;
+
+        for (const code of codeBlocks) {
+            // Check if tool is strictly inside the code block
+            if (tool.start >= code.start && tool.end <= code.end) {
+                isInsideCode = true;
+                
+                // Unwrapping Check: Does the tool text match the code block inner text (ignoring whitespace)?
+                // We use trim() on both sides.
+                const codeInnerTrimmed = code.inner.trim();
+                const toolRawTrimmed = tool.raw.trim();
+
+                if (codeInnerTrimmed === toolRawTrimmed) {
+                    // It's a match! The code block is just a wrapper for the tool.
+                    // Expand the tool's effective range to cover the whole code block.
+                    tool.start = code.start;
+                    tool.end = code.end;
+                    isValidTool = true;
+                } else {
+                    // Tool is just a snippet inside a larger code block. Treat as code.
+                    isValidTool = false;
+                }
+                break; // Found the containing block
+            } 
+            // Check for partial overlap (should rarely happen in valid md, but possible)
+            else if (tool.start < code.end && tool.end > code.start) {
+                // Overlap exists. Priority to code block to prevent breaking code rendering.
+                isValidTool = false;
+            }
+        }
+
+        if (isValidTool) {
+            activeTools.push(tool);
+        }
+    }
+
+    // 4. Sort tools by start index
+    activeTools.sort((a, b) => a.start - b.start);
+
+    // 5. Construct final parts list
+    let cursor = 0;
+    for (const tool of activeTools) {
+        // Push content before tool
+        if (tool.start > cursor) {
+            parts.push({ type: 'content', content: content.substring(cursor, tool.start) });
+        }
+        
+        // Push tool
+        parts.push(parseSpecialBlock(tool.raw, tool.match));
+        
+        // Advance cursor
+        cursor = tool.end;
+    }
+
+    // Push remaining content
+    if (cursor < content.length) {
+        parts.push({ type: 'content', content: content.substring(cursor) });
     }
 
     return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
