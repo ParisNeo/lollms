@@ -1,4 +1,6 @@
 # backend/routers/discussion/generation/tts.py
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -11,6 +13,9 @@ from backend.session import get_current_active_user, build_lollms_client_from_pa
 from backend.models import UserAuthDetails
 from backend.db.models.user import User as DBUser
 from backend.db.models.voice import UserVoice as DBUserVoice
+
+# Create a thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=50)
 
 class TTSRequest(BaseModel):
     text: str
@@ -36,8 +41,13 @@ def build_tts_router(router: APIRouter):
         Generates text-to-speech audio from the provided text using the user's configured TTS binding.
         It prioritizes the user's active custom voice if one is set.
         """
+        loop = asyncio.get_running_loop()
         try:
-            lc = build_lollms_client_from_params(username=current_user.username, load_llm=False, load_tts=True)
+            lc = await loop.run_in_executor(
+                executor,
+                lambda: build_lollms_client_from_params(username=current_user.username, load_llm=False, load_tts=True)
+            )
+
             if not lc.tts:
                 raise HTTPException(status_code=400, detail="Text-to-Speech (TTS) is not configured for this user.")
             
@@ -77,12 +87,15 @@ def build_tts_router(router: APIRouter):
             # Clean text before sending to TTS engine
             cleaned_text = _clean_text_for_tts(request_data.text)
 
-            audio_bytes = lc.tts.generate_audio(
-                text=cleaned_text,
-                voice=voice_to_use,
-                model=model_to_use,
-                language=language_to_use
-            )
+            def _generate():
+                return lc.tts.generate_audio(
+                    text=cleaned_text,
+                    voice=voice_to_use,
+                    model=model_to_use,
+                    language=language_to_use
+                )
+
+            audio_bytes = await loop.run_in_executor(executor, _generate)
 
             return Response(
                 content=audio_bytes,

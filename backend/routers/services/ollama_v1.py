@@ -6,6 +6,7 @@ import asyncio
 import threading
 import uuid
 from typing import List, Optional, Dict, Any, Union
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -31,6 +32,9 @@ from backend.routers.services.openai_v1 import (
 
 ollama_v1_router = APIRouter(prefix="/ollama/v1")
 bearer_scheme = HTTPBearer(auto_error=False) 
+
+# Create a thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=50)
 
 async def get_user_from_api_key(authorization: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme), db: Session = Depends(get_db)) -> DBUser:
     if not settings.get("ollama_service_enabled", False):
@@ -60,29 +64,39 @@ async def get_user_from_api_key(authorization: Optional[HTTPAuthorizationCredent
 
 @ollama_v1_router.get("/models")
 async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
-    all_models = []
-    active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-    display_mode = settings.get("model_display_mode", "mixed")
-    for binding in active_bindings:
-        try:
-            lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
-            models = lc.list_models()
-            aliases = json.loads(binding.model_aliases) if isinstance(binding.model_aliases, str) else (binding.model_aliases or {})
-            for m in models:
-                m_id = m if isinstance(m, str) else (m.get("id") or m.get("model_name"))
-                alias = aliases.get(m_id, {}).get("title")
-                final_id = alias if (display_mode != 'original' and alias) else f"{binding.alias}/{m_id}"
-                if display_mode == 'aliased' and not alias: continue
-                all_models.append({"id": final_id, "name": final_id, "object": "model", "created": int(time.time()), "owned_by": "lollms"})
-        except: continue
-    return {"object": "list", "data": all_models}
+    loop = asyncio.get_running_loop()
+    
+    def _list():
+        all_models = []
+        active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+        display_mode = settings.get("model_display_mode", "mixed")
+        for binding in active_bindings:
+            try:
+                lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
+                models = lc.list_models()
+                aliases = json.loads(binding.model_aliases) if isinstance(binding.model_aliases, str) else (binding.model_aliases or {})
+                for m in models:
+                    m_id = m if isinstance(m, str) else (m.get("id") or m.get("model_name"))
+                    alias = aliases.get(m_id, {}).get("title")
+                    final_id = alias if (display_mode != 'original' and alias) else f"{binding.alias}/{m_id}"
+                    if display_mode == 'aliased' and not alias: continue
+                    all_models.append({"id": final_id, "name": final_id, "object": "model", "created": int(time.time()), "owned_by": "lollms"})
+            except: continue
+        return {"object": "list", "data": all_models}
+
+    return await loop.run_in_executor(executor, _list)
 
 @ollama_v1_router.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
     binding_alias, model_name = resolve_model_name(db, request.model)
-    lc = build_lollms_client_from_params(user.username, binding_alias, model_name, llm_params={"temperature": request.temperature}, load_llm=True)
+    loop = asyncio.get_running_loop()
+
+    # Wrap client build
+    lc = await loop.run_in_executor(
+        executor, 
+        lambda: build_lollms_client_from_params(user.username, binding_alias, model_name, llm_params={"temperature": request.temperature}, load_llm=True)
+    )
     
-    # Restored personality handling for Ollama as well
     messages = list(request.messages)
     if request.personality:
         from backend.db.models.personality import Personality as DBPersonality
@@ -100,7 +114,11 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
         async def stream_generator():
             try:
                 if request.tools:
-                    result_content = await asyncio.to_thread(lc.generate_from_messages, openai_messages, temperature=request.temperature, n_predict=request.max_tokens, images=images, **generation_kwargs)
+                    # Blocking generation for tools
+                    result_content = await loop.run_in_executor(
+                        executor,
+                        lambda: lc.generate_from_messages(openai_messages, temperature=request.temperature, n_predict=request.max_tokens, images=images, **generation_kwargs)
+                    )
                     content, tool_calls = parse_tool_calls_from_text(result_content)
                     completion_id, created_ts = f"chatcmpl-{uuid.uuid4().hex}", int(time.time())
                     yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role='assistant'))]).model_dump_json()}\n\n"
@@ -121,7 +139,10 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
                     def bg_gen():
                         try: lc.generate_from_messages(openai_messages, streaming_callback=llm_cb, images=images, n_predict=request.max_tokens, **generation_kwargs)
                         finally: main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
-                    threading.Thread(target=bg_gen, daemon=True).start()
+                    
+                    # Replace explicit threading with run_in_executor
+                    main_loop.run_in_executor(executor, bg_gen)
+                    
                     yield f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(role='assistant'))]).model_dump_json()}\n\n"
                     while True:
                         item = await stream_queue.get()
@@ -133,8 +154,13 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
                 yield "data: [DONE]\n\n"
         return EventSourceResponse(stream_generator(), media_type="text/event-stream")
     else:
-        res_content = lc.generate_from_messages(openai_messages, images=images, n_predict=request.max_tokens, **generation_kwargs)
+        loop = asyncio.get_running_loop()
+        res_content = await loop.run_in_executor(
+            executor,
+            lambda: lc.generate_from_messages(openai_messages, images=images, n_predict=request.max_tokens, **generation_kwargs)
+        )
         content, tool_calls = parse_tool_calls_from_text(res_content)
-        prompt_tokens = lc.count_tokens(str(openai_messages))
-        completion_tokens = lc.count_tokens(res_content)
+        prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(openai_messages)))
+        completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(res_content))
+        
         return ChatCompletionResponse(model=request.model, choices=[ChatCompletionResponseChoice(index=0, message=ChatMessage(role="assistant", content=content, tool_calls=tool_calls), finish_reason="tool_calls" if tool_calls else "stop")], usage=UsageInfo(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, total_tokens=prompt_tokens + completion_tokens))

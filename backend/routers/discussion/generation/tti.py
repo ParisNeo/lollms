@@ -14,6 +14,7 @@ import traceback
 import threading
 import asyncio
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 # Third-Party Imports
 import fitz  # PyMuPDF
@@ -63,6 +64,9 @@ from backend.session import (get_current_active_user,
                              get_user_temp_uploads_path, user_sessions)
 from backend.task_manager import task_manager, Task
 
+# Create a thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=50)
+
 class TriggerTagRequest(BaseModel):
     tag_content: str
     tag_type: str  # generate, slides, edit
@@ -74,7 +78,7 @@ class TriggerTagRequest(BaseModel):
 
 def build_tti_generation_router(router: APIRouter):
     @router.post("/{discussion_id}/generate_image", response_model=TaskInfo, status_code=202)
-    def generate_image_from_data_zone(
+    async def generate_image_from_data_zone(
         discussion_id: str,
         prompt: str = Form(...),
         negative_prompt: str = Form(""),
@@ -84,26 +88,31 @@ def build_tti_generation_router(router: APIRouter):
         generation_params_json: str = Form("{}"),
         current_user: UserAuthDetails = Depends(get_current_active_user)
     ):
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        loop = asyncio.get_running_loop()
 
-        try:
-            generation_params = json.loads(generation_params_json)
-        except json.JSONDecodeError:
-            raise HTTPException(status_code=400, detail="Invalid format for generation parameters (kwargs).")
+        def _execute():
+            discussion = get_user_discussion(current_user.username, discussion_id)
+            if not discussion:
+                raise HTTPException(status_code=404, detail="Discussion not found")
 
-        db_task = task_manager.submit_task(
-            name=f"Generating image for: {discussion.metadata.get('title', 'Untitled')}",
-            target=_generate_image_task,
-            args=(current_user.username, discussion_id, prompt, negative_prompt, width, height, generation_params, parent_message_id),
-            description=f"Generating image with prompt: '{prompt[:50]}...'",
-            owner_username=current_user.username
-        )
-        return db_task
+            try:
+                generation_params = json.loads(generation_params_json)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Invalid format for generation parameters (kwargs).")
+
+            db_task = task_manager.submit_task(
+                name=f"Generating image for: {discussion.metadata.get('title', 'Untitled')}",
+                target=_generate_image_task,
+                args=(current_user.username, discussion_id, prompt, negative_prompt, width, height, generation_params, parent_message_id),
+                description=f"Generating image with prompt: '{prompt[:50]}...'",
+                owner_username=current_user.username
+            )
+            return db_task
+
+        return await loop.run_in_executor(executor, _execute)
 
     @router.post("/{discussion_id}/messages/{message_id}/trigger_tag", response_model=TaskInfo, status_code=202)
-    def trigger_message_tag_generation(
+    async def trigger_message_tag_generation(
         discussion_id: str,
         message_id: str,
         request: TriggerTagRequest = Body(...),
@@ -113,50 +122,55 @@ def build_tti_generation_router(router: APIRouter):
         Manually triggers a generation task based on a tag found in a message.
         Supports generate, slides, and edit operations.
         """
-        discussion = get_user_discussion(current_user.username, discussion_id)
-        if not discussion:
-            raise HTTPException(status_code=404, detail="Discussion not found")
+        loop = asyncio.get_running_loop()
 
-        msg = discussion.get_message(message_id)
-        if not msg:
-            raise HTTPException(status_code=404, detail="Message not found")
+        def _execute():
+            discussion = get_user_discussion(current_user.username, discussion_id)
+            if not discussion:
+                raise HTTPException(status_code=404, detail="Discussion not found")
 
-        task = None
-        # Use custom_prompt if provided, otherwise fallback to the tag's inner content
-        final_prompt = request.custom_prompt if request.custom_prompt and request.custom_prompt.strip() else request.tag_content
+            msg = discussion.get_message(message_id)
+            if not msg:
+                raise HTTPException(status_code=404, detail="Message not found")
 
-        if request.tag_type == 'slides':
-            task = task_manager.submit_task(
-                name="Generating Slides (Regenerate)",
-                target=_generate_slides_task,
-                args=(current_user.username, discussion_id, message_id, final_prompt, request.width, request.height, request.num_images),
-                description=f"Regenerating slides for: {final_prompt[:30]}...",
-                owner_username=current_user.username
-            )
-        elif request.tag_type == 'generate':
-            task = task_manager.submit_task(
-                name="Generating Image (Regenerate)",
-                target=_generate_image_task,
-                # Passing the existing message_id as parent to preserve history
-                args=(current_user.username, discussion_id, final_prompt, "", request.width, request.height, {}, msg.id),
-                description=f"Regenerating image for: {final_prompt[:30]}...",
-                owner_username=current_user.username
-            )
-        elif request.tag_type == 'edit':
-            if request.source_image_index is None:
-                raise HTTPException(status_code=400, detail="source_image_index is required for edit operations")
+            task = None
+            # Use custom_prompt if provided, otherwise fallback to the tag's inner content
+            final_prompt = request.custom_prompt if request.custom_prompt and request.custom_prompt.strip() else request.tag_content
 
-            task = task_manager.submit_task(
-                name="Editing Image",
-                target=_image_studio_edit_task,
-                args=(current_user.username, discussion_id, message_id, request.source_image_index, final_prompt, request.width, request.height),
-                description=f"Editing image with prompt: {final_prompt[:30]}...",
-                owner_username=current_user.username
-            )
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported tag type: {request.tag_type}")
+            if request.tag_type == 'slides':
+                task = task_manager.submit_task(
+                    name="Generating Slides (Regenerate)",
+                    target=_generate_slides_task,
+                    args=(current_user.username, discussion_id, message_id, final_prompt, request.width, request.height, request.num_images),
+                    description=f"Regenerating slides for: {final_prompt[:30]}...",
+                    owner_username=current_user.username
+                )
+            elif request.tag_type == 'generate':
+                task = task_manager.submit_task(
+                    name="Generating Image (Regenerate)",
+                    target=_generate_image_task,
+                    # Passing the existing message_id as parent to preserve history
+                    args=(current_user.username, discussion_id, final_prompt, "", request.width, request.height, {}, msg.id),
+                    description=f"Regenerating image for: {final_prompt[:30]}...",
+                    owner_username=current_user.username
+                )
+            elif request.tag_type == 'edit':
+                if request.source_image_index is None:
+                    raise HTTPException(status_code=400, detail="source_image_index is required for edit operations")
 
-        if not task:
-            raise HTTPException(status_code=500, detail="Failed to create generation task")
+                task = task_manager.submit_task(
+                    name="Editing Image",
+                    target=_image_studio_edit_task,
+                    args=(current_user.username, discussion_id, message_id, request.source_image_index, final_prompt, request.width, request.height),
+                    description=f"Editing image with prompt: {final_prompt[:30]}...",
+                    owner_username=current_user.username
+                )
+            else:
+                raise HTTPException(status_code=400, detail=f"Unsupported tag type: {request.tag_type}")
 
-        return task
+            if not task:
+                raise HTTPException(status_code=500, detail="Failed to create generation task")
+
+            return task
+
+        return await loop.run_in_executor(executor, _execute)

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-18 14:58]
+
+- refactor(discussion): update generation and service routers
+
 ## [2026-01-17 17:53]
 
 - feat(admin): add admin & social routes, update security and UI assets

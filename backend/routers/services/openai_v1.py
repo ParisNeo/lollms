@@ -12,6 +12,7 @@ import random
 import string
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union, Any
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
@@ -37,6 +38,9 @@ from backend.utils import track_service_usage, check_rate_limit
 # --- Router Definition ---
 openai_v1_router = APIRouter(prefix="/v1")
 bearer_scheme = HTTPBearer(auto_error=False) 
+
+# Create a thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=50)
 
 # --- Pydantic Models for OpenAI Compatibility ---
 
@@ -607,64 +611,65 @@ async def list_models(
         if cached:
             ASCIIColors.success("Returning cached model list.")
             return {"object": "list", "data": cached}
+    
+    loop = asyncio.get_running_loop()
 
-    all_models = []
-    active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-    model_display_mode = settings.get("model_display_mode", "mixed")
+    def _fetch_models():
+        all_models = []
+        active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+        model_display_mode = settings.get("model_display_mode", "mixed")
 
-    for binding in active_bindings:
-        try:
-            ASCIIColors.bg_bright_blue(f">{binding.alias}")
-            lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
-            models = lc.list_models()
-            
-            model_aliases = binding.model_aliases or {}
-            if isinstance(model_aliases, str):
-                try:
-                    model_aliases = json.loads(model_aliases)
-                except Exception:
-                    model_aliases = {}
+        for binding in active_bindings:
+            try:
+                ASCIIColors.bg_bright_blue(f">{binding.alias}")
+                # Blocking IO: building client, listing models
+                lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
+                models = lc.list_models()
+                
+                model_aliases = binding.model_aliases or {}
+                if isinstance(model_aliases, str):
+                    try:
+                        model_aliases = json.loads(model_aliases)
+                    except Exception:
+                        model_aliases = {}
 
-            if isinstance(models, list):
-                for item in models:
-                    model_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
-                    if not model_id:
-                        continue
-
-                    alias_data = model_aliases.get(model_id)
-
-                    internal_id = f"{binding.alias}/{model_id}"
-
-                    id_to_send = internal_id
-                    name_to_send = internal_id
-                    
-                    if model_display_mode == 'aliased':
-                        if not alias_data:
+                if isinstance(models, list):
+                    for item in models:
+                        model_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
+                        if not model_id:
                             continue
-                        if alias_data.get('title'):
-                            id_to_send = alias_data.get('title')
-                            name_to_send = alias_data.get('title')
-                            
-                    elif model_display_mode == 'mixed':
-                        if alias_data and alias_data.get('title'):
-                            id_to_send = alias_data.get('title')
-                            name_to_send = alias_data.get('title')
-                    
-                    all_models.append({
-                        "id": id_to_send,
-                        "name": name_to_send,
-                        "object": "model",
-                        "created": int(time.time()),
-                        "owned_by": "lollms"
-                    })
-        except Exception as e:
-            print(f"Could not fetch models from binding '{binding.alias}' for user '{user.username}': {e}")
-            continue
 
-    if not all_models:
-        # If forcing refresh, we don't error out, just return empty list to update cache
-        if not force_refresh:
-             raise HTTPException(status_code=404, detail="No models found from any active bindings.")
+                        alias_data = model_aliases.get(model_id)
+                        internal_id = f"{binding.alias}/{model_id}"
+                        id_to_send = internal_id
+                        name_to_send = internal_id
+                        
+                        if model_display_mode == 'aliased':
+                            if not alias_data: continue
+                            if alias_data.get('title'):
+                                id_to_send = alias_data.get('title')
+                                name_to_send = alias_data.get('title')
+                        elif model_display_mode == 'mixed':
+                            if alias_data and alias_data.get('title'):
+                                id_to_send = alias_data.get('title')
+                                name_to_send = alias_data.get('title')
+                        
+                        all_models.append({
+                            "id": id_to_send,
+                            "name": name_to_send,
+                            "object": "model",
+                            "created": int(time.time()),
+                            "owned_by": "lollms"
+                        })
+            except Exception as e:
+                print(f"Could not fetch models from binding '{binding.alias}' for user '{user.username}': {e}")
+                continue
+        return all_models
+
+    all_models = await loop.run_in_executor(executor, _fetch_models)
+
+    if not all_models and not force_refresh:
+         raise HTTPException(status_code=404, detail="No models found from any active bindings.")
     
     unique_models = {m["id"]: m for m in all_models}
     final_list = sorted(list(unique_models.values()), key=lambda x: x['id'])
@@ -683,22 +688,28 @@ async def list_personalities(
 ):
     ASCIIColors.info(f"------------ Open AI V1 --------------")
     ASCIIColors.info(f"Personalities listing (lollms custom)")
-    personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(
-        or_(
-            DBPersonality.is_public == True,
-            DBPersonality.owner_user_id == user.id
-        )
-    ).order_by(DBPersonality.category, DBPersonality.name).all()
     
-    response_data = []
-    for p in personalities_db:
-        owner_username = p.owner.username if p.owner else "System"
-        p_info = PersonalityInfo.from_orm(p)
-        p_info.owner_username = owner_username
-        response_data.append(p_info)
+    loop = asyncio.get_running_loop()
+    
+    def _fetch():
+        personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(
+            or_(
+                DBPersonality.is_public == True,
+                DBPersonality.owner_user_id == user.id
+            )
+        ).order_by(DBPersonality.category, DBPersonality.name).all()
         
+        response_data = []
+        for p in personalities_db:
+            owner_username = p.owner.username if p.owner else "System"
+            p_info = PersonalityInfo.from_orm(p)
+            p_info.owner_username = owner_username
+            response_data.append(p_info)
+        return response_data
+        
+    data = await loop.run_in_executor(executor, _fetch)
     ASCIIColors.info(f"------------ DONE --------------")
-    return PersonalityListResponse(data=response_data)
+    return PersonalityListResponse(data=data)
 
 @openai_v1_router.post("/chat/completions")
 async def chat_completions(
@@ -712,21 +723,25 @@ async def chat_completions(
     try:
         binding_alias, model_name = resolve_model_name(db, request.model)
     except HTTPException as e:
-        # If model not found, invalidate cache to force refresh next time
         if e.status_code == 400:
             invalidate_model_cache(db)
         raise e
 
+    # Client building can be slow, might involve model loading.
+    loop = asyncio.get_running_loop()
     try:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            llm_params={
-                "temperature": request.temperature,
-                "max_output_tokens": request.max_tokens
-            },
-            load_llm=True
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                llm_params={
+                    "temperature": request.temperature,
+                    "max_output_tokens": request.max_tokens
+                },
+                load_llm=True
+            )
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
@@ -757,13 +772,17 @@ async def chat_completions(
                 if request.tools:
                     ASCIIColors.info("Tools requested in stream mode. Buffering generation for safe parsing...")
                     generation_kwargs["ctx_size"]=user.llm_ctx_size
-                    result_content = await asyncio.to_thread(
-                        lc.generate_from_messages,
-                        openai_messages,
-                        temperature=request.temperature,
-                        n_predict=request.max_tokens,
-                        images=images,
-                        **generation_kwargs
+                    
+                    # Blocking generation for tools
+                    result_content = await loop.run_in_executor(
+                        executor,
+                        lambda: lc.generate_from_messages(
+                            openai_messages,
+                            temperature=request.temperature,
+                            n_predict=request.max_tokens,
+                            images=images,
+                            **generation_kwargs
+                        )
                     )
 
                     content, tool_calls = parse_tool_calls_from_text(result_content)
@@ -854,7 +873,8 @@ async def chat_completions(
                         finally:
                             main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
-                    threading.Thread(target=blocking_gen, daemon=True).start()
+                    # Replace explicit threading with run_in_executor
+                    main_loop.run_in_executor(executor, blocking_gen)
 
                     start_chunk = ChatCompletionStreamResponse(
                         id=completion_id,
@@ -890,12 +910,17 @@ async def chat_completions(
         try:
             ASCIIColors.info("Generating non-streaming response...")
             generation_kwargs["ctx_size"]=user.llm_ctx_size
-            result_content = lc.generate_from_messages(
-                openai_messages,
-                temperature=request.temperature,
-                n_predict=request.max_tokens,
-                images=images,
-                **generation_kwargs
+            
+            # Use executor for non-streaming blocking call as well
+            result_content = await loop.run_in_executor(
+                executor, 
+                lambda: lc.generate_from_messages(
+                    openai_messages,
+                    temperature=request.temperature,
+                    n_predict=request.max_tokens,
+                    images=images,
+                    **generation_kwargs
+                )
             )
             
             content = result_content
@@ -922,9 +947,11 @@ async def chat_completions(
                 message=msg_obj,
                 finish_reason=finish_reason
             )
-
-            prompt_tokens = lc.count_tokens(str(openai_messages))
-            completion_tokens = lc.count_tokens(result_content)
+            
+            # Token counting can be CPU intensive too
+            prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(openai_messages)))
+            completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(result_content))
+            
             ASCIIColors.info(f"------------ DONE --------------")
             
             return ChatCompletionResponse(
@@ -963,26 +990,35 @@ async def create_image_generation(
         raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'tti_binding_alias/model_name' format.")
 
     tti_binding_alias, tti_model_name = request_data.model.split('/', 1)
+    loop = asyncio.get_running_loop()
 
     try:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            tti_binding_alias=tti_binding_alias,
-            tti_model_name=tti_model_name,
-            load_llm=False,
-            load_tti=True
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                tti_binding_alias=tti_binding_alias,
+                tti_model_name=tti_model_name,
+                load_llm=False,
+                load_tti=True
+            )
         )
         
         if not hasattr(lc, 'tti') or not lc.tti:
             raise HTTPException(status_code=500, detail=f"TTI functionality is not available for binding '{tti_binding_alias}'.")
         
         generated_images_data = []
+
         for i in range(request_data.n):
-            image_bytes = lc.tti.generate_image(
-                prompt=request_data.prompt,
-                size=request_data.size, 
-                quality=request_data.quality, 
-                style=request_data.style
+            # Use executor for image generation (potentially blocking)
+            image_bytes = await loop.run_in_executor(
+                executor, 
+                lambda: lc.tti.generate_image(
+                    prompt=request_data.prompt,
+                    size=request_data.size, 
+                    quality=request_data.quality, 
+                    style=request_data.style
+                )
             )
 
             if not image_bytes:
@@ -1020,13 +1056,17 @@ async def create_embeddings(
     db: Session = Depends(get_db)
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
+    loop = asyncio.get_running_loop()
 
     try:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                load_llm=True
+            )
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
@@ -1040,15 +1080,22 @@ async def create_embeddings(
 
     embeddings_data = []
     total_tokens = 0
+    
     try:
         for i, text in enumerate(input_texts):
-            embedding_vector = lc.embed(text) 
+            # Use executor for embedding (blocking)
+            embedding_vector = await loop.run_in_executor(
+                executor, 
+                lambda: lc.embed(text)
+            )
+
             if not isinstance(embedding_vector, list) or not all(isinstance(f, (float, int)) for f in embedding_vector):
                 print(f"Warning: Binding '{binding_alias}' embed function returned an unexpected type for input '{text[:50]}...': {type(embedding_vector)}")
                 raise HTTPException(status_code=500, detail=f"The embedding model for binding '{binding_alias}' returned an invalid data format.")
 
             embeddings_data.append(EmbeddingObject(embedding=embedding_vector, index=i))
-            total_tokens += lc.count_tokens(text)
+            count = await loop.run_in_executor(executor, lambda: lc.count_tokens(text))
+            total_tokens += count
             
     except Exception as e:
         if isinstance(e, HTTPException):
@@ -1070,24 +1117,23 @@ async def tokenize_text(
     db: Session = Depends(get_db)
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
+    loop = asyncio.get_running_loop()
     
     try:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                load_llm=True
+            )
         )
-        tokens = lc.tokenize(request.text)
+        tokens = await loop.run_in_executor(executor, lambda: lc.tokenize(request.text))
         return TokenizeResponse(tokens=tokens, count=len(tokens))
     except AttributeError:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
-        )
-        count = lc.count_tokens(request.text)
+        # Fallback if tokenize not available
+        count = await loop.run_in_executor(executor, lambda: lc.count_tokens(request.text))
         return TokenizeResponse(count=count, tokens=count)
     except HTTPException as e:
         raise e
@@ -1101,15 +1147,19 @@ async def detokenize_tokens(
     db: Session = Depends(get_db)
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
+    loop = asyncio.get_running_loop()
     
     try:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                load_llm=True
+            )
         )
-        text = lc.detokenize(request.tokens)
+        text = await loop.run_in_executor(executor, lambda: lc.detokenize(request.tokens))
         return DetokenizeResponse(text=text)
     except HTTPException as e:
         raise e
@@ -1123,24 +1173,22 @@ async def count_tokens(
     db: Session = Depends(get_db)
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
-    
+    loop = asyncio.get_running_loop()
+
     try:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                load_llm=True
+            )
         )
-        count = lc.count_tokens(request.text)
+        count = await loop.run_in_executor(executor, lambda: lc.count_tokens(request.text))
         return CountTokensResponse(count=count)
     except AttributeError:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
-        )
-        count = lc.count_tokens(request.text)
+        count = await loop.run_in_executor(executor, lambda: lc.count_tokens(request.text))
         return CountTokensResponse(count=count)
     except HTTPException as e:
         raise e
@@ -1154,6 +1202,7 @@ async def get_model_context_size(
     db: Session = Depends(get_db)
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
+    loop = asyncio.get_running_loop()
     
     # 1. Check alias configuration first for context size override
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
@@ -1169,13 +1218,16 @@ async def get_model_context_size(
              return ContextSizeResponse(context_size=int(alias_info['ctx_size']))
 
     try:
-        lc = build_lollms_client_from_params(
-            username=user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                load_llm=True
+            )
         )
-        ctx_size = lc.get_ctx_size(model_name)
+        ctx_size = await loop.run_in_executor(executor, lambda: lc.get_ctx_size(model_name))
         return ContextSizeResponse(context_size=ctx_size)
     except HTTPException as e:
         raise e
@@ -1189,70 +1241,15 @@ async def extract_text_from_file(
 ):
     try:
         file_bytes = base64.b64decode(request.file)
-        extracted_text, _ = extract_text_from_file_bytes(file_bytes, request.filename)
+        # File extraction can be CPU intensive for large docs
+        loop = asyncio.get_running_loop()
+        extracted_text, _ = await loop.run_in_executor(
+            executor, 
+            lambda: extract_text_from_file_bytes(file_bytes, request.filename)
+        )
         return FileExtractionResponse(text=extracted_text)
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="Invalid base64 encoding.")
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")
-
-  
-   
-# KEEP THISE FUNCTIONS FOR COMPATIBILITY
-# --- Helper to Extract Images and Convert Messages ---
-def preprocess_messages(messages: List[ChatMessage]) -> List[Dict]:
-    processed = []
-    image_list = []
-
-    for msg in messages:
-        content = msg.content
-        if isinstance(content, str):
-            processed.append({"role": msg.role, "content": content})
-        elif isinstance(content, list):
-            text_parts = []
-            for item in content:
-                if item.get("type") == "image_url":
-                    base64_img = item["image_url"].get("base64")
-                    if base64_img:
-                        image_list.append(base64_img)
-                    url_img = item["image_url"].get("url")
-                    if url_img:
-                        image_list.append(url_img)
-                elif item.get("type") == "text":
-                    text_parts.append(item.get("text", ""))
-                else:
-                    text_parts.append(str(item))
-            processed.append({"role": msg.role, "content": "\n".join(text_parts)})
-        else:
-            processed.append({"role": msg.role, "content": str(content)})
-
-    return processed, image_list
-
-def to_image_block(img, default_mime="image/jpeg"):
-    # img can be: https URL, data URL, or raw base64
-    if isinstance(img, dict):
-        # Optional pattern: {'data': '<base64>', 'mime': 'image/png'} or {'url': 'https://...'}
-        if "url" in img:
-            url = img["url"]
-            return {"type": "image_url", "image_url": {"url": url}}
-        if "data" in img:
-            mime = img.get("mime", default_mime)
-            return {
-                "type": "image_url",
-                "image_url": {"url": f"data:{mime};base64,{img['data']}"}
-            }
-
-    if isinstance(img, str):
-        s = img.strip()
-        if s.startswith("http://") or s.startswith("https://"):
-            return {"type": "image_url", "image_url": {"url": s}}
-        if s.startswith("data:"):
-            return {"type": "image_url", "image_url": {"url": s}}
-        # raw base64: add data URL prefix
-        return {
-            "type": "image_url",
-            "image_url": {"url": f"data:{default_mime};base64,{s}"}
-        }
-
-    raise ValueError("Unsupported image input format")

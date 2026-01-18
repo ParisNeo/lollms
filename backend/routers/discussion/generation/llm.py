@@ -16,6 +16,7 @@ import asyncio
 import zipfile
 import platform
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 # Third-Party Imports
 import fitz  # PyMuPDF
@@ -78,6 +79,9 @@ except ImportError:
     google_build = None
 
 from scrapemaster import ScrapeMaster
+
+# Create a thread pool for blocking operations
+executor = ThreadPoolExecutor(max_workers=50)
 
 def _sanitize_b64(data: str) -> str:
     """Removes data URI scheme if present to return raw base64."""
@@ -1521,7 +1525,10 @@ def build_llm_generation_router(router: APIRouter):
                     if main_loop.is_running():
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
             
-            threading.Thread(target=blocking_call, daemon=True).start()        
+            # Use run_in_executor to handle the blocking generation task in a managed thread pool
+            # threading.Thread(target=blocking_call, daemon=True).start()
+            main_loop.run_in_executor(executor, blocking_call)
+            
             while True:
                 item = await stream_queue.get()
                 if item is None: break
