@@ -6,7 +6,7 @@ import useEventBus from '../../../services/eventBus';
 
 const props = defineProps({
   title: { type: String, required: true },
-  icon: { type: String, required: true },
+  icon: { type: String, default: '' },
   collection: { type: String, default: 'ui' },
   buttonClass: { type: [String, Object, Array], default: '' }
 });
@@ -81,7 +81,11 @@ provide('dropdown-context', {
       :icon="icon"
       :collection="collection"
       :button-class="buttonClass"
-    />
+    >
+      <template #icon v-if="$slots.icon">
+          <slot name="icon"></slot>
+      </template>
+    </ToolbarButton>
     <Teleport to="body">
       <Transition
         enter-active-class="transition ease-out duration-100"
@@ -98,7 +102,7 @@ provide('dropdown-context', {
           @mouseenter="cancelClose"
           @mouseleave="closeMenu"
           :style="floatingStyles"
-          class="z-50 w-56 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1"
+          class="z-[100] w-56 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1"
         >
           <slot></slot>
         </div>

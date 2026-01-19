@@ -31,6 +31,7 @@ class ArxivSelected(BaseModel):
     pdf_url: str
     ingest_full: bool = False
 
+
 class NotebookCreate(BaseModel):
     title: str
     content: Optional[str] = ""
@@ -48,7 +49,8 @@ class NotebookCreate(BaseModel):
     youtube_configs: Optional[List[Dict[str, str]]] = None
     raw_text: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
-    delay_processing: bool = False # Flag to skip auto-ingestion
+    delay_processing: bool = False  # NEW: Skip auto-generation
+    auto_generate: bool = True # Renamed from existing flag for clarity
 
 class NotebookUpdate(BaseModel):
     title: Optional[str] = None

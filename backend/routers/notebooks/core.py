@@ -11,6 +11,22 @@ from backend.session import get_current_active_user
 
 router = APIRouter()
 
+@router.get("/{notebook_id}", response_model=NotebookResponse)
+def get_notebook(
+    notebook_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Retrieves a single notebook by ID (Requires ownership)."""
+    notebook = db.query(DBNotebook).filter(
+        DBNotebook.id == notebook_id, 
+        DBNotebook.owner_user_id == current_user.id
+    ).first()
+    
+    if not notebook:
+        raise HTTPException(status_code=404, detail="Notebook not found.")
+    return notebook
+
 @router.put("/{notebook_id}", response_model=NotebookResponse)
 def update_notebook(
     notebook_id: str,

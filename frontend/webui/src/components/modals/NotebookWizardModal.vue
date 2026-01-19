@@ -22,8 +22,8 @@ const router = useRouter();
 const uiStore = useUiStore();
 const notebookStore = useNotebookStore();
 
-const step = ref(1);
-const isProcessing = ref(false);
+const currentStep = ref(1);
+const isCreating = ref(false);
 const showStopConfirmation = ref(false);
 const fileInput = ref(null);
 const isDragging = ref(false);
@@ -42,7 +42,8 @@ const wizardData = ref({
     num_slides: 10,
     slide_format: 'TitleImageBody',
     style_preset: 'Corporate Vector',
-    custom_style: ''
+    custom_style: '',
+    delay_processing: false
 });
 
 // UI helpers
@@ -74,30 +75,51 @@ const stylePresets = [
 
 const canProceedStep1 = computed(() => wizardData.value.title.trim().length > 0);
 
-function nextStep() {
-    if (step.value === 1 && !canProceedStep1.value) {
-        uiStore.addNotification("Please enter a project title", "error");
-        return;
-    }
-    if (step.value < 3) step.value++;
-}
+const canProceedToGenerate = computed(() => {
+    // Check if we have at least one source selected
+    const hasSources = 
+        wizardData.value.urls.length > 0 ||
+        wizardData.value.youtube_urls.length > 0 ||
+        wizardData.value.wikipedia_urls.length > 0 ||
+        wizardData.value.google_search_queries.length > 0 ||
+        wizardData.value.arxiv_selected.length > 0 ||
+        wizardData.value.files.length > 0 ||
+        wizardData.value.raw_text?.trim();
 
-function prevStep() {
-    if (step.value > 1) step.value--;
-}
+    // We allow creation as long as there are sources. Prompt is now optional.
+    return hasSources;
+});
+
+const validationMessage = computed(() => {
+    const hasSources = 
+        wizardData.value.urls.length > 0 ||
+        wizardData.value.youtube_urls.length > 0 ||
+        wizardData.value.wikipedia_urls.length > 0 ||
+        wizardData.value.google_search_queries.length > 0 ||
+        wizardData.value.arxiv_selected.length > 0 ||
+        wizardData.value.files.length > 0 ||
+        wizardData.value.raw_text?.trim();
+
+    if (!hasSources) {
+        return "Please add at least one source before creating the notebook.";
+    }
+
+    return null;
+});
 
 function closeModal() {
     uiStore.closeModal('notebookWizard');
     setTimeout(() => {
-        step.value = 1;
+        currentStep.value = 1;
         wizardData.value = { 
             title: '', type: 'generic', initialPrompt: '', 
             urls: [], youtube_urls: [], wikipedia_urls: [], 
             google_search_queries: [], arxiv_selected: [], 
             files: [], raw_text: '',
-            num_slides: 10, slide_format: 'TitleImageBody', style_preset: 'Corporate Vector', custom_style: ''
+            num_slides: 10, slide_format: 'TitleImageBody', style_preset: 'Corporate Vector', custom_style: '',
+            delay_processing: false
         };
-        isProcessing.value = false;
+        isCreating.value = false;
         newUrl.value = '';
         newYoutube.value = '';
         newWiki.value = '';
@@ -150,7 +172,7 @@ function selectArxivItem(item) {
 }
 
 function deselectArxivItem(entryId) {
-    wizardData.value.arxiv_selected = wizardData.value.arxiv_selected.filter(i => i.entry_id !== entryId);
+    wizardData.value.arxiv_selected = wizardData.value.arxiv_selected.filter(i => i.entry_id !== entry_id);
 }
 
 const isArxivSelected = (id) => wizardData.value.arxiv_selected.some(i => i.entry_id === id);
@@ -209,18 +231,16 @@ function getSuggestedPrompt() {
     wizardData.value.initialPrompt = final;
 }
 
-async function createProject() {
-    if (!wizardData.value.initialPrompt.trim()) {
-        uiStore.addNotification("Instructions required", "error");
-        return;
-    }
-    isProcessing.value = true;
+async function handleCreateNotebook() {
+    isCreating.value = true;
 
     try {
         const payload = {
             title: wizardData.value.title,
             type: wizardData.value.type,
-            initialPrompt: wizardData.value.initialPrompt,
+            // We pass an empty string for initialPrompt here to ensure the tabs are created empty.
+            // The actual prompt is used later in importSources.
+            initialPrompt: "", 
             urls: wizardData.value.urls || [],
             youtube_configs: (wizardData.value.youtube_urls || []).map(url => ({ url, lang: 'en' })),
             wikipedia_urls: wizardData.value.wikipedia_urls || [],
@@ -232,16 +252,14 @@ async function createProject() {
                 slide_format: wizardData.value.slide_format,
                 style_preset: wizardData.value.style_preset === 'Custom' ? wizardData.value.custom_style : wizardData.value.style_preset
             },
-            delay_processing: true // Always delay backend trigger so we can do it manually here
+            delay_processing: true 
         };
 
-        // 1. Create the notebook (DB Entry + Tabs)
+        // 1. Create the notebook with empty tabs
         const newNotebook = await notebookStore.createStructuredNotebook(payload);
-        
-        // Force Active Notebook
         notebookStore.setActiveNotebook(newNotebook);
 
-        // 2. Upload Files (if any)
+        // 2. Upload Files
         if (wizardData.value.files?.length > 0) {
             for (const file of wizardData.value.files) {
                 const useDocling = ['.pdf', '.docx', '.pptx'].some(ext => file.name.toLowerCase().endsWith(ext));
@@ -249,39 +267,35 @@ async function createProject() {
             }
         }
 
-        // 3. Find the Target Tab for the output
-        let targetTabId = null;
-        if (newNotebook.tabs && newNotebook.tabs.length > 0) {
-            const typePriority = ['slides', 'youtube_script', 'book_plan', 'markdown'];
-            for (const type of typePriority) {
-                const found = newNotebook.tabs.find(t => t.type === type);
-                if (found) { targetTabId = found.id; break; }
+        // 3. Trigger Generation ONLY if a prompt is provided AND delay_processing is false
+        const prompt = wizardData.value.initialPrompt?.trim();
+        if (prompt && !wizardData.value.delay_processing) {
+            let targetTabId = null;
+            if (newNotebook.tabs?.length > 0) {
+                const typePriority = ['slides', 'youtube_script', 'book_plan', 'markdown'];
+                for (const type of typePriority) {
+                    const found = newNotebook.tabs.find(t => t.type === type);
+                    if (found) { targetTabId = found.id; break; }
+                }
+                if (!targetTabId) targetTabId = newNotebook.tabs[0].id;
             }
-            if (!targetTabId) targetTabId = newNotebook.tabs[0].id;
-        }
 
-        // 4. Trigger Build Task
-        // We ALWAYS trigger this if there is a prompt, regardless of whether we have external links.
-        // The prompt drives the generation (using files if no links are present).
-        if (payload.initialPrompt) {
             await notebookStore.importSources(newNotebook.id, {
                 ...payload,
-                initialPrompt: payload.initialPrompt, 
+                initialPrompt: prompt, 
                 target_tab_id: targetTabId
             });
         }
 
         uiStore.addNotification(`"${wizardData.value.title}" created!`, "success");
         closeModal();
-
-        // 5. Redirect to Notebook View
         await router.push(`/notebooks/${newNotebook.id}`);
 
     } catch (e) {
         console.error(e);
         uiStore.addNotification("Failed to start project.", "error");
     } finally {
-        isProcessing.value = false;
+        isCreating.value = false;
     }
 }
 
@@ -302,16 +316,16 @@ async function confirmStopCreation() {
             <!-- Progress Stepper -->
             <div class="flex items-center justify-center mb-8 flex-shrink-0">
                 <div class="flex items-center">
-                    <div class="relative"><div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300" :class="step >= 1 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-500'"><IconCheckCircle v-if="step > 1" class="w-5 h-5" /><span v-else>1</span></div></div>
-                    <div class="w-20 h-1 bg-gray-200 mx-2"><div class="h-full bg-blue-600 transition-all duration-500" :style="{width: step > 1 ? '100%' : '0%'}"></div></div>
-                    <div class="relative"><div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300" :class="step >= 2 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-500'"><IconCheckCircle v-if="step > 2" class="w-5 h-5" /><span v-else>2</span></div></div>
-                    <div class="w-20 h-1 bg-gray-200 mx-2"><div class="h-full bg-blue-600 transition-all duration-500" :style="{width: step > 2 ? '100%' : '0%'}"></div></div>
-                    <div class="relative"><div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300" :class="step >= 3 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-500'">3</div></div>
+                    <div class="relative"><div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300" :class="currentStep >= 1 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-500'"><IconCheckCircle v-if="currentStep > 1" class="w-5 h-5" /><span v-else>1</span></div></div>
+                    <div class="w-20 h-1 bg-gray-200 mx-2"><div class="h-full bg-blue-600 transition-all duration-500" :style="{width: currentStep > 1 ? '100%' : '0%'}"></div></div>
+                    <div class="relative"><div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300" :class="currentStep >= 2 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-500'"><IconCheckCircle v-if="currentStep > 2" class="w-5 h-5" /><span v-else>2</span></div></div>
+                    <div class="w-20 h-1 bg-gray-200 mx-2"><div class="h-full bg-blue-600 transition-all duration-500" :style="{width: currentStep > 2 ? '100%' : '0%'}"></div></div>
+                    <div class="relative"><div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300" :class="currentStep >= 3 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-500'">3</div></div>
                 </div>
             </div>
 
             <!-- STEP 1: Type & Title -->
-            <div v-if="step === 1" class="flex-grow overflow-y-auto custom-scrollbar px-2 mt-4">
+            <div v-if="currentStep === 1" class="flex-grow overflow-y-auto custom-scrollbar px-2 mt-4">
                 <div class="text-center mb-8"><h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Choose Project Type</h2></div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
                     <div v-for="type in projectTypes" :key="type.id" @click="wizardData.type = type.id"
@@ -323,12 +337,12 @@ async function confirmStopCreation() {
                 </div>
                 <div class="space-y-3 max-w-2xl mx-auto">
                     <label class="block text-sm font-bold text-gray-700 dark:text-gray-300">Project Title <span class="text-red-500">*</span></label>
-                    <input v-model="wizardData.title" class="input-field w-full text-lg px-4 py-3 border-2 transition-colors focus:border-blue-500" placeholder="e.g. 'Project Mars'" @keyup.enter="canProceedStep1 && nextStep()" />
+                    <input v-model="wizardData.title" class="input-field w-full text-lg px-4 py-3 border-2 transition-colors focus:border-blue-500" placeholder="e.g. 'Project Mars'" @keyup.enter="canProceedStep1 && (currentStep++)" />
                 </div>
             </div>
 
             <!-- STEP 2: Sources -->
-            <div v-if="step === 2" class="flex-grow overflow-y-auto custom-scrollbar px-2">
+            <div v-if="currentStep === 2" class="flex-grow overflow-y-auto custom-scrollbar px-2">
                 <div class="text-center mb-6"><h2 class="text-2xl font-bold text-gray-900 dark:text-white">Knowledge Sources</h2><p class="text-sm text-gray-500">Optional context for the AI</p></div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <!-- Left Column -->
@@ -387,6 +401,11 @@ async function confirmStopCreation() {
                             <div class="flex gap-2 my-2"><input v-model="newUrl" @keyup.enter="addUrl" class="input-field flex-grow text-sm" placeholder="https://..." /><button @click="addUrl" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                             <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in wizardData.urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                         </div>
+
+                        <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border dark:border-gray-700">
+                            <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">📝 Raw Text / Notes</label>
+                            <textarea v-model="wizardData.raw_text" class="input-field w-full h-32 mt-2 p-3 text-xs resize-none" placeholder="Paste or type additional context here..."></textarea>
+                        </div>
                     </div>
 
                     <!-- Right Column -->
@@ -418,7 +437,7 @@ async function confirmStopCreation() {
             </div>
 
             <!-- STEP 3: Configuration & Prompt -->
-            <div v-if="step === 3" class="flex-grow flex flex-col px-2 overflow-y-auto custom-scrollbar">
+            <div v-if="currentStep === 3" class="flex-grow flex flex-col px-2 overflow-y-auto custom-scrollbar">
                 <div class="text-center mb-6"><h2 class="text-2xl font-bold text-gray-900 dark:text-white">Configuration</h2></div>
 
                 <!-- SLIDES CONFIG -->
@@ -453,32 +472,43 @@ async function confirmStopCreation() {
 
                 <div class="flex-grow flex flex-col bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4">
                     <div class="flex justify-between items-center mb-2">
-                         <label class="text-xs font-bold uppercase text-gray-500">Instructions for AI</label>
+                         <label class="text-xs font-bold uppercase text-gray-500">Instructions for AI (Optional)</label>
                          <button @click="getSuggestedPrompt" class="text-xs text-blue-600 font-bold hover:underline">✨ Auto-Fill</button>
                     </div>
                     <textarea v-model="wizardData.initialPrompt" class="input-field w-full min-h-[120px] p-4 text-base resize-none leading-relaxed" placeholder="Detailed instructions..."></textarea>
+                    <p class="text-[10px] text-gray-400 mt-2 italic">Leave empty to just create a notebook with the selected materials.</p>
                 </div>
             </div>
 
             <!-- Footer Buttons -->
-            <div class="mt-6 pt-4 border-t dark:border-gray-700 flex justify-between items-center flex-shrink-0">
-                <button v-if="step > 1" @click="prevStep" class="btn btn-secondary px-5 py-2">← Back</button>
+            <div class="p-4 border-t dark:border-gray-800 flex justify-between gap-3 bg-gray-50 dark:bg-gray-900/50">
+                <button v-if="currentStep > 1" @click="currentStep--" class="btn btn-secondary">Back</button>
                 <div v-else></div>
-                <div class="flex gap-3">
-                    <button @click="closeModal" class="btn btn-secondary px-5 py-2">Cancel</button>
-                    <button v-if="step < 3" @click="nextStep" class="btn btn-primary px-6 py-2" :disabled="step === 1 && !canProceedStep1">Next →</button>
-                    <button v-else-if="!isProcessing" @click="createProject" class="btn btn-primary px-8 py-2 font-bold flex items-center gap-2" :disabled="isProcessing || !wizardData.initialPrompt?.trim()">
-                        Create Production
+                
+                <div class="flex items-center gap-3">
+                    <p v-if="validationMessage && currentStep === 3" class="text-xs text-red-500 italic">
+                        {{ validationMessage }}
+                    </p>
+                    <button @click="closeModal" class="btn btn-secondary">Cancel</button>
+                    <button 
+                        v-if="currentStep < 3" 
+                        @click="currentStep++" 
+                        class="btn btn-primary"
+                        :disabled="currentStep === 1 && !canProceedStep1"
+                    >
+                        Next
                     </button>
-                    <div v-else class="flex gap-2">
-                        <button class="btn btn-primary px-8 py-2 font-bold flex items-center gap-2" disabled>
-                            <IconAnimateSpin class="w-4 h-4 animate-spin"/>
-                            Starting Build...
-                        </button>
-                    </div>
+                    <button 
+                        v-else 
+                        @click="handleCreateNotebook" 
+                        class="btn btn-primary"
+                        :disabled="!canProceedToGenerate || isCreating"
+                    >
+                        <IconAnimateSpin v-if="isCreating" class="w-4 h-4 mr-2 animate-spin" />
+                        {{ wizardData.initialPrompt?.trim() ? 'Create & Generate' : 'Create Empty Notebook' }}
+                    </button>
                 </div>
             </div>
-
             <!-- Stop Confirmation Modal -->
             <transition enter-active-class="transition ease-out duration-200" enter-from-class="opacity-0 translate-y-4" enter-to-class="opacity-100 translate-y-0" leave-active-class="transition ease-in duration-150" leave-from-class="opacity-100 translate-y-0" leave-to-class="opacity-0 translate-y-4">
                 <div v-if="showStopConfirmation" class="fixed inset-0 z-[100] bg-gray-900/60 backdrop-blur-sm p-6 flex items-center justify-center">

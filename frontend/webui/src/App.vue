@@ -24,6 +24,8 @@ const SlideshowModal = defineAsyncComponent(() => import('./components/modals/Sl
 const CommandOutputModal = defineAsyncComponent(() => import('./components/modals/CommandOutputModal.vue'));
 const ArtefactImportWizardModal = defineAsyncComponent(() => import('./components/modals/ArtefactImportWizardModal.vue'));
 const ArtefactViewerModal = defineAsyncComponent(() => import('./components/modals/ArtefactViewerModal.vue'));
+const NotebookWizardModal = defineAsyncComponent(() => import('./components/modals/NotebookWizardModal.vue'));
+const WhatsNextModal = defineAsyncComponent(() => import('./components/modals/WhatsNextModal.vue'));
 
 // UI Components
 import MessageContentRenderer from './components/ui/MessageContentRenderer/MessageContentRenderer.vue';
@@ -282,6 +284,8 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 
     <!-- Global Overlays -->
     <ModalContainer />
+    <WhatsNextModal />
+    <NotebookWizardModal />
     <ImageViewerModal />
     <SlideshowModal />
     <CommandOutputModal />

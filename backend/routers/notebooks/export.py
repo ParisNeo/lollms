@@ -13,6 +13,7 @@ from backend.db.models.notebook import Notebook as DBNotebook
 from backend.models import UserAuthDetails, TaskInfo
 from backend.session import get_current_active_user, get_user_notebook_assets_path
 
+from backend.settings import settings
 # Try imports for PDF generation and auto-install if missing
 try:
     from reportlab.lib.pagesizes import letter, landscape
@@ -29,6 +30,15 @@ except ImportError:
         import textwrap
     except:
         canvas = None
+from ascii_colors import ASCIIColors, trace_exception
+
+from backend.routers.files import (
+    md2_to_html,              # markdown2 renderer with extras
+    html_to_docx_bytes,       # HTML → python-docx mapper
+    md_to_pdf_bytes,          # Markdown → PDF (images/tables/code/TOC)
+    md_to_pptx_bytes,         # Markdown → PPTX (slides via ---)
+    html_wrapper              # Wrap HTML body in a shell
+)
 
 router = APIRouter()
 
@@ -83,216 +93,197 @@ def generate_video_endpoint(
     )
 
 @router.get("/{notebook_id}/export")
-def export_notebook(
+async def export_notebook(
     notebook_id: str,
     format: str = "json",
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    """Exports the entire notebook to JSON, PDF, PPTX, or ZIP (images)."""
-    notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
+    notebook = (
+        db.query(DBNotebook)
+        .filter(
+            DBNotebook.id == notebook_id,
+            DBNotebook.owner_user_id == current_user.id
+        )
+        .first()
+    )
+
     if not notebook:
-        raise HTTPException(status_code=404, detail="Notebook not found.")
+        raise HTTPException(status_code=404, detail="Notebook not found")
 
-    assets_path = get_user_notebook_assets_path(current_user.username, notebook_id)
+    export_format = format.lower()
+    setting_key_format = "markdown" if export_format == "md" else export_format
+    setting_key = f"export_to_{setting_key_format}_enabled"
 
-    if format == "json":
-        data = { 
-            "title": notebook.title, 
-            "type": notebook.type, 
-            "language": notebook.language,
-            "content": notebook.content, 
-            "tabs": notebook.tabs, 
-            "artefacts": notebook.artefacts 
-        }
-        return Response(content=json.dumps(data, indent=2), media_type="application/json", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.json"})
-    
-    elif format == "zip":
-        try:
-            mem_zip = io.BytesIO()
-            with zipfile.ZipFile(mem_zip, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
-                for tab in notebook.tabs:
-                    if tab['type'] == 'slides' and tab.get('content'):
-                        try:
-                            slides_data = json.loads(tab['content']).get('slides_data', [])
-                            for i, s in enumerate(slides_data):
-                                img_path = _get_image_path(assets_path, s)
-                                if img_path:
-                                    safe_title = secure_filename(s.get('title', 'Untitled'))[:30]
-                                    ext = os.path.splitext(img_path)[1] or ".png"
-                                    arcname = f"Slide_{i+1:02d}_{safe_title}{ext}"
-                                    zf.write(img_path, arcname)
-                        except Exception as e:
-                            print(f"Error zipping slide image: {e}")
-            
-            mem_zip.seek(0)
-            return Response(content=mem_zip.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}_images.zip"})
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Failed to generate ZIP: {str(e)}")
+    if not settings.get(setting_key, False):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Export to '{export_format}' is disabled by the administrator."
+        )
 
-    elif format == "pdf":
-        if not canvas:
-            raise HTTPException(status_code=501, detail="ReportLab library not installed and auto-installation failed. Cannot generate PDF.")
-        
-        try:
-            bio = io.BytesIO()
-            # Use Landscape Letter size for slide feel
-            page_w, page_h = landscape(letter)
-            c = canvas.Canvas(bio, pagesize=(page_w, page_h))
-            
-            # Draw Content
-            has_content = False
+    assets_path = get_user_notebook_assets_path(
+        current_user.username,
+        notebook_id
+    )
+
+    filename = f"{secure_filename(notebook.title)}.{export_format}"
+    media_type = "application/octet-stream"
+    file_content = b""
+
+    try:
+        # ---------------- JSON ----------------
+        if export_format == "json":
+            media_type = "application/json"
+            file_content = json.dumps(
+                {
+                    "title": notebook.title,
+                    "type": notebook.type,
+                    "language": notebook.language,
+                    "content": notebook.content,
+                    "tabs": notebook.tabs,
+                    "artefacts": notebook.artefacts,
+                },
+                indent=2
+            ).encode("utf-8")
+
+        # ---------------- DOCX ----------------
+        elif export_format == "docx":
+            html_parts = []
+
             for tab in notebook.tabs:
-                # Handle Slides
-                if tab['type'] == 'slides' and tab.get('content'):
-                    try:
-                        slides_data = json.loads(tab['content']).get('slides_data', [])
-                        for s in slides_data:
-                            has_content = True
-                            c.setFillColorRGB(1, 1, 1)
-                            c.rect(0, 0, page_w, page_h, fill=1)
-                            
+                if tab["type"] == "markdown" and tab.get("content"):
+                    title = tab.get("title")
+                    if title:
+                        html_parts.append(f"<h1>{title}</h1>")
+                    html_parts.append(md2_to_html(tab["content"]))
+
+            if not html_parts:
+                html_parts.append("<p>No content to export.</p>")
+
+            html = html_wrapper(
+                "\n".join(html_parts),
+                title=notebook.title
+            )
+
+            file_content = html_to_docx_bytes(html)
+            media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+        # ---------------- PDF (FIXED) ----------------
+        elif export_format == "pdf":
+            md_parts = []
+            slide_images = []
+
+            for tab in notebook.tabs:
+                # Markdown tabs
+                if tab["type"] == "markdown" and tab.get("content"):
+                    title = tab.get("title")
+                    if title:
+                        md_parts.append(f"# {title}\n")
+                    md_parts.append(tab["content"])
+                    md_parts.append("\n\n")
+
+                # Slide tabs
+                elif tab["type"] == "slides" and tab.get("content"):
+                    slides_data = json.loads(tab["content"]).get("slides_data", [])
+                    for s in slides_data:
+                        if s.get("title"):
+                            md_parts.append(f"## {s['title']}\n")
+                        for b in s.get("bullets", []):
+                            md_parts.append(f"- {b}")
+                        md_parts.append("\n")
+
+                        img_path = _get_image_path(assets_path, s)
+                        if img_path:
+                            slide_images.append(img_path)
+
+            content_md = "\n".join(md_parts).strip() or "# Empty notebook"
+
+            file_content = md_to_pdf_bytes(
+                content_md,
+                extra_images=slide_images
+            )
+            media_type = "application/pdf"
+
+        # ---------------- ZIP (slide images) ----------------
+        elif export_format == "zip":
+            bio = io.BytesIO()
+            with zipfile.ZipFile(bio, "w", zipfile.ZIP_DEFLATED) as zf:
+                for tab in notebook.tabs:
+                    if tab["type"] == "slides" and tab.get("content"):
+                        slides_data = json.loads(tab["content"]).get("slides_data", [])
+                        for i, s in enumerate(slides_data):
                             img_path = _get_image_path(assets_path, s)
-                            layout = s.get('layout', 'TitleImageBody')
-                            title = s.get('title', '')
-                            bullets = s.get('bullets', [])
-                            
-                            # -- Image Only Mode --
-                            if layout == 'ImageOnly' and img_path:
-                                try:
-                                    img = ImageReader(img_path)
-                                    iw, ih = img.getSize()
-                                    aspect = iw / ih
-                                    draw_w = page_w
-                                    draw_h = page_w / aspect
-                                    if draw_h > page_h:
-                                        draw_h = page_h
-                                        draw_w = page_h * aspect
-                                    x = (page_w - draw_w) / 2
-                                    y = (page_h - draw_h) / 2
-                                    c.drawImage(img, x, y, width=draw_w, height=draw_h)
-                                except Exception as e:
-                                    print(f"PDF Image Error: {e}")
-                            
-                            # -- Standard / Hybrid Layout --
-                            else:
-                                c.setFillColorRGB(0, 0, 0)
-                                c.setFont("Helvetica-Bold", 24)
-                                c.drawString(40, page_h - 50, title)
-                                
-                                if img_path:
-                                    try:
-                                        img = ImageReader(img_path)
-                                        box_x = page_w / 2 + 10
-                                        box_y = 50
-                                        box_w = page_w / 2 - 50
-                                        box_h = page_h - 120
-                                        c.drawImage(img, box_x, box_y, width=box_w, height=box_h, preserveAspectRatio=True, mask='auto')
-                                    except Exception as e:
-                                        print(f"PDF Image Error: {e}")
-
-                                text_x = 40
-                                text_y = page_h - 100
-                                text_w = (page_w / 2 - 50) if img_path else (page_w - 80)
-                                
-                                c.setFont("Helvetica", 16)
-                                for b in bullets:
-                                    if not b: continue
-                                    max_chars = int(text_w / 7)
-                                    lines = textwrap.wrap(b, width=max_chars)
-                                    c.drawString(text_x, text_y, "•")
-                                    for line in lines:
-                                        c.drawString(text_x + 15, text_y, line)
-                                        text_y -= 24
-                                        if text_y < 40: break
-                                    text_y -= 12
-                                    if text_y < 40: break
-
-                            c.showPage()
-                    except Exception as e:
-                        print(f"Slide processing error: {e}")
-                
-                # Handle standard Markdown tabs
-                elif tab['type'] == 'markdown' and tab.get('content'):
-                    has_content = True
-                    c.setFont("Helvetica-Bold", 20)
-                    c.drawString(40, page_h - 50, tab.get('title', 'Draft'))
-                    c.setFont("Helvetica", 12)
-                    text_y = page_h - 80
-                    lines = tab['content'].split('\n')
-                    for line in lines:
-                        wrapped = textwrap.wrap(line, width=100)
-                        for w_line in wrapped:
-                            c.drawString(40, text_y, w_line)
-                            text_y -= 15
-                            if text_y < 40:
-                                c.showPage()
-                                text_y = page_h - 50
-                    c.showPage()
-            
-            if not has_content:
-                c.drawString(100, 100, "No content found to export.")
-                c.showPage()
-                
-            c.save()
+                            if img_path:
+                                safe_title = secure_filename(
+                                    s.get("title", "Untitled")
+                                )[:30]
+                                ext = os.path.splitext(img_path)[1] or ".png"
+                                zf.write(
+                                    img_path,
+                                    f"Slide_{i+1:02d}_{safe_title}{ext}"
+                                )
             bio.seek(0)
-            return Response(content=bio.getvalue(), media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.pdf"})
-            
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=str(e))
+            file_content = bio.getvalue()
+            media_type = "application/zip"
 
-    elif format == "pptx":
-        try:
+        # ---------------- PPTX ----------------
+        elif export_format == "pptx":
             from pptx import Presentation
-            from pptx.util import Inches, Pt
-            
+            from pptx.util import Inches
+
             prs = Presentation()
             prs.slide_width = Inches(13.3333)
             prs.slide_height = Inches(7.5)
-            
-            for tab in notebook.tabs:
-                if tab['type'] == 'slides' and tab.get('content'):
-                    try:
-                        slides_data = json.loads(tab['content']).get('slides_data', [])
-                        for s in slides_data:
-                            img_path = _get_image_path(assets_path, s)
-                            layout_mode = s.get('layout', 'TitleImageBody')
-                            slide = None
-                            
-                            if layout_mode == 'ImageOnly' and img_path:
-                                slide = prs.slides.add_slide(prs.slide_layouts[6])
-                                slide.shapes.add_picture(img_path, 0, 0, width=prs.slide_width, height=prs.slide_height)
-                            elif layout_mode == 'TitleOnly':
-                                slide = prs.slides.add_slide(prs.slide_layouts[5])
-                                slide.shapes.title.text = s.get('title', '')
-                            else:
-                                slide = prs.slides.add_slide(prs.slide_layouts[1])
-                                if slide.shapes.title: 
-                                    slide.shapes.title.text = s.get('title', '')
-                                if len(slide.placeholders) > 1:
-                                    tf = slide.placeholders[1].text_frame
-                                    tf.text = ""
-                                    for bullet in s.get('bullets', []):
-                                        p = tf.add_paragraph()
-                                        p.text = bullet
-                                if img_path:
-                                    if len(slide.placeholders) > 1:
-                                        slide.placeholders[1].width = Inches(6)
-                                    slide.shapes.add_picture(img_path, Inches(6.5), Inches(1.5), height=Inches(5))
 
-                            if s.get('notes') and slide:
-                                slide.notes_slide.notes_text_frame.text = s['notes']
-                                
-                    except Exception as e:
-                        print(f"Error adding slide to PPTX: {e}")
-            
+            for tab in notebook.tabs:
+                if tab["type"] == "slides" and tab.get("content"):
+                    slides_data = json.loads(tab["content"]).get("slides_data", [])
+                    for s in slides_data:
+                        img_path = _get_image_path(assets_path, s)
+                        layout = s.get("layout", "TitleImageBody")
+
+                        if layout == "ImageOnly" and img_path:
+                            slide = prs.slides.add_slide(prs.slide_layouts[6])
+                            slide.shapes.add_picture(
+                                img_path,
+                                0,
+                                0,
+                                width=prs.slide_width,
+                                height=prs.slide_height
+                            )
+                        else:
+                            slide = prs.slides.add_slide(prs.slide_layouts[1])
+                            slide.shapes.title.text = s.get("title", "")
+
+                        if s.get("notes"):
+                            slide.notes_slide.notes_text_frame.text = s["notes"]
+
             bio = io.BytesIO()
             prs.save(bio)
-            return Response(content=bio.getvalue(), media_type="application/vnd.openxmlformats-officedocument.presentationml.presentation", headers={"Content-Disposition": f"attachment; filename={secure_filename(notebook.title)}.pptx"})
-        except Exception as e:
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=str(e))
+            file_content = bio.getvalue()
+            media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 
-    raise HTTPException(status_code=400, detail="Invalid format")
+        else:
+            raise HTTPException(status_code=400, detail="Unsupported export format")
+
+    except ImportError as e:
+        raise HTTPException(
+            status_code=501,
+            detail=f"Missing library for '{export_format}': {e.name}"
+        )
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate export: {e}"
+        )
+
+    headers = {
+        "Content-Disposition": f'attachment; filename="{filename}"'
+    }
+
+    return Response(
+        content=file_content,
+        media_type=media_type,
+        headers=headers
+    )

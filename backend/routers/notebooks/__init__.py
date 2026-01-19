@@ -33,6 +33,7 @@ def get_notebooks(
     """Lists all notebooks owned by the current user."""
     return db.query(DBNotebook).filter(DBNotebook.owner_user_id == current_user.id).order_by(DBNotebook.updated_at.desc()).all()
 
+
 @router.post("", response_model=NotebookResponse)
 @router.post("/", response_model=NotebookResponse, include_in_schema=False)
 def create_notebook(
@@ -64,8 +65,13 @@ def create_notebook(
 
     if not initial_tabs:
          main_tab_id = str(uuid.uuid4())
+         # Don't put the prompt in the main tab - it will be replaced by AI synthesis
          initial_tabs.append({
-            "id": main_tab_id, "title": "Main", "type": "markdown", "content": payload.initialPrompt or "", "images": []
+            "id": main_tab_id, 
+            "title": "Research Report", 
+            "type": "markdown", 
+            "content": "Loading sources..." if payload.delay_processing else "Generating report...",
+            "images": []
         })
 
     content_to_store = payload.content or ""
@@ -76,7 +82,7 @@ def create_notebook(
         except: pass
 
     new_notebook = DBNotebook(
-        title=payload.title or "New Production",
+        title=payload.title or "New Research",
         content=content_to_store,
         type=payload.type or "generic",
         language=payload.language or "en",
@@ -89,7 +95,7 @@ def create_notebook(
 
     if payload.raw_text:
         new_notebook.artefacts = [{
-            "filename": "Initial Research Notes",
+            "filename": "Manual Input",
             "content": payload.raw_text,
             "type": "text",
             "is_loaded": True
@@ -99,13 +105,13 @@ def create_notebook(
     db.commit()
     db.refresh(new_notebook)
 
-    # Trigger ingestion WITH chaining support ONLY if not delayed
-    if not payload.delay_processing:
+    # Trigger ingestion - it will handle whether to auto-generate or not
+    if not payload.delay_processing or (payload.urls or payload.youtube_configs or payload.wikipedia_urls or payload.google_search_queries or payload.arxiv_queries or payload.arxiv_selected):
         from backend.task_manager import task_manager
         from backend.tasks.notebook_tasks import _ingest_notebook_sources_task
 
         task_manager.submit_task(
-            name=f"Ingesting Production Context: {new_notebook.title}",
+            name=f"Building: {new_notebook.title}",
             target=_ingest_notebook_sources_task,
             args=(
                 current_user.username,
@@ -115,13 +121,13 @@ def create_notebook(
                 payload.wikipedia_urls or [],
                 payload.google_search_queries or [],
                 payload.arxiv_queries or [],
-                payload.initialPrompt, # Passed to enable auto-generation after ingestion
-                main_tab_id, # Target tab for output
+                payload.initialPrompt if not payload.delay_processing else None,  # Only pass prompt if auto-generating
+                main_tab_id,
                 payload.arxiv_config.dict() if payload.arxiv_config else {},
                 [a.dict() for a in payload.arxiv_selected] if payload.arxiv_selected else []
             ),
             owner_username=current_user.username,
-            description=new_notebook.id # Ensure overlay finds it
+            description=new_notebook.id
         )
 
     return new_notebook
@@ -157,3 +163,4 @@ router.include_router(core_router)
 router.include_router(assets_router)
 router.include_router(ai_router)
 router.include_router(export_router)
+

@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-19 03:15]
+
+- feat(notebook): add tab support and extend schema
+
+## [2026-01-19 01:10]
+
+- feat(notebook): enhance model, API & add UI assets
+
 ## [2026-01-18 21:34]
 
 - feat(admin): enhance bindings UI and slides making workflow

@@ -97,13 +97,17 @@ def get_notebooks(
     return db.query(DBNotebook).filter(DBNotebook.owner_user_id == current_user.id).order_by(DBNotebook.updated_at.desc()).all()
 
 
+
 @router.post("", response_model=NotebookResponse)
 def create_notebook(
     payload: NotebookCreate,
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    # 1. Create the notebook immediately with placeholders
     initial_tabs = []
+    main_tab_id = str(uuid.uuid4())
+    
     if payload.structure:
         for item in payload.structure:
             initial_tabs.append({
@@ -113,32 +117,19 @@ def create_notebook(
                 "content": item.content,
                 "images": []
             })
-    
-    # ID for the main tab (used for initial report generation)
-    main_tab_id = str(uuid.uuid4())
-
-    if not initial_tabs:
-         # Default Tab Setup with Loading State
-         initial_tabs.append({
+    else:
+        # Default starting tab
+        initial_tabs.append({
             "id": main_tab_id,
-            "title": "Research Report",
+            "title": "Main Draft",
             "type": "markdown",
-            "content": f"# Research Report\n\n> **Objective:** {payload.initialPrompt or 'General Analysis'}\n\n---\n\n### ⏳ status: Processing Sources...\nThe AI is currently reading the provided materials and will generate a comprehensive analysis shortly.\n\n*Please do not close this tab while the 'Ingesting knowledge sources' task is running.*" if payload.type == 'generic' and (payload.urls or payload.files or payload.raw_text or payload.arxiv_selected) else (payload.initialPrompt or ""),
+            "content": "# " + payload.title + "\n\nInitializing knowledge base...",
             "images": []
         })
-    else:
-        main_tab_id = initial_tabs[0]["id"]
-
-    content_to_store = payload.content or ""
-    if payload.metadata:
-        try:
-            content_obj = { "text": payload.content or "", "metadata": payload.metadata }
-            content_to_store = json.dumps(content_obj)
-        except: pass
 
     new_notebook = DBNotebook(
         title=payload.title,
-        content=content_to_store,
+        content=payload.content or "",
         type=payload.type,
         language=payload.language or "en",
         owner_user_id=current_user.id,
@@ -146,9 +137,10 @@ def create_notebook(
         artefacts=[]
     )
     
+    # Add manual text as the first artefact immediately
     if payload.raw_text:
         new_notebook.artefacts = [{
-            "filename": "Initial Notes",
+            "filename": "Source Data",
             "content": payload.raw_text,
             "type": "text",
             "is_loaded": True
@@ -158,42 +150,34 @@ def create_notebook(
     db.commit()
     db.refresh(new_notebook)
     
-    # Check if we need to trigger ingestion
-    has_sources = (
-        (payload.urls and len(payload.urls) > 0) or 
-        (payload.youtube_urls and len(payload.youtube_urls) > 0) or
-        (payload.wikipedia_urls and len(payload.wikipedia_urls) > 0) or
-        (payload.google_search_queries and len(payload.google_search_queries) > 0) or
-        (payload.arxiv_queries and len(payload.arxiv_queries) > 0) or
-        (payload.arxiv_selected and len(payload.arxiv_selected) > 0)
-    )
-
-    if has_sources:
+    # 2. Trigger the task in the background if auto_generate is on
+    if payload.auto_generate:
         arxiv_conf = payload.arxiv_config.dict() if payload.arxiv_config else {}
-        # Convert pydantic models to dicts for the task
         arxiv_selected_dicts = [a.dict() for a in payload.arxiv_selected] if payload.arxiv_selected else []
         
         task_manager.submit_task(
-            name=f"Notebook Ingest: {new_notebook.title}",
+            name=f"Building: {new_notebook.title}",
             target=_ingest_notebook_sources_task,
             args=(
                 current_user.username, 
                 new_notebook.id, 
                 payload.urls or [], 
-                payload.youtube_configs or [], # Use config objects if available
+                payload.youtube_configs or [],
                 payload.wikipedia_urls or [],
                 payload.google_search_queries or [],
                 payload.arxiv_queries or [],
                 payload.initialPrompt,
-                main_tab_id, # Target tab for the generated report
+                main_tab_id,
                 arxiv_conf,
                 arxiv_selected_dicts
             ),
-            description="Ingesting knowledge sources...",
+            description=f"Processing research for {new_notebook.id}",
             owner_username=current_user.username
         )
 
+    # 3. Return the notebook immediately so UI can navigate
     return new_notebook
+
 
 @router.put("/{notebook_id}", response_model=NotebookResponse)
 def update_notebook(

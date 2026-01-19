@@ -173,6 +173,11 @@ function handleDrop(event) { event.preventDefault(); isDragging.value = false; a
                     <div class="flex gap-2 my-2"><input v-model="newUrl" @keyup.enter="addUrl" class="input-field flex-grow text-sm" placeholder="https://..." /><button @click="addUrl" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                     <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in data.urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg border dark:border-gray-600"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                 </div>
+
+                <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border dark:border-gray-700">
+                    <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">📝 Raw Text / Notes</label>
+                    <textarea v-model="data.raw_text" class="input-field w-full h-32 mt-2 p-3 text-xs resize-none" placeholder="Paste or type additional context here..."></textarea>
+                </div>
             </div>
 
             <!-- Right Column -->

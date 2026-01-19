@@ -1,4 +1,3 @@
-
 import uuid
 import json
 import traceback
@@ -325,27 +324,24 @@ def _ingest_notebook_sources_task(
                     if total_ops > 0: task.set_progress(int(current_op / total_ops * 90))
             except Exception as e:
                 task.log(f"Arxiv selected error: {e}", "ERROR")
+        
+        # CRITICAL FIX: Force refresh artefacts list
+        flag_modified(notebook, "artefacts")
+        db.commit()
+        db.refresh(notebook)
+        
         # Check for cancellation at key points
         if task.cancellation_event.is_set():
             task.log("Task cancelled by user. Saving partial notebook state.", "WARNING")
             with task.db_session_factory() as db:
                 handle_partial_notebook(db, notebook_id, username)
             return
-        # --- TASK CHAINING: Trigger Production Phase ---
-        if not task.cancellation_event.is_set():
+        
+        # --- TASK CHAINING: Trigger Production Phase (ONLY if initial_prompt exists) ---
+        if not task.cancellation_event.is_set() and initial_prompt and initial_prompt.strip():
             db.refresh(notebook)
             has_artefacts = len(notebook.artefacts) > 0
             
-            effective_prompt = initial_prompt
-            if not effective_prompt:
-                if has_artefacts:
-                    task.log("No specific prompt provided. Auto-generating based on ingested data.", "INFO")
-                    effective_prompt = "Create a detailed presentation structure based on the available research data."
-                else:
-                    task.log("No prompt and no source data provided. Skipping generation phase.", "WARNING")
-                    task.set_progress(100)
-                    return
-
             task.log(f"Transitioning to Production Phase: {notebook.type}")
             task.set_progress(95)
             
@@ -362,7 +358,7 @@ def _ingest_notebook_sources_task(
                     task=task,
                     username=username,
                     notebook_id=notebook_id,
-                    prompt=effective_prompt,
+                    prompt=initial_prompt,
                     input_tab_ids=[],
                     action=action,
                     target_tab_id=target_tab_id,
@@ -371,6 +367,8 @@ def _ingest_notebook_sources_task(
             except Exception as e:
                 task.log(f"Chained Production Task Failed: {str(e)}", "ERROR")
                 trace_exception(e)
+        else:
+            task.log("No synthesis prompt provided. Notebook ready for manual interaction.", "INFO")
 
     task.set_progress(100)
     task.log("Pipeline processing completed.")

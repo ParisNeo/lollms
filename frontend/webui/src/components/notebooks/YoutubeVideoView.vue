@@ -411,6 +411,28 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                     <div class="flex items-center gap-3"><button @click="notebookStore.saveActive" class="btn btn-secondary btn-sm"><IconSave class="w-4 h-4 mr-2" /> Save</button></div>
                 </div>
 
+                <div class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 border rounded-xl dark:border-gray-800">
+                    <div v-for="art in notebook.artefacts" :key="art.filename" 
+                        class="group p-2 rounded-lg text-[10px] flex items-center justify-between gap-2 transition-all border cursor-pointer" 
+                        :class="wizardData.selected_artefacts.includes(art.filename) ? 'bg-green-50 border-green-500 text-green-700' : 'border-transparent hover:bg-gray-50 dark:hover:bg-gray-800 text-gray-500'"
+                        @click="toggleWizardArtefact(art.filename)">
+                        
+                        <div class="flex items-center gap-2 truncate min-w-0">
+                            <IconCheckCircle v-if="wizardData.selected_artefacts.includes(art.filename)" class="w-3 h-3 flex-shrink-0" />
+                            <IconFileText v-else class="w-3 h-3 opacity-30 flex-shrink-0" />
+                            <span class="truncate">{{ art.filename }}</span>
+                        </div>
+
+                        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button @click.stop="viewArtefact(art)" class="p-1 hover:text-blue-500" title="View">
+                                <IconEye class="w-3 h-3" />
+                            </button>
+                            <button @click.stop="openArtefactEditor(art)" class="p-1 hover:text-blue-500" title="Edit">
+                                <IconPencil class="w-3 h-3" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
                 <!-- SCENE EDITOR -->
                 <div class="flex-grow overflow-hidden relative">
                     <div v-if="currentTab.type === 'youtube_script'" class="absolute inset-0 flex flex-col md:flex-row overflow-hidden">
@@ -500,3 +522,4 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
 }
 @keyframes progress-animation { from { background-position: 1rem 0; } to { background-position: 0 0; } }
 </style>
+

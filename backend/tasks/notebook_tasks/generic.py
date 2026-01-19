@@ -40,28 +40,28 @@ def process_generic(task: Task, notebook: DBNotebook, username: str, prompt: str
 
         system_prompt = """You are a professional research assistant. Organize the information into a well-structured Markdown report with the following sections:
 
-1. **Title**: Create a descriptive title for the report
-2. **Introduction**: Briefly introduce the topic and purpose of the analysis
-3. **Methodology**: Explain what data sources were used and how the analysis was conducted
-4. **Key Findings**: Present the most important insights in bullet points or numbered lists
-5. **Detailed Analysis**: Provide in-depth analysis with proper headings and subheadings
-6. **Visualizations**: Suggest appropriate visualizations (charts, graphs, tables) that would help illustrate the findings
-7. **Conclusion**: Summarize the main takeaways and potential implications
-8. **References**: List all data sources used in the analysis
+1. **Executive Summary**: Brief overview of the main findings
+2. **Introduction**: Context and purpose of the analysis
+3. **Key Findings**: Most important insights in bullet points or numbered lists
+4. **Detailed Analysis**: In-depth analysis with proper headings and subheadings
+5. **Methodology**: Sources used and approach taken
+6. **Conclusion**: Main takeaways and implications
+7. **References**: List all data sources
 
 Use proper Markdown formatting including:
 - Headers (#, ##, ###)
 - Lists (-, 1.)
 - Bold and italic text for emphasis
-- Code blocks for any technical details
+- Code blocks for technical details
 - Tables for structured data
 - Citations in the format [1], [2] with references at the end
 """
 
+        # Build the user prompt with context
         user_prompt = f"""Analyze the following research data and generate a comprehensive report:
 
 [Context Data]
-{context[:50000]} # Truncate if too large
+{context[:50000]}
 
 [User Request]
 {prompt}
@@ -72,13 +72,30 @@ Make sure to:
 - Organize information logically
 - Use appropriate headings and subheadings
 - Include citations to source documents where relevant
-- Suggest visualizations that would enhance understanding
 - Keep the language professional but accessible
 """
 
         try:
-            # Stream the generation to the tab content if possible, or just generate
-            response = lc.generate_text(user_prompt, system_prompt=system_prompt)
+            task.set_progress(30)
+            # Use long_context_processing for better handling of large contexts
+            response = lc.long_context_processing(
+                text_to_process=context,
+                contextual_prompt=f"User request: {prompt}\n\nGenerate a comprehensive research report based on the sources.",
+                system_prompt=system_prompt
+            )
+            
+            # Handle dict response from LCP
+            if isinstance(response, dict):
+                if 'error' in response:
+                    task.log(f"LCP Error: {response['error']}", "ERROR")
+                    response = f"# Error Generating Report\n\nAn error occurred: {response['error']}"
+                else:
+                    response = response.get('content', response.get('text', str(response)))
+            
+            if not isinstance(response, str):
+                response = str(response)
+            
+            task.set_progress(90)
             target_tab['content'] = response
             task.log("Report generated successfully.")
         except Exception as e:
@@ -87,12 +104,78 @@ Make sure to:
 
         return target_tab['id']
 
+    elif action == 'generate_outline':
+        task.log("Generating structured outline...")
+        system_prompt = "You are a research analyst. Create a hierarchical outline with sections and subsections in Markdown format."
+        user_prompt = f"""Analyze these sources and create a detailed outline:
+
+{context[:30000]}
+
+User instruction: {prompt}
+
+Create a structured outline with:
+- Main sections (## headers)
+- Subsections (### headers)  
+- Key points under each section
+"""
+        response = lc.generate_text(user_prompt, system_prompt=system_prompt)
+        target_tab['content'] = response
+        return target_tab['id']
+
+    elif action == 'extract_key_points':
+        task.log("Extracting key insights...")
+        system_prompt = "Extract the most important points, findings, and insights from the research material."
+        user_prompt = f"""Sources:
+{context[:30000]}
+
+Extract 10-15 key points in bullet format. Focus on the most significant findings, facts, and insights.
+"""
+        response = lc.generate_text(user_prompt, system_prompt=system_prompt)
+        target_tab['content'] = response
+        return target_tab['id']
+
+    elif action == 'generate_timeline':
+        task.log("Creating timeline...")
+        system_prompt = "You are a chronology expert. Extract and organize events/developments into a timeline."
+        user_prompt = f"""From these sources, create a chronological timeline in Markdown format:
+
+{context[:30000]}
+
+Format as:
+## Timeline
+
+- **Date/Period**: Event description
+- **Date/Period**: Event description
+"""
+        response = lc.generate_text(user_prompt, system_prompt=system_prompt)
+        target_tab['content'] = response
+        return target_tab['id']
+
+    elif action == 'compare_sources':
+        task.log("Performing comparative analysis...")
+        system_prompt = "You are a comparative analyst. Identify similarities, differences, and patterns across sources."
+        user_prompt = f"""Compare and contrast these sources:
+
+{context[:30000]}
+
+Focus on: {prompt}
+
+Structure the comparison with:
+- Similarities
+- Differences
+- Unique insights from each source
+- Overall synthesis
+"""
+        response = lc.generate_text(user_prompt, system_prompt=system_prompt)
+        target_tab['content'] = response
+        return target_tab['id']
+
     elif action == 'generate_html':
         task.log("Generating HTML visualization...")
         task.set_progress(10)
 
         system_prompt = """You are a data visualization expert. Create an HTML visualization based on the provided data and user request.
-        Return only the HTML code wrapped in a <div> container with appropriate styling.
+        Return only the HTML code wrapped in a complete HTML document with appropriate styling.
         Use charts, graphs, or other visual elements to best represent the data.
         Include comments in the code to explain key parts."""
 
@@ -105,9 +188,9 @@ Make sure to:
 {prompt}
 
 [Task]
-Generate an HTML visualization that effectively represents the data.
+Generate a complete HTML document with visualization that effectively represents the data.
 Include appropriate:
-- Charts (using Chart.js or similar)
+- Charts (using Chart.js or similar from CDN)
 - Tables with styling
 - Text explanations
 - Responsive design
