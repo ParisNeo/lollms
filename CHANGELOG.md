@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-20 08:13]
+
+- chore(deps): bump lollms-client to 1.11.1
+
 ## [2026-01-19 03:15]
 
 - feat(notebook): add tab support and extend schema

@@ -198,3 +198,4 @@ Add note building and reloading to the discussion (add a new code environment wi
 URGENT
 Fix the context size setting from lollms when used as a service (force the configured context size in lollms)
 Fix user update and add a way to disconnect the user from admin panel
+Multi generation, no blocking when generating.

@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Form
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
-from lollms_client import LollmsClient, list_bindings, get_binding_desc
+from lollms_client import get_binding_desc
 from ascii_colors import trace_exception
 from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
 from lollms_client.lollms_tti_binding import list_binding_models as list_tti_binding_models
