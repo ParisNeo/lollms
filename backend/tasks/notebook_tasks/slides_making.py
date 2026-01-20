@@ -268,8 +268,8 @@ def process_slides_making(task: Task, notebook: DBNotebook, username: str, promp
                 db_notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook.id).first()
                 if db_notebook:
                     current_tab = next((t for t in db_notebook.tabs if t['id'] == (target_tab_id or target_tab['id'])), None)
-                    if current_target:
-                        current_target['content'] = json.dumps({
+                    if current_tab:
+                        current_tab['content'] = json.dumps({
                             "slides_data": final_slides_data, 
                             "mode": "hybrid", 
                             "summary": f"Built {i+1} slides..."
