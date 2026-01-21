@@ -168,15 +168,39 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
     if user_data.email and db.query(DBUser).filter(DBUser.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="Email already in use.")
 
+    # Prepare user data with defaults from settings
+    user_dict = user_data.model_dump(exclude={'username', 'password'})
+    
+    # Apply defaults from settings for None values
+    defaults_map = {
+        'lollms_model_name': 'default_lollms_model_name',
+        'safe_store_vectorizer': 'default_safe_store_vectorizer',
+        'llm_ctx_size': 'default_llm_ctx_size',
+        'llm_temperature': 'default_llm_temperature',
+        'llm_top_k': 'default_llm_top_k',
+        'llm_top_p': 'default_llm_top_p',
+        'llm_repeat_penalty': 'default_llm_repeat_penalty',
+        'llm_repeat_last_n': 'default_llm_repeat_last_n',
+        'rag_top_k': 'default_rag_top_k',
+        'max_rag_len': 'default_max_rag_len',
+        'rag_n_hops': 'default_rag_n_hops',
+        'rag_min_sim_percent': 'default_rag_min_sim_percent',
+        'rag_use_graph': 'default_rag_use_graph',
+        'rag_graph_response_type': 'default_rag_graph_response_type',
+    }
+    
+    for field, setting_key in defaults_map.items():
+        if user_dict.get(field) is None:
+            user_dict[field] = settings.get(setting_key)
+    
     new_user = DBUser(
-        username=user_data.username, hashed_password=hash_password(user_data.password),
-        is_admin=user_data.is_admin, is_moderator=(user_data.is_admin or user_data.is_moderator),
-        email=user_data.email, lollms_model_name=user_data.lollms_model_name,
-        safe_store_vectorizer=user_data.safe_store_vectorizer or settings.get("default_safe_store_vectorizer"),
-        llm_ctx_size=user_data.llm_ctx_size if user_data.llm_ctx_size is not None else settings.get("default_llm_ctx_size"),
+        username=user_data.username,
+        hashed_password=hash_password(user_data.password),
         is_active=True,
-        status="active"
+        status="active",
+        **user_dict
     )
+    
     db.add(new_user)
     db.commit()
     db.refresh(new_user)

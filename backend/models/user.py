@@ -13,6 +13,68 @@ class UserCreateAdmin(BaseModel):
     password: str
     email: Optional[EmailStr] = None
     is_admin: bool = False
+    is_moderator: bool = False
+    
+    # LLM Settings
+    lollms_model_name: Optional[str] = None
+    llm_ctx_size: Optional[int] = None
+    llm_temperature: Optional[float] = None
+    llm_top_k: Optional[int] = None
+    llm_top_p: Optional[float] = None
+    llm_repeat_penalty: Optional[float] = None
+    llm_repeat_last_n: Optional[int] = None
+    put_thoughts_in_context: bool = False
+    
+    # Other Bindings
+    tti_binding_model_name: Optional[str] = None
+    tts_binding_model_name: Optional[str] = None
+    stt_binding_model_name: Optional[str] = None
+    safe_store_vectorizer: Optional[str] = None
+    
+    # RAG Settings
+    rag_top_k: Optional[int] = None
+    max_rag_len: Optional[int] = None
+    rag_n_hops: Optional[int] = None
+    rag_min_sim_percent: Optional[float] = None
+    rag_use_graph: Optional[bool] = None
+    rag_graph_response_type: Optional[str] = None
+    
+    # UI Settings
+    user_ui_level: int = 0
+    first_page: str = "feed"
+    message_font_size: int = 14
+    
+    # Feature Flags
+    auto_title: bool = False
+    chat_active: bool = True
+    fun_mode: bool = False
+    show_token_counter: bool = True
+    receive_notification_emails: bool = True
+    is_searchable: bool = True
+    
+    # Image Settings
+    image_generation_enabled: bool = False
+    image_annotation_enabled: bool = False
+    image_editing_enabled: bool = False
+    activate_generated_images: bool = False
+    max_image_width: Optional[int] = -1
+    max_image_height: Optional[int] = -1
+    compress_images: bool = False
+    image_compression_quality: int = 85
+    
+    # Memory & Herd Mode
+    memory_enabled: bool = False
+    auto_memory_enabled: bool = False
+    herd_mode_enabled: bool = False
+    
+    # Reasoning
+    reasoning_activation: bool = False
+    reasoning_effort: Optional[str] = None
+    reasoning_summary: bool = False
+    
+    # Web Search
+    web_search_enabled: bool = False
+    web_search_deep_analysis: bool = False
 
 class UserPasswordResetAdmin(BaseModel):
     user_id: int

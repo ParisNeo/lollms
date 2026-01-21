@@ -522,7 +522,29 @@ export const useAdminStore = defineStore('admin', () => {
         const res = await apiClient.post('/api/admin/system/requirements/fix-all');
         tasksStore.addTask(res.data);
     }
+    async function createUser(userData) {
+        isLoadingUsers.value = true;
+        try {
+            const response = await apiClient.post('/api/admin/users', userData);
+            allUsers.value.push(response.data);
+            uiStore.addNotification('User created successfully.', 'success');
+            return response.data;
+        } finally {
+            isLoadingUsers.value = false;
+        }
+    }
 
+    async function deleteUser(userId) {
+        try {
+            await apiClient.delete(`/api/admin/users/${userId}`);
+            allUsers.value = allUsers.value.filter(u => u.id !== userId);
+            uiStore.addNotification('User deleted successfully.', 'success');
+            return true;
+        } catch (error) {
+            console.error("Delete user failed:", error);
+            return false;
+        }
+    }
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
@@ -583,6 +605,7 @@ export const useAdminStore = defineStore('admin', () => {
 
         fetchModerationQueue, approveContent, deleteContent,
         fetchRequirements, installRequirement, fixAllRequirements,
-        sanitizeDatabase // EXPORTED
+        sanitizeDatabase, // EXPORTED
+        createUser, deleteUser, // ADDED
     };
 });

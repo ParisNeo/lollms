@@ -12,6 +12,8 @@ import UserStatsModal from './UserStatsModal.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconXCircle from '../../assets/icons/IconXCircle.vue';
 import IconLink from '../../assets/icons/IconLink.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconPlus from '../../assets/icons/IconPlus.vue';
 
 const adminStore = useAdminStore();
 const uiStore = useUiStore();
@@ -70,6 +72,21 @@ function openEmailModal() {
     uiStore.openModal('emailAllUsers', { users: selectedUsers });
 }
 
+function openCreateModal() {
+    uiStore.openModal('adminCreateUser');
+}
+async function handleDeleteUser(user) {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Delete User?',
+        message: `Are you sure you want to delete user "${user.username}"? This action is permanent and will delete all user data.`,
+        confirmText: 'Delete User',
+        danger: true
+    });
+
+    if (confirmed.confirmed) {
+        await adminStore.deleteUser(user.id);
+    }
+}
 function openCopyEmailsModal() {
     const selectedUsers = allUsers.value.filter(u => selectedUserIds.value.includes(u.id));
     if (selectedUsers.length === 0) {
@@ -141,6 +158,9 @@ onMounted(() => {
             <div class="flex flex-wrap items-center justify-between gap-4">
                 <h3 class="text-base font-semibold leading-6 text-gray-900 dark:text-white">All Users</h3>
                 <div class="flex items-center gap-2">
+                    <button @click="openCreateModal" class="btn btn-primary btn-sm flex items-center gap-1">
+                        <IconPlus class="w-4 h-4" /> Add User
+                    </button>
                     <button @click="openCopyEmailsModal" class="btn btn-secondary btn-sm" :disabled="selectedUserIds.length === 0">Copy Emails</button>
                     <button @click="openEmailModal" class="btn btn-secondary btn-sm" :disabled="selectedUserIds.length === 0">Email Selected</button>
                 </div>
@@ -235,6 +255,9 @@ onMounted(() => {
                                     <button @click="openStatsModal(user)" title="View Stats" class="action-icon"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg></button>
                                     <button @click="handleMessageUser(user)" title="Send DM" class="action-icon"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg></button>
                                     <button @click="openEditModal(user)" title="Edit User" class="action-icon"><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="m16.862 4.487 1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931Zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0 1 15.75 21H5.25A2.25 2.25 0 0 1 3 18.75V8.25A2.25 2.25 0 0 1 5.25 6H10"></path></svg></button>
+                                    <button @click="handleDeleteUser(user)" title="Delete User" class="action-icon text-red-500 hover:text-red-700">
+                                        <IconTrash class="w-5 h-5" />
+                                    </button>
                                 </div>
                             </td>
                         </tr>
