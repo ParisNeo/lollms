@@ -201,3 +201,5 @@ Fix user update and add a way to disconnect the user from admin panel
 Multi generation, no blocking when generating.
 
 Fix edit post in feeds ui
+Fix showing html content ui.
+In the notebooks, the html content must be shown in the ui itself, not in a html code tag.
