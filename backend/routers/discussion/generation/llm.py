@@ -1045,11 +1045,15 @@ def build_llm_generation_router(router: APIRouter):
                 data_source_runtime = db_pers.data_source
             elif db_pers.data_source_type == "datastore" and db_pers.data_source:
                 def query_personality_datastore(query: str) -> str:
+                    ASCIIColors.info(f"Personality datasource is being queryed: {query}")
                     ds_id = db_pers.data_source
                     ds = get_safe_store_instance(owner_username, ds_id, db)
-                    if not ds: return f"Error: Personality datastore '{ds_id}' not found or inaccessible."
+                    if not ds: 
+                        ASCIIColors.error(f"Error: Personality datastore '{ds_id}' not found or inaccessible.")
+                        return f"Error: Personality datastore '{ds_id}' not found or inaccessible."
                     try:
                         results = ds.query(query, top_k=owner_db_user.rag_top_k or 10)
+                        ASCIIColors.error(f"Database output: {results}")
                         return "\n".join([chunk.get("chunk_text", "") for chunk in results])
                     except Exception as e:
                         return f"Error querying personality datastore: {e}"
