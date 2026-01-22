@@ -203,3 +203,4 @@ Multi generation, no blocking when generating.
 Fix edit post in feeds ui
 Fix showing html content ui.
 In the notebooks, the html content must be shown in the ui itself, not in a html code tag.
+Rag datasources work fine when in normal mode. But when I link them to a personality, they always return an empty list!! The same source, returns data when in normal mode, but returns nothing when attached to a personality
