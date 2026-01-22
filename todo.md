@@ -199,3 +199,5 @@ URGENT
 Fix the context size setting from lollms when used as a service (force the configured context size in lollms)
 Fix user update and add a way to disconnect the user from admin panel
 Multi generation, no blocking when generating.
+
+Fix edit post in feeds ui
