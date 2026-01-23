@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-23 08:12]
+
+- **chore: purge obsolete UI asset bundles and tweak index.html**
+
 ## [2026-01-21 12:50]
 
 - **feat: extend admin user model & clean up UI assets**

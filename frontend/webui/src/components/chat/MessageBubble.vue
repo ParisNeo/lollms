@@ -47,6 +47,7 @@ import IconCircle from '../../assets/icons/IconCircle.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue'; 
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
+import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
 
 const props = defineProps({
   message: { type: Object, required: true },
@@ -86,12 +87,13 @@ const parsedMarkdown = (content) => {
     return unprotectHtml(rawHtml);
 };
 
+
 const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
 const tasksStore = useTasksStore();
-const { currentModelVisionSupport, ttsState, currentPlayingAudio } = storeToRefs(discussionsStore);
+const { currentModelVisionSupport, ttsState } = storeToRefs(discussionsStore);
 const { imageGenerationTasks } = storeToRefs(tasksStore);
 
 const isEventsCollapsed = ref(true);
@@ -437,29 +439,46 @@ const sortedSources = computed(() => {
 const lastEventSummary = computed(() => {
     if (!hasEvents.value) return '';
     const lastEvent = props.message.events[props.message.events.length - 1];
-    let summary = `Event: ${lastEvent.type}`;
+    let summary = lastEvent.type.replace(/_/g, ' ');
     if (typeof lastEvent.content === 'string' && lastEvent.content.length > 0) {
-        summary += ` - ${lastEvent.content.substring(0, 50)}${lastEvent.content.length > 50 ? '...' : ''}`;
+        summary += `: ${lastEvent.content.substring(0, 40)}${lastEvent.content.length > 40 ? '...' : ''}`;
     }
     return summary;
 });
-
 const eventIconMap = {
-  'thought': IconThinking, 'tool_call': IconTool, 'observation': IconObservation,
-  'info': IconInfo, 'exception': IconError, 'error': IconError,
-  'scratchpad': IconScratchpad, 'default': IconEventDefault,
-  'step_start': IconCog, 'step_end': IconStepEnd,
+  'thought': IconThinking,
+  'tool_call': IconWrenchScrewdriver, // Changed from IconTool for better clarity
+  'observation': IconObservation,
+  'info': IconInfo,
+  'exception': IconError,
+  'error': IconError,
+  'warning': IconInfo, // Added warning
+  'scratchpad': IconScratchpad,
+  'default': IconEventDefault,
+  'step_start': IconCog,
+  'step_end': IconStepEnd,
+  'code_exec': IconCode, // Added code execution
+  'search': IconMagnifyingGlass, // Added search event
 };
 
 const groupedEvents = computed(() => {
     if (!hasEvents.value) return [];
     const result = [];
     const stack = [];
-    const filteredEvents = props.message.events.filter(event => event.type !== 'sources');
+    // Filter out internal or unwanted event types
+    const filteredEvents = props.message.events.filter(event => event.type !== 'sources' && event.type !== 'ui_update');
+    
     for (const event of filteredEvents) {
         const lowerType = event.type?.toLowerCase() || '';
+        
         if (lowerType.includes('step_start')) {
-            const newGroup = { type: 'step_group', startEvent: event, children: [], endEvent: null, isInitiallyOpen: false };
+            const newGroup = { 
+                type: 'step_group', 
+                startEvent: event, 
+                children: [], 
+                endEvent: null, 
+                isInitiallyOpen: true // Steps usually contain important context
+            };
             if (stack.length > 0) stack[stack.length - 1].children.push(newGroup);
             else result.push(newGroup);
             stack.push(newGroup);
@@ -467,9 +486,9 @@ const groupedEvents = computed(() => {
             if (stack.length > 0) {
                 const currentGroup = stack.pop();
                 currentGroup.endEvent = event;
-                const hasContent = (currentGroup.startEvent.content && String(currentGroup.startEvent.content).trim() !== '') || (currentGroup.endEvent.content && String(currentGroup.endEvent.content).trim() !== '');
-                if (currentGroup.children.length > 0 || hasContent) currentGroup.isInitiallyOpen = true;
-            } else { result.push(event); }
+            } else { 
+                result.push(event); 
+            }
         } else {
             if (stack.length > 0) stack[stack.length - 1].children.push(event);
             else result.push(event);
@@ -834,56 +853,74 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     </div>
                 </div>
                 
-                <!-- Events -->
-                <details v-if="hasEvents" class="events-container" :open="!isEventsCollapsed" @toggle="event => isEventsCollapsed = !event.target.open">
-                    <summary class="events-summary"><IconChevronRight class="toggle-icon" /><span>{{ isEventsCollapsed ? 'Show Events' : 'Hide Events' }}</span><span v-if="isEventsCollapsed" class="last-event-snippet">{{ lastEventSummary }}</span></summary>
-                    <div class="events-content">
-                        <template v-for="(item, index) in groupedEvents" :key="index">
-                            <details v-if="item.type === 'step_group'" class="step-group-block" :open="item.isInitiallyOpen">
-                                <summary class="step-group-summary">
-                                    <IconChevronRight class="toggle-icon" />
-                                    <div class="event-icon-container" :title="item.startEvent.type"><component :is="getEventIcon(item.startEvent.type)" /></div>
-                                    <div class="event-details font-semibold prose-sm dark:prose-invert" v-html="parsedMarkdown(String(item.startEvent.content || 'Step'))"></div>
-                                </summary>
-                                <div class="step-group-content">
-                                    <div v-for="(childEvent, childIndex) in item.children" :key="childIndex" class="event-item" :class="`event-type-${childEvent.type.toLowerCase()}`">
-                                        <div class="event-icon-container" :title="childEvent.type"><component :is="getEventIcon(childEvent.type)" /></div>
-                                        <div class="event-details">
-                                            <div class="event-title">{{ childEvent.type }}</div>
-                                            <div class="event-body">
-                                                <div v-if="typeof childEvent.content === 'string'" class="message-prose" v-html="parsedMarkdown(childEvent.content)"></div>
-                                                <StepDetail v-else :data="childEvent.content" />
-                                            </div>
+                <!-- NEW: Integrated Event Timeline -->
+                <div v-if="hasEvents" class="mt-4 space-y-2 border-l-2 border-gray-100 dark:border-gray-800 ml-1">
+                    <details class="events-details-container group/events" :open="!isEventsCollapsed">
+                        <summary class="flex items-center gap-2 cursor-pointer list-none select-none px-3 py-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
+                            <IconChevronRight class="w-3 h-3 transition-transform duration-200 group-open/events:rotate-90" />
+                            <span class="font-bold uppercase tracking-widest">{{ isEventsCollapsed ? 'Show Timeline' : 'Hide Timeline' }}</span>
+                            <span v-if="isEventsCollapsed" class="truncate opacity-60 italic">— {{ lastEventSummary }}</span>
+                        </summary>
+                        
+                        <div class="mt-2 space-y-4 pl-4 pr-2">
+                            <template v-for="(item, index) in groupedEvents" :key="index">
+                                <!-- Nested Step Group -->
+                                <div v-if="item.type === 'step_group'" class="step-card bg-gray-50/50 dark:bg-gray-900/30 rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden">
+                                    <div class="flex items-center gap-3 p-3 bg-gray-100/50 dark:bg-gray-800/50">
+                                        <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                                            <component :is="getEventIcon(item.startEvent.type)" class="w-4 h-4" />
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">{{ item.startEvent.type.replace(/_/g, ' ') }}</div>
+                                            <div class="text-sm font-bold truncate dark:text-gray-200" v-html="parsedMarkdown(String(item.startEvent.content || 'Executing Step'))"></div>
                                         </div>
                                     </div>
-                                    <div v-if="item.endEvent" class="step-end-block">
-                                        <div class="event-item">
-                                            <div class="event-icon-container" :title="item.endEvent.type"><component :is="getEventIcon(item.endEvent.type)" /></div>
-                                            <div class="event-details">
-                                                <div class="event-title">Step Result</div>
-                                                <div v-if="item.endEvent.content" class="event-body">
-                                                    <div v-if="typeof item.endEvent.content === 'string'" class="message-prose" v-html="parsedMarkdown(item.endEvent.content)"></div>
-                                                    <StepDetail v-else :data="item.endEvent.content" />
+                                    
+                                    <div class="p-3 space-y-3">
+                                        <div v-for="(child, cIdx) in item.children" :key="cIdx" class="flex gap-3">
+                                            <div class="flex-shrink-0 pt-1">
+                                                <component :is="getEventIcon(child.type)" class="w-3.5 h-3.5 text-gray-400" />
+                                            </div>
+                                            <div class="flex-1 min-w-0">
+                                                <div class="text-[9px] font-bold uppercase text-gray-400 mb-0.5">{{ child.type }}</div>
+                                                <div class="text-xs text-gray-700 dark:text-gray-300">
+                                                    <div v-if="typeof child.content === 'string'" v-html="parsedMarkdown(child.content)"></div>
+                                                    <StepDetail v-else :data="child.content" :level="1" />
                                                 </div>
                                             </div>
                                         </div>
+                                        
+                                        <!-- Step End Info -->
+                                        <div v-if="item.endEvent" class="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex gap-3">
+                                            <IconCheckCircle class="w-3.5 h-3.5 text-green-500" />
+                                            <div class="flex-1 text-xs font-medium text-gray-500">
+                                                <div v-if="item.endEvent.content" v-html="parsedMarkdown(String(item.endEvent.content))"></div>
+                                                <span v-else>Step completed successfully</span>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                            </details>
 
-                            <div v-else class="event-item" :class="`event-type-${item.type.toLowerCase()}`">
-                                <div class="event-icon-container" :title="item.type"><component :is="getEventIcon(item.type)" /></div>
-                                <div class="event-details">
-                                    <div class="event-title">{{ item.type }}</div>
-                                    <div class="event-body">
-                                        <div v-if="typeof item.content === 'string'" class="message-prose" v-html="parsedMarkdown(item.content)"></div>
-                                        <StepDetail v-else :data="item.content" />
+                                <!-- Single Event -->
+                                <div v-else class="flex gap-3 items-start group/ev-item">
+                                    <div class="p-1.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 group-hover/ev-item:bg-blue-50 dark:group-hover/ev-item:bg-blue-900/20 group-hover/ev-item:text-blue-500 transition-colors">
+                                        <component :is="getEventIcon(item.type)" class="w-3.5 h-3.5" />
+                                    </div>
+                                    <div class="flex-1 pt-0.5 min-w-0">
+                                        <div class="flex items-center justify-between mb-0.5">
+                                            <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">{{ item.type.replace(/_/g, ' ') }}</span>
+                                            <span class="text-[9px] font-mono text-gray-300 dark:text-gray-600">{{ new Date(item.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
+                                        </div>
+                                        <div class="text-xs text-gray-700 dark:text-gray-300">
+                                            <div v-if="typeof item.content === 'string'" v-html="parsedMarkdown(item.content)"></div>
+                                            <StepDetail v-else :data="item.content" :level="1" />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        </template>
-                    </div>
-                </details>
+                            </template>
+                        </div>
+                    </details>
+                </div>
 
                 <!-- Footer -->
                 <div class="message-footer">
@@ -946,4 +983,7 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .document-summary::-webkit-details-marker { display: none; }
 details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 .document-content { @apply p-3; }
+.events-details-container summary::-webkit-details-marker { display: none; }
+.step-card { @apply shadow-sm transition-all hover:shadow-md; }
 </style>
+

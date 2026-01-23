@@ -1,1 +1,0 @@
-import{aO as n,aU as o}from"./index-BkSnPnj7.js";var g=n((t,e)=>{let a;return e==="sandbox"&&(a=o("#i"+t)),(e==="sandbox"?o(a.nodes()[0].contentDocument.body):o("body")).select(`[id="${t}"]`)},"getDiagramElement");export{g};
