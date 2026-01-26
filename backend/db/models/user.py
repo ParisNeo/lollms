@@ -99,6 +99,11 @@ class User(Base):
     web_search_enabled = Column(Boolean, default=False, nullable=False)
     web_search_providers = Column(JSON, default=lambda: ["google"]) # NEW COLUMN
     web_search_deep_analysis = Column(Boolean, default=False, nullable=False)
+    street_view_enabled = Column(Boolean, default=False, nullable=False)
+    scheduler_enabled = Column(Boolean, default=False, nullable=False)
+    google_drive_enabled = Column(Boolean, default=False, nullable=False)
+    google_calendar_enabled = Column(Boolean, default=False, nullable=False)
+    google_gmail_enabled = Column(Boolean, default=False, nullable=False)
 
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-26 22:51]
+
+- Added new feature toggles to the User model
+
 ## [2026-01-26 22:31]
 
 - **feat: overhaul backend models, migrations, and LLM generation logic; update frontend assets**
