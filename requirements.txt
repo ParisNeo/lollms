@@ -41,7 +41,7 @@ numpy==2.2.6
 # - pypdf, python-docx, beautifulsoup4, lxml (for document parsing)
 # - cryptography (for encryption)
 # - filelock (core concurrency mechanism for safe_store)
-safe_store==3.3.6
+safe_store==3.3.7
 wcwidth==0.2.14
 # If you prefer to install safe_store features individually:
 # safe_store
