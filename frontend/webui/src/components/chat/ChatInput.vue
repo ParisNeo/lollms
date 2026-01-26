@@ -1,7 +1,7 @@
 <script setup>
-// ... (Imports from existing ChatInput.vue)
+// ... existing imports ...
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
-import { useRouter } from 'vue-router'; // Added useRouter
+import { useRouter } from 'vue-router'; 
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
@@ -43,8 +43,8 @@ import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue'; 
 import IconObservation from '../../assets/icons/IconObservation.vue';
 import IconUserGroup from '../../assets/icons/IconUserGroup.vue'; 
-import IconSettings from '../../assets/icons/IconSettings.vue'; // Added IconSettings
-import IconFilePlus from '../../assets/icons/IconPlusCircle.vue'; // Reusing PlusCircle as FilePlus for manual doc
+import IconSettings from '../../assets/icons/IconSettings.vue';
+import IconFilePlus from '../../assets/icons/IconPlusCircle.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -52,9 +52,8 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
 const { on, off } = useEventBus();
-const router = useRouter(); // Initialize router
+const router = useRouter();
 
-// ... (Existing reactive refs & storeToRefs - activeDiscussion, user, etc.)
 const dStoreRefs = storeToRefs(discussionsStore);
 const activeDiscussionArtefacts = computed(() => dStoreRefs.activeDiscussionArtefacts?.value || []);
 const activeDiscussion = computed(() => dStoreRefs.activeDiscussion?.value || null);
@@ -82,7 +81,30 @@ const isWebSearchActive = ref(false);
 const stagedImages = ref([]); 
 const user = computed(() => authStore.user);
 
-// ... (Existing Watchers & Mounted logic for user pref, etc.)
+
+const providerNames = {
+    google: 'Google',
+    duckduckgo: 'DDG',
+    wikipedia: 'Wiki',
+    reddit: 'Reddit',
+    stackoverflow: 'SO',
+    x: 'X',
+    github: 'GitHub'
+};
+
+const currentProviderName = computed(() => {
+    const providers = user.value?.web_search_providers || [];
+    if (providers.length === 0) return 'None';
+    if (providers.length === 1) return providerNames[providers[0]] || 'Web';
+    return `Multi (${providers.length})`;
+});
+
+const currentProviderList = computed(() => {
+    return (user.value?.web_search_providers || [])
+        .map(p => providerNames[p] || p)
+        .join(', ');
+});
+
 watch(user, (newUser) => {
     if (newUser) {
         isWebSearchActive.value = !!newUser.web_search_enabled;
@@ -94,25 +116,18 @@ const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 const isGoogleSearchConfigured = computed(() => !!user.value?.google_api_key && !!user.value?.google_cse_id);
 
-// --- Herd Mode Validation ---
 const canEnableHerd = computed(() => {
     if (!user.value) return false;
     const u = user.value;
-    
-    // If Dynamic Mode is set, we need at least one model in the pool
     if (u.herd_dynamic_mode) {
         return Array.isArray(u.herd_model_pool) && u.herd_model_pool.length > 0;
     }
-    
-    // If Static Mode (default), we need at least one participant in any crew list
     const hasPre = Array.isArray(u.herd_precode_participants) && u.herd_precode_participants.length > 0;
     const hasPost = Array.isArray(u.herd_postcode_participants) && u.herd_postcode_participants.length > 0;
     const hasLegacy = Array.isArray(u.herd_participants) && u.herd_participants.length > 0;
-    
     return hasPre || hasPost || hasLegacy;
 });
 
-// ... (Context Bar Logic, Rag Selection, Mcp Selection - Unchanged)
 const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
 const maxTokens = computed(() => activeDiscussionContextStatus.value?.max_tokens || 1);
 
@@ -175,22 +190,32 @@ function toggleMcpTool(toolId) {
     mcpToolSelection.value = Array.from(current);
 }
 
-function toggleWebSearch() {
-    if (!isGoogleSearchConfigured.value) {
+async function toggleWebSearch() {
+    // Check against providers list (plural) as defined in model
+    const providers = user.value?.web_search_providers || [];
+    if (providers.includes('google') && !isGoogleSearchConfigured.value) {
         uiStore.addNotification("Google Web Search is not configured. Please add your API Key in Settings > User Context.", "error");
         return;
     }
-    isWebSearchActive.value = !isWebSearchActive.value;
+
+    const newState = !isWebSearchActive.value;
+    isWebSearchActive.value = newState; // Optimistic UI update
+    
+    try {
+        await authStore.updateUserPreferences({ web_search_enabled: newState });
+    } catch (e) {
+        console.error("Failed to save web search preference", e);
+        uiStore.addNotification("Failed to save settings.", "error");
+        // Revert on failure
+        isWebSearchActive.value = !newState;
+    }
 }
 
-// Function to toggle global user preferences from the menu shortcut
 async function toggleUserPref(key, currentValue) {
-    // Prevent toggle if herd is disabled and we try to enable it without config
     if (key === 'herd_mode_enabled' && !currentValue && !canEnableHerd.value) {
         uiStore.addNotification("Please configure Herd participants in Settings > User Context first.", "warning");
         return;
     }
-
     try {
         await authStore.updateUserPreferences({ [key]: !currentValue }, false);
     } catch (e) {
@@ -202,155 +227,198 @@ function navigateToContextSettings() {
     router.push('/settings?section=context');
 }
 
-// --- Active Features Badges ---
+function showFeatureInfo(feature) {
+    if (!feature.modalTitle && !feature.modalDescription) return;
+    
+    let content = `### Description\n${feature.modalDescription}\n`;
+    if (feature.systemPrompt) {
+        content += `\n### System Prompt Addition\n\`\`\`text\n${feature.systemPrompt}\n\`\`\``;
+    }
+    
+    uiStore.openModal('interactiveOutput', {
+        title: feature.modalTitle || feature.label,
+        content: content
+    });
+}
+
+function showHiddenFeaturesModal() {
+    let content = "";
+    hiddenFeatures.value.forEach(feat => {
+        content += `### ${feat.modalTitle || feat.label}\n`;
+        if (feat.modalDescription) content += `${feat.modalDescription}\n`;
+        if (feat.systemPrompt) {
+            content += `\n**System Prompt**\n\`\`\`text\n${feat.systemPrompt}\n\`\`\``;
+        }
+        content += `\n\n---\n\n`;
+    });
+    
+    // Remove trailing separator
+    content = content.replace(/\n\n---\n\n$/, '');
+
+    uiStore.openModal('interactiveOutput', {
+        title: `Additional Active Features (+${hiddenFeatures.value.length})`,
+        content: content
+    });
+}
+
 const activeFeatures = computed(() => {
     const features = [];
-    
-    // Herd Mode
     if (user.value?.herd_mode_enabled) {
         features.push({
             id: 'herd',
             icon: IconUserGroup,
             label: `Herd (${user.value.herd_rounds} rnds)`,
             colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800',
-            title: `Herd Mode Active. Phase 1 & 3 enabled.`
+            title: `Herd Mode Active.`,
+            modalTitle: 'Herd Mode',
+            modalDescription: 'A collaborative multi-agent workflow. Your request is processed by a "Pre-code" crew (Brainstorming), synthesized by a Leader, critiqued by a "Post-code" crew, and refined into a final answer.',
+            systemPrompt: '(Dynamic Context) The system orchestrates multiple agent interactions. It injects specific system prompts for each agent (e.g., "You are a creative thinker...") and manages the debate history context.'
         });
     }
-
-    // RAG
     if (ragStoreSelection.value.length > 0) {
         features.push({ 
             id: 'rag', 
             icon: IconDatabase, 
             label: 'RAG', 
-            colorClass: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
-            title: `${ragStoreSelection.value.length} Data Store(s) Active`
+            colorClass: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800', 
+            title: `${ragStoreSelection.value.length} Data Store(s) Active`,
+            modalTitle: 'RAG (Retrieval Augmented Generation)',
+            modalDescription: `Active Data Stores: ${ragStoreSelection.value.length}. Retrieves relevant text chunks from your documents to ground the AI's response in facts.`,
+            systemPrompt: '## Context from Data Stores\n[Chunk 1] content...\n[Chunk 2] content...'
         });
     }
-    
-    // Tools
     if (mcpToolSelection.value.length > 0) {
         features.push({ 
             id: 'tools', 
             icon: IconMcp, 
             label: 'Tools', 
-            colorClass: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800',
-            title: `${mcpToolSelection.value.length} Tool(s) Active`
+            colorClass: 'text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800', 
+            title: `${mcpToolSelection.value.length} Tool(s) Active`,
+            modalTitle: 'MCP Tools',
+            modalDescription: `Active Tools: ${mcpToolSelection.value.length}. Allows the AI to execute external functions (e.g., file system access, API calls) via the Model Context Protocol.`,
+            systemPrompt: '(Tool Definitions injected as JSON Schema). The model outputs tool calls which are executed by the system.'
         });
     }
-    
-    // Web Search
     if (isWebSearchActive.value) {
         features.push({
             id: 'web_search',
             icon: IconGlobeAlt,
-            label: 'Web',
+            label: currentProviderName.value,
             colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
-            title: 'Web Search Active. AI can search the internet.'
+            title: `Web Search Active (${currentProviderName.value}).`,
+            modalTitle: 'Web Search',
+            modalDescription: `Provider: ${currentProviderName.value}. The AI can search the internet for real-time information if it determines the query requires it.`,
+            systemPrompt: 'User: "..." Do you need to search? -> [Search Action] -> ## Web Search Context:\n### Title\nContent...'
         });
     }
-    
-    // Thinking (Reasoning)
     if (user.value?.reasoning_activation) {
-        features.push({
-            id: 'thinking',
-            icon: IconThinking,
-            label: 'Thinking',
-            colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
-            title: 'Thinking Mode Enabled. AI will reason before answering.'
+        features.push({ 
+            id: 'thinking', 
+            icon: IconThinking, 
+            label: 'Thinking', 
+            colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800', 
+            title: 'Thinking Mode Enabled.',
+            modalTitle: 'Thinking Mode',
+            modalDescription: `Enables Chain-of-Thought reasoning. Effort: ${user.value.reasoning_effort || 'medium'}.`,
+            systemPrompt: 'System may inject <think> instructions or utilize the model\'s native reasoning tokens.'
         });
     }
-
-    // Annotation
     if (user.value?.image_annotation_enabled) {
-        features.push({
-            id: 'annotation',
-            icon: IconObservation,
-            label: 'Annotate',
-            colorClass: 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800',
-            title: 'Image Annotation Enabled. AI can detect objects.'
+        features.push({ 
+            id: 'annotation', 
+            icon: IconObservation, 
+            label: 'Annotate', 
+            colorClass: 'text-pink-600 dark:text-pink-400 bg-pink-50 dark:bg-pink-900/20 border-pink-200 dark:border-pink-800', 
+            title: 'Image Annotation Enabled.',
+            modalTitle: 'Image Annotation',
+            modalDescription: 'Enables the AI to detect objects in images and provide coordinates.',
+            systemPrompt: '## Image Annotation: Use <annotate>[JSON]</annotate> for bounding boxes/points.'
         });
     }
-
-    // Memory
     if (user.value?.memory_enabled) {
-        features.push({
-            id: 'memory',
-            icon: IconThinking,
-            label: user.value.auto_memory_enabled ? 'Memory (Auto)' : 'Memory',
-            colorClass: 'text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800',
-            title: user.value.auto_memory_enabled 
-                ? 'Long-Term Memory Active. AI can automatically save new memories.' 
-                : 'Long-Term Memory Active. Use <new_memory> tags to save.'
+        features.push({ 
+            id: 'memory', 
+            icon: IconThinking, 
+            label: user.value.auto_memory_enabled ? 'Memory (Auto)' : 'Memory', 
+            colorClass: 'text-teal-600 dark:text-teal-400 bg-teal-50 dark:bg-teal-900/20 border-teal-200 dark:border-teal-800', 
+            title: 'Long-Term Memory Active.',
+            modalTitle: 'Long-Term Memory',
+            modalDescription: 'Injects stored memories into context and allows the AI to save new facts.',
+            systemPrompt: '## Long-Term Memory Bank\n[Memory #1] ...\n## Memory Management\nManage memories using these tags:\n- Add: <new_memory>...'
         });
     }
-
-    // Vision
     if (currentModelVisionSupport.value) {
-        features.push({
-            id: 'vision',
-            icon: IconEye,
-            label: 'Vision',
-            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
-            title: 'Vision Supported. AI can see attached images.'
+        features.push({ 
+            id: 'vision', 
+            icon: IconEye, 
+            label: 'Vision', 
+            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800', 
+            title: 'Vision Supported.',
+            modalTitle: 'Computer Vision',
+            modalDescription: 'The currently selected model supports image input analysis.',
+            systemPrompt: '(Images are encoded and passed directly to the model\'s visual encoder).'
         });
     }
-
-    // Image Gen
     if (user.value?.image_generation_enabled) {
-        features.push({
-            id: 'img_gen',
-            icon: IconPhoto,
-            label: 'ImgGen',
-            colorClass: 'text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-50 dark:bg-fuchsia-900/20 border-fuchsia-200 dark:border-fuchsia-800',
-            title: 'Image Generation Enabled. AI can create images.'
+        features.push({ 
+            id: 'img_gen', 
+            icon: IconPhoto, 
+            label: 'ImgGen', 
+            colorClass: 'text-fuchsia-600 dark:text-fuchsia-400 bg-fuchsia-50 dark:bg-fuchsia-900/20 border-fuchsia-200 dark:border-fuchsia-800', 
+            title: 'Image Generation Enabled.',
+            modalTitle: 'Image Generation',
+            modalDescription: 'Allows the AI to generate images from text descriptions.',
+            systemPrompt: `## Image Gen: Use <generate_image width="W" height="H" n="N">prompt</generate_image>.${user.value.image_generation_system_prompt ? '\n(Plus user system prompt)' : ''}`
         });
     }
-
-    // Image Edit
     if (user.value?.image_editing_enabled) {
-        features.push({
-            id: 'img_edit',
-            icon: IconPencil,
-            label: 'ImgEdit',
-            colorClass: 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800',
-            title: 'Image Editing Enabled. AI can modify existing images.'
+        features.push({ 
+            id: 'img_edit', 
+            icon: IconPencil, 
+            label: 'ImgEdit', 
+            colorClass: 'text-violet-600 dark:text-violet-400 bg-violet-50 dark:bg-violet-900/20 border-violet-200 dark:border-violet-800', 
+            title: 'Image Editing Enabled.',
+            modalTitle: 'Image Editing',
+            modalDescription: 'Allows the AI to modify existing images.',
+            systemPrompt: '## Image Edit: Use <edit_image source_index="-1" strength="0.8">prompt</edit_image>.'
         });
     }
-
-    // Slide Maker
     if (user.value?.slide_maker_enabled) {
-        features.push({
-            id: 'slides',
-            icon: IconPresentationChartBar,
-            label: 'Slides',
-            colorClass: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800',
-            title: 'Slide Maker Enabled. AI can generate presentations.'
+        features.push({ 
+            id: 'slides', 
+            icon: IconPresentationChartBar, 
+            label: 'Slides', 
+            colorClass: 'text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800', 
+            title: 'Slide Maker Enabled.',
+            modalTitle: 'Slide Maker',
+            modalDescription: 'Allows the AI to generate presentations (PPTX/PDF).',
+            systemPrompt: '## Slides: Use <generate_slides><Slide>desc</Slide></generate_slides>.'
         });
     }
-
-    // Note Generation
     if (user.value?.note_generation_enabled) {
-        features.push({
-            id: 'notes',
-            icon: IconFileText,
-            label: 'Notes',
-            colorClass: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800',
-            title: 'Note Generation Enabled. AI can create notes.'
+        features.push({ 
+            id: 'notes', 
+            icon: IconFileText, 
+            label: 'Notes', 
+            colorClass: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800', 
+            title: 'Note Generation Enabled.',
+            modalTitle: 'Note Generation',
+            modalDescription: 'Allows the AI to create structured notes.',
+            systemPrompt: '## Notes: Use ```note ... ``` for structured data.'
         });
     }
-
-    // Audio (TTS/STT)
     if (user.value?.tts_binding_model_name || user.value?.stt_binding_model_name) {
-        features.push({
-            id: 'audio',
-            icon: IconMicrophone,
-            label: 'Audio',
-            colorClass: 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-800',
-            title: 'Audio Features (TTS/STT) Enabled.'
+        features.push({ 
+            id: 'audio', 
+            icon: IconMicrophone, 
+            label: 'Audio', 
+            colorClass: 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-800', 
+            title: 'Audio Features Enabled.',
+            modalTitle: 'Audio Features',
+            modalDescription: 'Speech-to-Text (STT) and/or Text-to-Speech (TTS) are configured.',
+            systemPrompt: '(Handled by audio processing modules, no text prompt injection)'
         });
     }
-
     return features;
 });
 
@@ -359,57 +427,20 @@ const maxVisibleBadges = 5;
 const visibleFeatures = computed(() => activeFeatures.value.slice(0, maxVisibleBadges));
 const hiddenFeatures = computed(() => activeFeatures.value.slice(maxVisibleBadges));
 
-// ... (Image & File Handling - Unchanged)
-function openStagedImageViewer(startIndex) {
-    uiStore.openImageViewer({
-        imageList: stagedImages.value.map((img) => ({ 
-            src: img.previewUrl, 
-            prompt: `Uploaded image: ${img.file.name}` 
-        })),
-        startIndex
-    });
-}
-async function toggleArtefactLoad(file) {
-    if (!activeDiscussion.value) return;
-    if (file.is_loaded) {
-        await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version });
-    } else {
-        await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version });
-    }
-}
-async function removeArtefact(file) {
-    if (!activeDiscussion.value) return;
-    const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' });
-    if (confirmed.confirmed) {
-        await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title });
-    }
-}
-function removeStagedImage(index) {
-    const removed = stagedImages.value.splice(index, 1)[0];
-    if (removed && removed.previewUrl) {
-        URL.revokeObjectURL(removed.previewUrl);
-    }
-}
+function openStagedImageViewer(startIndex) { uiStore.openImageViewer({ imageList: stagedImages.value.map((img) => ({ src: img.previewUrl, prompt: `Uploaded image: ${img.file.name}` })), startIndex }); }
+async function toggleArtefactLoad(file) { if (!activeDiscussion.value) return; if (file.is_loaded) await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); else await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); }
+async function removeArtefact(file) { if (!activeDiscussion.value) return; const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' }); if (confirmed.confirmed) await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title }); }
+function removeStagedImage(index) { const removed = stagedImages.value.splice(index, 1)[0]; if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl); }
 function triggerFileUpload() { fileInput.value?.click(); }
 function triggerImageUpload() { imageInput.value?.click(); }
 async function handleFilesInput(files) {
     if (files.length === 0) return;
     const images = files.filter(f => f.type.startsWith('image/'));
     const others = files.filter(f => !f.type.startsWith('image/'));
-    if (images.length > 0) {
-        images.forEach(file => {
-            stagedImages.value.push({ file, previewUrl: URL.createObjectURL(file) });
-        });
-    }
+    if (images.length > 0) images.forEach(file => { stagedImages.value.push({ file, previewUrl: URL.createObjectURL(file) }); });
     if (others.length > 0) {
         if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
-        if (activeDiscussion.value) {
-            isUploading.value = true;
-            try {
-                // Modified to use auto_load logic implicitly (default backend behavior updated to auto_load=True)
-                await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true })));
-            } finally { isUploading.value = false; }
-        }
+        if (activeDiscussion.value) { isUploading.value = true; try { await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true }))); } finally { isUploading.value = false; } }
     }
 }
 async function handleFileUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files); event.target.value = ''; }
@@ -419,38 +450,18 @@ async function handlePaste(event) {
     event.stopPropagation();
     const items = (event.clipboardData || window.clipboardData).items;
     const imageFiles = [];
-    for (let i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf("image") !== -1) {
-            const blob = items[i].getAsFile();
-            if (blob) {
-                const extension = (blob.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
-                imageFiles.push(new File([blob], `pasted_image_${Date.now()}.${extension}`, { type: blob.type }));
-            }
-        }
-    }
-    if (imageFiles.length > 0) {
-        event.preventDefault();
-        await handleFilesInput(imageFiles);
-    }
+    for (let i = 0; i < items.length; i++) { if (items[i].type.indexOf("image") !== -1) { const blob = items[i].getAsFile(); if (blob) { const extension = (blob.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg'); imageFiles.push(new File([blob], `pasted_image_${Date.now()}.${extension}`, { type: blob.type })); } } }
+    if (imageFiles.length > 0) { event.preventDefault(); await handleFilesInput(imageFiles); }
 }
-async function handleImportFromInternet() {
-    if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; }
-    uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id, mode: 'url' });
-}
-async function handleCreateManualArtefact() {
-    if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; }
-    uiStore.openModal('createArtefact', { discussionId: activeDiscussion.value.id });
-}
+async function handleImportFromInternet() { if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; } uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id, mode: 'url' }); }
+async function handleCreateManualArtefact() { if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; } uiStore.openModal('createArtefact', { discussionId: activeDiscussion.value.id }); }
 function handlePromptSelection(content) { messageText.value += (messageText.value ? '\n' : '') + content; }
 
 const filteredUserPromptsByCategory = computed(() => {
     if (!userPromptSearchTerm.value) return userPromptsByCategory.value;
     const term = userPromptSearchTerm.value.toLowerCase();
     const result = {};
-    for (const [cat, prompts] of Object.entries(userPromptsByCategory.value)) {
-        const filtered = prompts.filter(p => p.name.toLowerCase().includes(term));
-        if (filtered.length > 0) result[cat] = filtered;
-    }
+    for (const [cat, prompts] of Object.entries(userPromptsByCategory.value)) { const filtered = prompts.filter(p => p.name.toLowerCase().includes(term)); if (filtered.length > 0) result[cat] = filtered; }
     return result;
 });
 
@@ -463,74 +474,33 @@ async function toggleRecording() {
             mediaRecorder = new MediaRecorder(stream);
             audioChunks = [];
             mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
-            mediaRecorder.onstop = async () => {
-                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                const text = await discussionsStore.transcribeAudio(audioBlob);
-                if (text) messageText.value += (messageText.value ? ' ' : '') + text;
-                stream.getTracks().forEach(track => track.stop());
-            };
+            mediaRecorder.onstop = async () => { const audioBlob = new Blob(audioChunks, { type: 'audio/wav' }); const text = await discussionsStore.transcribeAudio(audioBlob); if (text) messageText.value += (messageText.value ? ' ' : '') + text; stream.getTracks().forEach(track => track.stop()); };
             mediaRecorder.start();
             isRecording.value = true;
         } catch (err) { uiStore.addNotification('Microphone access denied.', 'error'); }
     }
 }
 
-// --- Sending ---
 async function handleSendMessage() {
     if (generationInProgress.value) return;
     const text = messageText.value.trim();
     if (!text && attachedFiles.value.length === 0 && stagedImages.value.length === 0) return;
-
     const imagesToUpload = stagedImages.value.map(item => item.file);
     const localPreviews = stagedImages.value.map(item => item.previewUrl);
     messageText.value = '';
     inputTokenCount.value = 0;
     stagedImages.value = []; 
-
-    try {
-        await discussionsStore.sendMessage({ 
-            prompt: text, 
-            image_server_paths: [], 
-            localImageUrls: localPreviews,
-            image_files: imagesToUpload,
-            webSearchEnabled: isWebSearchActive.value
-        });
-    } catch(err) {
-        console.error("SendMessage failed:", err);
-        uiStore.addNotification('Failed to send message.', 'error');
-        messageText.value = text;
-        imagesToUpload.forEach((file, i) => { stagedImages.value.push({ file, previewUrl: localPreviews[i] }); });
-    }
+    try { await discussionsStore.sendMessage({ prompt: text, image_server_paths: [], localImageUrls: localPreviews, image_files: imagesToUpload, webSearchEnabled: isWebSearchActive.value }); } catch(err) { console.error("SendMessage failed:", err); uiStore.addNotification('Failed to send message.', 'error'); messageText.value = text; imagesToUpload.forEach((file, i) => { stagedImages.value.push({ file, previewUrl: localPreviews[i] }); }); }
 }
 
 function handleKeyDown(event) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendMessage(); } }
-async function fetchInputTokenCount(text) {
-    if (!text.trim()) { inputTokenCount.value = 0; return; }
-    try {
-        const response = await apiClient.post('/api/discussions/tokenize', { text });
-        inputTokenCount.value = response.data.tokens;
-    } catch (error) {}
-}
+async function fetchInputTokenCount(text) { if (!text.trim()) { inputTokenCount.value = 0; return; } try { const response = await apiClient.post('/api/discussions/tokenize', { text }); inputTokenCount.value = response.data.tokens; } catch (error) {} }
 function handleStopGeneration() { discussionsStore.stopGeneration(); }
 
-watch(messageText, (newText) => {
-    clearTimeout(tokenizeInputDebounceTimer);
-    if (!newText.trim()) { inputTokenCount.value = 0; }
-    else if (showContextBar.value) { tokenizeInputDebounceTimer = setTimeout(() => fetchInputTokenCount(newText), 500); }
-});
+watch(messageText, (newText) => { clearTimeout(tokenizeInputDebounceTimer); if (!newText.trim()) { inputTokenCount.value = 0; } else if (showContextBar.value) { tokenizeInputDebounceTimer = setTimeout(() => fetchInputTokenCount(newText), 500); } });
 
-onMounted(() => {
-    promptsStore.fetchPrompts();
-    if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores();
-    if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools();
-    on('files-dropped-in-chat', handleFilesInput);
-    on('files-pasted-in-chat', handleFilesInput);
-});
-onUnmounted(() => {
-    off('files-dropped-in-chat', handleFilesInput);
-    off('files-pasted-in-chat', handleFilesInput);
-    stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl));
-});
+onMounted(() => { promptsStore.fetchPrompts(); if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores(); if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools(); on('files-dropped-in-chat', handleFilesInput); on('files-pasted-in-chat', handleFilesInput); });
+onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-pasted-in-chat', handleFilesInput); stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl)); });
 </script>
 
 <template>
@@ -569,7 +539,8 @@ onUnmounted(() => {
 
                 <div class="flex items-center gap-1.5 flex-shrink-0" v-if="activeFeatures.length > 0">
                     <div v-for="feat in visibleFeatures" :key="feat.id" 
-                         :class="['flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-help', feat.colorClass]"
+                         @click="showFeatureInfo(feat)"
+                         :class="['flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer hover:opacity-80', feat.colorClass]"
                          :title="feat.title">
                         <div class="w-3 h-3 flex-shrink-0 flex items-center justify-center">
                             <component :is="feat.icon" class="w-full h-full fill-current" />
@@ -577,20 +548,9 @@ onUnmounted(() => {
                         <span class="hidden md:inline">{{ feat.label }}</span>
                     </div>
 
-                    <div v-if="hiddenFeatures.length > 0" class="relative group/overflow">
-                        <div class="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-help bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300">
+                    <button v-if="hiddenFeatures.length > 0" @click="showHiddenFeaturesModal" class="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700">
                             <span>+{{ hiddenFeatures.length }}</span>
-                        </div>
-                        <div class="absolute bottom-full right-0 mb-1 w-max p-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl opacity-0 group-hover/overflow:opacity-100 transition-opacity pointer-events-none group-hover/overflow:pointer-events-auto flex flex-col gap-1 z-50">
-                            <div v-for="feat in hiddenFeatures" :key="feat.id" 
-                                :class="['flex items-center gap-2 px-2 py-1 rounded border text-[10px] font-bold uppercase tracking-wider', feat.colorClass]">
-                                <div class="w-3 h-3 flex-shrink-0 flex items-center justify-center">
-                                    <component :is="feat.icon" class="w-full h-full fill-current" />
-                                </div>
-                                <span>{{ feat.label }}</span>
-                            </div>
-                        </div>
-                    </div>
+                    </button>
                 </div>
             </div>
         </div>
@@ -630,22 +590,18 @@ onUnmounted(() => {
                         
                         <div class="menu-divider"></div>
                         
-                        <!-- NEW Context Options Submenu -->
+                        <!-- Context Options Submenu -->
                         <DropdownSubmenu title="Context Options" icon="cog" collection="ui">
                              <div class="p-1 min-w-[200px]">
                                 <!-- Group: Knowledge -->
                                 <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Knowledge</div>
                                 
                                 <!-- Web Search Toggle -->
-                                <button 
-                                    @click.stop="toggleWebSearch" 
-                                    class="menu-item flex justify-between items-center group/item" 
-                                    :class="{'opacity-50 cursor-not-allowed': !isGoogleSearchConfigured}"
-                                    :title="!isGoogleSearchConfigured ? 'Requires Google API Key & CSE ID in Settings > User Context' : 'Enable Web Search'"
-                                >
+                                <button @click.stop="toggleWebSearch" class="menu-item flex justify-between items-center group/item" 
+                                        :title="`Active Engines: ${currentProviderList}`">
                                     <span class="flex items-center gap-2">
                                         <IconGlobeAlt class="w-4 h-4 text-blue-500" />
-                                        <span>Web Search</span>
+                                        <span>Search ({{ currentProviderName }})</span>
                                     </span>
                                     <IconCheckCircle v-if="isWebSearchActive" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
@@ -661,7 +617,7 @@ onUnmounted(() => {
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
-                                <!-- Auto-Memory Sub-Toggle (Only visible if Memory is enabled) -->
+                                <!-- Auto-Memory Sub-Toggle -->
                                 <button v-if="user?.memory_enabled" @click.stop="toggleUserPref('auto_memory_enabled', user.auto_memory_enabled)" class="menu-item flex justify-between items-center group/item pl-8 text-xs">
                                     <span class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
                                         <span>↳ Auto Save</span>
@@ -679,7 +635,7 @@ onUnmounted(() => {
                                     class="menu-item flex justify-between items-center group/item"
                                     :disabled="!canEnableHerd"
                                     :class="{'opacity-50 cursor-not-allowed': !canEnableHerd}"
-                                    :title="!canEnableHerd ? 'Configure Herd participants in Settings > User Context first' : 'Toggle Herd Mode'"
+                                    :title="!canEnableHerd ? 'Configure Herd participants in Settings' : 'Toggle Herd Mode'"
                                 >
                                     <span class="flex items-center gap-2">
                                         <IconUserGroup class="w-4 h-4 text-amber-500" />
@@ -766,7 +722,7 @@ onUnmounted(() => {
                              </div>
                         </DropdownSubmenu>
                         
-                        <!-- RAG, Tools, Prompts Submenus (Same as before) -->
+                        <!-- RAG, Tools, Prompts Submenus -->
                         <DropdownSubmenu title="RAG Context" icon="database">
                              <div class="p-1 max-h-64 overflow-y-auto min-w-[200px]">
                                 <div v-if="availableRagStores.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No stores available.</div>
@@ -808,10 +764,9 @@ onUnmounted(() => {
                         rows="1" 
                         class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-64 overflow-y-auto text-sm leading-relaxed" 
                         :class="{ 'opacity-0 pointer-events-none': generationInProgress }"
-                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message... (Shift+Enter for new line)'" 
+                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message...'" 
                     ></textarea>
                     
-                    <!-- Status Overlay -->
                     <div v-if="generationInProgress || currentActiveTask" class="absolute inset-0 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none">
                          <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500" /> 
                          <span v-if="currentActiveTask">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>
@@ -830,7 +785,7 @@ onUnmounted(() => {
                 </div>
             </div>
             
-            <p v-if="totalPercentage > 100" class="text-[10px] text-center text-red-500 font-black animate-pulse">CONTEXT LIMIT REACHED. PREVIOUS TURNS MAY BE LOST.</p>
+            <p v-if="totalPercentage > 100" class="text-[10px] text-center text-red-500 font-black animate-pulse">CONTEXT LIMIT REACHED.</p>
         </div>
     </div>
 </template>

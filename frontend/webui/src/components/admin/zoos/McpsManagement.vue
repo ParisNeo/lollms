@@ -66,7 +66,6 @@ const pageSize = computed({
   set: (val) => { mcpFilters.pageSize = val; }
 });
 
-
 const sortOptions = [
     { value: 'last_update_date', label: 'Last Updated' }, { value: 'creation_date', label: 'Creation Date' },
     { value: 'name', label: 'Name' }, { value: 'author', label: 'Author' },
@@ -94,7 +93,8 @@ watch([sortKey, sortOrder, selectedCategory, installationStatusFilter, selectedR
     else adminStore.fetchZooMcps();
 });
 watch(searchQuery, debouncedFetch);
-watch(currentPage, adminStore.fetchZooMcps);
+// Explicitly call fetchZooMcps as a function to ensure correct context
+watch(currentPage, () => adminStore.fetchZooMcps());
 watch(starredItems, (newStarred) => { localStorage.setItem('starredMcps', JSON.stringify(newStarred)); }, { deep: true });
 watch(activeSubTab, (newTab) => {
     if (newTab === 'zoo') adminStore.fetchZooMcps();

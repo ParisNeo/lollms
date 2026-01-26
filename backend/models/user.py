@@ -54,8 +54,10 @@ class UserCreateAdmin(BaseModel):
     
     # Image Settings
     image_generation_enabled: bool = False
+    image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: bool = False
     image_editing_enabled: bool = False
+    slide_maker_enabled: bool = False
     activate_generated_images: bool = False
     max_image_width: Optional[int] = -1
     max_image_height: Optional[int] = -1
@@ -66,6 +68,7 @@ class UserCreateAdmin(BaseModel):
     memory_enabled: bool = False
     auto_memory_enabled: bool = False
     herd_mode_enabled: bool = False
+    herd_rounds: int = 2
     
     # Reasoning
     reasoning_activation: bool = False
@@ -74,6 +77,7 @@ class UserCreateAdmin(BaseModel):
     
     # Web Search
     web_search_enabled: bool = False
+    web_search_providers: List[str] = Field(default_factory=lambda: ["google"])
     web_search_deep_analysis: bool = False
 
 class UserPasswordResetAdmin(BaseModel):
@@ -290,8 +294,6 @@ class UserAuthDetails(BaseModel):
     herd_dynamic_mode: bool = False
     herd_model_pool: List[Dict[str, str]] = Field(default_factory=list)
 
-
-
     preferred_name: Optional[str] = None
     
     reasoning_activation: bool = False
@@ -303,10 +305,11 @@ class UserAuthDetails(BaseModel):
     compress_images: bool = False
     image_compression_quality: int = 85
 
-    # Google Search Settings
+    # Web Search Settings
     google_api_key: Optional[str] = None
     google_cse_id: Optional[str] = None
     web_search_enabled: bool = False
+    web_search_providers: List[str] = Field(default_factory=lambda: ["google"])
     web_search_deep_analysis: bool = False
 
     class Config:
@@ -375,7 +378,7 @@ class UserUpdate(BaseModel):
     image_studio_negative_prompt: Optional[str] = None
     image_studio_image_size: Optional[str] = None
     image_studio_n_images: Optional[int] = None
-    image_studio_seed: Optional[int] = None
+    image_studio_seed: int = -1
     image_studio_generation_params: Optional[Dict[str, Any]] = None
     
     image_generation_enabled: Optional[bool] = None
@@ -410,8 +413,9 @@ class UserUpdate(BaseModel):
     compress_images: Optional[bool] = None
     image_compression_quality: Optional[int] = None
 
-    # Google Search Settings
+    # Web Search Settings
     google_api_key: Optional[str] = None
     google_cse_id: Optional[str] = None
     web_search_enabled: Optional[bool] = None
+    web_search_providers: Optional[List[str]] = None
     web_search_deep_analysis: Optional[bool] = None

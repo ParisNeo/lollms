@@ -17,6 +17,9 @@ const tasksStore = useTasksStore();
 const uiStore = useUiStore();
 const dataStore = useDataStore();
 
+// Use storeToRefs for refs and other reactive properties
+const { personalityFilters } = adminStore;
+
 const { 
     personalityZooRepositories, isLoadingPersonalityZooRepositories, 
     zooPersonalities, isLoadingZooPersonalities 
@@ -28,15 +31,42 @@ const activeSubTab = ref('zoo');
 const newRepo = ref({ type: 'git', name: '', url: '', path: '' });
 const isAddRepoFormVisible = ref(false);
 const isLoadingAction = ref(null);
-const searchQuery = ref('');
-const selectedCategory = ref('All');
-const installationStatusFilter = ref('All');
-const selectedRepository = ref('All');
-const sortKey = ref('name');
-const sortOrder = ref('asc');
+
+// Use computed properties with setters to link local refs to the store state
+const searchQuery = computed({
+  get: () => personalityFilters.searchQuery,
+  set: (val) => { personalityFilters.searchQuery = val; }
+});
+const selectedCategory = computed({
+  get: () => personalityFilters.selectedCategory,
+  set: (val) => { personalityFilters.selectedCategory = val; }
+});
+const installationStatusFilter = computed({
+  get: () => personalityFilters.installationStatusFilter,
+  set: (val) => { personalityFilters.installationStatusFilter = val; }
+});
+const selectedRepository = computed({
+  get: () => personalityFilters.selectedRepository,
+  set: (val) => { personalityFilters.selectedRepository = val; }
+});
+const sortKey = computed({
+  get: () => personalityFilters.sortKey,
+  set: (val) => { personalityFilters.sortKey = val; }
+});
+const sortOrder = computed({
+  get: () => personalityFilters.sortOrder,
+  set: (val) => { personalityFilters.sortOrder = val; }
+});
+const currentPage = computed({
+  get: () => personalityFilters.currentPage,
+  set: (val) => { personalityFilters.currentPage = val; }
+});
+const pageSize = computed({
+  get: () => personalityFilters.pageSize,
+  set: (val) => { personalityFilters.pageSize = val; }
+});
+
 const starredItems = ref(JSON.parse(localStorage.getItem('starredPersonalities') || '[]'));
-const currentPage = ref(1);
-const pageSize = ref(24);
 let debounceTimer = null;
 
 const sortOptions = [
@@ -54,18 +84,7 @@ const pageInfo = computed(() => {
 });
 
 async function fetchZooItems() {
-    const params = {
-        page: currentPage.value, page_size: pageSize.value, sort_by: sortKey.value,
-        sort_order: sortOrder.value, 
-        category: selectedCategory.value !== 'All' && selectedCategory.value !== 'Starred' ? selectedCategory.value : undefined,
-        repository: selectedRepository.value !== 'All' ? selectedRepository.value : undefined,
-        search_query: searchQuery.value || undefined, 
-        installation_status: installationStatusFilter.value !== 'All' ? installationStatusFilter.value : undefined,
-    };
-    if (selectedCategory.value === 'Starred') {
-        params.starred_names = starredItems.value;
-    }
-    await adminStore.fetchZooPersonalities(params);
+    await adminStore.fetchZooPersonalities();
 }
 
 const itemsWithTaskStatus = computed(() => {

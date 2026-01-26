@@ -144,10 +144,14 @@ export const useAdminStore = defineStore('admin', () => {
     const promptFilters = reactive(getStoredFilters('lollms-prompt-filters', {
         searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'name', sortOrder: 'asc', currentPage: 1, pageSize: 24
     }));
+    const personalityFilters = reactive(getStoredFilters('lollms-personality-filters', {
+        searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'name', sortOrder: 'asc', currentPage: 1, pageSize: 24
+    }));
 
     watch(appFilters, (newFilters) => { localStorage.setItem('lollms-app-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(mcpFilters, (newFilters) => { localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(promptFilters, (newFilters) => { localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters)); }, { deep: true });
+    watch(personalityFilters, (newFilters) => { localStorage.setItem('lollms-personality-filters', JSON.stringify(newFilters)); }, { deep: true });
 
     async function handleTaskCompletion(task) {
         if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
@@ -156,8 +160,8 @@ export const useAdminStore = defineStore('admin', () => {
         if (taskName.includes('app') || taskName.includes('mcp')) {
             fetchZooApps(true); fetchZooMcps(true);
         }
-        if (taskName.includes('prompt')) { fetchZooPrompts({}, true); }
-        if (taskName.includes('personality')) { fetchZooPersonalities({}, true); }
+        if (taskName.includes('prompt')) { fetchZooPrompts(true); }
+        if (taskName.includes('personality')) { fetchZooPersonalities(true); }
 
         if (taskName.includes('purge unused temporary files') && task.status === 'completed') {
             const message = task.result?.message || 'Purge completed successfully.';
@@ -412,16 +416,73 @@ export const useAdminStore = defineStore('admin', () => {
     async function deletePersonalityZooRepository(repoId) { await apiClient.delete(`/api/personalities_zoo/repositories/${repoId}`); personalityZooRepositories.value = personalityZooRepositories.value.filter(r => r.id !== repoId); }
     async function pullPersonalityZooRepository(repoId) { const res = await apiClient.post(`/api/personalities_zoo/repositories/${repoId}/pull`); tasksStore.addTask(res.data); }
 
-    async function fetchZooApps(force=false) { if(!force && zooApps.value.items.length > 0) return; isLoadingZooApps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/apps_zoo/categories'), apiClient.get('/api/apps_zoo/available') ]); zooApps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooApps.value = false; } }
+    async function fetchZooApps(force=false) { 
+        isLoadingZooApps.value = true; 
+        try { 
+            const params = {
+                page: appFilters.currentPage, page_size: appFilters.pageSize, sort_by: appFilters.sortKey, sort_order: appFilters.sortOrder,
+                category: appFilters.selectedCategory !== 'All' ? appFilters.selectedCategory : undefined,
+                repository: appFilters.selectedRepository !== 'All' ? appFilters.selectedRepository : undefined,
+                search_query: appFilters.searchQuery || undefined,
+                installation_status: appFilters.installationStatusFilter !== 'All' ? appFilters.installationStatusFilter : undefined,
+            };
+            const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/apps_zoo/categories'), apiClient.get('/api/apps_zoo/available', { params }) ]); 
+            zooApps.value = { ...items_res.data, categories: cat_res.data }; 
+        } finally { isLoadingZooApps.value = false; } 
+    }
     async function installZooApp(payload) { const res = await apiClient.post('/api/apps_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchAppReadme(repo, folder) { const res = await apiClient.get('/api/apps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    async function fetchZooMcps(force=false) { if(!force && zooMcps.value.items.length > 0) return; isLoadingZooMcps.value = true; try { const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/mcps_zoo/categories'), apiClient.get('/api/mcps_zoo/available') ]); zooMcps.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooMcps.value = false; } }
+    async function fetchZooMcps(force=false) { 
+        isLoadingZooMcps.value = true; 
+        try { 
+            const params = {
+                page: mcpFilters.currentPage, page_size: mcpFilters.pageSize, sort_by: mcpFilters.sortKey, sort_order: mcpFilters.sortOrder,
+                category: mcpFilters.selectedCategory !== 'All' ? mcpFilters.selectedCategory : undefined,
+                repository: mcpFilters.selectedRepository !== 'All' ? mcpFilters.selectedRepository : undefined,
+                search_query: mcpFilters.searchQuery || undefined,
+                installation_status: mcpFilters.installationStatusFilter !== 'All' ? mcpFilters.installationStatusFilter : undefined,
+            };
+            const [cat_res, items_res] = await Promise.all([ apiClient.get('/api/mcps_zoo/categories'), apiClient.get('/api/mcps_zoo/available', { params }) ]); 
+            zooMcps.value = { ...items_res.data, categories: cat_res.data }; 
+        } finally { isLoadingZooMcps.value = false; } 
+    }
     async function installZooMcp(payload) { const res = await apiClient.post('/api/mcps_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchMcpReadme(repo, folder) { const res = await apiClient.get('/api/mcps_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    async function fetchZooPrompts(params = {}, force=false) { if(!force && zooPrompts.value.items.length > 0) return; isLoadingZooPrompts.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); zooPrompts.value = { ...items_res.data, categories: cat_res.data }; } finally { isLoadingZooPrompts.value = false; } }
+    async function fetchZooPrompts(force=false) { 
+        isLoadingZooPrompts.value = true; 
+        try { 
+            const params = {
+                page: promptFilters.currentPage, page_size: promptFilters.pageSize, sort_by: promptFilters.sortKey, sort_order: promptFilters.sortOrder,
+                category: promptFilters.selectedCategory !== 'All' ? promptFilters.selectedCategory : undefined,
+                repository: promptFilters.selectedRepository !== 'All' ? promptFilters.selectedRepository : undefined,
+                search_query: promptFilters.searchQuery || undefined,
+                installation_status: promptFilters.installationStatusFilter !== 'All' ? promptFilters.installationStatusFilter : undefined,
+            };
+            const [cat_res, items_res] = await Promise.all([apiClient.get('/api/prompts_zoo/categories'), apiClient.get('/api/prompts_zoo/available', { params })]); 
+            zooPrompts.value = { ...items_res.data, categories: cat_res.data }; 
+        } finally { isLoadingZooPrompts.value = false; } 
+    }
     async function installZooPrompt(payload) { const res = await apiClient.post('/api/prompts_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPromptReadme(repo, folder) { const res = await apiClient.get('/api/prompts_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
-    async function fetchZooPersonalities(params = {}, force=false) { if(!force && zooPersonalities.value.items.length > 0) return; isLoadingZooPersonalities.value = true; try { const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } }
+    async function fetchZooPersonalities(force=false) { 
+        isLoadingZooPersonalities.value = true; 
+        try { 
+            const params = {
+                page: personalityFilters.currentPage, page_size: personalityFilters.pageSize, sort_by: personalityFilters.sortKey, sort_order: personalityFilters.sortOrder,
+                category: personalityFilters.selectedCategory !== 'All' ? personalityFilters.selectedCategory : undefined,
+                repository: personalityFilters.selectedRepository !== 'All' ? personalityFilters.selectedRepository : undefined,
+                search_query: personalityFilters.searchQuery || undefined,
+                installation_status: personalityFilters.installationStatusFilter !== 'All' ? personalityFilters.installationStatusFilter : undefined,
+            };
+            
+            if (personalityFilters.selectedCategory === 'Starred') {
+                params.starred_names = JSON.parse(localStorage.getItem('starredPersonalities') || '[]');
+            }
+
+            const [cat_res, items_res] = await Promise.all([apiClient.get('/api/personalities_zoo/categories'), apiClient.get('/api/personalities_zoo/available', { params })]); 
+            zooPersonalities.value = { ...items_res.data, categories: cat_res.data }; 
+        } catch(e){ console.error(e) } finally { isLoadingZooPersonalities.value = false; } 
+    }
     async function installZooPersonality(payload) { const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
     
@@ -563,7 +624,7 @@ export const useAdminStore = defineStore('admin', () => {
         systemStatus, isLoadingSystemStatus, connectedUsers, isLoadingConnectedUsers, serverInfo, isLoadingServerInfo, globalGenerationStats, isLoadingGlobalGenerationStats, modelUsageStats, isLoadingModelUsageStats,
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories, newsArticles, isLoadingNewsArticles,
         isImporting, isEnhancingEmail, adminAvailableLollmsModels, isLoadingLollmsModels,
-        appFilters, mcpFilters, promptFilters, systemLogs, isLoadingSystemLogs,
+        appFilters, mcpFilters, promptFilters, personalityFilters, systemLogs, isLoadingSystemLogs,
         systemRequirements, isLoadingRequirements,
 
         // Actions

@@ -71,7 +71,7 @@ from backend.task_manager import task_manager, Task
 from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.tasks.image_generation_tasks import _generate_slides_task
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
 # Google Search Tools
 try:
     from googleapiclient.discovery import build as google_build
@@ -82,6 +82,10 @@ from scrapemaster import ScrapeMaster
 
 # Create a thread pool for blocking operations
 executor = ThreadPoolExecutor(max_workers=50)
+
+
+import pipmaster as pm
+
 
 def _sanitize_b64(data: str) -> str:
     """Removes data URI scheme if present to return raw base64."""
@@ -563,19 +567,83 @@ def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_
     # Important: Return original text to preserve tags
     return text, images_b64, generation_infos, generated_groups
 
+
+
 def perform_google_search(query: str, api_key: str, cse_id: str) -> List[Dict[str, str]]:
-    """Performs a Google Custom Search and returns a list of results."""
-    if not google_build:
-        raise ImportError("google-api-python-client is not installed.")
-    
+    if not google_build: return []
     try:
         service = google_build("customsearch", "v1", developerKey=api_key)
         res = service.cse().list(q=query, cx=cse_id, num=5).execute()
         items = res.get('items', [])
         return [{'title': item.get('title'), 'link': item.get('link'), 'snippet': item.get('snippet')} for item in items]
-    except Exception as e:
-        print(f"Google Search Error: {e}")
-        return []
+    except Exception: return []
+
+def perform_wikipedia_search(query: str) -> List[Dict[str, str]]:
+    pm.ensure_packages(["wikipedia-api", "wikipedia"])
+    import wikipediaapi
+    import wikipedia
+    wiki = wikipediaapi.Wikipedia('LollmsWebAgent/1.0', 'en')
+    page = wiki.page(query)
+    if page.exists():
+        return [{'title': page.title, 'link': page.fullurl, 'snippet': page.summary[:1000]}]
+    search_results = wikipedia.search(query)
+    res = []
+    for title in search_results[:3]:
+        p = wiki.page(title)
+        if p.exists():
+            res.append({'title': p.title, 'link': p.fullurl, 'snippet': p.summary[:500]})
+    return res
+
+def perform_search_single(query: str, provider: str, user: DBUser) -> List[Dict[str, str]]:
+    """Handler for a single search engine turn."""
+    if provider == "wikipedia": return perform_wikipedia_search(query)
+    
+    site_map = {
+        "reddit": "site:reddit.com",
+        "stackoverflow": "site:stackoverflow.com",
+        "x": "site:x.com",
+        "github": "site:github.com"
+    }
+    
+    actual_query = query
+    base_provider = provider
+    if provider in site_map:
+        actual_query = f"{site_map[provider]} {query}"
+        base_provider = "google" if (user.google_api_key and user.google_cse_id) else "duckduckgo"
+
+    if base_provider == "google" and user.google_api_key and user.google_cse_id:
+        return perform_google_search(actual_query, user.google_api_key, user.google_cse_id)
+    
+    if base_provider == "duckduckgo" or base_provider in site_map:
+        pm.ensure_packages("duckduckgo_search")
+        try:
+            from duckduckgo_search import DDGS
+            with DDGS() as ddgs:
+                results = [r for r in ddgs.text(actual_query, max_results=5)]
+                return [{'title': r.get('title'), 'link': r.get('href'), 'snippet': r.get('body')} for r in results]
+        except Exception: pass
+    return []
+
+def perform_multi_search(query: str, providers: List[str], user: DBUser) -> List[Dict[str, Any]]:
+    """Runs multiple engine searches in parallel and deduplicates."""
+    all_results = []
+    with ThreadPoolExecutor(max_workers=len(providers)) as pool:
+        future_to_provider = {pool.submit(perform_search_single, query, p, user): p for p in providers}
+        for future in as_completed(future_to_provider):
+            try:
+                results = future.result()
+                for r in results: r['engine'] = future_to_provider[future]
+                all_results.extend(results)
+            except Exception: pass
+
+    seen_links = set()
+    unique_results = []
+    for r in all_results:
+        if r['link'] not in seen_links:
+            seen_links.add(r['link'])
+            unique_results.append(r)
+    for i, res in enumerate(unique_results): res['index'] = i + 1
+    return unique_results
 
 def process_herd_logic(
     user: DBUser, 
@@ -839,14 +907,19 @@ def build_llm_generation_router(router: APIRouter):
         image_server_paths_json: str = Form("[]"),
         parent_message_id: Optional[str] = Form(None), 
         is_resend: bool = Form(False),
-        web_search_enabled: bool = Form(False), # New param from frontend
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> StreamingResponse:
+        """
+        Main chat endpoint. Handles text generation, RAG, Web Search, Herd Mode, 
+        and internal tool execution (Image Gen/Edit, Memory).
+        """
+        # 1. Retrieve discussion and owner details
         discussion_obj, owner_username, permission, owner_db_user = await get_discussion_and_owner_for_request(
             discussion_id, current_user, db, 'interact'
         )
 
+        # 2. Setup LLM Client
         user_model_full = current_user.lollms_model_name
         binding_alias = None
         if user_model_full and '/' in user_model_full:
@@ -857,9 +930,10 @@ def build_llm_generation_router(router: APIRouter):
         
         if not lc:
             async def error_stream():
-                yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client from the discussion object."}) + "\n"
+                yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client. Check your binding settings."}) + "\n"
             return StreamingResponse(error_stream(), media_type="application/x-ndjson")
 
+        # 3. Setup RAG Callback
         def query_rag_callback(query: str, ss, rag_top_k=None, rag_min_similarity_percent=None) -> List[Dict]:
             if not ss: return []
             try:
@@ -870,21 +944,19 @@ def build_llm_generation_router(router: APIRouter):
                 retrieved_chunks = ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
                 revamped_chunks=[]
                 for entry in retrieved_chunks:
-                    revamped_entry = {}
-                    if 'document_metadata' in entry:
-                        revamped_entry["metadata"] = entry['document_metadata']
-                    if "file_path" in entry:
-                        revamped_entry["title"]=Path(entry["file_path"]).name
-                    if "chunk_text" in entry:
-                        revamped_entry["content"]=entry["chunk_text"]
-                    if "similarity_percent" in entry:
-                        revamped_entry["score"] = float(entry["similarity_percent"])
+                    revamped_entry = {
+                        "metadata": entry.get('document_metadata', {}),
+                        "title": Path(entry.get("file_path", "unknown")).name,
+                        "content": entry.get("chunk_text", ""),
+                        "score": float(entry.get("similarity_percent", 0))
+                    }
                     revamped_chunks.append(revamped_entry)
                 return revamped_chunks
             except Exception as e:
                 trace_exception(e)
-                return [{"error": f"Error during RAG query on datastore {ss.name}: {e}"}]
+                return [{"error": f"Error during RAG query: {e}"}]
         
+        # 4. Construct Context (Memory + Dynamic Preamble)
         memory_content = ""
         memory_instructions = ""
         if owner_db_user.memory_enabled:
@@ -895,184 +967,122 @@ def build_llm_generation_router(router: APIRouter):
             else:
                 memory_content = "\n## Long-Term Memory Bank\nThe memory bank is currently empty.\n"
             
-            memory_instructions += "\n## Memory Management\n"
-            memory_instructions += "You have access to a long-term memory bank (provided in context).\n"
-            memory_instructions += "You can manage memories using these tags in your response. **Refer to memories by their Index number (#1, #2...)**.\n"
-            memory_instructions += "- Add: `<new_memory>concise info</new_memory>`\n"
-            memory_instructions += "- Update: `<update_memory:INDEX>new content</update_memory:INDEX>` (e.g. `<update_memory:1>...`)\n"
-            memory_instructions += "- Delete: `<delete_memory:INDEX></delete_memory:INDEX>` (e.g. `<delete_memory:1></delete_memory:1>`)\n"
-            
+            memory_instructions = (
+                "\n## Memory Management\n"
+                "Manage memories using these tags (refer to Index #):\n"
+                "- Add: `<new_memory>info</new_memory>`\n"
+                "- Update: `<update_memory:INDEX>content</update_memory:INDEX>`\n"
+                "- Delete: `<delete_memory:INDEX></delete_memory:INDEX>`\n"
+            )
             if owner_db_user.auto_memory_enabled:
-                memory_instructions += "IMPORTANT: You should automatically save important user details and preferences to memory using `<new_memory>` tags when appropriate, without being explicitly asked.\n"
+                memory_instructions += "Save important user details automatically using `<new_memory>` tags.\n"
 
         discussion_obj.memory = memory_content
-
-        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
         
-        use_rag = {}
-        for ds_id in rag_datastore_ids:
-            ss = get_safe_store_instance(owner_username, ds_id, db)
-            if ss:
-                use_rag[ss.name] = {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)}
-
+        # Get personality if active
         db_pers = db.query(DBPersonality).filter(DBPersonality.id == owner_db_user.active_personality_id).first() if owner_db_user.active_personality_id else None
         
-        dynamic_preamble = ""
+        # NEW: Prepare personality data_source parameter
+        personality_data_source = None
+        if db_pers:
+            if db_pers.data_source_type == 'static_text' and db_pers.data_source:
+                # Mode 1: Static text - pass as string
+                personality_data_source = db_pers.data_source
+            
+            elif db_pers.data_source_type == 'datastore' and db_pers.data_source:
+                # Mode 2: RAG datastore - pass as callable
+                try:
+                    pers_ss = get_safe_store_instance(owner_username, db_pers.data_source, db, permission_level="read_query")
+                    # Create a callable that queries the datastore
+                    def personality_rag_query(query: str) -> str|List[dict]:
+                        """Query the personality's RAG datastore and return formatted context."""
+                        try:
+                            if current_user.rag_top_k is None:
+                                rag_top_k = 5
+                            else:
+                                rag_top_k = current_user.rag_top_k
+                            if current_user.rag_min_sim_percent is None:
+                                rag_min_sim_percent = 50
+                            else:
+                                rag_min_sim_percent = current_user.rag_min_sim_percent
+                                
+                            retrieved_chunks = pers_ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_sim_percent)
+                            
+                            if not retrieved_chunks:
+                                return ""
+                            
+                            # Format the retrieved chunks into the expected dictionary structure
+                            formatted_chunks = []
+                            for entry in retrieved_chunks:
+                                chunk_text = entry.get("chunk_text", "")
+                                file_path = entry.get("file_path", "unknown")
+                                similarity = entry.get("similarity_percent", 0)
+                                
+                                formatted_chunks.append({
+                                    "content": chunk_text,
+                                    "text": chunk_text,  # Alias for compatibility
+                                    "source": Path(file_path).name,
+                                    "score": similarity,  # Already in percent (0-100)
+                                    "value": similarity,  # Alias for compatibility
+                                    "similarity_percent": similarity  # Keep original field too
+                                })
+                            
+                            return formatted_chunks
+                        except Exception as e:
+                            trace_exception(e)
+                            return f"[Error querying personality knowledge base: {e}]"
+                    
+                    personality_data_source = personality_rag_query
+                except Exception as e:
+                    print(f"Warning: Could not load personality datastore {db_pers.data_source}: {e}")
+                    personality_data_source = None
+        
+        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
+        use_rag = {ss.name: {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)} 
+                   for ds_id in rag_datastore_ids if (ss := get_safe_store_instance(owner_username, ds_id, db))}
+
+        # 5. Build Dynamic Preamble
         preamble_parts = []
         if owner_db_user.share_dynamic_info_with_llm:
             now = datetime.now()
-            date_str = now.strftime("%A, %B %d, %Y")
-            time_str = now.strftime("%H:%M:%S")
-            preamble_parts.append(f"- Current Date: {date_str}")
-            preamble_parts.append(f"- Current Time: {time_str}")
-            if owner_db_user.tell_llm_os:
-                preamble_parts.append(f"- User's OS: {platform.system()}")
+            preamble_parts.append(f"- Current Date: {now.strftime('%A, %B %d, %Y')}")
+            preamble_parts.append(f"- Current Time: {now.strftime('%H:%M:%S')}")
+            if owner_db_user.tell_llm_os: preamble_parts.append(f"- User's OS: {platform.system()}")
 
-        if owner_db_user.fun_mode:
-            preamble_parts.append("- Fun Mode is active. Be humorous, witty, and engaging. Tell jokes and use emojis.")
-
-        if owner_db_user.force_ai_response_language:
-            if owner_db_user.ai_response_language and owner_db_user.ai_response_language.lower() != 'auto':
-                preamble_parts.append(f"- IMPORTANT: You must respond exclusively in the following language: {owner_db_user.ai_response_language}")
-            else:
-                preamble_parts.append("- IMPORTANT: You must respond exclusively in the same language as the user's prompt.")
-        
+        if owner_db_user.fun_mode: preamble_parts.append("- Fun Mode: Be humorous and use emojis.")
+        if owner_db_user.force_ai_response_language and owner_db_user.ai_response_language != 'auto':
+            preamble_parts.append(f"- Respond exclusively in: {owner_db_user.ai_response_language}")
         if owner_db_user.share_personal_info_with_llm and owner_db_user.user_personal_info:
-             preamble_parts.append(f"## User Personal Information:\n{owner_db_user.user_personal_info}")
+            preamble_parts.append(f"## User Personal Information:\n{owner_db_user.user_personal_info}")
 
-        if owner_db_user.image_annotation_enabled:
-            preamble_parts.append(
-                "## Image Annotation Instructions\n"
-                "When you are asked to annotate, highlight, or segment an object in an image, you MUST use the `<annotate>` tag. "
-                "The tag must contain a JSON list of annotation objects. Each object must have a `label` and a shape. "
-                "Supported shapes are `box`, `polygon`, and `point`.\n"
-                "- `box`: A list of four numbers [x_min, y_min, x_max, y_max] for a bounding box.\n"
-                "- `polygon`: A list of points, e.g., [[x1, y1], [x2, y2], ...], for irregular shapes.\n"
-                "- `point`: A list of two numbers [x, y] for a single keypoint.\n"
-                "All coordinates must be relative (from 0.0 to 1.0).\n"
-                "Optionally, include a `display` object with `border_color` (hex) and `fill_opacity` (0.0-1.0).\n"
-                "After the `<annotate>` block, you MUST provide a natural language description of your annotations.\n"
-                "Example:\n"
-                "<annotate>\n"
-                "[\n"
-                "  {\"box\": [0.25, 0.3, 0.75, 0.8], \"label\": \"cat\", \"display\": {\"border_color\": \"#FF0000\", \"fill_opacity\": 0.1}},\n"
-                "  {\"point\": [0.5, 0.5], \"label\": \"cat_nose\"},\n"
-                "  {\"polygon\": [[0.1, 0.1], [0.2, 0.1], [0.15, 0.2]], \"label\": \"cat_ear\"}\n"
-                "]\n"
-                "</annotate>\n"
-                "Here is the annotation highlighting the cat, its nose, and one ear."
-            )
+        # Feature Specific Instructions
+        if owner_db_user.image_annotation_enabled: preamble_parts.append("## Image Annotation: Use <annotate>[JSON]</annotate> for bounding boxes/points.")
+        if owner_db_user.image_generation_enabled: preamble_parts.append("## Image Gen: Use <generate_image width=\"W\" height=\"H\" n=\"N\">prompt</generate_image>.")
+        if owner_db_user.slide_maker_enabled: preamble_parts.append("## Slides: Use <generate_slides><Slide>desc</Slide></generate_slides>.")
+        if owner_db_user.image_editing_enabled: preamble_parts.append("## Image Edit: Use <edit_image source_index=\"-1\" strength=\"0.8\">prompt</edit_image>.")
+        if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use ```note ... ``` for structured data.")
+        if memory_instructions: preamble_parts.append(memory_instructions)
 
-        if owner_db_user.image_generation_enabled:
-            preamble_parts.append(
-                "## Image Generation Instructions\n"
-                "To generate an image, use the tag `<generate_image width=\"W\" height=\"H\" n=\"N\">prompt</generate_image>`.\n"
-                "- `width` (optional): Image width in pixels (e.g., 1024, 512).\n"
-                "- `height` (optional): Image height in pixels (e.g., 1024, 768).\n"
-                "- `n` (optional): Number of variants to generate (max 10).\n"
-                "Example: `<generate_image width=\"1216\" height=\"832\" n=\"2\">A majestic lion in the savannah at sunset, photorealistic style</generate_image>`"
-            )
+        dynamic_preamble = "## Dynamic Context\n" + "\n".join(preamble_parts) + "\n\n" if preamble_parts else ""
         
-        if owner_db_user.slide_maker_enabled:
-            # --- NEW: Slide Generation Instruction ---
-            preamble_parts.append(
-                "## Slide Show Generation Instructions\n"
-                "To generate a coherent set of slides (images) for a presentation, use the `<generate_slides>` tag.\n"
-                "Inside this tag, provide a list of `<Slide>` tags, each containing a description of the slide's visual content.\n"
-                "Attributes `width` and `height` can be set on the parent tag (default 1024x768).\n"
-                "Example:\n"
-                "<generate_slides width=\"1280\" height=\"720\">\n"
-                "  <Slide>Title slide: A futuristic coffee shop robot, cinematic style</Slide>\n"
-                "  <Slide>A diagram of the robot's internal components</Slide>\n"
-                "  <Slide>Customers enjoying coffee served by the robot</Slide>\n"
-                "</generate_slides>"
-            )
-
-        if owner_db_user.image_editing_enabled:
-            preamble_parts.append(
-                "## Image Editing Instructions\n"
-                "You can edit images present in the discussion history.\n"
-                "Use the tag `<edit_image source_index=\"-1\" strength=\"0.8\">instruction/prompt</edit_image>`\n"
-                "- `source_index` (optional): Index of the image to edit relative to the end of the history. -1 is the last image, -2 is the one before, etc. Default: -1.\n"
-                "- `strength` (optional): 0.0 to 1.0. How much to change the original image. Higher values mean more changes. Default: 0.75.\n"
-                "- `width`/`height` (optional): Output dimensions. If omitted, preserves source dimensions."
-            )
-
-        if getattr(owner_db_user, 'note_generation_enabled', False):
-            preamble_parts.append(
-                "## Note Generation Instructions\n"
-                "To create a note, output a code block with the language `note`. The content inside the block will be the note's body.\n"
-                "Example:\n"
-                "```note\n"
-                "# Note title\n"
-                "Structured markdown formatted note information depending on the user's request.\n"
-                "You are encouraged to use tables, lists, sections, equations ...\n"
-                "If you need to show code, use code environments with mandatory code language specifier.\n"
-                "```"
-            )
-
-        if memory_instructions:
-            preamble_parts.append(memory_instructions)
-
-        if preamble_parts:
-            dynamic_preamble = "## Dynamic Information\n" + "\n".join(preamble_parts) + "\n\n"
-
-        system_prompt_text = db_pers.prompt_text if db_pers else "You are a helpful AI assistant."
-        
+        # User Data Zone processing
         user_data_zone = owner_db_user.data_zone or ""
-        now = datetime.now()
-        username_to_use = owner_db_user.preferred_name if owner_db_user.preferred_name else current_user.username
-        
-        replacements = {
-            "{{date}}": now.strftime("%Y-%m-%d"),
-            "{{time}}": now.strftime("%H:%M:%S"),
-            "{{datetime}}": now.strftime("%Y-%m-%d %H:%M:%S"),
-            "{{user_name}}": username_to_use,
-        }
-        processed_user_data_zone = user_data_zone
-        for placeholder, value in replacements.items():
-            processed_user_data_zone = processed_user_data_zone.replace(placeholder, value)
-            
-        discussion_obj.user_data_zone = processed_user_data_zone
+        username_to_use = owner_db_user.preferred_name or current_user.username
+        replacements = {"{{date}}": now.strftime("%Y-%m-%d"), "{{time}}": now.strftime("%H:%M:%S"), "{{user_name}}": username_to_use}
+        for k, v in replacements.items(): user_data_zone = user_data_zone.replace(k, v)
+        discussion_obj.user_data_zone = user_data_zone
 
-        use_mcps_from_discussion = (discussion_obj.metadata or {}).get('active_tools', [])
-        use_mcps_from_personality = db_pers.active_mcps if db_pers and db_pers.active_mcps else []
-        combined_mcps = list(set(use_mcps_from_discussion + use_mcps_from_personality))
-
-        data_source_runtime = None
-        if db_pers:
-            if db_pers.data_source_type == "raw_text":
-                data_source_runtime = db_pers.data_source
-            elif db_pers.data_source_type == "datastore" and db_pers.data_source:
-                def query_personality_datastore(query: str) -> str:
-                    ds_id = db_pers.data_source
-                    ASCIIColors.info(f"datasource id: {ds_id}")
-                    ASCIIColors.info(f"top k: {owner_db_user.rag_top_k}")
-                    
-                    ASCIIColors.info(f"Personality datasource is being queryed: {query}")
-                    ds = get_safe_store_instance(owner_username, ds_id, db)
-                    if not ds: 
-                        ASCIIColors.error(f"Error: Personality datastore '{ds_id}' not found or inaccessible.")
-                        return f"Error: Personality datastore '{ds_id}' not found or inaccessible."
-                    try:
-                        results = ds.query(query, top_k=owner_db_user.rag_top_k or 10)
-                        ASCIIColors.info(f"Database output: {results}")
-                        return "\n".join([chunk.get("chunk_text", "") for chunk in results])
-                    except Exception as e:
-                        return f"Error querying personality datastore: {e}"
-                data_source_runtime = query_personality_datastore
-
+        # 6. Setup Personality & Tools
+        combined_mcps = list(set(((discussion_obj.metadata or {}).get('active_tools', [])) + (db_pers.active_mcps if db_pers and db_pers.active_mcps else [])))
         active_personality = LollmsPersonality(
-            name=db_pers.name if db_pers else "Generic Assistant",
-            author=db_pers.author if db_pers else "System",
-            category=db_pers.category if db_pers else "Default",
-            description=db_pers.description if db_pers else "A generic, helpful assistant.",
-            system_prompt=dynamic_preamble + system_prompt_text,
-            script=db_pers.script_code if db_pers else None,
-            active_mcps=db_pers.active_mcps or [] if db_pers else [],
-            data_source=data_source_runtime
+            name=db_pers.name if db_pers else "Assistant",
+            author=db_pers.author,
+            category=db_pers.category,
+            description=db_pers.description,
+            system_prompt=dynamic_preamble + (db_pers.prompt_text if db_pers else "You are a helpful assistant."),
+            active_mcps=combined_mcps,
+            data_source=personality_data_source  # Now correctly passes string OR callable
         )
-        
 
         main_loop = asyncio.get_running_loop()
         stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
@@ -1089,46 +1099,27 @@ def build_llm_generation_router(router: APIRouter):
                 def llm_callback(chunk: Any, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
                     nonlocal first_chunk_time
                     if stop_event.is_set(): return False
-                    
                     if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and first_chunk_time is None:
                         first_chunk_time = time.time()
-                        if start_time:
-                            ttft = (first_chunk_time - start_time) * 1000
-                            payload = {"type": "ttft", "content": round(ttft, 2)}
-                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
+                        ttft = (first_chunk_time - start_time) * 1000
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "ttft", "content": round(ttft, 2)}) + "\n")
 
-                    if not params: params = {}
-                    
                     payload_map = {
                         MSG_TYPE.MSG_TYPE_CHUNK: {"type": "chunk", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": params.get("id")},
-                        MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": params.get("id"), "status": "done"},
+                        MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": (params or {}).get("id")},
+                        MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": (params or {}).get("id"), "status": "done"},
                         MSG_TYPE.MSG_TYPE_INFO: {"type": "info", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_OBSERVATION: {"type": "observation", "content": chunk},
                         MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: {"type": "thought", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_REASONING: {"type": "reasoning", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_TOOL_CALL: {"type": "tool_call", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_SCRATCHPAD: {"type": "scratchpad", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_EXCEPTION: {"type": "exception", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk},
                         MSG_TYPE.MSG_TYPE_SOURCES_LIST: {"type": "sources", "content": chunk}
                     }
-                    
                     payload = payload_map.get(msg_type)
                     if payload:
-                        if payload['type']!="chunk":
-                            all_events.append(payload)
-                        json_compatible_payload = jsonable_encoder(payload)
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_payload) + "\n")
+                        if payload['type'] != "chunk": all_events.append(payload)
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
                     return True
 
                 try:
-                    # Sanitize active discussion images to remove data:image... prefixes
-                    active_discussion_images_raw = [
-                        _sanitize_b64(img['data']) for img in discussion_obj.get_discussion_images() 
-                        if img.get('active', True)
-                    ]
-                    
+                    # Initial Image Handling
                     images_for_message = []
                     image_server_paths = json.loads(image_server_paths_json)
                     if image_server_paths and not is_resend:
@@ -1140,414 +1131,152 @@ def build_llm_generation_router(router: APIRouter):
                             if (temp_path / filename).exists():
                                 persistent_filename = f"{uuid.uuid4().hex[:8]}_{filename}"
                                 shutil.move(str(temp_path / filename), str(assets_path / persistent_filename))
-                                b64_data = base64.b64encode((assets_path / persistent_filename).read_bytes()).decode('utf-8')
-                                images_for_message.append(b64_data)
+                                b64 = base64.b64encode((assets_path / persistent_filename).read_bytes()).decode('utf-8')
+                                images_for_message.append(resize_base64_image(b64, owner_db_user.max_image_width, owner_db_user.max_image_height))
 
-                    all_input_images = images_for_message # Fix: Do not append discussion images to prompt. They are part of system context via export.
-
-                    # --- RESIZE AND COMPRESS LOGIC ---
-                    # Check user settings for max dimensions
-                    max_w = owner_db_user.max_image_width if owner_db_user.max_image_width is not None else -1
-                    max_h = owner_db_user.max_image_height if owner_db_user.max_image_height is not None else -1
-                    
-                    # Apply resizing and compression
-                    if all_input_images:
-                        resized_images = []
-                        for img_b64 in all_input_images:
-                            resized_images.append(resize_base64_image(img_b64, max_w, max_h))
-                        all_input_images = resized_images
-                    # -------------------------
-
-                    # --- Google Search "Agent" Loop ---
-                    # If web search is enabled, we need to check if the AI wants to use it before final generation.
-                    # This logic assumes "one-shot" tool usage (decide -> search -> answer), which is simpler than a full loop.
-                    
+                    # --- WEB SEARCH AGENT (Persistent Source of Truth) ---
                     search_context = ""
                     search_sources_list = []
                     
-                    if web_search_enabled and owner_db_user.google_api_key and owner_db_user.google_cse_id:
-                        # Notify UI we are checking
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Web Agent: Analyzing need for search..."})) + "\n")
+                    if owner_db_user.web_search_enabled:
+                        active_providers = owner_db_user.web_search_providers or ["google"]
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": "Web Agent: Analyzing need for search..."}) + "\n")
                         
-                        # 1. Ask LLM if it needs to search
-                        pre_flight_prompt = f"The user asked: \"{prompt}\".\nDo you need to search the internet for current information to answer this?\nReply with JSON: {{ \"search\": true/false, \"query\": \"search terms\" }}"
-                        
+                        pre_flight = f"User: \"{prompt}\". Do you need to search the internet? Respond JSON: {{ \"search\": true/false, \"query\": \"terms\" }}"
                         try:
-                            # Use a separate non-streaming call for decision
-                            # Note: This adds latency.
-                            decision_text = lc.generate_text(pre_flight_prompt, max_new_tokens=100, temperature=0.0)
-                            try:
-                                # Extract JSON
-                                json_match = re.search(r'\{.*\}', decision_text, re.DOTALL)
-                                if json_match:
-                                    decision = json.loads(json_match.group(0))
+                            decision_text = lc.generate_text(pre_flight, max_new_tokens=100, temperature=0.0)
+                            json_match = re.search(r'\{.*\}', decision_text, re.DOTALL)
+                            if json_match:
+                                decision = json.loads(json_match.group(0))
+                                if decision.get("search"):
+                                    search_query = decision.get("query", prompt)
+                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent: Decided to search for '{search_query}'"}) + "\n")
                                     
-                                    if decision.get("search"):
-                                        query = decision.get("query")
-                                        # Use step_start for persistent status
-                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Web Agent: Searching for '{query}'..."})) + "\n")
+                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": f"Web Agent: Searching {', '.join(active_providers)}..."}) + "\n")
+                                    results = perform_multi_search(search_query, active_providers, owner_db_user)
+                                    
+                                    if results:
+                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent: Found {len(results)} results."}) + "\n")
+                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": "Web Agent: Reading page contents..."}) + "\n")
                                         
-                                        # Perform Search
-                                        results = perform_google_search(query, owner_db_user.google_api_key, owner_db_user.google_cse_id)
-                                        
-                                        if results:
-                                            scraped_content = []
-                                            # Use scraping by default for top results to fix "sparse" results
-                                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Web Agent: Reading content from results..."})) + "\n")
-                                            
+                                        scraped = []
+                                        scraper = ScrapeMaster()
+                                        for res in results[:3]:
                                             try:
-                                                scraper = ScrapeMaster()
-                                                # Scrape top 3
-                                                for res in results[:3]: 
-                                                    try:
-                                                        content = scraper.scrape(res['link'])
-                                                        if content:
-                                                            clean_content = content.strip()
-                                                            if len(clean_content) > 500: # Ensure meaningful content
-                                                                scraped_content.append(f"### Source: {res['title']}\nURL: {res['link']}\nContent:\n{clean_content[:4000]}") # 4k char limit per page
-                                                    except Exception: pass
+                                                c = scraper.scrape(res['link'])
+                                                if c and len(c.strip()) > 500:
+                                                    scraped.append(f"### {res['title']}\nURL: {res['link']}\n{c.strip()[:3500]}")
                                             except Exception: pass
-                                            
-                                            # Construct Context
-                                            search_context = "### Web Search & Browsing Results:\n\n"
-                                            
-                                            if scraped_content:
-                                                search_context += "\n".join(scraped_content)
-                                                search_context += "\n\n--- Search Snippets ---\n"
-
-                                            for i, res in enumerate(results):
-                                                idx = i + 1
-                                                search_context += f"[{idx}] Title: {res['title']}\n  Link: {res['link']}\n  Snippet: {res['snippet']}\n\n"
-                                                search_sources_list.append({"title": res['title'], "content": res['snippet'], "source": res['link'], "score": 100, "index": idx})
-                                            
-                                            # Send sources to frontend immediately
-                                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "content": search_sources_list}) + "\n")
-
-                                        else:
-                                            search_context = "Web search returned no results."
+                                        
+                                        search_context = "### Web Search Context:\n" + "\n".join(scraped) + "\n"
+                                        for i, res in enumerate(results):
+                                            search_sources_list.append({"title": res['title'], "content": res['snippet'], "source": res['link'], "index": i+1})
+                                        
+                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent: Digested {len(scraped)} pages."}) + "\n")
+                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "content": search_sources_list}) + "\n")
                                     else:
-                                        # AI decided no search needed
-                                        pass
+                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": "Web Agent: No results found.", "status": "failed"}) + "\n")
                                 else:
-                                    # Fallback if JSON parse fails
-                                    pass
-                            except Exception as e:
-                                print(f"Search decision parse error: {e}")
+                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": "Web Agent: Decided search is unnecessary."}) + "\n")
                         except Exception as e:
-                            print(f"Pre-flight search check failed: {e}")
-                    
-                    # Augment prompt if search context exists
-                    final_user_message = prompt
-                    
-                    # --- HERD MODE LOGIC ---
-                    herd_debate_context = ""
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent Error: {e}", "status": "failed"}) + "\n")
+
+                    # --- HERD MODE ---
+                    herd_context = ""
                     if owner_db_user.herd_mode_enabled:
-                         # We need a separate DB session for the herd logic since it might access bindings/personalities
-                         db_herd = next(get_db())
-                         try:
-                             herd_debate_context = process_herd_logic(
-                                 owner_db_user, 
-                                 discussion_obj, 
-                                 prompt, 
-                                 main_loop, 
-                                 stream_queue, 
-                                 db_herd
-                             )
-                         finally:
-                             db_herd.close()
-                    if herd_debate_context:
-                        # The Final Instruction for Phase 4
-                        final_user_message += f"\n\n[FULL HERD WORKFLOW HISTORY]:\n{herd_debate_context}\n\n[INSTRUCTION]: Act as the Team Leader. Review the entire history above (Ideas, Draft, Critiques). Synthesize the FINAL, corrected, and polished solution/answer. Ignore any internal debate artifacts in your final output, just provide the best possible result."
+                        db_herd = next(get_db())
+                        try: herd_context = process_herd_logic(owner_db_user, discussion_obj, prompt, main_loop, stream_queue, db_herd)
+                        finally: db_herd.close()
 
-                    # Move search context to system prompt as requested
+                    # Final Prompt Assembly
+                    final_prompt = prompt
                     if search_context:
-                        # Append to system prompt
-                        active_personality.system_prompt += f"\n\n{search_context}\n\n[INSTRUCTION]: Use the Web Search Context above to answer the user's question. Cite sources using [1], [2] format corresponding to the numbered list in the context."
+                        active_personality.system_prompt += f"\n\n{search_context}\nUse this context to answer. Cite using [1], [2] tags."
+                    if herd_context:
+                        final_prompt += f"\n\n[Debate History]:\n{herd_context}\n\n[Final Instruction]: Synthesize the definitive answer."
 
-                    # FIX: Pass add_user_message=not is_resend to prevent duplication on regeneration
-                    # FIX: Pass generation_tip_id which was set correctly above
+                    # Core Generation
                     result = discussion_obj.chat(
-                        branch_tip_id= parent_message_id if is_resend else None, # This is the parent to branch from
-                        user_message=final_user_message, 
-                        personality=active_personality, 
-                        use_mcps=combined_mcps, 
-                        use_data_store=use_rag, 
-                        images=all_input_images, 
-                        streaming_callback=llm_callback, 
-                        max_reasoning_steps=owner_db_user.rag_n_hops,
-                        rag_top_k=owner_db_user.rag_top_k, 
-                        rag_min_similarity_percent=owner_db_user.rag_min_sim_percent,
-                        debug=SERVER_CONFIG.get("debug", False),
-                        user_name=current_user.username,
-                        user_icon=current_user.icon,
-                        add_user_message=not is_resend, 
+                        branch_tip_id=parent_message_id if is_resend else None,
+                        user_message=final_prompt, personality=active_personality,
+                        use_mcps=combined_mcps, use_data_store=use_rag, images=images_for_message,
+                        streaming_callback=llm_callback, think=owner_db_user.reasoning_activation,
+                        reasoning_effort=owner_db_user.reasoning_effort, add_user_message=not is_resend,
+                        use_rlm=owner_db_user.rlm_enabled,
 
-                        think=owner_db_user.reasoning_activation,
-                        reasoning_effort=owner_db_user.reasoning_effort,
-                        reasooning_summary=owner_db_user.reasoning_summary
                     )
                     
-                    end_time = time.time()
-                    
-                    ai_message_obj = result.get('ai_message')
-                    if ai_message_obj:
-                        # Append search sources to message metadata so they persist
+                    ai_msg = result.get('ai_message')
+                    if ai_msg:
+                        # Update Metadata
+                        # Fuse sources (RAG + Web Search)
+                        current_sources = ai_msg.metadata.get('sources', [])
                         if search_sources_list:
-                            existing_sources = (ai_message_obj.metadata or {}).get('sources', [])
-                            ai_message_obj.set_metadata_item('sources', existing_sources + search_sources_list, discussion_obj)
+                            # Re-index web sources to continue after RAG sources
+                            start_index = len(current_sources) + 1
+                            for i, src in enumerate(search_sources_list):
+                                src['index'] = start_index + i
+                            all_sources = current_sources + search_sources_list
+                            ai_msg.set_metadata_item('sources', all_sources, discussion_obj)
 
+                        # Process Internal Tags (Memory, Image Gen, Image Edit)
                         if owner_db_user.memory_enabled:
-                             # ... memory processing ...
                             db_mem = next(get_db())
                             try:
-                                processed_content, memory_action = process_memory_tags(ai_message_obj.content, owner_db_user.id, db_mem)
-                                if memory_action:
-                                    manager.send_personal_message_sync({
-                                        "type": "notification",
-                                        "data": {"message": "Memorizing...", "type": "info", "duration": 3000}
-                                    }, current_user.id)
-                                    
-                                    manager.send_personal_message_sync({
-                                        "type": "data_zone_processed",
-                                        "data": {"discussion_id": discussion_id, "zone": "memory"}
-                                    }, current_user.id)
+                                cleaned, action = process_memory_tags(ai_msg.content, owner_db_user.id, db_mem)
+                                if action: 
+                                    ai_msg.content = cleaned
+                                    manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory"}}, current_user.id)
+                            finally: db_mem.close()
 
-                                if processed_content != ai_message_obj.content:
-                                    ai_message_obj.content = processed_content
-                            except Exception as e:
-                                print(f"Error processing memory tags: {e}")
-                            finally:
-                                db_mem.close()
-
-                        # --- IMAGE GENERATION ---
                         if owner_db_user.image_generation_enabled:
                             db_img = next(get_db())
                             try:
-                                # Standard Image Generation
-                                processed_text, generated_images, generation_meta, generated_groups = process_image_generation_tags(ai_message_obj.content, owner_db_user, db_img, discussion_obj, main_loop, stream_queue)
-                                
-                                # Slides Generation
-                                processed_text_slides, slide_task_id = process_slide_generation_tags(processed_text, owner_db_user, db_img, discussion_obj, ai_message_obj.id, main_loop, stream_queue)
-                                
-                                if generated_images:
-                                    current_images = ai_message_obj.images or []
-                                    start_index_for_meta = len(current_images)
-                                    
-                                    # Use add_image_pack method to handle image appending and metadata
-                                    should_activate = owner_db_user.activate_generated_images
-                                    if hasattr(ai_message_obj, 'add_image_pack'):
-                                        # Use the first prompt from the generation batch as title for the pack
-                                        title = generation_meta[0]['prompt'] if generation_meta else "Generated Images"
-                                        ai_message_obj.add_image_pack(generated_images, group_type="generated", active_by_default=should_activate, title=title)
-                                    
-                                    if processed_text_slides != ai_message_obj.content:
-                                        ai_message_obj.content = processed_text_slides
-                                    
-                                    existing_metadata = ai_message_obj.metadata or {}
-                                    existing_gen_infos = existing_metadata.get("generated_image_infos", [])
-                                    
-                                    for info in generation_meta:
-                                        info['index'] += start_index_for_meta
-                                        existing_gen_infos.append(info)
-                                    
-                                    ai_message_obj.set_metadata_item("generated_image_infos", existing_gen_infos, discussion_obj)
-                                    # [UPDATE] Track generated groups for variant selection
-                                    existing_metadata = ai_message_obj.metadata or {}
-                                    existing_groups = existing_metadata.get("generated_groups", [])
-                                    existing_groups.extend(generated_groups)
-                                    ai_message_obj.set_metadata_item("generated_groups", existing_groups, discussion_obj)
-                                    
-                                    discussion_obj.commit()
+                                _, imgs, meta, groups = process_image_generation_tags(ai_msg.content, owner_db_user, db_img, discussion_obj, main_loop, stream_queue)
+                                _, slide_tid = process_slide_generation_tags(ai_msg.content, owner_db_user, db_img, discussion_obj, ai_msg.id, main_loop, stream_queue)
+                                if imgs:
+                                    ai_msg.add_image_pack(imgs, group_type="generated", active_by_default=owner_db_user.activate_generated_images, title=meta[0]['prompt'])
+                                    ai_msg.set_metadata_item("generated_image_infos", (ai_msg.metadata.get("generated_image_infos", []) + meta), discussion_obj)
+                                    ai_msg.set_metadata_item("generated_groups", (ai_msg.metadata.get("generated_groups", []) + groups), discussion_obj)
+                                if slide_tid: ai_msg.set_metadata_item('active_task_id', slide_tid, discussion_obj)
+                                discussion_obj.commit()
+                            finally: db_img.close()
 
-                                    manager.send_personal_message_sync({
-                                        "type": "notification",
-                                        "data": {"message": f"Generated {len(generated_images)} image(s).", "type": "success", "duration": 3000}
-                                    }, current_user.id)
-                                    
-                                if slide_task_id:
-                                    # Attach task ID to message metadata so UI can show progress bar
-                                    ai_message_obj.set_metadata_item('active_task_id', slide_task_id, discussion_obj)
-                                    discussion_obj.commit()
-                                
-                                # Similar logic for image generation: keep tags?
-                                # User: "First, for image generation, image edit and slide show generation, ALWAYS keep the original tag in the message."
-                                # So we skip updating content with processed_text too.
-                                pass 
-
-                            except Exception as e:
-                                print(f"Error processing image tags: {e}")
-                                trace_exception(e)
-                            finally:
-                                db_img.close()
-                                
-                        # --- IMAGE EDITING ---
-                        if owner_db_user.image_editing_enabled:
-                            db_img_edit = next(get_db())
-                            try:
-                                processed_text, edited_images, edit_meta, edit_groups = process_image_editing_tags(
-                                    ai_message_obj.content, 
-                                    owner_db_user, 
-                                    db_img_edit, 
-                                    discussion_obj, 
-                                    main_loop, 
-                                    stream_queue,
-                                    current_turn_images=all_input_images
-                                )
-                                if edited_images:
-                                    current_images = ai_message_obj.images or []
-                                    start_index = len(current_images)
-                                    
-                                    if hasattr(ai_message_obj, 'add_image_pack'):
-                                        title = edit_meta[0]['prompt'] if edit_meta else "Edited Images"
-                                        ai_message_obj.add_image_pack(edited_images, group_type="generated", active_by_default=True, title=title)
-                                    
-                                    # Skip content update to keep tags
-                                    # if processed_text != ai_message_obj.content:
-                                    #    ai_message_obj.content = processed_text
-
-                                    existing_metadata = ai_message_obj.metadata or {}
-                                    existing_gen_infos = existing_metadata.get("generated_image_infos", [])
-                                    
-                                    for info in edit_meta:
-                                        info['index'] += start_index
-                                        existing_gen_infos.append(info)
-                                    
-                                    ai_message_obj.set_metadata_item("generated_image_infos", existing_gen_infos, discussion_obj)
-                                    # [UPDATE] Track edited groups
-                                    existing_metadata = ai_message_obj.metadata or {}
-                                    existing_groups = existing_metadata.get("generated_groups", [])
-                                    existing_groups.extend(edit_groups)
-                                    ai_message_obj.set_metadata_item("generated_groups", existing_groups, discussion_obj)
-
-                                    discussion_obj.commit()
-
-                                    manager.send_personal_message_sync({
-                                        "type": "notification",
-                                        "data": {"message": f"Edited {len(edited_images)} image(s).", "type": "success", "duration": 3000}
-                                    }, current_user.id)
-                                
-                                # Skip content update to keep tags
-                                    
-                            except Exception as e:
-                                print(f"Error processing image editing tags: {e}")
-                                trace_exception(e)
-                            finally:
-                                db_img_edit.close()
-
+                        # Post-generation Stats
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
-                        total_tokens = ai_message_obj.tokens or 0
-                        
-                        tps = 0
-                        if total_tokens > 1 and first_chunk_time and end_time > first_chunk_time:
-                            streaming_time = end_time - first_chunk_time
-                            tps = (total_tokens - 1) / streaming_time if streaming_time > 0 else 0
+                        tps = (ai_msg.tokens - 1) / (time.time() - first_chunk_time) if first_chunk_time and ai_msg.tokens > 1 else 0
+                        ai_msg.set_metadata_item('ttft', round(ttft, 2), discussion_obj)
+                        ai_msg.set_metadata_item('tps', round(tps, 2), discussion_obj)
+                        ai_msg.set_metadata_item('events', all_events, discussion_obj)
 
-                        ai_message_obj.set_metadata_item('ttft', round(ttft, 2), discussion_obj)
-                        ai_message_obj.set_metadata_item('tps', round(tps, 2), discussion_obj)
-                        ai_message_obj.set_metadata_item('events', all_events, discussion_obj)
-
-                    def lollms_message_to_output(msg):
-                        if not msg: return None
-                        
-                        full_image_refs = []
-                        if hasattr(msg, 'images') and msg.images:
-                            full_image_refs = [ f"data:image/png;base64,{img}" for img in msg.images or []]
-
-                        msg_metadata_raw = msg.metadata
-                        if isinstance(msg_metadata_raw, str):
-                            try: msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
-                            except json.JSONDecodeError: msg_metadata = {}
-                        else:
-                            msg_metadata = msg_metadata_raw or {}
-
-                        sources = getattr(msg, 'sources', None)
-                        if sources is None:
-                            sources = msg_metadata.get('sources')
-                        
-                        if sources:
-                            msg_metadata['sources'] = sources
-
-                        return {
-                            "id": msg.id, "sender": msg.sender, "content": msg.content,
-                            "created_at": msg.created_at, "parent_message_id": msg.parent_id,
-                            "discussion_id": msg.discussion_id, "metadata": msg_metadata,
-                            "tokens": msg.tokens, "sender_type": msg.sender_type,
-                            "binding_name": msg.binding_name, "model_name": msg.model_name,
-                            "sources": sources,
-                            "image_references": full_image_refs,
-                            "active_images": getattr(msg, 'active_images', [])
-                        }
-                    
-                    final_messages_payload = {
-                        'user_message': lollms_message_to_output(result.get('user_message')),
-                        'ai_message': lollms_message_to_output(result.get('ai_message'))
-                    }
-                    
-                    new_title = None
-                    if current_user.auto_title and (discussion_obj.metadata is None or discussion_obj.metadata.get('title',"").startswith("New Discussion")):
-                         # ... title gen ...
-                        event_title_building = jsonable_encoder({"type": "new_title_start"})
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(event_title_building) + "\n")
-                        new_title = discussion_obj.auto_title()
-                        event_title_building = jsonable_encoder({"type": "new_title_end", "new_title": new_title})
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(event_title_building) + "\n")
+                    # Finalize
+                    def msg_to_out(m): return None if not m else {"id": m.id, "sender": m.sender, "content": m.content, "metadata": m.metadata, "sender_type": m.sender_type, "image_references": [f"data:image/png;base64,{i}" for i in (m.images or [])]}
                     
                     finalize_payload = {
                         "type": "finalize",
-                        "data": final_messages_payload,
-                        "discussion": {
-                            "id": discussion_id,
-                            "discussion_data_zone": discussion_obj.discussion_data_zone,
-                            "discussion_images": discussion_obj.get_discussion_images(),
-                            "active_discussion_images": discussion_obj.get_active_images()
-                        }
+                        "data": {"user_message": msg_to_out(result.get('user_message')), "ai_message": msg_to_out(ai_msg)},
+                        "discussion": {"id": discussion_id, "discussion_data_zone": discussion_obj.discussion_data_zone}
                     }
-                    if new_title:
-                        finalize_payload["new_title"] = new_title
-                    json_compatible_event = jsonable_encoder(finalize_payload)
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(json_compatible_event) + "\n")
+                    if current_user.auto_title and discussion_obj.metadata.get('title',"").startswith("New Discussion"):
+                        finalize_payload["new_title"] = discussion_obj.auto_title()
                     
-                    db_for_broadcast = next(get_db())
-                    try:
-                        shared_links = db_for_broadcast.query(DBSharedDiscussionLink).filter(DBSharedDiscussionLink.discussion_id == discussion_id).all()
-                        if shared_links:
-                            participant_ids = {link.owner_user_id for link in shared_links}
-                            participant_ids.update({link.shared_with_user_id for link in shared_links})
-                            
-                            payload = {"type": "discussion_updated", "data": {"discussion_id": discussion_id, "sender_username": current_user.username}}
-                            for user_id in participant_ids:
-                                if user_id != current_user.id:
-                                    manager.send_personal_message_sync(payload, user_id)
-                    finally:
-                        db_for_broadcast.close()
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(finalize_payload)) + "\n")
 
                 except Exception as e:
                     trace_exception(e)
-                    err_msg = f"LLM generation failed: {e}"
-                    if main_loop.is_running():
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": err_msg}) + "\n")
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": str(e)}) + "\n")
                 finally:
-                    if current_user.username in user_sessions and "active_generation_control" in user_sessions[current_user.username]:
-                        user_sessions[current_user.username]["active_generation_control"].pop(discussion_id, None)
-                    if main_loop.is_running():
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+                    user_sessions.get(current_user.username, {}).get("active_generation_control", {}).pop(discussion_id, None)
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
             
-            # Use run_in_executor to handle the blocking generation task in a managed thread pool
-            # threading.Thread(target=blocking_call, daemon=True).start()
             main_loop.run_in_executor(executor, blocking_call)
-            
             while True:
                 item = await stream_queue.get()
                 if item is None: break
                 yield item
 
-        return StreamingResponse(
-            stream_generator(), 
-            media_type="application/x-ndjson",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
-        )    
-    
-    
+        return StreamingResponse(stream_generator(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
     @router.post("/{discussion_id}/stop_generation", status_code=200)
     async def stop_discussion_generation(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
         username = current_user.username

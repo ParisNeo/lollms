@@ -6,7 +6,7 @@ from typing import List, Optional
 from packaging import version as packaging_version
 import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import PlainTextResponse
 from sqlalchemy.orm import Session
 from pydantic import ValidationError as PydanticValidationError
@@ -165,7 +165,8 @@ def get_available(
     category: Optional[str] = None, 
     search_query: Optional[str] = None, 
     installation_status: Optional[str] = None, 
-    repository: Optional[str] = None
+    repository: Optional[str] = None,
+    starred_names: Optional[List[str]] = Query(None, alias="starred_names[]")
 ):
     all_items_raw = get_all_items('personality')
     installed_recs = db.query(DBPersonality).filter(DBPersonality.owner_user_id.is_(None)).all()
@@ -205,7 +206,14 @@ def get_available(
     if repository and repository != 'All':
         filtered_items = [item for item in filtered_items if item.repository == repository]
     if category and category != 'All':
-        filtered_items = [i for i in filtered_items if i.category == category]
+        if category == 'Starred':
+            if starred_names:
+                filtered_items = [i for i in filtered_items if i.name in starred_names]
+            else:
+                filtered_items = []
+        else:
+            filtered_items = [i for i in filtered_items if i.category == category]
+            
     if search_query:
         q = search_query.lower()
         filtered_items = [i for i in filtered_items if q in i.name.lower() or (i.description and q in i.description.lower())]

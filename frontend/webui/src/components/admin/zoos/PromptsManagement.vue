@@ -48,15 +48,7 @@ const pageInfo = computed(() => {
 });
 
 async function fetchZooItems() {
-    const params = {
-        page: promptFilters.currentPage, page_size: promptFilters.pageSize, sort_by: promptFilters.sortKey,
-        sort_order: promptFilters.sortOrder, 
-        category: promptFilters.selectedCategory !== 'All' ? promptFilters.selectedCategory : undefined,
-        repository: promptFilters.selectedRepository !== 'All' ? promptFilters.selectedRepository : undefined,
-        search_query: promptFilters.searchQuery || undefined, 
-        installation_status: promptFilters.installationStatusFilter !== 'All' ? promptFilters.installationStatusFilter : undefined,
-    };
-    await adminStore.fetchZooPrompts(params);
+    await adminStore.fetchZooPrompts();
 }
 
 const itemsWithTaskStatus = computed(() => {
@@ -116,7 +108,7 @@ async function handleInstallItem(item) { await adminStore.installZooPrompt({ rep
 async function handleUninstallItem(item) {
     const installed = installedPrompts.value.find(p => p.name === item.name);
     if (!installed) return;
-    if (await uiStore.showConfirmation({ title: `Uninstall '${item.name}'?`, message: 'This will remove the prompt from the system.' })) {
+    if (await uiStore.showConfirmation({ title: `Uninstall '${item.name}'?`, message: 'This will remove the prompt from the system.', confirmText: 'Uninstall' })) {
         await adminStore.deleteSystemPrompt(installed.id);
         await fetchZooItems();
     }

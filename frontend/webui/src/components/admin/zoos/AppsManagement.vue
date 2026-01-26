@@ -67,7 +67,7 @@ watch(
     }
 );
 watch(() => appFilters.searchQuery, debouncedFetch);
-watch(() => appFilters.currentPage, adminStore.fetchZooApps);
+watch(() => appFilters.currentPage, () => adminStore.fetchZooApps());
 watch(starredItems, (newStarred) => { localStorage.setItem('starredApps', JSON.stringify(newStarred)); }, { deep: true });
 watch(activeSubTab, (newTab) => {
     if (newTab === 'zoo') adminStore.fetchZooApps();

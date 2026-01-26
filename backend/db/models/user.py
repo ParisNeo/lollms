@@ -75,6 +75,7 @@ class User(Base):
     reasoning_activation = Column(Boolean, default=False, nullable=True)
     reasoning_effort = Column(String, nullable=True)
     reasoning_summary = Column(Boolean, default=False, nullable=True)
+    rlm_enabled = Column(Boolean, default=False, nullable=False)
     
     # Herd Mode Settings
     herd_mode_enabled = Column(Boolean, default=False, nullable=False)
@@ -96,6 +97,7 @@ class User(Base):
     google_api_key = Column(String, nullable=True)
     google_cse_id = Column(String, nullable=True)
     web_search_enabled = Column(Boolean, default=False, nullable=False)
+    web_search_providers = Column(JSON, default=lambda: ["google"]) # NEW COLUMN
     web_search_deep_analysis = Column(Boolean, default=False, nullable=False)
 
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")

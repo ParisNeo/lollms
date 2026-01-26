@@ -8,12 +8,13 @@ import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
-import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconCircle from '../../assets/icons/IconCircle.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore(); // Use data store
 const { user } = storeToRefs(authStore);
-const { availableLollmsModels, allPersonalities, availableMcpToolsForSelector } = storeToRefs(dataStore);
+const { availableLollmsModels, allPersonalities } = storeToRefs(dataStore);
 
 // Local state for form fields
 const preferredName = ref('');
@@ -37,18 +38,40 @@ const noteGenerationEnabled = ref(false);
 const memoryEnabled = ref(false);
 const autoMemoryEnabled = ref(false);
 const reasoningActivation = ref(false);
+const reasoningEffort = ref('medium');
+const rlmEnabled = ref(false);
 const maxImageWidth = ref(-1);
 const maxImageHeight = ref(-1);
 const compressImages = ref(false);
 const imageCompressionQuality = ref(85);
 
-// New Google Search States
+// Internal Web Search States
 const googleApiKey = ref('');
 const googleCseId = ref('');
 const webSearchEnabled = ref(false);
+const webSearchProviders = ref(['google']); // Multi-engine support
 const webSearchDeepAnalysis = ref(false);
 const isKeyVisible = ref(false);
 
+const availableEngines = [
+    { id: 'google', name: 'Google Search' },
+    { id: 'duckduckgo', name: 'DuckDuckGo' },
+    { id: 'wikipedia', name: 'Wikipedia' },
+    { id: 'reddit', name: 'Reddit' },
+    { id: 'stackoverflow', name: 'StackOverflow' },
+    { id: 'x', name: 'X / Twitter' },
+    { id: 'github', name: 'GitHub' }
+];
+
+function toggleEngine(id) {
+    const idx = webSearchProviders.value.indexOf(id);
+    if (idx > -1) {
+        // Allow removing, but user should ideally have one if enabled
+        webSearchProviders.value.splice(idx, 1);
+    } else {
+        webSearchProviders.value.push(id);
+    }
+}
 
 // Herd Mode States
 const herdModeEnabled = ref(false);
@@ -90,15 +113,18 @@ function populateForm() {
     memoryEnabled.value = user.value.memory_enabled || false;
     autoMemoryEnabled.value = user.value.auto_memory_enabled || false;
     reasoningActivation.value = user.value.reasoning_activation || false;
+    reasoningEffort.value = user.value.reasoning_effort || 'medium';
+    rlmEnabled.value = user.value.rlm_enabled || false;
     maxImageWidth.value = user.value.max_image_width ?? -1;
     maxImageHeight.value = user.value.max_image_height ?? -1;
     compressImages.value = user.value.compress_images || false;
     imageCompressionQuality.value = user.value.image_compression_quality ?? 85;
     
-    // Google Search
+    // Web Search
     googleApiKey.value = user.value.google_api_key || '';
     googleCseId.value = user.value.google_cse_id || '';
     webSearchEnabled.value = user.value.web_search_enabled || false;
+    webSearchProviders.value = Array.isArray(user.value.web_search_providers) ? [...user.value.web_search_providers] : ['google'];
     webSearchDeepAnalysis.value = user.value.web_search_deep_analysis || false;
 
     // Herd Mode
@@ -132,8 +158,8 @@ watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
-    memoryEnabled, autoMemoryEnabled, reasoningActivation, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
-    googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis,
+    memoryEnabled, autoMemoryEnabled, reasoningActivation, reasoningEffort, rlmEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
+    googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis, webSearchProviders,
     herdModeEnabled, herdRounds, herdPrecodeParticipants, herdPostcodeParticipants,
     herdDynamicMode, herdModelPool
 ], () => {
@@ -198,6 +224,8 @@ async function handleSaveChanges() {
             memory_enabled: memoryEnabled.value,
             auto_memory_enabled: autoMemoryEnabled.value,
             reasoning_activation: reasoningActivation.value,
+            reasoning_effort: reasoningEffort.value,
+            rlm_enabled: rlmEnabled.value,
             max_image_width: maxImageWidth.value,
             max_image_height: maxImageHeight.value,
             compress_images: compressImages.value,
@@ -205,6 +233,7 @@ async function handleSaveChanges() {
             google_api_key: googleApiKey.value,
             google_cse_id: googleCseId.value,
             web_search_enabled: webSearchEnabled.value,
+            web_search_providers: webSearchProviders.value,
             web_search_deep_analysis: webSearchDeepAnalysis.value,
             herd_mode_enabled: herdModeEnabled.value,
             herd_rounds: herdRounds.value,
@@ -223,9 +252,9 @@ async function handleSaveChanges() {
 <template>
   <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
     <div class="px-4 py-5 sm:p-6 border-b border-gray-200 dark:border-gray-700">
-        <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">Global User Context</h3>
+        <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">Global User Context & Tools</h3>
         <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Manage information and preferences shared with the AI across all discussions.
+            Manage information and internal tools shared with the AI across all discussions.
         </p>
     </div>
     
@@ -243,46 +272,71 @@ async function handleSaveChanges() {
             <p class="text-xs text-gray-500 mt-1">If left blank, the AI will use your username: <strong>{{ user?.username }}</strong></p>
         </div>
         
-        <!-- Google Search Settings -->
+        <!-- Web Search Settings -->
         <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg space-y-4">
             <div class="flex items-center justify-between">
                 <div>
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Web Search</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to search Google for real-time information.</p>
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Internal Web Search</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to search the internet for real-time information.</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="webSearchEnabled" class="sr-only peer" :disabled="!googleApiKey || !googleCseId">
+                    <input type="checkbox" v-model="webSearchEnabled" class="sr-only peer">
                     <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
                 </label>
             </div>
             
-            <div v-if="webSearchEnabled" class="flex items-center justify-between pl-4 border-l-2 border-blue-300 dark:border-blue-600">
+            <div v-if="webSearchEnabled" class="space-y-4 animate-in fade-in">
+                <!-- Multi-Engine Grid -->
                 <div>
-                    <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300">Deep Content Analysis</h4>
-                    <p class="text-[10px] text-gray-500 dark:text-gray-400">If enabled, the AI will visit top search result pages to read detailed content instead of just snippets.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="webSearchDeepAnalysis" class="sr-only peer">
-                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google API Key</label>
-                    <div class="relative">
-                        <input :type="isKeyVisible ? 'text' : 'password'" v-model="googleApiKey" class="input-field w-full pr-10 text-xs" placeholder="AIza...">
-                        <button type="button" @click="isKeyVisible = !isKeyVisible" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500">
-                            <IconEyeOff v-if="isKeyVisible" class="w-4 h-4" /><IconEye v-else class="w-4 h-4" />
+                    <label class="block text-xs font-semibold mb-2 text-gray-600 dark:text-gray-300 uppercase tracking-wider">Active Search Engines</label>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
+                        <button 
+                            v-for="engine in availableEngines" 
+                            :key="engine.id"
+                            type="button"
+                            @click="toggleEngine(engine.id)"
+                            class="flex items-center gap-2 p-2 rounded-lg border text-left transition-all group"
+                            :class="webSearchProviders.includes(engine.id) 
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20' 
+                                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 opacity-60 hover:opacity-100 hover:border-gray-300'"
+                        >
+                            <IconCheckCircle v-if="webSearchProviders.includes(engine.id)" class="w-4 h-4 flex-shrink-0" />
+                            <IconCircle v-else class="w-4 h-4 flex-shrink-0 opacity-30 group-hover:opacity-60" />
+                            <span class="text-xs font-bold truncate">{{ engine.name }}</span>
                         </button>
                     </div>
+                    <p class="text-[10px] text-gray-500 mt-2 italic">Select multiple engines to allow the AI to aggregate information from various sources in parallel.</p>
                 </div>
-                <div>
-                    <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google CSE ID</label>
-                    <input type="text" v-model="googleCseId" class="input-field w-full text-xs" placeholder="cx...">
+
+                <div class="flex items-center justify-between pl-4 border-l-2 border-blue-300 dark:border-blue-600">
+                    <div>
+                        <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300">Deep Content Analysis</h4>
+                        <p class="text-[10px] text-gray-500 dark:text-gray-400">If enabled, the AI will visit top search result pages to read detailed content instead of just snippets.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="webSearchDeepAnalysis" class="sr-only peer">
+                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <!-- Conditional Google Credentials -->
+                <div v-if="webSearchProviders.includes('google')" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-blue-100 dark:border-blue-900/40">
+                    <div>
+                        <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google API Key</label>
+                        <div class="relative">
+                            <input :type="isKeyVisible ? 'text' : 'password'" v-model="googleApiKey" class="input-field w-full pr-10 text-xs" placeholder="AIza...">
+                            <button type="button" @click="isKeyVisible = !isKeyVisible" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500">
+                                <IconEyeOff v-if="isKeyVisible" class="w-4 h-4" /><IconEye v-else class="w-4 h-4" />
+                            </button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google CSE ID</label>
+                        <input type="text" v-model="googleCseId" class="input-field w-full text-xs" placeholder="cx...">
+                    </div>
+                    <p v-if="!googleApiKey || !googleCseId" class="text-[10px] text-red-500 italic md:col-span-2">Google API Key and CSE ID are required since Google is an active engine.</p>
                 </div>
             </div>
-            <p v-if="!googleApiKey || !googleCseId" class="text-xs text-red-500 italic">API Key and CSE ID are required to enable Web Search.</p>
         </div>
 
         <!-- Herd Mode Settings -->
@@ -491,13 +545,36 @@ async function handleSaveChanges() {
         
         <!-- Toggle Sections -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
+             <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                    <div class="flex-grow">
+                        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Thinking Mode</h3>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI reasoning/thinking process (if supported).</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" v-model="reasoningActivation" class="sr-only peer">
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <div v-if="reasoningActivation" class="pl-4 border-l-2 border-gray-300 dark:border-gray-600 animate-in slide-in-from-top-2 fade-in">
+                    <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Reasoning Effort</label>
+                    <select v-model="reasoningEffort" class="input-field text-xs w-full sm:w-1/2">
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                    <p class="text-[10px] text-gray-500 mt-1">Controls the depth of thought for reasoning models.</p>
+                </div>
+            </div>
+
+            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
                 <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Thinking Mode</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI reasoning/thinking process (if supported).</p>
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Recursive Language Model (RLM)</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable recursive context processing for large text.</p>
                 </div>
                 <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="reasoningActivation" class="sr-only peer">
+                    <input type="checkbox" v-model="rlmEnabled" class="sr-only peer">
                     <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
                 </label>
             </div>
@@ -557,7 +634,7 @@ async function handleSaveChanges() {
                 </label>
             </div>
             
-            <!-- NEW: Slide Maker Toggle -->
+            <!-- Slide Maker Toggle -->
             <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
                 <div class="flex-grow">
                     <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Slide Maker</h3>
@@ -624,7 +701,7 @@ async function handleSaveChanges() {
                 </div>
             </div>
 
-             <!-- NEW: Compression Settings -->
+             <!-- Compression Settings -->
              <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
                 <div class="flex items-center justify-between mb-3">
                     <div class="flex-grow pr-4">

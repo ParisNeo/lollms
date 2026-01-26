@@ -14,7 +14,16 @@ const uiStore = useUiStore();
 const props = computed(() => uiStore.modalData('interactiveOutput'));
 
 const title = computed(() => props.value?.title || 'Execution Results');
-const results = computed(() => props.value?.results || {}); // Expecting { node_id: { key: value, ... } }
+const results = computed(() => {
+    const rawResults = props.value?.results;
+    if (rawResults && Object.keys(rawResults).length > 0) return rawResults;
+    
+    // Fallback for direct content display (e.g. from ChatInput feature info)
+    if (props.value?.content) {
+        return { "Info": { "content": props.value.content } };
+    }
+    return {};
+});
 
 /**
  * Determines if a value should be rendered as a rich image.
@@ -22,6 +31,17 @@ const results = computed(() => props.value?.results || {}); // Expecting { node_
 function isImage(key, value) {
     if (typeof value !== 'string') return false;
     return key.toLowerCase().includes('image') || key.toLowerCase().includes('_b64') || value.startsWith('data:image/');
+}
+
+/**
+ * Determines if a value should be rendered as interactive HTML.
+ */
+function isHtml(key, value) {
+    if (typeof value !== 'string') return false;
+    const k = key.toLowerCase();
+    if (k.includes('html') || k.includes('visualization') || k.includes('interactive') || k.includes('animation') || k.includes('plot')) return true;
+    const trimmed = value.trim();
+    return /^\s*<!doctype html>|^\s*<html/i.test(trimmed);
 }
 
 /**
@@ -105,6 +125,11 @@ function handleClose() {
                                             </button>
                                         </div>
                                     </div>
+                                </div>
+
+                                <!-- HTML / INTERACTIVE RENDERING -->
+                                <div v-else-if="isHtml(key, value)" class="html-result-container w-full h-[600px] border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative">
+                                    <iframe :srcdoc="value" class="w-full h-full" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" referrerpolicy="no-referrer"></iframe>
                                 </div>
 
                                 <!-- MARKDOWN / TEXT RENDERING -->
