@@ -22,6 +22,11 @@ const results = computed(() => {
     if (props.value?.content) {
         return { "Info": { "content": props.value.content } };
     }
+
+    // Fallback for direct HTML content (e.g. from CodeBlock)
+    if (props.value?.htmlContent) {
+        return { "Preview": { "html_output": props.value.htmlContent } };
+    }
     return {};
 });
 
@@ -59,6 +64,14 @@ function formatImageSrc(value) {
     if (value.startsWith('data:image/')) return value;
     // Assume PNG as default for raw base64 from nodes
     return `data:image/png;base64,${value}`;
+}
+
+function openHtmlFullscreen(content) {
+    const blob = new Blob([content], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    // Clean up
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function downloadImage(b64, name) {
@@ -130,6 +143,12 @@ function handleClose() {
                                 <!-- HTML / INTERACTIVE RENDERING -->
                                 <div v-else-if="isHtml(key, value)" class="html-result-container w-full h-[600px] border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative">
                                     <iframe :srcdoc="value" class="w-full h-full" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" referrerpolicy="no-referrer"></iframe>
+                                    <!-- Actions Overlay -->
+                                    <div class="absolute top-2 right-2 flex gap-2 z-10">
+                                        <button @click="openHtmlFullscreen(value)" class="p-2 bg-white/80 dark:bg-black/50 hover:bg-white dark:hover:bg-black text-gray-700 dark:text-gray-200 rounded-full shadow-sm backdrop-blur-sm transition-all border dark:border-gray-600" title="Open in New Tab">
+                                            <IconMaximize class="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 </div>
 
                                 <!-- MARKDOWN / TEXT RENDERING -->

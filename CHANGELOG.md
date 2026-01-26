@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-26 18:24]
+
+- **refactor(ui): purge obsolete bundled UI assets and update entry HTML**
+
 ## [2026-01-26 17:57]
 
 - Update Ollama dependency to latest patch version
