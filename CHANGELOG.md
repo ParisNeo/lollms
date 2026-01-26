@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-01-26 01:02]
+
+- Update safe_store dependency to latest patch version
+
 ## [2026-01-26 00:29]
 
 - **chore(deps): bump `lollms-client` from 1.11.1 to 1.11.2**
