@@ -22,7 +22,7 @@ pipmaster==1.1.0
 openai==2.1.0
 tiktoken==0.11.0
 
-ollama==0.6.0
+ollama==0.6.1
 # Add other lollms_client backend dependencies if you plan to use them, e.g.:
 # torch
 # transformers
