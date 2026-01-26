@@ -1,27 +1,48 @@
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue';
+import { useUiStore } from '../../stores/ui';
+import axios from 'axios';
 
 const props = defineProps({
     message: { type: String, default: 'Searching for server' },
     subMessage: { type: String, default: 'Connection lost' }
 });
 
+const uiStore = useUiStore();
 const dots = ref('.');
-let interval;
+let visualInterval;
+let checkInterval;
+
+async function checkConnection() {
+    try {
+        // Try to hit a lightweight endpoint with short timeout
+        await axios.get('/api/public/system-status', { timeout: 3000 });
+        // If successful, the server is back!
+        uiStore.setConnectionLost(false);
+    } catch (e) {
+        // Still down, keep waiting
+    }
+}
 
 onMounted(() => {
-    interval = setInterval(() => {
+    // 1. Visual Animation
+    visualInterval = setInterval(() => {
         dots.value = dots.value.length >= 3 ? '.' : dots.value + '.';
     }, 500);
+
+    // 2. Connection Check Logic (Every 5 seconds)
+    checkConnection(); // Check immediately
+    checkInterval = setInterval(checkConnection, 5000);
 });
 
 onUnmounted(() => {
-    clearInterval(interval);
+    clearInterval(visualInterval);
+    clearInterval(checkInterval);
 });
 </script>
 
 <template>
-    <div class="fixed inset-0 z-[9999] flex flex-col items-center justify-center bg-gray-900/90 backdrop-blur-sm transition-opacity duration-300 cursor-wait">
+    <div class="fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-gray-900/90 backdrop-blur-sm transition-opacity duration-300 cursor-wait">
         <div class="relative flex items-center justify-center mb-10">
             <!-- Radar Scanner Animation -->
             <div class="radar-container">

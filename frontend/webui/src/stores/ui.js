@@ -53,6 +53,7 @@ export const useUiStore = defineStore('ui', {
     // Maintenance & System State
     isMaintenanceMode: false,
     maintenanceMessage: '',
+    isConnectionLost: false, // New connection state
     appVersion: '',
   }),
 
@@ -168,9 +169,15 @@ export const useUiStore = defineStore('ui', {
         }
     },
 
-    addNotification(message, type = 'info', duration = 3000, persistent = false, sender = null) {
+    addNotification(message, type = 'info', duration = 3000, persistent = false, sender = null, icon = null) {
         const id = Date.now() + Math.random();
-        this.notifications.push({ id, message, type, duration, persistent, sender });
+        this.notifications.push({ id, message, type, duration, persistent, sender, icon });
+        
+        if (!persistent && duration > 0) {
+            setTimeout(() => {
+                this.removeNotification(id);
+            }, duration);
+        }
     },
 
     removeNotification(id) {
@@ -339,6 +346,14 @@ export const useUiStore = defineStore('ui', {
     setMaintenanceMode(enabled, message = "") {
         this.isMaintenanceMode = enabled;
         this.maintenanceMessage = message;
+        if (!enabled) {
+            this.closeModal(); // Close overlays if maintenance is over
+        }
+    },
+
+    // New action to handle connection loss overlay
+    setConnectionLost(status) {
+        this.isConnectionLost = status;
     }
   }
 });

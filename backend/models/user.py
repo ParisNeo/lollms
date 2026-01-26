@@ -79,6 +79,16 @@ class UserCreateAdmin(BaseModel):
     web_search_enabled: bool = False
     web_search_providers: List[str] = Field(default_factory=lambda: ["google"])
     web_search_deep_analysis: bool = False
+    street_view_enabled: bool = False
+    
+    # Google Workspace
+    google_drive_enabled: bool = False
+    google_calendar_enabled: bool = False
+    google_gmail_enabled: bool = False
+    google_client_secret_json: Optional[str] = None
+    
+    # Scheduler
+    scheduler_enabled: bool = False
 
 class UserPasswordResetAdmin(BaseModel):
     user_id: int
@@ -311,6 +321,12 @@ class UserAuthDetails(BaseModel):
     web_search_enabled: bool = False
     web_search_providers: List[str] = Field(default_factory=lambda: ["google"])
     web_search_deep_analysis: bool = False
+    street_view_enabled: bool = False
+    google_drive_enabled: bool = False
+    google_calendar_enabled: bool = False
+    google_gmail_enabled: bool = False
+    google_client_secret_json: Optional[str] = None
+    scheduler_enabled: bool = False
 
     class Config:
         from_attributes = True
@@ -419,3 +435,9 @@ class UserUpdate(BaseModel):
     web_search_enabled: Optional[bool] = None
     web_search_providers: Optional[List[str]] = None
     web_search_deep_analysis: Optional[bool] = None
+    street_view_enabled: Optional[bool] = None
+    google_drive_enabled: Optional[bool] = None
+    google_calendar_enabled: Optional[bool] = None
+    google_gmail_enabled: Optional[bool] = None
+    google_client_secret_json: Optional[str] = None
+    scheduler_enabled: Optional[bool] = None

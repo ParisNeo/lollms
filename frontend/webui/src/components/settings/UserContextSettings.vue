@@ -10,6 +10,10 @@ import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../assets/icons/IconCircle.vue';
+import IconMap from '../../assets/icons/IconMap.vue';
+import IconGoogle from '../../assets/icons/IconGoogle.vue';
+import IconGoogleDrive from '../../assets/icons/IconGoogleDrive.vue';
+import IconCalendar from '../../assets/icons/IconCalendar.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore(); // Use data store
@@ -44,6 +48,13 @@ const maxImageWidth = ref(-1);
 const maxImageHeight = ref(-1);
 const compressImages = ref(false);
 const imageCompressionQuality = ref(85);
+const streetViewEnabled = ref(false);
+const googleDriveEnabled = ref(false);
+const googleCalendarEnabled = ref(false);
+const googleGmailEnabled = ref(false);
+const schedulerEnabled = ref(false);
+
+const googleClientSecret = ref('');
 
 // Internal Web Search States
 const googleApiKey = ref('');
@@ -51,6 +62,8 @@ const googleCseId = ref('');
 const webSearchEnabled = ref(false);
 const webSearchProviders = ref(['google']); // Multi-engine support
 const webSearchDeepAnalysis = ref(false);
+const showSearchHelp = ref(false);
+const showWorkspaceHelp = ref(false);
 const isKeyVisible = ref(false);
 
 const availableEngines = [
@@ -126,6 +139,12 @@ function populateForm() {
     webSearchEnabled.value = user.value.web_search_enabled || false;
     webSearchProviders.value = Array.isArray(user.value.web_search_providers) ? [...user.value.web_search_providers] : ['google'];
     webSearchDeepAnalysis.value = user.value.web_search_deep_analysis || false;
+    streetViewEnabled.value = user.value.street_view_enabled || false;
+    googleDriveEnabled.value = user.value.google_drive_enabled || false;
+    googleCalendarEnabled.value = user.value.google_calendar_enabled || false;
+    googleGmailEnabled.value = user.value.google_gmail_enabled || false;
+    googleClientSecret.value = user.value.google_client_secret_json || '';
+    schedulerEnabled.value = user.value.scheduler_enabled || false;
 
     // Herd Mode
     herdModeEnabled.value = user.value.herd_mode_enabled || false;
@@ -160,7 +179,8 @@ watch([
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
     memoryEnabled, autoMemoryEnabled, reasoningActivation, reasoningEffort, rlmEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
     googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis, webSearchProviders,
-    herdModeEnabled, herdRounds, herdPrecodeParticipants, herdPostcodeParticipants,
+    herdModeEnabled, herdRounds, herdPrecodeParticipants, herdPostcodeParticipants, 
+    streetViewEnabled, googleDriveEnabled, googleCalendarEnabled, googleGmailEnabled, googleClientSecret, schedulerEnabled,
     herdDynamicMode, herdModelPool
 ], () => {
   hasChanges.value = true;
@@ -240,7 +260,13 @@ async function handleSaveChanges() {
             herd_precode_participants: herdPrecodeParticipants.value,
             herd_postcode_participants: herdPostcodeParticipants.value,
             herd_dynamic_mode: herdDynamicMode.value,
-            herd_model_pool: herdModelPool.value
+            herd_model_pool: herdModelPool.value,
+            street_view_enabled: streetViewEnabled.value,
+            google_drive_enabled: googleDriveEnabled.value,
+            google_calendar_enabled: googleCalendarEnabled.value,
+            google_gmail_enabled: googleGmailEnabled.value,
+            google_client_secret_json: googleClientSecret.value,
+            scheduler_enabled: schedulerEnabled.value
         });
         hasChanges.value = false;
     } finally {
@@ -284,7 +310,10 @@ async function handleSaveChanges() {
                     <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
                 </label>
             </div>
-            
+            <div class="flex justify-end">
+                <button @click="showSearchHelp = !showSearchHelp" class="text-xs text-blue-500 hover:underline">How to get keys?</button>
+            </div>
+
             <div v-if="webSearchEnabled" class="space-y-4 animate-in fade-in">
                 <!-- Multi-Engine Grid -->
                 <div>
@@ -337,6 +366,103 @@ async function handleSaveChanges() {
                     <p v-if="!googleApiKey || !googleCseId" class="text-[10px] text-red-500 italic md:col-span-2">Google API Key and CSE ID are required since Google is an active engine.</p>
                 </div>
             </div>
+
+            <!-- HELP SECTION -->
+            <div v-if="showSearchHelp" class="mt-4 p-4 bg-white dark:bg-gray-800 rounded border border-blue-200 dark:border-gray-600 text-xs space-y-3 animate-in slide-in-from-top-2">
+                <h4 class="font-bold text-gray-800 dark:text-gray-200">How to configure Google Search</h4>
+                <ol class="list-decimal pl-4 space-y-1 text-gray-600 dark:text-gray-400">
+                    <li>Go to the <a href="https://console.cloud.google.com/" target="_blank" class="text-blue-500 hover:underline">Google Cloud Console</a>.</li>
+                    <li>Create a new Project (or select existing).</li>
+                    <li>Navigate to <strong>APIs & Services > Library</strong> and enable:
+                        <ul class="list-disc pl-4 mt-1">
+                            <li><strong>Custom Search API</strong> (for Web Search)</li>
+                            <li><strong>Maps Static API</strong> (if using Street View)</li>
+                        </ul>
+                    </li>
+                    <li>Go to <strong>APIs & Services > Credentials</strong> and create an <strong>API Key</strong>. Copy it to the "Google API Key" field above.</li>
+                    <li>Go to <a href="https://programmablesearchengine.google.com/" target="_blank" class="text-blue-500 hover:underline">Programmable Search Engine</a>.</li>
+                    <li>Create a new search engine.
+                        <ul class="list-disc pl-4">
+                            <li>"Search the entire web": Yes</li>
+                        </ul>
+                    </li>
+                    <li>Copy the <strong>Search Engine ID (cx)</strong> to the "Google CSE ID" field above.</li>
+                </ol>
+            </div>
+
+        </div>
+        
+        <!-- Google Workspace Settings -->
+        <div class="p-4 bg-white dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg space-y-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <IconGoogle class="w-5 h-5 text-gray-600 dark:text-gray-300"/>
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Google Workspace Tools</h3>
+                </div>
+                <button @click="showWorkspaceHelp = !showWorkspaceHelp" class="text-xs text-blue-500 hover:underline">How to set up?</button>
+            </div>
+            <p class="text-xs text-gray-500 dark:text-gray-400">Enable deep integration with Drive, Calendar, and Gmail. Requires OAuth credentials.</p>
+
+            <div v-if="showWorkspaceHelp" class="p-4 bg-blue-50 dark:bg-gray-800 rounded border border-blue-200 dark:border-gray-600 text-xs space-y-3 animate-in slide-in-from-top-2">
+                <h4 class="font-bold text-gray-800 dark:text-gray-200">How to configure Google Workspace (OAuth)</h4>
+                <ol class="list-decimal pl-4 space-y-1 text-gray-600 dark:text-gray-400">
+                    <li>Go to <a href="https://console.cloud.google.com/" target="_blank" class="text-blue-500 hover:underline">Google Cloud Console</a>.</li>
+                    <li>Navigate to <strong>APIs & Services > Library</strong> and enable:
+                        <ul class="list-disc pl-4 mt-1">
+                            <li><strong>Google Drive API</strong></li>
+                            <li><strong>Google Calendar API</strong></li>
+                            <li><strong>Gmail API</strong></li>
+                        </ul>
+                    </li>
+                    <li>Go to <strong>OAuth consent screen</strong>:
+                        <ul class="list-disc pl-4">
+                            <li>User Type: <strong>External</strong></li>
+                            <li>Add your email as a <strong>Test User</strong>.</li>
+                        </ul>
+                    </li>
+                    <li>Go to <strong>Credentials</strong> > Create Credentials > <strong>OAuth Client ID</strong>.</li>
+                    <li>Application type: <strong>Desktop App</strong>.</li>
+                    <li>Download the JSON file (rename it to <code>client_secret.json</code> if you want, or just open it).</li>
+                    <li>Paste the <strong>entire content</strong> of that JSON file into the box below.</li>
+                </ol>
+            </div>
+
+            <div>
+                <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Client Secret JSON</label>
+                <textarea v-model="googleClientSecret" class="styled-textarea font-mono text-[10px]" rows="4" placeholder='{"installed":{"client_id":"...","project_id":"...","auth_uri":"...","token_uri":"..."}}'></textarea>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors" :class="googleDriveEnabled ? 'border-green-500 bg-green-50 dark:bg-green-900/10' : 'dark:border-gray-600'">
+                    <input type="checkbox" v-model="googleDriveEnabled" class="rounded text-green-600 focus:ring-green-500">
+                    <IconGoogleDrive class="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                    <span class="text-xs font-bold">Drive</span>
+                </label>
+                
+                <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors" :class="googleCalendarEnabled ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/10' : 'dark:border-gray-600'">
+                    <input type="checkbox" v-model="googleCalendarEnabled" class="rounded text-blue-600 focus:ring-blue-500">
+                    <IconCalendar class="w-4 h-4 text-gray-600 dark:text-gray-300" />
+                    <span class="text-xs font-bold">Calendar</span>
+                </label>
+                
+                <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors" :class="googleGmailEnabled ? 'border-red-500 bg-red-50 dark:bg-red-900/10' : 'dark:border-gray-600'">
+                    <input type="checkbox" v-model="googleGmailEnabled" class="rounded text-red-600 focus:ring-red-500">
+                    <!-- Use generic mail icon if Gmail icon missing, reusing generic google icon for now or text -->
+                    <span class="text-xs font-bold">Gmail</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Proactive Scheduler -->
+        <div class="p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 rounded-lg flex items-center justify-between">
+            <div class="flex-grow">
+                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Proactive Task Scheduler</h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to schedule tasks (CRON) like checking feeds or sending reminders.</p>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" v-model="schedulerEnabled" class="sr-only peer">
+                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-500"></div>
+            </label>
         </div>
 
         <!-- Herd Mode Settings -->
@@ -645,6 +771,19 @@ async function handleSaveChanges() {
                     <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
                 </label>
             </div>
+
+            <!-- Street View Toggle -->
+            <div class="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg flex items-center justify-between">
+                <div class="flex-grow">
+                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Google Street View</h3>
+                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to fetch street view images. Requires 'Maps Static API' enabled on your Google API Key.</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" v-model="streetViewEnabled" class="sr-only peer" :disabled="!googleApiKey">
+                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-amber-300 dark:peer-focus:ring-amber-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-amber-500 peer-disabled:opacity-50"></div>
+                </label>
+            </div>
+
         </div>
         
         <!-- Image Generation Settings -->

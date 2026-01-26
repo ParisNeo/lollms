@@ -14,6 +14,8 @@ import IconPresentationChartBar from '../../../assets/icons/IconPresentationChar
 import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import TaskProgressIndicator from '../TaskProgressIndicator.vue'; 
+import IconMap from '../../../assets/icons/IconMap.vue';
+import IconClock from '../../../assets/icons/IconClock.vue';
 
 import { useTasksStore } from '../../../stores/tasks';
 import { useDiscussionsStore } from '../../../stores/discussions';
@@ -127,7 +129,7 @@ const parsedStreamingContent = computed(() => {
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
         // Fallback regex if match not provided
-         const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))/;
+         const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))/;
          match = regex.exec(rawBlock);
     }
     
@@ -168,6 +170,20 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         }
         return { type: 'image_tool', mode: 'slides', prompt: innerContent, slides: slides, raw: fullTag };
     }
+    else if (match[6]) { // street_view
+        const fullTag = match[6];
+        const location = fullTag.replace(/<street_view>|<\/street_view>/g, '').trim();
+        return { type: 'image_tool', mode: 'street_view', prompt: location, raw: fullTag };
+    }
+    else if (match[7]) { // schedule_task
+        const fullTag = match[7];
+        const promptContent = fullTag.replace(/<schedule_task[^>]*>|<\/schedule_task>/g, '').trim();
+        let name = "Task";
+        const nameMatch = fullTag.match(/name="([^"]*)"/);
+        if (nameMatch) name = nameMatch[1];
+        return { type: 'scheduler', name: name, prompt: promptContent, raw: fullTag };
+    }
+
     return { type: 'content', content: rawBlock };
 };
 
@@ -194,7 +210,7 @@ const messageParts = computed(() => {
     }
 
     // 2. Identify all Tool Blocks
-    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))/g;
+    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))/g;
     const tools = [];
     let toolMatch;
 
@@ -510,12 +526,14 @@ function handleContentClick(event) {
                      <div class="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
                          <IconPencil v-if="part.mode === 'edit'" class="w-5 h-5" />
                          <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-5 h-5" />
+                         <IconMap v-else-if="part.mode === 'street_view'" class="w-5 h-5 text-amber-500" />
                          <IconPhoto v-else class="w-5 h-5" />
                      </div>
                      <div class="flex flex-col">
                         <span class="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 leading-none mb-1">
                             <template v-if="part.mode === 'edit'">Image Edit</template>
                             <template v-else-if="part.mode === 'slides'">Slide Deck</template>
+                            <template v-else-if="part.mode === 'street_view'">Street View</template>
                             <template v-else>Image Generation</template>
                         </span>
                         <span class="text-sm font-bold text-gray-800 dark:text-gray-200">AI Request Block</span>
@@ -551,6 +569,11 @@ function handleContentClick(event) {
                 <p class="text-[10px] text-gray-500 italic">This will generate a new variant using the updated prompt.</p>
              </div>
              <div v-else class="relative group/prompt">
+                 <div v-if="part.mode === 'street_view'" class="text-sm font-medium text-gray-800 dark:text-gray-200">
+                    Fetching view for: <span class="font-bold">{{ part.prompt }}</span>
+                 </div>
+                 <!-- Existing blocks for slides/other -->
+                 <template v-else>
                  <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-purple-200 dark:border-purple-800">
                      <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-gray-600 dark:text-gray-300 mb-1">
                          <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
@@ -558,6 +581,23 @@ function handleContentClick(event) {
                  </div>
                  <div v-else class="text-sm font-medium text-gray-800 dark:text-gray-200 italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all">
                      "{{ part.prompt }}"
+                 </div>
+                 </template>
+             </div>
+          </div>
+
+          <!-- [NEW] Scheduler Block -->
+          <div v-else-if="part.type === 'scheduler'" class="my-4 p-4 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/20 shadow-sm">
+             <div class="flex items-center gap-3">
+                 <div class="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
+                     <IconClock class="w-6 h-6" />
+                 </div>
+                 <div class="flex flex-col">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-300 leading-none mb-1">
+                        Scheduled Task
+                    </span>
+                    <span class="text-sm font-bold text-gray-800 dark:text-gray-200">{{ part.name }}</span>
+                    <span class="text-xs text-gray-600 dark:text-gray-400 italic mt-1">"{{ part.prompt }}"</span>
                  </div>
              </div>
           </div>

@@ -24,6 +24,7 @@ from backend.db.models.dm import Conversation, ConversationMember, DirectMessage
 from backend.db.models.note import Note, NoteGroup
 from backend.db.models.notebook import Notebook
 from backend.db.models.flow import Flow, FlowNodeDefinition
+from backend.db.models.db_task import ScheduledTask # Assuming we will add this
 from ascii_colors import ASCIIColors, trace_exception
 
 
@@ -780,7 +781,13 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "activate_generated_images": "BOOLEAN DEFAULT 0 NOT NULL",
             "compress_images": "BOOLEAN DEFAULT 0 NOT NULL",
             "image_compression_quality": "INTEGER DEFAULT 85 NOT NULL",
-            "rlm_enabled": "BOOLEAN DEFAULT 0 NOT NULL"
+            "rlm_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "street_view_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "google_drive_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "google_calendar_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "google_gmail_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "google_client_secret_json": "TEXT",
+            "scheduler_enabled": "BOOLEAN DEFAULT 0 NOT NULL"
         }
         
         added_cols = []
@@ -1083,6 +1090,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     
     if not inspector.has_table("fun_facts"):
         FunFact.__table__.create(connection)
+
+    # NEW: Scheduled Tasks Table
+    if not inspector.has_table("scheduled_tasks"):
+        from backend.db.models.db_task import ScheduledTask
+        ScheduledTask.__table__.create(connection)
+        connection.commit()
 
     if not inspector.has_table("rss_feed_sources"):
         from backend.db.models.news import RSSFeedSource

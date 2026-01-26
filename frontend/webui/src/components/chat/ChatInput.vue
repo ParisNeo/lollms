@@ -20,6 +20,7 @@ import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconSend from '../../assets/icons/IconSend.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconClock from '../../assets/icons/IconClock.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
@@ -45,6 +46,10 @@ import IconObservation from '../../assets/icons/IconObservation.vue';
 import IconUserGroup from '../../assets/icons/IconUserGroup.vue'; 
 import IconSettings from '../../assets/icons/IconSettings.vue';
 import IconFilePlus from '../../assets/icons/IconPlusCircle.vue';
+import IconMap from '../../assets/icons/IconMap.vue';
+import IconGoogleDrive from '../../assets/icons/IconGoogleDrive.vue';
+import IconCalendar from '../../assets/icons/IconCalendar.vue';
+import IconGoogle from '../../assets/icons/IconGoogle.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -419,6 +424,54 @@ const activeFeatures = computed(() => {
             systemPrompt: '(Handled by audio processing modules, no text prompt injection)'
         });
     }
+    if (user.value?.street_view_enabled && user.value?.google_api_key) {
+        features.push({
+            id: 'street_view',
+            icon: IconMap,
+            label: 'Street View',
+            colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800',
+            title: 'Street View Enabled.',
+            modalTitle: 'Google Street View',
+            modalDescription: 'Allows the AI to retrieve street view images for a given location using Google Maps Static API.',
+            systemPrompt: '## Street View: Use <street_view>location</street_view>.'
+        });
+    }
+    if (user.value?.scheduler_enabled) {
+        features.push({
+            id: 'scheduler',
+            icon: IconClock,
+            label: 'Scheduler',
+            colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800',
+            title: 'Task Scheduler Enabled.',
+            modalTitle: 'Proactive Scheduler',
+            modalDescription: 'Allows the AI to schedule recurrent tasks using CRON syntax.',
+            systemPrompt: '## Scheduler: Use <schedule_task name="..." cron="...">Prompt</schedule_task>.'
+        });
+    }
+    if (user.value?.google_drive_enabled) {
+        features.push({
+            id: 'gdrive',
+            icon: IconGoogleDrive,
+            label: 'Drive',
+            colorClass: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800',
+            title: 'Google Drive Access.',
+            modalTitle: 'Google Drive',
+            modalDescription: 'Allows reading and listing files from your Google Drive.',
+            systemPrompt: '## Drive: <google_drive_list>id</google_drive_list>'
+        });
+    }
+    if (user.value?.google_calendar_enabled) {
+        features.push({
+            id: 'gcal',
+            icon: IconCalendar,
+            label: 'Calendar',
+            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800',
+            title: 'Google Calendar Access.',
+            modalTitle: 'Google Calendar',
+            modalDescription: 'Allows managing events on your Google Calendar.',
+            systemPrompt: '## Calendar: <calendar_add>...</calendar_add>'
+        });
+    }
     return features;
 });
 
@@ -617,6 +670,30 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
+                                <!-- Street View Toggle -->
+                                <button @click.stop="toggleUserPref('street_view_enabled', user.street_view_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconMap class="w-4 h-4 text-amber-500" />
+                                        <span>Street View</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.street_view_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Scheduler Toggle -->
+                                <button @click.stop="toggleUserPref('scheduler_enabled', user.scheduler_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconClock class="w-4 h-4 text-indigo-500" />
+                                        <span>Scheduler</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.scheduler_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                
+                                <!-- Google Workspace Link (Redirects to settings as it needs setup) -->
+                                <div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>
+                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Google Workspace</div>
+                                
                                 <!-- Auto-Memory Sub-Toggle -->
                                 <button v-if="user?.memory_enabled" @click.stop="toggleUserPref('auto_memory_enabled', user.auto_memory_enabled)" class="menu-item flex justify-between items-center group/item pl-8 text-xs">
                                     <span class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
@@ -624,6 +701,34 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     </span>
                                     <IconCheckCircle v-if="user?.auto_memory_enabled" class="w-3.5 h-3.5 text-green-500" />
                                     <IconCircle v-else class="w-3.5 h-3.5 text-gray-400" />
+                                </button>
+                                
+                                <!-- Drive -->
+                                <button @click.stop="toggleUserPref('google_drive_enabled', user.google_drive_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconGoogleDrive class="w-4 h-4 text-green-600" />
+                                        <span>Drive</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.google_drive_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                <!-- Calendar -->
+                                <button @click.stop="toggleUserPref('google_calendar_enabled', user.google_calendar_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconCalendar class="w-4 h-4 text-blue-600" />
+                                        <span>Calendar</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.google_calendar_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+                                <!-- Gmail -->
+                                <button @click.stop="toggleUserPref('google_gmail_enabled', user.google_gmail_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconGoogle class="w-4 h-4 text-red-600" />
+                                        <span>Gmail</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.google_gmail_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
                                 
                                 <!-- Group: Reasoning -->

@@ -46,6 +46,7 @@ const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const user = computed(() => authStore.user);
 const wsConnected = computed(() => authStore.wsConnected);
 const isMaintenanceMode = computed(() => uiStore.isMaintenanceMode);
+const isConnectionLost = computed(() => uiStore.isConnectionLost);
 
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const funFactColor = computed(() => authStore.welcome_fun_fact_color || '#3B82F6');
@@ -68,6 +69,7 @@ const funFactStyle = computed(() => {
 });
 
 const layoutState = computed(() => {
+    // Admins can bypass the maintenance overlay if they are already logged in
     if (isMaintenanceMode.value && !authStore.isAdmin) return 'maintenance';
     if (isAuthenticating.value || isFunFactHanging.value) return 'loading';
     return isAuthenticated.value ? 'authenticated' : 'guest';
@@ -113,7 +115,7 @@ watch(wsConnected, async (newVal, oldVal) => {
             try {
                 console.log("[App] Connection restored. Re-initializing...");
                 // 1. Refresh User Data/Settings
-                await authStore.fetchUser(); 
+                await authStore.refreshUser(); 
                 // 2. Restart Task Listeners/Polling
                 tasksStore.startPolling();
                 // 3. Notify user
@@ -155,8 +157,9 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
     >
+        <!-- Shows when WS drops OR when the API detects the server is stopped (isConnectionLost) -->
         <ConnectionOverlay 
-            v-if="(!wsConnected && isAuthenticated && hasConnectedOnce && layoutState !== 'maintenance') || isReconnecting" 
+            v-if="((!wsConnected || isConnectionLost) && isAuthenticated && hasConnectedOnce && layoutState !== 'maintenance') || isReconnecting" 
             :message="isReconnecting ? 'Synchronizing data...' : 'Searching for server'"
             :sub-message="isReconnecting ? 'Reconnected' : 'Connection Lost'"
         />

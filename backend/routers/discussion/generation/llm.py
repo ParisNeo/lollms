@@ -16,6 +16,7 @@ import asyncio
 import zipfile
 import platform
 import time
+import requests
 from concurrent.futures import ThreadPoolExecutor
 
 # Third-Party Imports
@@ -40,7 +41,7 @@ from ascii_colors import ASCIIColors, trace_exception
 from backend.config import APP_VERSION, SERVER_CONFIG
 from backend.db import get_db
 from backend.db.models.config import TTIBinding as DBTTIBinding
-from backend.db.models.db_task import DBTask
+from backend.db.models.db_task import DBTask, ScheduledTask
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.discussion import SharedDiscussionLink as DBSharedDiscussionLink
 from backend.db.models.user import (User as DBUser, UserMessageGrade,
@@ -402,6 +403,94 @@ def process_slide_generation_tags(text: str, user: DBUser, db: Session, discussi
 
     # Return original text to preserve tags
     return text, triggered_task_id
+
+def process_street_view_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
+    """
+    Parses <street_view> tags and fetches images from Google Street View Static API.
+    """
+    pattern = re.compile(r'<street_view>(.*?)</street_view>', re.DOTALL | re.IGNORECASE)
+    matches = list(pattern.finditer(text))
+    if not matches or not user.google_api_key:
+        return text, [], [], []
+
+    images_b64 = []
+    generation_infos = []
+    generated_groups = []
+    current_image_count = 0
+
+    for match in matches:
+        location = match.group(1).strip()
+        if location:
+            if main_loop and stream_queue:
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"Fetching Street View: {location}"})) + "\n")
+            
+            try:
+                url = f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={location}&key={user.google_api_key}"
+                resp = requests.get(url)
+                if resp.status_code == 200:
+                    b64 = base64.b64encode(resp.content).decode('utf-8')
+                    images_b64.append(b64)
+                    generation_infos.append({"index": current_image_count, "prompt": f"Street View: {location}", "model": "google_street_view", "type": "street_view"})
+                    generated_groups.append({"id": str(uuid.uuid4()), "title": f"Street View: {location}", "type": "street_view", "indices": [current_image_count], "images": [b64]})
+                    current_image_count += 1
+            except Exception as e:
+                print(f"Street View Error: {e}")
+
+    return text, images_b64, generation_infos, generated_groups
+
+def process_scheduler_tags(text: str, user: DBUser, db: Session) -> Tuple[str, List[str]]:
+    """
+    Parses <schedule_task name="..." cron="...">prompt</schedule_task> tags.
+    """
+    pattern = re.compile(r'<schedule_task\b([^>]*)>(.*?)</schedule_task>', re.DOTALL | re.IGNORECASE)
+    matches = list(pattern.finditer(text))
+    messages = []
+    
+    if not matches: return text, []
+    
+    for match in matches:
+        attr_str = match.group(1)
+        prompt = match.group(2).strip()
+        name = "Untitled Task"
+        cron = "0 8 * * *" # Default daily 8am
+        
+        for attr in re.findall(r'(\w+)="([^"]*)"', attr_str):
+            if attr[0] == 'name': name = attr[1]
+            if attr[0] == 'cron': cron = attr[1]
+            
+        try:
+            new_task = ScheduledTask(owner_user_id=user.id, name=name, cron_expression=cron, prompt=prompt, is_active=True)
+            db.add(new_task)
+            db.commit()
+            messages.append(f"Scheduled task '{name}' created with cron '{cron}'.")
+        except Exception as e:
+            messages.append(f"Failed to schedule task '{name}': {e}")
+            
+    return text, messages
+
+def process_google_workspace_tags(text: str, user: DBUser, main_loop=None, stream_queue=None) -> Tuple[str, List[str]]:
+    """
+    Parses Google Workspace tags. Currently a placeholder for full OAuth implementation.
+    """
+    # Drive
+    drive_list = re.findall(r'<google_drive_list>(.*?)</google_drive_list>', text, re.DOTALL | re.IGNORECASE)
+    # Calendar
+    calendar_add = re.findall(r'<calendar_add\b([^>]*)>(.*?)</calendar_add>', text, re.DOTALL | re.IGNORECASE)
+    # Gmail
+    gmail_send = re.findall(r'<gmail_send\b([^>]*)>(.*?)</gmail_send>', text, re.DOTALL | re.IGNORECASE)
+    
+    messages = []
+    
+    if drive_list:
+        messages.append("Google Drive: Listing files (Mock execution - OAuth pending).")
+    
+    if calendar_add:
+        messages.append("Google Calendar: Event creation received (Mock execution - OAuth pending).")
+
+    if gmail_send:
+        messages.append("Gmail: Email sending request received (Mock execution - OAuth pending).")
+
+    return text, messages
 
 def process_image_editing_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None, current_turn_images: List[str] = None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
     """
@@ -1060,6 +1149,12 @@ def build_llm_generation_router(router: APIRouter):
         if owner_db_user.image_generation_enabled: preamble_parts.append("## Image Gen: Use <generate_image width=\"W\" height=\"H\" n=\"N\">prompt</generate_image>.")
         if owner_db_user.slide_maker_enabled: preamble_parts.append("## Slides: Use <generate_slides><Slide>desc</Slide></generate_slides>.")
         if owner_db_user.image_editing_enabled: preamble_parts.append("## Image Edit: Use <edit_image source_index=\"-1\" strength=\"0.8\">prompt</edit_image>.")
+        if owner_db_user.street_view_enabled and owner_db_user.google_api_key: preamble_parts.append("## Street View: Use <street_view>location</street_view>.")
+        if owner_db_user.scheduler_enabled: preamble_parts.append("## Scheduler: Use <schedule_task name=\"Title\" cron=\"* * * * *\">Prompt to run</schedule_task>. Cron format: min hour day month dow.")
+        if owner_db_user.google_drive_enabled: preamble_parts.append("## Google Drive: Use <google_drive_list>folder_id</google_drive_list> to list files. Use <google_drive_read>file_id</google_drive_read> to read.")
+        if owner_db_user.google_calendar_enabled: preamble_parts.append("## Calendar: Use <calendar_list>today</calendar_list> or <calendar_add start=\"ISO\" end=\"ISO\">Title</calendar_add>.")
+        if owner_db_user.google_gmail_enabled: preamble_parts.append("## Gmail: Use <gmail_send to=\"email\">Subject|Body</gmail_send> or <gmail_list>count</gmail_list>.")
+
         if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use ```note ... ``` for structured data.")
         if memory_instructions: preamble_parts.append(memory_instructions)
 
@@ -1241,6 +1336,31 @@ def build_llm_generation_router(router: APIRouter):
                                 if slide_tid: ai_msg.set_metadata_item('active_task_id', slide_tid, discussion_obj)
                                 discussion_obj.commit()
                             finally: db_img.close()
+                        
+                        # Google Street View
+                        if owner_db_user.street_view_enabled:
+                            db_sv = next(get_db())
+                            try:
+                                _, imgs, meta, groups = process_street_view_tags(ai_msg.content, owner_db_user, db_sv, discussion_obj, main_loop, stream_queue)
+                                if imgs:
+                                    ai_msg.add_image_pack(imgs, group_type="street_view", active_by_default=True, title=groups[0]['title'])
+                                    discussion_obj.commit()
+                            finally: db_sv.close()
+
+                        # Scheduler
+                        if owner_db_user.scheduler_enabled:
+                            db_sched = next(get_db())
+                            try:
+                                _, msgs = process_scheduler_tags(ai_msg.content, owner_db_user, db_sched)
+                                if msgs:
+                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": " | ".join(msgs)})) + "\n")
+                            finally: db_sched.close()
+
+                        # Google Workspace (Drive, Calendar, Gmail)
+                        if any([owner_db_user.google_drive_enabled, owner_db_user.google_calendar_enabled, owner_db_user.google_gmail_enabled]):
+                            _, msgs = process_google_workspace_tags(ai_msg.content, owner_db_user, main_loop, stream_queue)
+                            if msgs:
+                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": " | ".join(msgs)})) + "\n")
 
                         # Post-generation Stats
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0

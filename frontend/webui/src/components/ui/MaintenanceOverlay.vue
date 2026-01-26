@@ -1,13 +1,16 @@
 <script setup>
 import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import { useAuthStore } from '../../stores/auth';
 import axios from 'axios';
 import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
-import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
+import IconSignOut from '../../assets/icons/IconSignOut.vue';
 
 const uiStore = useUiStore();
+const authStore = useAuthStore();
 const maintenanceMessage = computed(() => uiStore.maintenanceMessage);
+const isAdmin = computed(() => authStore.isAdmin);
 
 const funFact = ref(null);
 const loadingFact = ref(false);
@@ -16,9 +19,6 @@ let factInterval = null;
 async function fetchFunFact() {
     loadingFact.value = true;
     try {
-        // Use the public ui router endpoint (or any public one) if possible
-        // Or if session is invalid, the backend auth might block.
-        // However, backend/routers/ui.py -> get_fun_fact is public (depends on get_db only).
         const res = await axios.get('/api/fun-fact');
         funFact.value = res.data;
     } catch (e) {
@@ -32,7 +32,6 @@ async function checkStatus() {
     try {
         const res = await axios.get('/api/public/system-status');
         if (!res.data.maintenance_mode) {
-            // Maintenance over!
             uiStore.setMaintenanceMode(false, "");
             window.location.reload();
         }
@@ -41,12 +40,15 @@ async function checkStatus() {
     }
 }
 
+function dismissAsAdmin() {
+    uiStore.setMaintenanceMode(false, "");
+}
+
 onMounted(() => {
     fetchFunFact();
-    // Rotate facts every 30s
     factInterval = setInterval(() => {
         fetchFunFact();
-        checkStatus(); // Also check if maintenance is over
+        checkStatus(); 
     }, 15000);
 });
 
@@ -57,6 +59,19 @@ onUnmounted(() => {
 function manualRefresh() {
     checkStatus();
     fetchFunFact();
+}
+
+async function handleLogout() {
+    try {
+        await authStore.logout();
+    } catch (e) {
+        console.error("Logout failed during maintenance:", e);
+    } finally {
+        // Force client-side cleanup with correct token key
+        localStorage.removeItem('lollms-token');
+        if (authStore.$reset) authStore.$reset();
+        window.location.reload();
+    }
 }
 </script>
 
@@ -108,10 +123,20 @@ function manualRefresh() {
             </div>
         </div>
 
-        <button @click="manualRefresh" class="mt-12 flex items-center gap-2 px-6 py-2 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-all text-sm font-bold uppercase tracking-wider border border-gray-700">
-            <IconRefresh class="w-4 h-4" :class="{'animate-spin': loadingFact}" />
-            Check Status
-        </button>
+        <div class="flex gap-4 mt-12">
+            <button @click="manualRefresh" class="flex items-center gap-2 px-6 py-2 rounded-full bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-all text-sm font-bold uppercase tracking-wider border border-gray-700">
+                <IconRefresh class="w-4 h-4" :class="{'animate-spin': loadingFact}" />
+                Check Status
+            </button>
+            <button @click="handleLogout" class="flex items-center gap-2 px-6 py-2 rounded-full bg-red-900/20 hover:bg-red-900/40 text-red-400 hover:text-red-300 transition-all text-sm font-bold uppercase tracking-wider border border-red-900/30">
+                <IconSignOut class="w-4 h-4" />
+                Disconnect
+            </button>
+            <button v-if="isAdmin" @click="dismissAsAdmin" class="flex items-center gap-2 px-6 py-2 rounded-full bg-blue-600 hover:bg-blue-500 text-white transition-all text-sm font-bold uppercase tracking-wider border border-blue-500 shadow-lg shadow-blue-500/20">
+                <IconWrenchScrewdriver class="w-4 h-4" />
+                Admin Override
+            </button>
+        </div>
 
     </div>
 </template>

@@ -2,7 +2,7 @@
 import uuid
 from sqlalchemy import (
     Column, String, Integer, Text, JSON, DateTime,
-    ForeignKey
+    ForeignKey, Boolean
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -31,3 +31,21 @@ class DBTask(Base):
     
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     owner = relationship("User")
+
+class ScheduledTask(Base):
+    __tablename__ = "scheduled_tasks"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    name = Column(String, nullable=False)
+    description = Column(String, nullable=True)
+    cron_expression = Column(String, nullable=False) # e.g., "0 8 * * *"
+    prompt = Column(Text, nullable=False) # The prompt to run
+    is_active = Column(Boolean, default=True)
+    
+    last_run_at = Column(DateTime(timezone=True), nullable=True)
+    next_run_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    owner = relationship("User", backref="scheduled_tasks")
