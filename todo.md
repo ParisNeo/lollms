@@ -205,4 +205,5 @@ Fix showing html content ui.
 In the notebooks, the html content must be shown in the ui itself, not in a html code tag.
 
 When adding a folder to a datasource, show a spinner while the files are being loaded.
-Let the admin select maximal file size that can be uploaded. 
+Let the admin select maximal file size that can be uploaded.
+Fix mermaid view
