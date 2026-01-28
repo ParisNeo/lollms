@@ -55,7 +55,7 @@ new ui:
 - OK format the exported pdf
 - OK loading the artefact adds the images to the data zone!
 - OK FIX inline images import
-
+- OK Rag datasources work fine when in normal mode. But when I link them to a personality, they always return an empty list!! The same source, returns data when in normal mode, but returns nothing when attached to a personality
 
 
 ## Discussion:
@@ -203,4 +203,8 @@ Multi generation, no blocking when generating.
 Fix edit post in feeds ui
 Fix showing html content ui.
 In the notebooks, the html content must be shown in the ui itself, not in a html code tag.
-Rag datasources work fine when in normal mode. But when I link them to a personality, they always return an empty list!! The same source, returns data when in normal mode, but returns nothing when attached to a personality
+
+When adding a folder to a datasource, show a spinner while the files are being loaded.
+Let the admin select maximal file size that can be uploaded.
+Fix mermaid view
+I see pending approval user in the main admin ui, but when I press it I get No pending users found.
