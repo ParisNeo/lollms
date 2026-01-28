@@ -718,7 +718,10 @@ async def chat_completions(
     db: Session = Depends(get_db)
 ):
     ASCIIColors.info("------------ Open AI V1 --------------")
-    ASCIIColors.bold(f"Received Chat Completion Request. Model: {request.model}, Stream: {request.stream}")
+    ASCIIColors.bold(f"Received Chat Completion Request from user: {user.username} Model: {request.model}, Stream: {request.stream}")
+    # for message in request.messages:
+    #     ASCIIColors.bold(f"{message.role}:")
+    #     ASCIIColors.green(str(message.content))
 
     try:
         binding_alias, model_name = resolve_model_name(db, request.model)

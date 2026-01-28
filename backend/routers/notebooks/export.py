@@ -55,7 +55,7 @@ def _get_image_path(assets_path: Path, slide: dict) -> str:
             
         img_data = slide['images'][idx]
         img_url = img_data.get('path', '')
-        
+
         # Extract filename from /api/notebooks/{id}/assets/{filename}
         if '/assets/' in img_url:
             filename = img_url.split('/assets/')[-1]
@@ -63,7 +63,7 @@ def _get_image_path(assets_path: Path, slide: dict) -> str:
             filename = os.path.basename(img_url)
             
         local_path = assets_path / filename
-        
+
         if local_path.exists():
             return str(local_path)
     except Exception:
@@ -203,6 +203,41 @@ async def export_notebook(
                 extra_images=slide_images
             )
             media_type = "application/pdf"
+
+        # ---------------- MARKDOWN ----------------
+        elif export_format in ("md", "markdown"):
+            md_parts = []
+
+            for tab in notebook.tabs:
+                # Regular markdown tabs
+                if tab["type"] == "markdown" and tab.get("content"):
+                    title = tab.get("title")
+                    if title:
+                        md_parts.append(f"# {title}\n")
+                    md_parts.append(tab["content"])
+                    md_parts.append("\n\n")
+
+                # Slides converted to markdown
+                elif tab["type"] == "slides" and tab.get("content"):
+                    slides_data = json.loads(tab["content"]).get("slides_data", [])
+                    for s in slides_data:
+                        # Slide title as a secondary heading
+                        if s.get("title"):
+                            md_parts.append(f"## {s['title']}\n")
+                        # Bullets
+                        for b in s.get("bullets", []):
+                            md_parts.append(f"- {b}")
+                        md_parts.append("\n")
+                        # Image reference if available
+                        img_path = _get_image_path(assets_path, s)
+                        if img_path:
+                            img_filename = os.path.basename(img_path)
+                            md_parts.append(f"![{s.get('title','image')}]({img_filename})\n")
+                        md_parts.append("\n")
+
+            content_md = "\n".join(md_parts).strip() or "# Empty notebook"
+            file_content = content_md.encode("utf-8")
+            media_type = "text/markdown"
 
         # ---------------- ZIP (slide images) ----------------
         elif export_format == "zip":
