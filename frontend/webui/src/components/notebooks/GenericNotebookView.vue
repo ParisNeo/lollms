@@ -40,6 +40,7 @@ const aiPrompt = ref('');
 const modifyCurrentTab = ref(false);
 const selectedArtefactNames = ref([]);
 const editingArtefact = ref(null);
+const editingArtefactMode = ref('edit'); // 'edit' or 'preview'
 
 const exportOptions = [
     { label: 'PDF Document', value: 'pdf' },
@@ -80,12 +81,21 @@ const initTabs = () => {
 
 watch(() => props.notebook.id, initTabs, { immediate: true });
 
-async function handleAction(actionType, customPrompt = null) {
+async function handleAction(actionType) {
     const target = modifyCurrentTab.value ? activeTabId.value : null;
-    const finalPrompt = customPrompt || aiPrompt.value || `Perform ${actionType.replace('_', ' ')}`;
-    
-    await notebookStore.processWithAi(finalPrompt, [], actionType, target, false, selectedArtefactNames.value);
-    if (!customPrompt) aiPrompt.value = '';
+    let prompt = aiPrompt.value;
+
+    if (actionType === 'summarize' && !prompt) {
+        prompt = "Summarize the selected information into a comprehensive research report.";
+    }
+
+    if (!prompt.trim() && !selectedArtefactNames.value.length) {
+        uiStore.addNotification("Please enter a prompt or select artefacts.", "warning");
+        return;
+    }
+
+    await notebookStore.processWithAi(prompt, [], actionType, target, false, selectedArtefactNames.value);
+    aiPrompt.value = '';
 }
 
 function handleProcess() { handleAction('text_processing'); }
@@ -118,6 +128,7 @@ function openArtefactEditor(art) {
         name: art.filename,
         content: art.content
     };
+    editingArtefactMode.value = 'edit'; // Reset to edit mode when opening
 }
 
 async function saveArtefactEdit() {
@@ -144,7 +155,7 @@ async function saveArtefactEdit() {
                 <span class="text-sm font-bold text-gray-800 dark:text-gray-100 truncate max-w-[200px]">{{ notebook.title }}</span>
                 <div class="flex items-center gap-1.5">
                     <span class="text-[8px] font-black uppercase bg-gray-200 dark:bg-gray-800 px-1.5 py-0.5 rounded text-gray-500">Research</span>
-                    <span v-if="activeTask" class="flex items-center gap-1 text-[8px] font-black uppercase text-blue-500 animate-pulse">
+                    <span v-if="activeTask" class="flex items-center gap-1 text-[8px] font-black text-blue-500 animate-pulse">
                         <IconAnimateSpin class="w-2 h-2 animate-spin" /> {{ activeTask.progress }}%
                     </span>
                 </div>
@@ -250,7 +261,7 @@ async function saveArtefactEdit() {
 
             <div class="max-w-6xl mx-auto w-full flex gap-2 relative">
                 <input v-model="aiPrompt" @keyup.enter="handleProcess" placeholder="Ask AI to analyze or write..." class="input-field flex-grow pr-32 h-12 rounded-xl text-sm" />
-                <div class="absolute right-14 top-1/2 -translate-y-1/2 flex items-center gap-2 border-l dark:border-gray-700 pl-3 pr-2 bg-white dark:bg-gray-900">
+                <div class="absolute right-14 top-1/2 -translate-y-1/2 flex items-center gap-2 border-l dark:border-gray-700 pl-3 pr-2 bg-white dark:bg-gray-800">
                     <input type="checkbox" id="mod-tab" v-model="modifyCurrentTab" class="h-4 w-4 rounded text-blue-600"/>
                     <label for="mod-tab" class="text-[9px] font-black uppercase text-gray-400 cursor-pointer select-none">Update Active</label>
                 </div>
@@ -258,18 +269,29 @@ async function saveArtefactEdit() {
             </div>
         </div>
 
-        <!-- ARTEFACT EDITOR MODAL -->
+        <!-- ARTEFACT EDITOR MODAL WITH MARKDOWN PREVIEW -->
         <transition enter-active-class="transition duration-300" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="transition duration-200" leave-from-class="opacity-100" leave-to-class="opacity-0">
             <div v-if="editingArtefact" class="fixed inset-0 z-[100] bg-gray-900/60 backdrop-blur-sm flex items-center justify-center p-6">
                 <div class="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-5xl h-[85vh] flex flex-col overflow-hidden border dark:border-gray-800 shadow-2xl">
                     <div class="p-4 border-b dark:border-gray-800 flex justify-between items-center bg-gray-50 dark:bg-gray-800/50">
                         <div class="flex items-center gap-2">
                             <IconPencil class="w-4 h-4 text-blue-500" />
-                            <h3 class="font-black text-xs uppercase tracking-widest text-gray-500">Edit Research Source</h3>
+                            <h3 class="font-black text-xs uppercase tracking-widest text-gray-500">Edit Knowledge Source</h3>
                         </div>
-                        <button @click="editingArtefact = null" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors">
-                            <IconXMark class="w-5 h-5"/>
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <!-- Edit/Preview Toggle -->
+                            <div class="flex bg-gray-200 dark:bg-gray-700 p-0.5 rounded-lg">
+                                <button @click="editingArtefactMode = 'edit'" class="px-3 py-1.5 rounded text-xs font-bold transition-all flex items-center gap-1" :class="editingArtefactMode === 'edit' ? 'bg-white dark:bg-gray-600 shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'">
+                                    <IconPencil class="w-3 h-3" /> Edit
+                                </button>
+                                <button @click="editingArtefactMode = 'preview'" class="px-3 py-1.5 rounded text-xs font-bold transition-all flex items-center gap-1" :class="editingArtefactMode === 'preview' ? 'bg-white dark:bg-gray-600 shadow text-blue-600' : 'text-gray-500 hover:text-gray-700'">
+                                    <IconEye class="w-3 h-3" /> Preview
+                                </button>
+                            </div>
+                            <button @click="editingArtefact = null" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors">
+                                <IconXMark class="w-5 h-5"/>
+                            </button>
+                        </div>
                     </div>
                     <div class="flex-grow p-6 flex flex-col gap-4 overflow-hidden">
                         <div class="space-y-1">
@@ -278,7 +300,23 @@ async function saveArtefactEdit() {
                         </div>
                         <div class="flex-grow flex flex-col space-y-1 min-h-0">
                             <label class="text-[10px] font-black uppercase text-gray-400">Content</label>
-                            <textarea v-model="editingArtefact.content" class="flex-grow input-field font-mono text-xs p-4 resize-none leading-relaxed" placeholder="Type or paste content..."></textarea>
+                            <!-- Edit Mode: Textarea -->
+                            <textarea 
+                                v-if="editingArtefactMode === 'edit'"
+                                v-model="editingArtefact.content" 
+                                class="flex-grow input-field font-mono text-xs p-4 resize-none leading-relaxed" 
+                                placeholder="Type or paste content (Markdown supported)..."
+                            ></textarea>
+                            <!-- Preview Mode: Markdown Renderer -->
+                            <div 
+                                v-else
+                                class="flex-grow overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-950 rounded-lg border dark:border-gray-700 p-6"
+                            >
+                                <MessageContentRenderer :content="editingArtefact.content" class="prose dark:prose-invert max-w-none" />
+                            </div>
+                        </div>
+                        <div v-if="editingArtefactMode === 'edit'" class="text-[10px] text-gray-400 italic">
+                            💡 Tip: Use Markdown syntax for formatting. Switch to Preview to see the rendered output.
                         </div>
                     </div>
                     <div class="p-4 border-t dark:border-gray-800 flex justify-end gap-3 bg-gray-50 dark:bg-gray-900/50">

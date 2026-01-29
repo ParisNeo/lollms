@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onMounted, watch, ref } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, watch, nextTick } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 import { useNotebookStore } from '../stores/notebooks';
 import { useUiStore } from '../stores/ui';
 import { useTasksStore } from '../stores/tasks';
@@ -20,7 +20,9 @@ const notebookStore = useNotebookStore();
 const uiStore = useUiStore();
 const tasksStore = useTasksStore();
 const route = useRoute();
+const router = useRouter();
 
+// Use storeToRefs for proper reactivity
 const { activeNotebook, isLoading } = storeToRefs(notebookStore);
 const { tasks } = storeToRefs(tasksStore);
 
@@ -35,9 +37,12 @@ const currentViewComponent = computed(() => {
 
 const loadCurrentNotebook = async () => {
     const id = route.params.id;
+    
     if (id) {
+        console.log(`[NotebookStudioView] Loading notebook: ${id}`);
         await notebookStore.selectNotebook(id);
     } else {
+        console.log('[NotebookStudioView] No notebook ID, clearing active notebook');
         notebookStore.setActiveNotebook(null);
     }
 };
@@ -60,6 +65,7 @@ watch(tasks, (newVal, oldVal) => {
     }
 }, { deep: true });
 
+// CRITICAL: Watch route with immediate: true to handle initial load
 watch(() => route.params.id, loadCurrentNotebook, { immediate: true });
 
 onMounted(() => {
@@ -71,13 +77,13 @@ onMounted(() => {
     <div class="flex-grow h-full w-full flex flex-col overflow-hidden bg-white dark:bg-gray-900 relative">
         
         <!-- Loading Overlay -->
-        <div v-if="isLoading && !activeNotebook" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 dark:bg-gray-900/80 z-50 backdrop-blur-sm">
+        <div v-if="isLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 dark:bg-gray-900/80 z-50 backdrop-blur-sm">
             <IconAnimateSpin class="w-10 h-10 text-blue-500 animate-spin mb-4" />
             <p class="text-[10px] font-black uppercase tracking-widest text-gray-400">Syncing Production...</p>
         </div>
 
-        <!-- Render View -->
-        <div v-if="activeNotebook" class="flex-grow h-full w-full overflow-hidden">
+        <!-- Render View when activeNotebook exists - simple check -->
+        <div v-else-if="activeNotebook" class="flex-grow h-full w-full overflow-hidden">
             <component 
                 :is="currentViewComponent" 
                 :notebook="activeNotebook"
@@ -85,8 +91,8 @@ onMounted(() => {
             />
         </div>
         
-        <!-- Empty State -->
-        <div v-else-if="!isLoading" class="flex-grow h-full flex flex-col items-center justify-center text-center p-12">
+        <!-- Empty State - only when no active notebook -->
+        <div v-else class="flex-grow h-full flex flex-col items-center justify-center text-center p-12">
             <div class="max-w-md">
                 <div class="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
                     <IconServer class="w-10 h-10 text-gray-300" />
