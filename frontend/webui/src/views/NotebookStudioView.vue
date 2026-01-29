@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, watch, nextTick } from 'vue';
+import { computed, onMounted, watch, nextTick, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useNotebookStore } from '../stores/notebooks';
 import { useUiStore } from '../stores/ui';
@@ -47,26 +47,62 @@ const loadCurrentNotebook = async () => {
     }
 };
 
+// Track running tasks for this notebook to detect completion
+const runningTaskIds = ref(new Set());
+
 // REACTIVITY: Watch for tasks finishing related to this notebook
-watch(tasks, (newVal, oldVal) => {
-    if (!activeNotebook.value || !oldVal) return;
+watch(tasks, (newTasks) => {
+    if (!activeNotebook.value) return;
     const nbId = activeNotebook.value.id || activeNotebook.value._id;
+    const nbTitle = activeNotebook.value.title;
     
-    // Detect tasks that just moved to 'finished' or 'failed'
-    const justFinished = newVal.find(t => 
-        (t.description === nbId || (t.name && t.name.includes(activeNotebook.value.title))) &&
-        (t.status === 'finished' || t.status === 'failed') &&
-        oldVal.some(ot => ot.id === t.id && (ot.status === 'running' || ot.status === 'pending'))
-    );
-
-    if (justFinished) {
-        console.log(`[NotebookStudio] Task ${justFinished.name} ended. Refreshing content...`);
-        notebookStore.selectNotebook(nbId);
+    // Find tasks related to this notebook
+    const relevantTasks = newTasks.filter(t => {
+        const descMatch = t.description === nbId;
+        const nameMatch = t.name && nbTitle && t.name.includes(nbTitle);
+        return descMatch || nameMatch;
+    });
+    
+    // Track currently running tasks
+    const currentlyRunning = new Set();
+    for (const t of relevantTasks) {
+        if (t.status === 'running' || t.status === 'pending') {
+            currentlyRunning.add(t.id);
+        }
     }
-}, { deep: true });
+    
+    // Check for tasks that just finished (were running, now not)
+    for (const taskId of runningTaskIds.value) {
+        if (!currentlyRunning.has(taskId)) {
+            // This task was running but is no longer running - it finished!
+            const finishedTask = newTasks.find(t => t.id === taskId);
+            if (finishedTask && (finishedTask.status === 'finished' || finishedTask.status === 'failed' || finishedTask.status === 'cancelled')) {
+                console.log(`[NotebookStudio] Task ${finishedTask.name} finished with status ${finishedTask.status}. Refreshing content...`);
+                // Refresh the notebook data
+                notebookStore.selectNotebook(nbId);
+                // Also refresh the notebooks list to show updated titles/status
+                notebookStore.fetchNotebooks();
+            }
+        }
+    }
+    
+    // Update tracking set
+    runningTaskIds.value = currentlyRunning;
+}, { deep: true, immediate: true });
 
-// CRITICAL: Watch route with immediate: true to handle initial load
-watch(() => route.params.id, loadCurrentNotebook, { immediate: true });
+// Also watch for route changes
+watch(() => route.params.id, (newId, oldId) => {
+    if (newId !== oldId) {
+        loadCurrentNotebook();
+    }
+}, { immediate: true });
+
+// Watch for notebook ID changes to reset task tracking
+watch(() => activeNotebook.value?.id, (newId, oldId) => {
+    if (newId !== oldId) {
+        runningTaskIds.value.clear();
+    }
+});
 
 onMounted(() => {
     notebookStore.fetchNotebooks();

@@ -16,7 +16,39 @@ export const useNotebookStore = defineStore('notebooks', () => {
         try {
             const res = await apiClient.get('/api/notebooks');
             if (Array.isArray(res.data)) {
-                notebooks.value = res.data;
+                // Merge with existing to preserve reactivity where possible
+                const newNotebooks = res.data;
+                // Update existing notebooks in place to maintain reactivity
+                for (let i = 0; i < newNotebooks.length; i++) {
+                    const newNb = newNotebooks[i];
+                    if (!newNb.id && newNb._id) newNb.id = newNb._id;
+                    
+                    const existingIdx = notebooks.value.findIndex(n => 
+                        (n.id || n._id) === (newNb.id || newNb._id)
+                    );
+                    if (existingIdx !== -1) {
+                        // Update existing to preserve reactivity
+                        Object.assign(notebooks.value[existingIdx], newNb);
+                    } else {
+                        notebooks.value.push(newNb);
+                    }
+                }
+                // Remove notebooks that no longer exist
+                for (let i = notebooks.value.length - 1; i >= 0; i--) {
+                    const existing = notebooks.value[i];
+                    const stillExists = newNotebooks.some(n => 
+                        (n.id || n._id) === (existing.id || existing._id)
+                    );
+                    if (!stillExists) {
+                        notebooks.value.splice(i, 1);
+                    }
+                }
+                // Sort by updated_at
+                notebooks.value.sort((a, b) => {
+                    const dateA = new Date(b.updated_at || b.created_at || 0);
+                    const dateB = new Date(a.updated_at || a.created_at || 0);
+                    return dateA - dateB;
+                });
             }
         } finally {
             isLoading.value = false;
@@ -36,6 +68,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
     async function createStructuredNotebook(payload) {
         const res = await apiClient.post('/api/notebooks', payload);
         const newNb = res.data;
+        if (!newNb.id && newNb._id) newNb.id = newNb._id;
         notebooks.value.unshift(newNb);
         return newNb;
     }
@@ -56,12 +89,21 @@ export const useNotebookStore = defineStore('notebooks', () => {
                 // Ensure the object has a consistent 'id' property for the UI
                 if (!res.data.id && res.data._id) res.data.id = res.data._id;
                 
-                activeNotebook.value = res.data;
+                // Update active notebook reactively
+                if (activeNotebook.value && (activeNotebook.value.id === id || activeNotebook.value._id === id)) {
+                    // Update in place to preserve reactivity
+                    Object.assign(activeNotebook.value, res.data);
+                } else {
+                    activeNotebook.value = res.data;
+                }
+                
                 console.log(`[NotebookStore] Successfully loaded: ${res.data.title}`);
                 
                 // Sync the local list
                 const idx = notebooks.value.findIndex(n => (n.id || n._id) === id);
-                if (idx !== -1) notebooks.value[idx] = res.data;
+                if (idx !== -1) {
+                    Object.assign(notebooks.value[idx], res.data);
+                }
             } else {
                 console.error("[NotebookStore] Server returned invalid notebook data:", res.data);
                 activeNotebook.value = null;
@@ -96,8 +138,13 @@ export const useNotebookStore = defineStore('notebooks', () => {
             const updated = res.data;
             if (!updated.id && updated._id) updated.id = updated._id;
             
+            // Update in place
+            Object.assign(activeNotebook.value, updated);
+            
             const idx = notebooks.value.findIndex(n => (n.id || n._id) === id);
-            if (idx !== -1) notebooks.value[idx] = updated;
+            if (idx !== -1) {
+                Object.assign(notebooks.value[idx], updated);
+            }
         } catch (e) {
             uiStore.addNotification("Failed to save notebook.", "error");
         }
@@ -274,6 +321,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
         const id = activeNotebook.value.id || activeNotebook.value._id;
         try {
             await apiClient.put(`/api/notebooks/${id}/tabs/${tabId}/slides/${slideId}/select_image`, { index });
+            // Update local state reactively
             const tab = activeNotebook.value.tabs.find(t => t.id === tabId);
             if (tab) {
                 try {
@@ -343,7 +391,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
             if (!prompt.includes('|')) finalPrompt = `${prompt}||${negativePrompt}`;
         }
         try {
-            await apiClient.post(`/api/notebooks/${id}/process`, {
+            const res = await apiClient.post(`/api/notebooks/${id}/process`, {
                 prompt: finalPrompt, 
                 input_tab_ids: inputTabIds, 
                 output_type: outputType,
@@ -351,9 +399,15 @@ export const useNotebookStore = defineStore('notebooks', () => {
                 selected_artefacts: selectedArtefacts, 
                 skip_llm: skipLlm
             });
+            // Track the new task
+            if (res.data && res.data.id) {
+                tasksStore.addTask(res.data);
+            }
             uiStore.addNotification(`Task: ${outputType} started.`, "info");
+            return res.data;
         } catch (e) {
             uiStore.addNotification("Task failed.", "error");
+            throw e;
         }
     }
 
@@ -362,12 +416,15 @@ export const useNotebookStore = defineStore('notebooks', () => {
         const id = activeNotebook.value.id || activeNotebook.value._id;
         const fullPrompt = `SLIDE_INDEX:${slideIdx}| ${prompt}`;
         try {
-            await apiClient.post(`/api/notebooks/${id}/process`, {
+            const res = await apiClient.post(`/api/notebooks/${id}/process`, {
                 prompt: fullPrompt, 
                 input_tab_ids: [], 
                 output_type: 'generate_notes', 
                 target_tab_id: targetTabId
             });
+            if (res.data && res.data.id) {
+                tasksStore.addTask(res.data);
+            }
             uiStore.addNotification("Notes generation started...", "info");
         } catch (e) {
             uiStore.addNotification("Failed to start notes generation.", "error");
@@ -379,12 +436,15 @@ export const useNotebookStore = defineStore('notebooks', () => {
         const id = activeNotebook.value.id || activeNotebook.value._id;
         const fullPrompt = `SLIDE_INDEX:${slideIdx}`;
         try {
-            await apiClient.post(`/api/notebooks/${id}/process`, {
+            const res = await apiClient.post(`/api/notebooks/${id}/process`, {
                 prompt: fullPrompt, 
                 input_tab_ids: [], 
                 output_type: 'generate_audio', 
                 target_tab_id: targetTabId
             });
+            if (res.data && res.data.id) {
+                tasksStore.addTask(res.data);
+            }
             uiStore.addNotification("Audio generation started...", "info");
         } catch (e) {
             uiStore.addNotification("Failed to start audio generation.", "error");
@@ -396,12 +456,15 @@ export const useNotebookStore = defineStore('notebooks', () => {
         const id = activeNotebook.value.id || activeNotebook.value._id;
         const fullPrompt = `SLIDE_INDEX:${slideIdx}| ${prompt}`;
         try {
-            await apiClient.post(`/api/notebooks/${id}/process`, {
+            const res = await apiClient.post(`/api/notebooks/${id}/process`, {
                 prompt: fullPrompt, 
                 input_tab_ids: [], 
                 output_type: 'generate_slide_title', 
                 target_tab_id: targetTabId
             });
+            if (res.data && res.data.id) {
+                tasksStore.addTask(res.data);
+            }
             uiStore.addNotification("Title generation started...", "info");
         } catch (e) {
             uiStore.addNotification("Failed to start title generation.", "error");
@@ -423,6 +486,9 @@ export const useNotebookStore = defineStore('notebooks', () => {
         const id = activeNotebook.value.id || activeNotebook.value._id;
         try {
             const res = await apiClient.post(`/api/notebooks/${id}/generate_summary`);
+            if (res.data && res.data.id) {
+                tasksStore.addTask(res.data);
+            }
             uiStore.addNotification("Summary generation started...", "info");
             return res.data; 
         } catch (e) {

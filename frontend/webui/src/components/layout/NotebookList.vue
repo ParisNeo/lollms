@@ -1,8 +1,10 @@
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { useNotebookStore } from '../../stores/notebooks';
 import { useUiStore } from '../../stores/ui';
+import { useTasksStore } from '../../stores/tasks';
+import { storeToRefs } from 'pinia';
 import IconPlus from '../../assets/icons/IconPlus.vue';
 import IconServer from '../../assets/icons/IconServer.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
@@ -12,10 +14,14 @@ import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 
 const notebookStore = useNotebookStore();
 const uiStore = useUiStore();
+const tasksStore = useTasksStore();
 const router = useRouter();
 const route = useRoute();
 
-const notebooks = computed(() => notebookStore.notebooks);
+// Use storeToRefs for proper reactivity
+const { notebooks, activeNotebook } = storeToRefs(notebookStore);
+const { tasks } = storeToRefs(tasksStore);
+
 const activeId = computed(() => route.params.id);
 
 function getIcon(type) {
@@ -41,8 +47,46 @@ async function deleteNotebook(id, title) {
     }
 }
 
+// Watch for task completions to refresh the list
+// This ensures notebook titles/contents update when tasks finish
+let taskWatcher = null;
+
 onMounted(() => {
     notebookStore.fetchNotebooks();
+    
+    // Set up watcher for task changes to refresh notebooks
+    taskWatcher = tasksStore.$subscribe((mutation, state) => {
+        // Check if any task just finished
+        const finishedTask = state.tasks.find(t => {
+            // Look for tasks that finished in the last second
+            if (t.status !== 'finished' && t.status !== 'failed') return false;
+            if (!t.updated_at) return false;
+            const updatedAt = new Date(t.updated_at).getTime();
+            const now = Date.now();
+            return (now - updatedAt) < 2000; // Finished in last 2 seconds
+        });
+        
+        if (finishedTask) {
+            // Refresh notebooks to get updated titles/status
+            notebookStore.fetchNotebooks();
+            
+            // If we have an active notebook, refresh it too
+            if (activeNotebook.value) {
+                const activeId = activeNotebook.value.id || activeNotebook.value._id;
+                if (finishedTask.description === activeId || 
+                    (finishedTask.name && activeNotebook.value.title && finishedTask.name.includes(activeNotebook.value.title))) {
+                    notebookStore.selectNotebook(activeId);
+                }
+            }
+        }
+    });
+});
+
+onUnmounted(() => {
+    // Clean up subscription
+    if (taskWatcher) {
+        taskWatcher();
+    }
 });
 </script>
 
