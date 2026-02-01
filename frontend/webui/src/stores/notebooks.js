@@ -16,35 +16,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
         try {
             const res = await apiClient.get('/api/notebooks');
             if (Array.isArray(res.data)) {
-                // Merge with existing to preserve reactivity where possible
-                const newNotebooks = res.data;
-                // Update existing notebooks in place to maintain reactivity
-                for (let i = 0; i < newNotebooks.length; i++) {
-                    const newNb = newNotebooks[i];
-                    if (!newNb.id && newNb._id) newNb.id = newNb._id;
-                    
-                    const existingIdx = notebooks.value.findIndex(n => 
-                        (n.id || n._id) === (newNb.id || newNb._id)
-                    );
-                    if (existingIdx !== -1) {
-                        // Update existing to preserve reactivity
-                        Object.assign(notebooks.value[existingIdx], newNb);
-                    } else {
-                        notebooks.value.push(newNb);
-                    }
-                }
-                // Remove notebooks that no longer exist
-                for (let i = notebooks.value.length - 1; i >= 0; i--) {
-                    const existing = notebooks.value[i];
-                    const stillExists = newNotebooks.some(n => 
-                        (n.id || n._id) === (existing.id || existing._id)
-                    );
-                    if (!stillExists) {
-                        notebooks.value.splice(i, 1);
-                    }
-                }
-                // Sort by updated_at
-                notebooks.value.sort((a, b) => {
+                notebooks.value = res.data.map(nb => ({
+                    ...nb,
+                    id: nb.id || nb._id
+                })).sort((a, b) => {
                     const dateA = new Date(b.updated_at || b.created_at || 0);
                     const dateB = new Date(a.updated_at || a.created_at || 0);
                     return dateA - dateB;
@@ -67,8 +42,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
 
     async function createStructuredNotebook(payload) {
         const res = await apiClient.post('/api/notebooks', payload);
-        const newNb = res.data;
-        if (!newNb.id && newNb._id) newNb.id = newNb._id;
+        const newNb = {
+            ...res.data,
+            id: res.data.id || res.data._id
+        };
         notebooks.value.unshift(newNb);
         return newNb;
     }
@@ -79,37 +56,23 @@ export const useNotebookStore = defineStore('notebooks', () => {
             return;
         }
         
-        console.log(`[NotebookStore] Fetching notebook: ${id}`);
         isLoading.value = true;
         try {
             const res = await apiClient.get(`/api/notebooks/${id}`);
-            
-            // Check for both 'id' and '_id' to be safe
             if (res.data && (res.data.id !== undefined || res.data._id !== undefined)) {
-                // Ensure the object has a consistent 'id' property for the UI
-                if (!res.data.id && res.data._id) res.data.id = res.data._id;
-                
-                // Update active notebook reactively
-                if (activeNotebook.value && (activeNotebook.value.id === id || activeNotebook.value._id === id)) {
-                    // Update in place to preserve reactivity
-                    Object.assign(activeNotebook.value, res.data);
-                } else {
-                    activeNotebook.value = res.data;
-                }
-                
-                console.log(`[NotebookStore] Successfully loaded: ${res.data.title}`);
+                const notebook = {
+                    ...res.data,
+                    id: res.data.id || res.data._id
+                };
+                activeNotebook.value = notebook;
                 
                 // Sync the local list
                 const idx = notebooks.value.findIndex(n => (n.id || n._id) === id);
                 if (idx !== -1) {
-                    Object.assign(notebooks.value[idx], res.data);
+                    Object.assign(notebooks.value[idx], notebook);
                 }
-            } else {
-                console.error("[NotebookStore] Server returned invalid notebook data:", res.data);
-                activeNotebook.value = null;
             }
         } catch (e) {
-            console.error("[NotebookStore] Error selecting notebook:", e);
             activeNotebook.value = null;
             uiStore.addNotification("Failed to load notebook content.", "error");
         } finally {
@@ -135,10 +98,10 @@ export const useNotebookStore = defineStore('notebooks', () => {
                 artefacts: activeNotebook.value.artefacts,
                 tabs: activeNotebook.value.tabs
             });
-            const updated = res.data;
-            if (!updated.id && updated._id) updated.id = updated._id;
-            
-            // Update in place
+            const updated = {
+                ...res.data,
+                id: res.data.id || res.data._id
+            };
             Object.assign(activeNotebook.value, updated);
             
             const idx = notebooks.value.findIndex(n => (n.id || n._id) === id);
@@ -168,6 +131,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            window.URL.revokeObjectURL(url);
             uiStore.addNotification("Export successful.", "success");
         } catch (e) {
             uiStore.addNotification("Export failed.", "error");
@@ -189,7 +153,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
     async function deleteNotebook(id) {
         try {
             await apiClient.delete(`/api/notebooks/${id}`);
-            notebooks.value = notebooks.value.filter(n => (n.id !== id && n._id !== id));
+            notebooks.value = notebooks.value.filter(n => n.id !== id && n._id !== id);
             if ((activeNotebook.value?.id === id || activeNotebook.value?._id === id)) {
                 activeNotebook.value = null;
             }
@@ -226,8 +190,12 @@ export const useNotebookStore = defineStore('notebooks', () => {
 
         try {
             const res = await apiClient.post(`/api/notebooks/${notebookId}/import_sources`, payload);
+            // Track the task
+            if (res.data && res.data.id) {
+                tasksStore.addTask(res.data);
+            }
             uiStore.addNotification("Knowledge ingestion started.", "info");
-            return res.data;
+            return res.data; // Return task info for tracking
         } catch (e) {
             uiStore.addNotification("Failed to start ingestion.", "error");
             throw e;
@@ -259,7 +227,11 @@ export const useNotebookStore = defineStore('notebooks', () => {
 
     async function deleteArtefact(filename) {
         if (!activeNotebook.value) return;
-        const confirmed = await uiStore.showConfirmation({ title: 'Delete Source', message: `Remove "${filename}"?`, confirmText: 'Delete' });
+        const confirmed = await uiStore.showConfirmation({ 
+            title: 'Delete Source', 
+            message: `Remove "${filename}"?`, 
+            confirmText: 'Delete' 
+        });
         if (confirmed.confirmed) {
             activeNotebook.value.artefacts = activeNotebook.value.artefacts.filter(a => a.filename !== filename);
             await saveActive();
@@ -292,16 +264,6 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
-    async function cancelTask(taskId) {
-        try {
-            await apiClient.post(`/api/tasks/${taskId}/cancel`);
-            return true;
-        } catch (e) {
-            uiStore.addNotification("Failed to cancel task.", "error");
-            return false;
-        }
-    }
-
     async function deleteSlideImage(tabId, slideId, imageIndex) {
         if (!activeNotebook.value) return;
         const id = activeNotebook.value.id || activeNotebook.value._id;
@@ -321,7 +283,6 @@ export const useNotebookStore = defineStore('notebooks', () => {
         const id = activeNotebook.value.id || activeNotebook.value._id;
         try {
             await apiClient.put(`/api/notebooks/${id}/tabs/${tabId}/slides/${slideId}/select_image`, { index });
-            // Update local state reactively
             const tab = activeNotebook.value.tabs.find(t => t.id === tabId);
             if (tab) {
                 try {
@@ -348,7 +309,9 @@ export const useNotebookStore = defineStore('notebooks', () => {
                 prompt, 
                 negative_prompt: negativePrompt
             });
-            tasksStore.addTask(res.data);
+            if (res.data && res.data.id) {
+                tasksStore.addTask(res.data);
+            }
             uiStore.addNotification("Image regeneration started.", "info");
         } catch (e) {
             uiStore.addNotification("Regeneration failed.", "error");
@@ -383,7 +346,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
         }
     }
 
-    async function processWithAi(prompt, inputTabIds, outputType, targetTabId = null, skipLlm = false, selectedArtefacts = [], negativePrompt = "") {
+    async function processWithAi(prompt, inputTabIds, outputType, targetTabId = null, skipLlm = false, selectedArtefacts = [], negativePrompt = "", useRlm = false) {
         if (!activeNotebook.value) return;
         const id = activeNotebook.value.id || activeNotebook.value._id;
         let finalPrompt = prompt;
@@ -397,9 +360,9 @@ export const useNotebookStore = defineStore('notebooks', () => {
                 output_type: outputType,
                 target_tab_id: targetTabId, 
                 selected_artefacts: selectedArtefacts, 
-                skip_llm: skipLlm
+                skip_llm: skipLlm,
+                use_rlm: useRlm // PASSING THE FLAG
             });
-            // Track the new task
             if (res.data && res.data.id) {
                 tasksStore.addTask(res.data);
             }
@@ -532,7 +495,7 @@ export const useNotebookStore = defineStore('notebooks', () => {
         describeAsset, searchArxiv,
         sendSlideMessage, brainstormSlide, processWithAi, generateSlideNotes, generateSlideTitle, generateSlideAudio,
         enhancePrompt, generateSummary,
-        addTab, removeTab, cancelTask,
+        addTab, removeTab,
         $reset 
     };
 });

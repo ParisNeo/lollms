@@ -21,7 +21,8 @@ def _process_notebook_task(
     target_tab_id: str = None, 
     skip_llm: bool = False,
     generate_speech: bool = False,
-    selected_artefacts: list = None
+    selected_artefacts: list = None,
+    use_rlm: bool = False # NEW
 ):
     with task.db_session_factory() as db:
         notebook = db.query(DBNotebook).filter(DBNotebook.id == notebook_id).first()
@@ -40,14 +41,13 @@ def _process_notebook_task(
                 result_tab_id = process_youtube_video(task, notebook, username, prompt, input_tab_ids, action, target_tab_id, selected_artefacts)
             
             elif notebook.type == 'book_building':
-                # Assuming book_building handler exists, if not, fallback to generic for text
                 if 'process_book_building' in globals():
                     result_tab_id = process_book_building(task, notebook, username, prompt, input_tab_ids, action, target_tab_id, selected_artefacts)
                 else:
-                    result_tab_id = process_generic(task, notebook, username, prompt, input_tab_ids, action, target_tab_id, selected_artefacts)
+                    result_tab_id = process_generic(task, notebook, username, prompt, input_tab_ids, action, target_tab_id, selected_artefacts, use_rlm=use_rlm)
 
             else: # generic, research, etc.
-                result_tab_id = process_generic(task, notebook, username, prompt, input_tab_ids, action, target_tab_id, selected_artefacts)
+                result_tab_id = process_generic(task, notebook, username, prompt, input_tab_ids, action, target_tab_id, selected_artefacts, use_rlm=use_rlm)
 
             from sqlalchemy.orm.attributes import flag_modified
             flag_modified(notebook, "tabs")

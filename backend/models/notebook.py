@@ -90,3 +90,4 @@ class ProcessRequest(BaseModel):
     selected_artefacts: Optional[List[str]] = []
     skip_llm: bool = False
     generate_speech: bool = False
+    use_rlm: bool = False # NEW: Recursive Language Model flag

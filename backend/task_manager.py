@@ -1,4 +1,3 @@
-# backend/task_manager.py
 import uuid
 import datetime
 import threading

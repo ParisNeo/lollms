@@ -1,6 +1,5 @@
-// [UPDATE] frontend/webui/src/stores/tasks.js
 import { defineStore } from 'pinia';
-import { ref, computed, shallowRef } from 'vue';
+import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
@@ -11,8 +10,8 @@ export const useTasksStore = defineStore('tasks', () => {
     const { on, off, emit } = useEventBus();
 
     // --- STATE ---
-    // Use shallowRef to prevent deep recursion performance issues on large task lists
-    const tasks = shallowRef([]);
+    // Use regular ref instead of shallowRef to ensure deep reactivity
+    const tasks = ref([]);
     const isLoadingTasks = ref(false);
     const isClearingTasks = ref(false);
     let isFetching = false;
@@ -53,7 +52,13 @@ export const useTasksStore = defineStore('tasks', () => {
                 params.owner_filter = ownerFilter;
             }
             const response = await apiClient.get('/api/tasks', { params });
-            tasks.value = Array.isArray(response.data) ? response.data : [];
+            const newTasks = Array.isArray(response.data) ? response.data : [];
+            
+            console.log(`[TasksStore] Fetched ${newTasks.length} tasks`);
+            
+            // Replace entire array to trigger reactivity
+            tasks.value = newTasks;
+            
         } catch (error) {
             console.error("Failed to fetch tasks:", error);
         } finally {
@@ -64,24 +69,47 @@ export const useTasksStore = defineStore('tasks', () => {
 
     function addTask(taskData) {
         if (!taskData || !taskData.id) return;
-        const newTasks = [...tasks.value];
-        const index = newTasks.findIndex(t => t.id === taskData.id);
         
-        if (index !== -1) {
-            newTasks[index] = { ...newTasks[index], ...taskData };
+        console.log(`[TasksStore] Adding/updating task: ${taskData.id} - ${taskData.name} (${taskData.status})`);
+        
+        // Create a new array to ensure Vue detects the change
+        const currentTasks = [...tasks.value];
+        const existingIndex = currentTasks.findIndex(t => t.id === taskData.id);
+        
+        if (existingIndex !== -1) {
+            // Preserve logs if not provided in update
+            const existingLogs = currentTasks[existingIndex].logs || [];
+            const newLogs = taskData.logs || existingLogs;
+            
+            // Merge the task data
+            currentTasks[existingIndex] = { 
+                ...currentTasks[existingIndex], 
+                ...taskData, 
+                logs: newLogs 
+            };
         } else {
-            newTasks.unshift(taskData);
+            // Add new task at the beginning
+            currentTasks.unshift(taskData);
         }
-        tasks.value = newTasks;
+        
+        // Replace the entire array to trigger reactivity
+        tasks.value = currentTasks;
 
+        // Emit events for important state changes
         if (['completed', 'failed', 'cancelled'].includes(taskData.status)) {
+            console.log(`[TasksStore] Task ${taskData.id} ended with status: ${taskData.status}`);
             emit('task:completed', taskData);
         }
     }
     
     // --- WebSocket Event Handlers ---
-    function handleTaskUpdate(data) { addTask(data); }
+    function handleTaskUpdate(data) { 
+        console.log(`[TasksStore] WebSocket task_update received: ${data.id} - ${data.status}`);
+        addTask(data); 
+    }
+    
     function handleTaskEnd(data) {
+        console.log(`[TasksStore] WebSocket task_end received: ${data.id} - ${data.status}`);
         addTask(data);
         if (data.status === 'failed') {
              uiStore.addNotification(`Task '${data.name}' failed: ${data.error || 'Unknown error'}`, 'error');
@@ -99,9 +127,14 @@ export const useTasksStore = defineStore('tasks', () => {
     async function cancelTask(taskId) {
         try {
             const response = await apiClient.post(`/api/tasks/${taskId}/cancel`);
+            console.log(`[TasksStore] Cancelled task ${taskId}:`, response.data);
             addTask(response.data);
             uiStore.addNotification('Task cancellation processed.', 'info');
-        } catch (error) {}
+            return response.data;
+        } catch (error) {
+            console.error(`[TasksStore] Failed to cancel task ${taskId}:`, error);
+            throw error;
+        }
     }
 
     async function cancelAllTasks() {
@@ -136,13 +169,14 @@ export const useTasksStore = defineStore('tasks', () => {
         on('task_end', handleTaskEnd);
         on('tasks_cleared', handleTasksCleared);
         
-        // POLLING REMOVED: Relying entirely on WebSocket push events to reduce server load.
+        console.log('[TasksStore] Started listening for task events');
     }
 
     function stopListening() {
         off('task_update', handleTaskUpdate);
         off('task_end', handleTaskEnd);
         off('tasks_cleared', handleTasksCleared);
+        console.log('[TasksStore] Stopped listening for task events');
     }
     
     return {

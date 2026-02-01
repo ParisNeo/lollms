@@ -195,15 +195,32 @@ def process_notebook_ai(
 ):
     from backend.task_manager import task_manager
     from backend.tasks.notebook_tasks import _process_notebook_task
+    
+    # Verify notebook exists and user owns it
     exists = db.query(DBNotebook.id).filter(DBNotebook.id == notebook_id, DBNotebook.owner_user_id == current_user.id).first()
-    if not exists: raise HTTPException(status_code=404)
+    if not exists: 
+        raise HTTPException(status_code=404, detail="Notebook not found")
 
+    # CRITICAL: We pass notebook_id as the description so the UI can reliably filter tasks
     return task_manager.submit_task(
         name=f"AI Task: {payload.output_type}",
         target=_process_notebook_task,
-        args=(current_user.username, notebook_id, payload.prompt, payload.input_tab_ids, payload.output_type, payload.target_tab_id, payload.skip_llm, payload.generate_speech, payload.selected_artefacts),
+        args=(
+            current_user.username, 
+            notebook_id, 
+            payload.prompt, 
+            payload.input_tab_ids, 
+            payload.output_type, 
+            payload.target_tab_id, 
+            payload.skip_llm, 
+            payload.generate_speech, 
+            payload.selected_artefacts,
+            payload.use_rlm
+        ),
+        description=notebook_id, # Linked to current UI view
         owner_username=current_user.username
     )
+
 
 @router.post("/enhance_prompt")
 def enhance_prompt_endpoint(
@@ -257,3 +274,4 @@ def regenerate_slide_image_endpoint(
         args=(current_user.username, notebook_id, payload.tab_id, payload.slide_id, payload.prompt, payload.negative_prompt),
         owner_username=current_user.username
     )
+

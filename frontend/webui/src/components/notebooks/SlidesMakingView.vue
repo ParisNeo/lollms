@@ -39,6 +39,7 @@ import IconVideoCamera from '../../assets/icons/IconVideoCamera.vue';
 import IconChevronDown from '../../assets/icons/IconChevronDown.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 import IconCode from '../../assets/icons/IconCode.vue';
+import IconCopy from '../../assets/icons/IconCopy.vue';
 
 const props = defineProps({
     notebook: { type: Object, required: true }
@@ -51,7 +52,7 @@ const authStore = useAuthStore();
 const { tasks } = storeToRefs(tasksStore);
 const user = computed(() => authStore.user); 
 
-const activeTabIdx = ref(0);
+const activeTabId = ref(null);
 const selectedSlideIdx = ref(0);
 const fileInput = ref(null);
 const logsContainerRef = ref(null);
@@ -67,6 +68,10 @@ const isTaskConsoleExpanded = ref(true);
 const viewMode = ref('image'); // 'image' or 'html'
 const aiPrompt = ref('');
 const trackedTaskId = ref(null);
+
+// Tab Editing
+const editingTabId = ref(null);
+const tabTitleInput = ref('');
 
 // Improved Active Task Lookup
 const activeTask = computed(() => {
@@ -187,6 +192,8 @@ async function handleAutoTitle() { await notebookStore.generateTitle(); }
 async function handleProcess() {
     const p = (aiPrompt.value || '').trim();
     if (!p || !currentTab.value) return;
+    // IMPORTANT: For slides, we TARGET the current tab to modify it, rather than creating a new one.
+    // This preserves "edit the slide" behavior.
     await notebookStore.processWithAi(p, [], 'generate_slides_text', currentTab.value.id, false, selectedArtefactNames.value);
     aiPrompt.value = '';
 }
@@ -421,6 +428,56 @@ function playSlideshow() {
     });
 }
 
+// --- TAB EDITING & STOP ---
+function startEditingTab(tab) {
+    editingTabId.value = tab.id;
+    tabTitleInput.value = tab.title;
+    nextTick(() => { document.getElementById(`tab-input-${tab.id}`)?.focus(); });
+}
+
+async function saveTabTitle() {
+    if (!editingTabId.value) return;
+    const tab = props.notebook.tabs.find(t => t.id === editingTabId.value);
+    if (tab && tabTitleInput.value.trim()) {
+        tab.title = tabTitleInput.value.trim();
+        await notebookStore.saveActive();
+    }
+    editingTabId.value = null;
+}
+
+async function handleAutoTabTitle() {
+    if (!currentTab.value) return;
+    const summary = slideData.value.summary || JSON.stringify(slideData.value.slides_data.map(s => s.title));
+    if (!summary) return;
+    try {
+        uiStore.addNotification("Generating title...", "info");
+        const res = await notebookStore.enhancePrompt(summary, "Create a short 3-5 word title for this presentation deck.");
+        if (res) {
+            currentTab.value.title = res.replace(/"/g, '').trim();
+            await notebookStore.saveActive();
+        }
+    } catch (e) { uiStore.addNotification("Failed to auto-title.", "error"); }
+}
+
+async function stopTask() {
+    if (activeTask.value) {
+        await tasksStore.cancelTask(activeTask.value.id);
+    }
+}
+
+async function handleCopyContent() {
+    if (!currentTab.value?.content) {
+        uiStore.addNotification("Nothing to copy.", "warning");
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(currentTab.value.content);
+        uiStore.addNotification("Content copied to clipboard.", "success");
+    } catch (err) {
+        uiStore.addNotification("Copy failed.", "error");
+    }
+}
+
 onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); });
 </script>
 
@@ -439,7 +496,12 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                                 <p class="text-blue-400 font-bold uppercase tracking-widest text-xs">{{ activeTask.description }}</p>
                             </div>
                         </div>
-                        <div class="text-5xl font-black text-blue-500 font-mono">{{ activeTask.progress }}%</div>
+                        <div class="flex items-center gap-4">
+                            <div class="text-5xl font-black text-blue-500 font-mono">{{ activeTask.progress }}%</div>
+                            <button @click="stopTask" class="btn btn-danger px-6 py-3 rounded-xl flex items-center gap-2 shadow-lg hover:shadow-red-500/30">
+                                <IconStopCircle class="w-6 h-6" /> Stop
+                            </button>
+                        </div>
                     </div>
                     <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden mb-10"><div class="h-full bg-blue-500 transition-all duration-500 progress-bar-animated" :style="{width: activeTask.progress + '%'}"></div></div>
                     <div class="bg-black rounded-2xl border border-slate-800 overflow-hidden h-64 flex flex-col">
@@ -462,12 +524,29 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                     <span class="text-sm font-bold text-slate-800 dark:text-slate-100">{{ notebook.title }}</span>
                     <IconSparkles class="w-3 h-3 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                 </div>
-                <div class="flex items-center gap-2 text-[10px] text-slate-500"><IconPresentationChartBar class="w-3 h-3" /><span class="uppercase tracking-wide font-medium">{{ currentTab?.title || 'Studio' }}</span></div>
+                <div class="flex items-center gap-2 text-[10px] text-slate-500">
+                    <IconPresentationChartBar class="w-3 h-3" />
+                    <template v-if="currentTab">
+                        <input v-if="editingTabId === currentTab.id" 
+                               :id="`tab-input-${currentTab.id}`" 
+                               v-model="tabTitleInput" 
+                               @blur="saveTabTitle" 
+                               @keyup.enter="saveTabTitle" 
+                               class="bg-transparent border-b border-blue-500 outline-none p-0 text-[10px] uppercase font-bold text-blue-600 w-24" />
+                        <span v-else @dblclick="startEditingTab(currentTab)" class="uppercase tracking-wide font-medium cursor-pointer hover:text-blue-500 select-none">{{ currentTab.title }}</span>
+                        
+                        <button @click="handleAutoTabTitle" class="ml-1 text-purple-400 hover:text-purple-600" title="Auto-Title Tab">
+                            <IconMagic class="w-3 h-3" />
+                        </button>
+                    </template>
+                    <span v-else class="uppercase tracking-wide font-medium">Studio</span>
+                </div>
             </div>
         </Teleport>
 
         <Teleport to="#global-header-actions-target">
             <div class="flex items-center gap-1">
+                <button @click="handleCopyContent" class="btn-icon-flat text-gray-500 hover:text-blue-500" title="Copy Content"><IconCopy class="w-4 h-4" /></button>
                 <select :value="notebook.language" @change="handleLanguageChange($event.target.value)" class="bg-slate-100 dark:bg-slate-800 border-none rounded px-2 py-1 text-[10px] font-black uppercase outline-none mr-2">
                     <option v-for="l in languages" :key="l.code" :value="l.code">{{ l.code }}</option>
                 </select>
