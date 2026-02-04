@@ -88,6 +88,7 @@ class ProcessRequest(BaseModel):
     skip_llm: bool = False
     generate_speech: bool = False
     selected_artefacts: Optional[List[str]] = []
+    use_rlm: bool = False # Ensure this is present for RLM support
 
 @router.get("", response_model=List[NotebookResponse])
 def get_notebooks(
@@ -151,7 +152,8 @@ def create_notebook(
     db.refresh(new_notebook)
     
     # 2. Trigger the task in the background if auto_generate is on
-    if payload.auto_generate:
+    # Note: frontend handles task triggering mostly, but legacy support here
+    if payload.initialPrompt:
         arxiv_conf = payload.arxiv_config.dict() if payload.arxiv_config else {}
         arxiv_selected_dicts = [a.dict() for a in payload.arxiv_selected] if payload.arxiv_selected else []
         
@@ -347,10 +349,22 @@ def process_notebook_ai(
     payload: ProcessRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
+    # Added payload.use_rlm to args
     return task_manager.submit_task(
         name=f"AI Task: {payload.output_type}",
         target=_process_notebook_task,
-        args=(current_user.username, notebook_id, payload.prompt, payload.input_tab_ids, payload.output_type, payload.target_tab_id, payload.skip_llm, payload.generate_speech, payload.selected_artefacts),
+        args=(
+            current_user.username, 
+            notebook_id, 
+            payload.prompt, 
+            payload.input_tab_ids, 
+            payload.output_type, 
+            payload.target_tab_id, 
+            payload.skip_llm, 
+            payload.generate_speech, 
+            payload.selected_artefacts,
+            payload.use_rlm
+        ),
         owner_username=current_user.username
     )
 

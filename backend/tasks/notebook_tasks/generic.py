@@ -60,39 +60,38 @@ def process_generic(
             notebook.tabs.append(target_tab)
 
         if use_rlm:
-            # --- RLM STRATEGY ---
+            # --- RLM STRATEGY (Enhanced) ---
             # Treats context as an external variable for decomposition and recursive reasoning
-            system_prompt = """You are acting as a Recursive Language Model (RLM). 
-            Your goal is to perform deep reasoning over a massive context by treating it as a programmable variable.
-            
-            RLM STRATEGY:
-            1. INSPECT: Identify logical boundaries, entities, and key evidence.
-            2. DECOMPOSE: Break the request into atomic sub-questions.
-            3. RECURSIVE SYNTHESIS: Process data in logical chunks without losing fine-grained detail.
-            4. FINAL VERIFICATION: Ensure the synthesized answer is grounded in the provided context variable.
-            
-            You have access to a symbolic Python REPL. You can use regex or indexing to slice the 'context'.
-            Your output must be high-density, technical Markdown."""
+            system_prompt = """You are a Recursive Language Model (RLM) engine.
+Your goal is to synthesize a comprehensive answer by recursively analyzing the provided context.
+
+RLM PROCEDURE:
+1. DECOMPOSE: Break down the user's request into key components or sub-questions.
+2. RETRIEVE & ANALYZE: For each component, identify relevant evidence from the context chunks.
+3. SYNTHESIZE: Combine the evidence into a coherent, high-density technical report.
+4. REFINE: Ensure the final output is logical, well-cited, and directly addresses the user's prompt.
+
+Do not lose technical details. Maintain a high level of accuracy."""
             
             user_prompt = f"""
             [CONTEXT_DATA_INFO]
             Estimated Tokens: {len(context) // 4}
-            Snippet: {context[:5000]}... [Full context accessible via recursive reasoning]
-
+            
             [USER_REQUEST]
             {prompt}
 
             [TASK]
-            Apply RLM inference. Decompose, chunk, and synthesize a comprehensive answer. 
-            Do not provide a shallow summary; provide a deep, grounded technical report.
+            Apply Recursive Language Model logic. 
+            Decompose the request, analyze the context chunks recursively, and produce a final synthesized report.
             """
             
             try:
                 task.log("Decomposing request using Recursive strategy...")
                 task.set_progress(30)
+                # long_context_processing handles chunking and summarization recursively
                 response = lc.long_context_processing(
                     text_to_process=context,
-                    contextual_prompt=f"Apply RLM logic to answer: {prompt}",
+                    contextual_prompt=prompt, # Pass prompt directly as contextual prompt for chunks
                     system_prompt=system_prompt
                 )
             except Exception as e:

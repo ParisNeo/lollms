@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-04 01:53]
+
+- feat(notebooks): add RLM flag support and enhance recursive processing
+
 ## [2026-02-01 23:57]
 
 - feat(notebooks): implement async task-based notebook processing with UI updates

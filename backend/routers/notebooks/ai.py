@@ -274,4 +274,3 @@ def regenerate_slide_image_endpoint(
         args=(current_user.username, notebook_id, payload.tab_id, payload.slide_id, payload.prompt, payload.negative_prompt),
         owner_username=current_user.username
     )
-
