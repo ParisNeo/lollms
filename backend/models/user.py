@@ -331,10 +331,11 @@ class UserAuthDetails(BaseModel):
     class Config:
         from_attributes = True
 
+
 class UserUpdate(BaseModel):
     first_name: Optional[str] = None
     family_name: Optional[str] = None
-    email: Optional[str] = None
+    email: Optional[EmailStr] = None
     birth_date: Optional[date] = None
     icon: Optional[str] = None
     preferred_name: Optional[str] = None
@@ -394,7 +395,7 @@ class UserUpdate(BaseModel):
     image_studio_negative_prompt: Optional[str] = None
     image_studio_image_size: Optional[str] = None
     image_studio_n_images: Optional[int] = None
-    image_studio_seed: int = -1
+    image_studio_seed: Optional[int] = None
     image_studio_generation_params: Optional[Dict[str, Any]] = None
     
     image_generation_enabled: Optional[bool] = None

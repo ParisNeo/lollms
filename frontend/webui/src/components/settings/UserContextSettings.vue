@@ -1,9 +1,11 @@
 <script setup>
 import { computed, ref, watch, nextTick, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
-import { useDataStore } from '../../stores/data'; // Import data store for lists
+import { useDataStore } from '../../stores/data';
 import { storeToRefs } from 'pinia';
 import LanguageSelector from '../ui/LanguageSelector.vue';
+
+// --- Icons ---
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
@@ -14,13 +16,22 @@ import IconMap from '../../assets/icons/IconMap.vue';
 import IconGoogle from '../../assets/icons/IconGoogle.vue';
 import IconGoogleDrive from '../../assets/icons/IconGoogleDrive.vue';
 import IconCalendar from '../../assets/icons/IconCalendar.vue';
+import IconUserGroup from '../../assets/icons/IconUserGroup.vue';
+import IconThinking from '../../assets/icons/IconThinking.vue';
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
+import IconClock from '../../assets/icons/IconClock.vue';
+import IconSettings from '../../assets/icons/IconSettings.vue';
+import IconObservation from '../../assets/icons/IconObservation.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
 
 const authStore = useAuthStore();
-const dataStore = useDataStore(); // Use data store
+const dataStore = useDataStore();
 const { user } = storeToRefs(authStore);
 const { availableLollmsModels, allPersonalities } = storeToRefs(dataStore);
 
-// Local state for form fields
+// --- Local state for all form fields ---
 const preferredName = ref('');
 const generalInfo = ref('');
 const personalInfo = ref('');
@@ -35,8 +46,8 @@ const forceAiResponseLanguage = ref(false);
 const imageGenerationEnabled = ref(false);
 const imageGenerationSystemPrompt = ref('');
 const imageAnnotationEnabled = ref(false);
-const imageEditingEnabled = ref(false); 
-const slideMakerEnabled = ref(false); 
+const imageEditingEnabled = ref(false);
+const slideMakerEnabled = ref(false);
 const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
 const memoryEnabled = ref(false);
@@ -48,23 +59,36 @@ const maxImageWidth = ref(-1);
 const maxImageHeight = ref(-1);
 const compressImages = ref(false);
 const imageCompressionQuality = ref(85);
-const streetViewEnabled = ref(false);
-const googleDriveEnabled = ref(false);
-const googleCalendarEnabled = ref(false);
-const googleGmailEnabled = ref(false);
-const schedulerEnabled = ref(false);
 
-const googleClientSecret = ref('');
-
-// Internal Web Search States
+// Web Search
 const googleApiKey = ref('');
 const googleCseId = ref('');
 const webSearchEnabled = ref(false);
-const webSearchProviders = ref(['google']); // Multi-engine support
+const webSearchProviders = ref(['google']);
 const webSearchDeepAnalysis = ref(false);
+const streetViewEnabled = ref(false);
+
+// Google Workspace & Scheduler
+const googleDriveEnabled = ref(false);
+const googleCalendarEnabled = ref(false);
+const googleGmailEnabled = ref(false);
+const googleClientSecret = ref('');
+const schedulerEnabled = ref(false);
+
+// Herd Mode
+const herdModeEnabled = ref(false);
+const herdRounds = ref(2);
+const herdPrecodeParticipants = ref([]);
+const herdPostcodeParticipants = ref([]);
+const herdDynamicMode = ref(false);
+const herdModelPool = ref([]);
+
+// UI Helpers
 const showSearchHelp = ref(false);
 const showWorkspaceHelp = ref(false);
 const isKeyVisible = ref(false);
+const hasChanges = ref(false);
+const isSaving = ref(false);
 
 const availableEngines = [
     { id: 'google', name: 'Google Search' },
@@ -76,103 +100,91 @@ const availableEngines = [
     { id: 'github', name: 'GitHub' }
 ];
 
-function toggleEngine(id) {
-    const idx = webSearchProviders.value.indexOf(id);
-    if (idx > -1) {
-        // Allow removing, but user should ideally have one if enabled
-        webSearchProviders.value.splice(idx, 1);
-    } else {
-        webSearchProviders.value.push(id);
-    }
-}
-
-// Herd Mode States
-const herdModeEnabled = ref(false);
-const herdRounds = ref(2);
-const herdPrecodeParticipants = ref([]);
-const herdPostcodeParticipants = ref([]);
-
-// Dynamic Herd States
-const herdDynamicMode = ref(false);
-const herdModelPool = ref([]); // List of {model: '', description: ''}
-
-
-const hasChanges = ref(false);
-const isSaving = ref(false);
+const staticInfo = [
+  { label: 'Date', placeholder: '{{date}}' },
+  { label: 'Time', placeholder: '{{time}}' },
+  { label: 'Date & Time', placeholder: '{{datetime}}' },
+  { label: 'Username', placeholder: '{{user_name}}' },
+];
 
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
-// Function to update local state from the store
+/**
+ * Maps the global user state from the store to our local form refs.
+ */
 function populateForm() {
+  // CRITICAL: Do not overwrite local changes if we are currently in the middle of a save operation
+  if (isSaving.value) return;
+
   if (user.value) {
     preferredName.value = user.value.preferred_name || '';
     generalInfo.value = user.value.data_zone || '';
     personalInfo.value = user.value.user_personal_info || '';
     codingStyle.value = user.value.coding_style_constraints || '';
     langPrefs.value = user.value.programming_language_preferences || '';
-    tellOS.value = user.value.tell_llm_os || false;
+    tellOS.value = !!user.value.tell_llm_os;
     shareDynamicInfo.value = user.value.share_dynamic_info_with_llm ?? true;
-    sharePersonalInfo.value = user.value.share_personal_info_with_llm || false;
-    funMode.value = user.value.fun_mode || false;
+    sharePersonalInfo.value = !!user.value.share_personal_info_with_llm;
+    funMode.value = !!user.value.fun_mode;
     aiResponseLanguage.value = user.value.ai_response_language || 'auto';
-    forceAiResponseLanguage.value = user.value.force_ai_response_language || false;
-    imageGenerationEnabled.value = user.value.image_generation_enabled || false;
+    forceAiResponseLanguage.value = !!user.value.force_ai_response_language;
+    imageGenerationEnabled.value = !!user.value.image_generation_enabled;
     imageGenerationSystemPrompt.value = user.value.image_generation_system_prompt || '';
-    imageAnnotationEnabled.value = user.value.image_annotation_enabled || false;
-    imageEditingEnabled.value = user.value.image_editing_enabled || false;
-    slideMakerEnabled.value = user.value.slide_maker_enabled || false;
-    activateGeneratedImages.value = user.value.activate_generated_images || false;
-    noteGenerationEnabled.value = user.value.note_generation_enabled || false;
-    memoryEnabled.value = user.value.memory_enabled || false;
-    autoMemoryEnabled.value = user.value.auto_memory_enabled || false;
-    reasoningActivation.value = user.value.reasoning_activation || false;
+    imageAnnotationEnabled.value = !!user.value.image_annotation_enabled;
+    imageEditingEnabled.value = !!user.value.image_editing_enabled;
+    slideMakerEnabled.value = !!user.value.slide_maker_enabled;
+    activateGeneratedImages.value = !!user.value.activate_generated_images;
+    noteGenerationEnabled.value = !!user.value.note_generation_enabled;
+    memoryEnabled.value = !!user.value.memory_enabled;
+    autoMemoryEnabled.value = !!user.value.auto_memory_enabled;
+    reasoningActivation.value = !!user.value.reasoning_activation;
     reasoningEffort.value = user.value.reasoning_effort || 'medium';
-    rlmEnabled.value = user.value.rlm_enabled || false;
+    rlmEnabled.value = !!user.value.rlm_enabled;
     maxImageWidth.value = user.value.max_image_width ?? -1;
     maxImageHeight.value = user.value.max_image_height ?? -1;
-    compressImages.value = user.value.compress_images || false;
+    compressImages.value = !!user.value.compress_images;
     imageCompressionQuality.value = user.value.image_compression_quality ?? 85;
     
-    // Web Search
     googleApiKey.value = user.value.google_api_key || '';
     googleCseId.value = user.value.google_cse_id || '';
-    webSearchEnabled.value = user.value.web_search_enabled || false;
-    webSearchProviders.value = Array.isArray(user.value.web_search_providers) ? [...user.value.web_search_providers] : ['google'];
-    webSearchDeepAnalysis.value = user.value.web_search_deep_analysis || false;
-    streetViewEnabled.value = user.value.street_view_enabled || false;
-    googleDriveEnabled.value = user.value.google_drive_enabled || false;
-    googleCalendarEnabled.value = user.value.google_calendar_enabled || false;
-    googleGmailEnabled.value = user.value.google_gmail_enabled || false;
-    googleClientSecret.value = user.value.google_client_secret_json || '';
-    schedulerEnabled.value = user.value.scheduler_enabled || false;
+    webSearchEnabled.value = !!user.value.web_search_enabled;
+    
+    // Fix: Ensure we take a fresh copy of the array to break reactivity cycle with store
+    if (Array.isArray(user.value.web_search_providers)) {
+        webSearchProviders.value = [...user.value.web_search_providers];
+    } else {
+        webSearchProviders.value = ['google'];
+    }
 
-    // Herd Mode
-    herdModeEnabled.value = user.value.herd_mode_enabled || false;
+    webSearchDeepAnalysis.value = !!user.value.web_search_deep_analysis;
+    streetViewEnabled.value = !!user.value.street_view_enabled;
+    googleDriveEnabled.value = !!user.value.google_drive_enabled;
+    googleCalendarEnabled.value = !!user.value.google_calendar_enabled;
+    googleGmailEnabled.value = !!user.value.google_gmail_enabled;
+    googleClientSecret.value = user.value.google_client_secret_json || '';
+    schedulerEnabled.value = !!user.value.scheduler_enabled;
+
+    herdModeEnabled.value = !!user.value.herd_mode_enabled;
     herdRounds.value = user.value.herd_rounds || 2;
     herdPrecodeParticipants.value = user.value.herd_precode_participants ? JSON.parse(JSON.stringify(user.value.herd_precode_participants)) : [];
     herdPostcodeParticipants.value = user.value.herd_postcode_participants ? JSON.parse(JSON.stringify(user.value.herd_postcode_participants)) : [];
-    
-    // Dynamic Herd
-    herdDynamicMode.value = user.value.herd_dynamic_mode || false;
+    herdDynamicMode.value = !!user.value.herd_dynamic_mode;
     herdModelPool.value = user.value.herd_model_pool ? JSON.parse(JSON.stringify(user.value.herd_model_pool)) : [];
     
-    // Reset change tracker
     nextTick(() => {
         hasChanges.value = false;
     });
   }
 }
 
-// Ensure data for selectors is loaded
 onMounted(() => {
     if (availableLollmsModels.value.length === 0) dataStore.fetchAvailableLollmsModels();
     if (allPersonalities.value.length === 0) dataStore.fetchPersonalities();
 });
 
-// Watch for changes in the user object (e.g., after login or refresh)
 watch(user, populateForm, { immediate: true, deep: true });
 
-// Watch for changes in local form fields to enable the save button
+// Listen for local changes
 watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
@@ -183,40 +195,24 @@ watch([
     streetViewEnabled, googleDriveEnabled, googleCalendarEnabled, googleGmailEnabled, googleClientSecret, schedulerEnabled,
     herdDynamicMode, herdModelPool
 ], () => {
-  hasChanges.value = true;
-}, { deep: true }); // Need deep watch for array
+    // Only mark as changed if we aren't currently populating from the store
+    hasChanges.value = true;
+}, { deep: true });
 
-const staticInfo = [
-  { label: 'Date', placeholder: '{{date}}' },
-  { label: 'Time', placeholder: '{{time}}' },
-  { label: 'Date & Time', placeholder: '{{datetime}}' },
-  { label: 'Username', placeholder: '{{user_name}}' },
-];
-
-// --- HERD PARTICIPANT MANAGEMENT ---
-
-function addPrecodeParticipant() {
-    herdPrecodeParticipants.value.push({ model: '', personality: '' });
+// --- List Management (Using Immutable patterns to help Vue detection) ---
+function toggleEngine(id) {
+    const current = [...webSearchProviders.value];
+    const idx = current.indexOf(id);
+    if (idx > -1) current.splice(idx, 1);
+    else current.push(id);
+    webSearchProviders.value = current;
 }
-function removePrecodeParticipant(index) {
-    herdPrecodeParticipants.value.splice(index, 1);
-}
-
-function addPostcodeParticipant() {
-    herdPostcodeParticipants.value.push({ model: '', personality: '' });
-}
-function removePostcodeParticipant(index) {
-    herdPostcodeParticipants.value.splice(index, 1);
-}
-
-// --- DYNAMIC HERD MODEL POOL MANAGEMENT ---
-function addModelToPool() {
-    herdModelPool.value.push({ model: '', description: '' });
-}
-
-function removeModelFromPool(index) {
-    herdModelPool.value.splice(index, 1);
-}
+function addPrecodeParticipant() { herdPrecodeParticipants.value.push({ model: '', personality: '' }); }
+function removePrecodeParticipant(index) { herdPrecodeParticipants.value.splice(index, 1); }
+function addPostcodeParticipant() { herdPostcodeParticipants.value.push({ model: '', personality: '' }); }
+function removePostcodeParticipant(index) { herdPostcodeParticipants.value.splice(index, 1); }
+function addModelToPool() { herdModelPool.value.push({ model: '', description: '' }); }
+function removeModelFromPool(index) { herdModelPool.value.splice(index, 1); }
 
 async function handleSaveChanges() {
     if (!hasChanges.value) return;
@@ -253,7 +249,7 @@ async function handleSaveChanges() {
             google_api_key: googleApiKey.value,
             google_cse_id: googleCseId.value,
             web_search_enabled: webSearchEnabled.value,
-            web_search_providers: webSearchProviders.value,
+            web_search_providers: [...webSearchProviders.value], // Send a fresh copy
             web_search_deep_analysis: webSearchDeepAnalysis.value,
             herd_mode_enabled: herdModeEnabled.value,
             herd_rounds: herdRounds.value,
@@ -269,6 +265,10 @@ async function handleSaveChanges() {
             scheduler_enabled: schedulerEnabled.value
         });
         hasChanges.value = false;
+        uiStore.addNotification('Global context settings saved successfully.', 'success');
+    } catch (e) {
+        console.error("Save failed:", e);
+        uiStore.addNotification('Failed to save settings. Please check your connection.', 'error');
     } finally {
         isSaving.value = false;
     }
@@ -276,631 +276,349 @@ async function handleSaveChanges() {
 </script>
 
 <template>
-  <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
-    <div class="px-4 py-5 sm:p-6 border-b border-gray-200 dark:border-gray-700">
-        <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">Global User Context & Tools</h3>
-        <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-            Manage information and internal tools shared with the AI across all discussions.
-        </p>
+  <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg max-w-5xl mx-auto">
+    <div class="px-4 py-5 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <div>
+            <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">Global User Context & Tools</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure global behaviors, rules, and advanced AI features.</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span v-if="hasChanges" class="text-xs font-bold text-amber-500 animate-pulse uppercase tracking-widest">Unsaved Changes</span>
+            <button @click="handleSaveChanges" class="btn btn-primary shadow-lg" :disabled="!hasChanges || isSaving">
+                <IconAnimateSpin v-if="isSaving" class="w-4 h-4 mr-2 animate-spin" />
+                {{ isSaving ? 'Saving...' : 'Save All Changes' }}
+            </button>
+        </div>
     </div>
     
-    <div class="p-4 sm:p-6 space-y-6">
+    <div class="p-4 sm:p-6 space-y-8">
         <!-- Preferred Name -->
-        <div>
+        <div class="section-card">
             <label for="preferred-name" class="block text-sm font-semibold mb-1 text-gray-700 dark:text-gray-200">Preferred Name</label>
-            <input 
-                type="text" 
-                id="preferred-name" 
-                v-model="preferredName" 
-                class="input-field w-full" 
-                :placeholder="user?.username || 'How should the AI address you?'"
-            >
-            <p class="text-xs text-gray-500 mt-1">If left blank, the AI will use your username: <strong>{{ user?.username }}</strong></p>
+            <input type="text" id="preferred-name" v-model="preferredName" class="input-field w-full" :placeholder="user?.username || 'Address me as...'">
+            <p class="text-xs text-gray-500 mt-1">Leave blank to use your username ({{ user?.username }}).</p>
         </div>
         
-        <!-- Web Search Settings -->
-        <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg space-y-4">
+        <!-- Web Search -->
+        <div class="p-5 bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800 rounded-xl space-y-4">
             <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Internal Web Search</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to search the internet for real-time information.</p>
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-blue-500 text-white rounded-lg"><IconGlobeAlt class="w-5 h-5"/></div>
+                    <div>
+                        <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100">Web Search Engine</h3>
+                        <p class="text-xs text-gray-500">Allow AI to access live internet information.</p>
+                    </div>
                 </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="webSearchEnabled" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
+                <label class="toggle-switch">
+                    <input type="checkbox" v-model="webSearchEnabled">
+                    <span class="slider"></span>
                 </label>
             </div>
-            <div class="flex justify-end">
-                <button @click="showSearchHelp = !showSearchHelp" class="text-xs text-blue-500 hover:underline">How to get keys?</button>
-            </div>
 
-            <div v-if="webSearchEnabled" class="space-y-4 animate-in fade-in">
-                <!-- Multi-Engine Grid -->
+            <div v-if="webSearchEnabled" class="space-y-5 pt-4 border-t border-blue-200 dark:border-blue-800 animate-in fade-in">
                 <div>
-                    <label class="block text-xs font-semibold mb-2 text-gray-600 dark:text-gray-300 uppercase tracking-wider">Active Search Engines</label>
-                    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
-                        <button 
-                            v-for="engine in availableEngines" 
-                            :key="engine.id"
-                            type="button"
-                            @click="toggleEngine(engine.id)"
-                            class="flex items-center gap-2 p-2 rounded-lg border text-left transition-all group"
-                            :class="webSearchProviders.includes(engine.id) 
-                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 ring-2 ring-blue-500/20' 
-                                : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-500 opacity-60 hover:opacity-100 hover:border-gray-300'"
-                        >
-                            <IconCheckCircle v-if="webSearchProviders.includes(engine.id)" class="w-4 h-4 flex-shrink-0" />
-                            <IconCircle v-else class="w-4 h-4 flex-shrink-0 opacity-30 group-hover:opacity-60" />
-                            <span class="text-xs font-bold truncate">{{ engine.name }}</span>
+                    <label class="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-3">Active Engines</label>
+                    <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <button v-for="engine in availableEngines" :key="engine.id" type="button" @click="toggleEngine(engine.id)"
+                            class="flex items-center gap-2 p-2 rounded-lg border text-left transition-all"
+                            :class="webSearchProviders.includes(engine.id) ? 'border-blue-500 bg-blue-500/10 text-blue-600 ring-2 ring-blue-500/20' : 'border-gray-200 dark:border-gray-700 opacity-50'">
+                            <IconCheckCircle v-if="webSearchProviders.includes(engine.id)" class="w-4 h-4" />
+                            <IconCircle v-else class="w-4 h-4" />
+                            <span class="text-xs font-bold">{{ engine.name }}</span>
                         </button>
                     </div>
-                    <p class="text-[10px] text-gray-500 mt-2 italic">Select multiple engines to allow the AI to aggregate information from various sources in parallel.</p>
                 </div>
 
-                <div class="flex items-center justify-between pl-4 border-l-2 border-blue-300 dark:border-blue-600">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                        <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300">Deep Content Analysis</h4>
-                        <p class="text-[10px] text-gray-500 dark:text-gray-400">If enabled, the AI will visit top search result pages to read detailed content instead of just snippets.</p>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" v-model="webSearchDeepAnalysis" class="sr-only peer">
-                        <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
-                </div>
-
-                <!-- Conditional Google Credentials -->
-                <div v-if="webSearchProviders.includes('google')" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-blue-100 dark:border-blue-900/40">
-                    <div>
-                        <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google API Key</label>
+                        <label class="block text-xs font-bold mb-1">Google API Key</label>
                         <div class="relative">
                             <input :type="isKeyVisible ? 'text' : 'password'" v-model="googleApiKey" class="input-field w-full pr-10 text-xs" placeholder="AIza...">
-                            <button type="button" @click="isKeyVisible = !isKeyVisible" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-500">
-                                <IconEyeOff v-if="isKeyVisible" class="w-4 h-4" /><IconEye v-else class="w-4 h-4" />
-                            </button>
+                            <button type="button" @click="isKeyVisible = !isKeyVisible" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400"><IconEyeOff v-if="isKeyVisible" class="w-4 h-4" /><IconEye v-else class="w-4 h-4" /></button>
                         </div>
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Google CSE ID</label>
+                        <label class="block text-xs font-bold mb-1">Google CSE ID</label>
                         <input type="text" v-model="googleCseId" class="input-field w-full text-xs" placeholder="cx...">
                     </div>
-                    <p v-if="!googleApiKey || !googleCseId" class="text-[10px] text-red-500 italic md:col-span-2">Google API Key and CSE ID are required since Google is an active engine.</p>
+                </div>
+                
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" v-model="webSearchDeepAnalysis" class="rounded text-blue-600">
+                    <span class="text-xs font-medium">Enable Deep Analysis (visit top pages)</span>
+                </label>
+
+                <button @click="showSearchHelp = !showSearchHelp" class="text-xs text-blue-500 hover:underline">Setup Instructions</button>
+                <div v-if="showSearchHelp" class="p-3 bg-white dark:bg-gray-800 rounded border border-blue-200 text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                    1. Enable <b>Custom Search API</b> in Google Cloud Console.<br>
+                    2. Create an API Key in Credentials.<br>
+                    3. Create a Search Engine at <b>programmablesearchengine.google.com</b> and copy the CX ID.
                 </div>
             </div>
-
-            <!-- HELP SECTION -->
-            <div v-if="showSearchHelp" class="mt-4 p-4 bg-white dark:bg-gray-800 rounded border border-blue-200 dark:border-gray-600 text-xs space-y-3 animate-in slide-in-from-top-2">
-                <h4 class="font-bold text-gray-800 dark:text-gray-200">How to configure Google Search</h4>
-                <ol class="list-decimal pl-4 space-y-1 text-gray-600 dark:text-gray-400">
-                    <li>Go to the <a href="https://console.cloud.google.com/" target="_blank" class="text-blue-500 hover:underline">Google Cloud Console</a>.</li>
-                    <li>Create a new Project (or select existing).</li>
-                    <li>Navigate to <strong>APIs & Services > Library</strong> and enable:
-                        <ul class="list-disc pl-4 mt-1">
-                            <li><strong>Custom Search API</strong> (for Web Search)</li>
-                            <li><strong>Maps Static API</strong> (if using Street View)</li>
-                        </ul>
-                    </li>
-                    <li>Go to <strong>APIs & Services > Credentials</strong> and create an <strong>API Key</strong>. Copy it to the "Google API Key" field above.</li>
-                    <li>Go to <a href="https://programmablesearchengine.google.com/" target="_blank" class="text-blue-500 hover:underline">Programmable Search Engine</a>.</li>
-                    <li>Create a new search engine.
-                        <ul class="list-disc pl-4">
-                            <li>"Search the entire web": Yes</li>
-                        </ul>
-                    </li>
-                    <li>Copy the <strong>Search Engine ID (cx)</strong> to the "Google CSE ID" field above.</li>
-                </ol>
-            </div>
-
         </div>
-        
-        <!-- Google Workspace Settings -->
-        <div class="p-4 bg-white dark:bg-gray-700/50 border border-gray-200 dark:border-gray-600 rounded-lg space-y-4">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                    <IconGoogle class="w-5 h-5 text-gray-600 dark:text-gray-300"/>
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Google Workspace Tools</h3>
-                </div>
-                <button @click="showWorkspaceHelp = !showWorkspaceHelp" class="text-xs text-blue-500 hover:underline">How to set up?</button>
-            </div>
-            <p class="text-xs text-gray-500 dark:text-gray-400">Enable deep integration with Drive, Calendar, and Gmail. Requires OAuth credentials.</p>
 
-            <div v-if="showWorkspaceHelp" class="p-4 bg-blue-50 dark:bg-gray-800 rounded border border-blue-200 dark:border-gray-600 text-xs space-y-3 animate-in slide-in-from-top-2">
-                <h4 class="font-bold text-gray-800 dark:text-gray-200">How to configure Google Workspace (OAuth)</h4>
-                <ol class="list-decimal pl-4 space-y-1 text-gray-600 dark:text-gray-400">
-                    <li>Go to <a href="https://console.cloud.google.com/" target="_blank" class="text-blue-500 hover:underline">Google Cloud Console</a>.</li>
-                    <li>Navigate to <strong>APIs & Services > Library</strong> and enable:
-                        <ul class="list-disc pl-4 mt-1">
-                            <li><strong>Google Drive API</strong></li>
-                            <li><strong>Google Calendar API</strong></li>
-                            <li><strong>Gmail API</strong></li>
-                        </ul>
-                    </li>
-                    <li>Go to <strong>OAuth consent screen</strong>:
-                        <ul class="list-disc pl-4">
-                            <li>User Type: <strong>External</strong></li>
-                            <li>Add your email as a <strong>Test User</strong>.</li>
-                        </ul>
-                    </li>
-                    <li>Go to <strong>Credentials</strong> > Create Credentials > <strong>OAuth Client ID</strong>.</li>
-                    <li>Application type: <strong>Desktop App</strong>.</li>
-                    <li>Download the JSON file (rename it to <code>client_secret.json</code> if you want, or just open it).</li>
-                    <li>Paste the <strong>entire content</strong> of that JSON file into the box below.</li>
-                </ol>
+        <!-- Google Workspace -->
+        <div class="p-5 bg-white dark:bg-gray-700/30 border border-gray-200 dark:border-gray-600 rounded-xl space-y-4">
+            <div class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-red-500 text-white rounded-lg"><IconGoogle class="w-5 h-5"/></div>
+                    <h3 class="text-sm font-bold">Google Workspace Tools</h3>
+                </div>
+                <button @click="showWorkspaceHelp = !showWorkspaceHelp" class="text-xs text-blue-500 hover:underline">Setup Guide</button>
+            </div>
+            
+            <div v-if="showWorkspaceHelp" class="p-3 bg-blue-50 dark:bg-gray-800 rounded border border-blue-100 text-xs mb-2">
+                Download your <b>OAuth Desktop Client</b> JSON from Google Cloud Console and paste it below.
             </div>
 
             <div>
-                <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Client Secret JSON</label>
-                <textarea v-model="googleClientSecret" class="styled-textarea font-mono text-[10px]" rows="4" placeholder='{"installed":{"client_id":"...","project_id":"...","auth_uri":"...","token_uri":"..."}}'></textarea>
+                <label class="block text-xs font-bold text-gray-400 uppercase mb-2">Client Secret JSON</label>
+                <textarea v-model="googleClientSecret" class="input-field font-mono text-[10px] w-full" rows="3" placeholder='{"installed":{...}}'></textarea>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors" :class="googleDriveEnabled ? 'border-green-500 bg-green-50 dark:bg-green-900/10' : 'dark:border-gray-600'">
-                    <input type="checkbox" v-model="googleDriveEnabled" class="rounded text-green-600 focus:ring-green-500">
-                    <IconGoogleDrive class="w-4 h-4 text-gray-600 dark:text-gray-300" />
-                    <span class="text-xs font-bold">Drive</span>
-                </label>
-                
-                <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors" :class="googleCalendarEnabled ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/10' : 'dark:border-gray-600'">
-                    <input type="checkbox" v-model="googleCalendarEnabled" class="rounded text-blue-600 focus:ring-blue-500">
-                    <IconCalendar class="w-4 h-4 text-gray-600 dark:text-gray-300" />
-                    <span class="text-xs font-bold">Calendar</span>
-                </label>
-                
-                <label class="flex items-center gap-2 p-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-colors" :class="googleGmailEnabled ? 'border-red-500 bg-red-50 dark:bg-red-900/10' : 'dark:border-gray-600'">
-                    <input type="checkbox" v-model="googleGmailEnabled" class="rounded text-red-600 focus:ring-red-500">
-                    <!-- Use generic mail icon if Gmail icon missing, reusing generic google icon for now or text -->
-                    <span class="text-xs font-bold">Gmail</span>
-                </label>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <label class="tool-toggle" :class="{'active': googleDriveEnabled}"><input type="checkbox" v-model="googleDriveEnabled"><IconGoogleDrive class="w-4 h-4"/><span>Drive</span></label>
+                <label class="tool-toggle" :class="{'active': googleCalendarEnabled}"><input type="checkbox" v-model="googleCalendarEnabled"><IconCalendar class="w-4 h-4"/><span>Calendar</span></label>
+                <label class="tool-toggle" :class="{'active': googleGmailEnabled}"><input type="checkbox" v-model="googleGmailEnabled"><IconGoogle class="w-4 h-4"/><span>Gmail</span></label>
             </div>
         </div>
 
         <!-- Proactive Scheduler -->
-        <div class="p-4 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800/50 rounded-lg flex items-center justify-between">
-            <div class="flex-grow">
-                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Proactive Task Scheduler</h3>
-                <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to schedule tasks (CRON) like checking feeds or sending reminders.</p>
+        <div class="p-5 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-800 rounded-xl flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="p-2 bg-indigo-600 text-white rounded-lg"><IconClock class="w-5 h-5"/></div>
+                <div>
+                    <h3 class="text-sm font-bold">Task Scheduler</h3>
+                    <p class="text-xs text-gray-500">Allow AI to create automated CRON tasks.</p>
+                </div>
             </div>
-            <label class="relative inline-flex items-center cursor-pointer">
-                <input type="checkbox" v-model="schedulerEnabled" class="sr-only peer">
-                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-500"></div>
+            <label class="toggle-switch">
+                <input type="checkbox" v-model="schedulerEnabled">
+                <span class="slider"></span>
             </label>
         </div>
 
-        <!-- Herd Mode Settings -->
-        <div class="p-4 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800/50 rounded-lg space-y-4">
+        <!-- Herd Mode -->
+        <div class="p-5 bg-purple-50 dark:bg-purple-900/10 border border-purple-200 dark:border-purple-800 rounded-xl space-y-4">
             <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Herd Mode</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Advanced 4-phase workflow: Brainstorm > Draft > Critique > Final.</p>
+                <div class="flex items-center gap-3">
+                    <div class="p-2 bg-purple-600 text-white rounded-lg"><IconUserGroup class="w-5 h-5"/></div>
+                    <div>
+                        <h3 class="text-sm font-bold">Herd Mode (Multi-Agent)</h3>
+                        <p class="text-xs text-gray-500">4-Phase: Brainstorm, Draft, Critique, Final.</p>
+                    </div>
                 </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="herdModeEnabled" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-purple-300 dark:peer-focus:ring-purple-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-purple-600"></div>
+                <label class="toggle-switch">
+                    <input type="checkbox" v-model="herdModeEnabled">
+                    <span class="slider"></span>
                 </label>
             </div>
-            
-            <div v-if="herdModeEnabled" class="space-y-6 pl-2 border-l-2 border-purple-200 dark:border-purple-800">
-                
+
+            <div v-if="herdModeEnabled" class="space-y-6 pt-4 border-t border-purple-200 dark:border-purple-800 animate-in slide-in-from-top-2">
                 <div class="flex items-center gap-4">
-                    <label class="text-sm font-medium whitespace-nowrap">Iterations</label>
+                    <label class="text-xs font-bold uppercase text-gray-500">Critique Rounds</label>
                     <input type="number" v-model.number="herdRounds" min="1" max="5" class="input-field w-20 text-center">
-                    <span class="text-xs text-gray-500">Number of critique rounds.</span>
                 </div>
                 
-                <!-- Dynamic Herd Mode Toggle -->
-                <div class="p-3 bg-white dark:bg-gray-800 rounded-lg border border-purple-100 dark:border-purple-900">
-                    <div class="flex items-center justify-between mb-2">
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs font-bold uppercase text-purple-600 dark:text-purple-400">Auto-Build Crews</span>
-                            <span class="text-[10px] text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 rounded">AI Driven</span>
-                        </div>
-                        <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" v-model="herdDynamicMode" class="sr-only peer">
-                            <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-purple-500"></div>
-                        </label>
+                <div class="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700 shadow-inner">
+                    <div class="flex items-center justify-between mb-4">
+                        <span class="text-xs font-black uppercase text-purple-500">Dynamic AI-Selected Crews</span>
+                        <label class="toggle-switch-sm"><input type="checkbox" v-model="herdDynamicMode"><span class="slider-sm"></span></label>
                     </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">
-                        If enabled, the AI will dynamically create specific personalities for the Pre-code and Post-code crews based on your prompt, assigning roles to the models in your pool below.
-                    </p>
                     
-                    <!-- Dynamic Model Pool Section -->
-                    <div v-if="herdDynamicMode" class="mt-4 animate-in fade-in slide-in-from-top-2">
-                        <div class="flex justify-between items-center mb-2">
-                            <label class="text-xs font-bold text-gray-700 dark:text-gray-300">Model Pool</label>
-                            <button type="button" @click.prevent="addModelToPool" class="btn btn-secondary btn-xs flex items-center">
-                                <IconPlus class="w-3 h-3 mr-1"/> Add Model
-                            </button>
-                        </div>
-                        
-                        <div v-if="herdModelPool.length === 0" class="text-center p-4 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-xs text-gray-500 italic">
-                            No models in pool. Add models for the AI to use.
-                        </div>
-                        
-                        <div v-else class="space-y-3">
-                            <div v-for="(item, index) in herdModelPool" :key="'pool-'+index" class="flex items-start gap-2 bg-gray-50 dark:bg-gray-700/50 p-3 rounded border dark:border-gray-600">
-                                <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                    <div>
-                                        <label class="text-[10px] text-gray-500 block mb-1">Model Binding</label>
-                                        <select v-model="item.model" class="input-field text-xs w-full">
-                                            <option value="" disabled>Select Model</option>
-                                            <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label class="text-[10px] text-gray-500 block mb-1">Role/Strength Description</label>
-                                        <input type="text" v-model="item.description" class="input-field text-xs w-full" placeholder="e.g. Fast, Logic, Creative...">
-                                    </div>
-                                </div>
-                                <button type="button" @click.prevent="removeModelFromPool(index)" class="text-red-500 hover:text-red-700 p-1.5 mt-4 rounded hover:bg-red-50 dark:hover:bg-red-900/20">
-                                    <IconTrash class="w-4 h-4" />
-                                </button>
+                    <div v-if="herdDynamicMode" class="space-y-3">
+                        <div class="flex justify-between items-center"><label class="text-xs font-bold">Model Pool</label><button @click="addModelToPool" class="btn btn-secondary btn-xs"><IconPlus class="w-3 h-3 mr-1"/> Add</button></div>
+                        <div v-for="(item, index) in herdModelPool" :key="'pool-'+index" class="flex gap-2 items-start bg-gray-50 dark:bg-gray-900 p-3 rounded border dark:border-gray-700">
+                            <div class="flex-grow grid grid-cols-2 gap-2">
+                                <select v-model="item.model" class="input-field text-xs"><option v-for="m in availableLollmsModels" :key="m.id" :value="m.id">{{ m.name }}</option></select>
+                                <input type="text" v-model="item.description" class="input-field text-xs" placeholder="e.g. Creative Expert">
                             </div>
-                        </div>
-                    </div>                    
-                </div>
-
-                <!-- Static Crews (Only visible if Dynamic Mode is OFF) -->
-                <div v-if="!herdDynamicMode" class="space-y-6">
-                    <!-- Pre-code Crew -->
-                    <div>
-                        <div class="flex justify-between items-center mb-2">
-                            <label class="text-sm font-bold text-blue-600 dark:text-blue-400">Phase 1: Pre-code Crew (Idea Generation)</label>
-                            <button @click="addPrecodeParticipant" class="btn btn-secondary btn-sm flex items-center gap-1">
-                                <IconPlus class="w-4 h-4"/> Add Agent
-                            </button>
-                        </div>
-                        <div v-if="herdPrecodeParticipants.length === 0" class="text-center p-2 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-xs text-gray-500 italic">
-                            No agents selected.
-                        </div>
-                        <div v-else class="space-y-2">
-                            <div v-for="(participant, index) in herdPrecodeParticipants" :key="'pre-'+index" class="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded border dark:border-gray-700">
-                                 <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <select v-model="participant.model" class="input-field text-xs">
-                                        <option value="" disabled>Select Model</option>
-                                        <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
-                                    </select>
-                                    <select v-model="participant.personality" class="input-field text-xs">
-                                        <option value="">Default Personality</option>
-                                        <option v-for="p in allPersonalities" :key="p.name" :value="p.name">{{ p.name }}</option>
-                                    </select>
-                                 </div>
-                                 <button @click="removePrecodeParticipant(index)" class="text-red-500 hover:text-red-700 p-1">
-                                     <IconTrash class="w-4 h-4" />
-                                 </button>
-                            </div>
+                            <button @click="removeModelFromPool(index)" class="text-red-500 p-1"><IconTrash class="w-4 h-4"/></button>
                         </div>
                     </div>
 
-                    <!-- Post-code Crew -->
-                    <div>
-                        <div class="flex justify-between items-center mb-2">
-                            <label class="text-sm font-bold text-green-600 dark:text-green-400">Phase 3: Post-code Crew (Critique & Review)</label>
-                            <button @click="addPostcodeParticipant" class="btn btn-secondary btn-sm flex items-center gap-1">
-                                <IconPlus class="w-4 h-4"/> Add Agent
-                            </button>
+                    <div v-else class="space-y-6">
+                        <div>
+                            <div class="flex justify-between items-center mb-2"><label class="text-xs font-bold text-blue-500">Phase 1: Pre-code Crew</label><button @click="addPrecodeParticipant" class="btn btn-secondary btn-xs">Add Agent</button></div>
+                            <div v-for="(p, index) in herdPrecodeParticipants" :key="'pre-'+index" class="flex gap-2 mb-2">
+                                <select v-model="p.model" class="input-field text-xs flex-1"><option v-for="m in availableLollmsModels" :key="m.id" :value="m.id">{{ m.name }}</option></select>
+                                <select v-model="p.personality" class="input-field text-xs flex-1"><option v-for="pers in allPersonalities" :key="pers.name" :value="pers.name">{{ pers.name }}</option></select>
+                                <button @click="removePrecodeParticipant(index)" class="text-red-500 p-1"><IconTrash class="w-4 h-4"/></button>
+                            </div>
                         </div>
-                        <div v-if="herdPostcodeParticipants.length === 0" class="text-center p-2 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-lg text-xs text-gray-500 italic">
-                            No agents selected.
-                        </div>
-                        <div v-else class="space-y-2">
-                            <div v-for="(participant, index) in herdPostcodeParticipants" :key="'post-'+index" class="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded border dark:border-gray-700">
-                                 <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <select v-model="participant.model" class="input-field text-xs">
-                                        <option value="" disabled>Select Model</option>
-                                        <option v-for="model in availableLollmsModels" :key="model.id" :value="model.id">{{ model.name }}</option>
-                                    </select>
-                                    <select v-model="participant.personality" class="input-field text-xs">
-                                        <option value="">Default Personality</option>
-                                        <option v-for="p in allPersonalities" :key="p.name" :value="p.name">{{ p.name }}</option>
-                                    </select>
-                                 </div>
-                                 <button @click="removePostcodeParticipant(index)" class="text-red-500 hover:text-red-700 p-1">
-                                     <IconTrash class="w-4 h-4" />
-                                 </button>
+                        <div>
+                            <div class="flex justify-between items-center mb-2"><label class="text-xs font-bold text-green-500">Phase 3: Post-code Crew</label><button @click="addPostcodeParticipant" class="btn btn-secondary btn-xs">Add Agent</button></div>
+                            <div v-for="(p, index) in herdPostcodeParticipants" :key="'post-'+index" class="flex gap-2 mb-2">
+                                <select v-model="p.model" class="input-field text-xs flex-1"><option v-for="m in availableLollmsModels" :key="m.id" :value="m.id">{{ m.name }}</option></select>
+                                <select v-model="p.personality" class="input-field text-xs flex-1"><option v-for="pers in allPersonalities" :key="pers.name" :value="pers.name">{{ pers.name }}</option></select>
+                                <button @click="removePostcodeParticipant(index)" class="text-red-500 p-1"><IconTrash class="w-4 h-4"/></button>
                             </div>
                         </div>
                     </div>
                 </div>
-                
-                <div class="text-[10px] text-gray-500 italic">
-                    Note: Phase 2 (Draft) and Phase 4 (Final) are handled by the currently active "Leader" model/personality selected in the header.
-                </div>
             </div>
         </div>
 
-        <!-- Memory Settings -->
-        <div class="p-4 bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800/50 rounded-lg space-y-3">
-            <div class="flex items-center justify-between">
-                <div>
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Long-Term Memory</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Allow the AI to access and manage your memory bank.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="memoryEnabled" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-teal-600"></div>
-                </label>
-            </div>
-            
-            <div v-if="memoryEnabled" class="flex items-center justify-between pl-4 border-l-2 border-teal-300 dark:border-teal-600">
-                <div>
-                    <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-300">Auto Memory Decision</h4>
-                    <p class="text-[10px] text-gray-500 dark:text-gray-400">Let the AI automatically decide when to save new memories during conversation.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="autoMemoryEnabled" class="sr-only peer">
-                    <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-teal-600"></div>
-                </label>
-            </div>
-        </div>
-
-        <!-- Static Info Section -->
-        <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg">
-            <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Dynamic Information</h3>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="shareDynamicInfo" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
-            </div>
-            <p v-if="shareDynamicInfo" class="text-xs text-gray-500 dark:text-gray-400 mb-3">The AI will automatically know the following information. You can use these placeholders in your prompts.</p>
-            <p v-else class="text-xs text-gray-500 dark:text-gray-400 mb-3">Dynamic information is currently disabled and will not be sent to the AI.</p>
-            <div v-if="shareDynamicInfo" class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                <div v-for="info in staticInfo" :key="info.label" class="flex justify-between items-center">
-                    <span class="text-gray-800 dark:text-gray-200">{{ info.label }}:</span>
-                    <code class="px-2 py-0.5 bg-gray-200 dark:bg-gray-700 rounded text-xs">{{ info.placeholder }}</code>
-                </div>
-            </div>
-        </div>
-
-        <!-- Personal Info Section -->
-        <div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 rounded-lg">
-            <div class="flex items-center justify-between mb-3">
-                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Personal Information / Credentials</h3>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="sharePersonalInfo" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
-            </div>
-            <p class="text-xs text-gray-600 dark:text-gray-300 mb-2">
-                You can add sensitive information here (e.g., API keys, passwords, personal details) that the AI might need for specific tasks.
-            </p>
-            <div class="p-2 mb-3 bg-white dark:bg-gray-900 border border-red-200 dark:border-red-800 rounded text-xs text-red-600 dark:text-red-400 font-medium">
-                Warning: Do NOT enter passwords or sensitive credentials unless you are running a local, secure model that you trust. Information entered here will be sent to the AI model in the context.
-            </div>
-            <textarea v-model="personalInfo" class="styled-textarea" placeholder="e.g., My email password is..., API Key for Service X is..."></textarea>
-        </div>
-        
-        <!-- Toggle Sections -->
+        <!-- System & Intelligence Toggles -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex flex-col gap-3">
+            <div class="p-4 bg-teal-50 dark:bg-teal-900/10 border border-teal-200 dark:border-teal-800 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">Long-Term Memory</h3><p class="text-xs text-gray-500">Allow AI to save and load facts about you.</p></div>
+                <div class="flex items-center gap-3">
+                    <label v-if="memoryEnabled" class="flex items-center gap-2 text-[10px] font-black uppercase text-teal-600"><input type="checkbox" v-model="autoMemoryEnabled"><span>Auto</span></label>
+                    <label class="toggle-switch"><input type="checkbox" v-model="memoryEnabled"><span class="slider"></span></label>
+                </div>
+            </div>
+
+            <div class="p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-800 rounded-xl space-y-3">
                 <div class="flex items-center justify-between">
-                    <div class="flex-grow">
-                        <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Thinking Mode</h3>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI reasoning/thinking process (if supported).</p>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" v-model="reasoningActivation" class="sr-only peer">
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
+                    <div><h3 class="text-sm font-bold">Thinking Mode</h3><p class="text-xs text-gray-500">Enable deep reasoning processes.</p></div>
+                    <label class="toggle-switch"><input type="checkbox" v-model="reasoningActivation"><span class="slider"></span></label>
                 </div>
-
-                <div v-if="reasoningActivation" class="pl-4 border-l-2 border-gray-300 dark:border-gray-600 animate-in slide-in-from-top-2 fade-in">
-                    <label class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Reasoning Effort</label>
-                    <select v-model="reasoningEffort" class="input-field text-xs w-full sm:w-1/2">
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                    </select>
-                    <p class="text-[10px] text-gray-500 mt-1">Controls the depth of thought for reasoning models.</p>
-                </div>
+                <select v-if="reasoningActivation" v-model="reasoningEffort" class="input-field text-xs w-full"><option value="low">Low Effort</option><option value="medium">Medium Effort</option><option value="high">High Effort</option></select>
             </div>
 
-            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Recursive Language Model (RLM)</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable recursive context processing for large text.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="rlmEnabled" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
+            <div class="p-4 bg-gray-50 dark:bg-gray-700/20 border dark:border-gray-700 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">Fun Mode 🎉</h3><p class="text-xs text-gray-500">Add humor and emojis to AI output.</p></div>
+                <label class="toggle-switch"><input type="checkbox" v-model="funMode"><span class="slider"></span></label>
             </div>
 
-            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Fun Mode 🎉</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Ask the AI to be more humorous and witty.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="funMode" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
+            <div class="p-4 bg-gray-50 dark:bg-gray-700/20 border dark:border-gray-700 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">Tell OS</h3><p class="text-xs text-gray-500">Share your operating system name.</p></div>
+                <label class="toggle-switch"><input type="checkbox" v-model="tellOS"><span class="slider"></span></label>
+            </div>
+
+            <div class="p-4 bg-gray-50 dark:bg-gray-700/20 border dark:border-gray-700 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">RLM Mode</h3><p class="text-xs text-gray-500">Recursive context processing.</p></div>
+                <label class="toggle-switch"><input type="checkbox" v-model="rlmEnabled"><span class="slider"></span></label>
+            </div>
+
+            <div class="p-4 bg-gray-50 dark:bg-gray-700/20 border dark:border-gray-700 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">Annotation</h3><p class="text-xs text-gray-500">Allow AI to draw bounding boxes on images.</p></div>
+                <label class="toggle-switch"><input type="checkbox" v-model="imageAnnotationEnabled"><span class="slider"></span></label>
             </div>
             
-            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Image Annotation</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to annotate images with bounding boxes.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="imageAnnotationEnabled" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
+            <div class="p-4 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">Street View</h3><p class="text-xs text-gray-500">Allow AI to fetch street view images.</p></div>
+                <label class="toggle-switch"><input type="checkbox" v-model="streetViewEnabled"><span class="slider"></span></label>
             </div>
-            
-            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Note Generation</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to generate and format notes during conversation.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="noteGenerationEnabled" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
-            </div>
-
-            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Operating System</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Inform the AI about your current operating system.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="tellOS" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
-            </div>
-            
-            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Image Editing</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to edit existing images using tags like &lt;edit_image&gt;.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="imageEditingEnabled" class="sr-only peer" :disabled="!isTtiConfigured">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
-                </label>
-            </div>
-            
-            <!-- Slide Maker Toggle -->
-            <div class="p-3 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Slide Maker</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to generate slide presentations with images.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="slideMakerEnabled" class="sr-only peer" :disabled="!isTtiConfigured">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
-                </label>
-            </div>
-
-            <!-- Street View Toggle -->
-            <div class="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-lg flex items-center justify-between">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Google Street View</h3>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Enable AI to fetch street view images. Requires 'Maps Static API' enabled on your Google API Key.</p>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="streetViewEnabled" class="sr-only peer" :disabled="!googleApiKey">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-amber-300 dark:peer-focus:ring-amber-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-amber-500 peer-disabled:opacity-50"></div>
-                </label>
-            </div>
-
         </div>
-        
-        <!-- Image Generation Settings -->
-        <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg">
-            <div class="flex items-center justify-between mb-3">
-                <div class="flex-grow">
-                    <h3 class="text-sm font-semibold" :class="isTtiConfigured ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'">Image Generation</h3>
-                    <p class="text-xs" :class="isTtiConfigured ? 'text-gray-500 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'">
-                        {{ isTtiConfigured ? 'Enable AI to generate images using code blocks.' : 'Select a TTI model in settings to enable.' }}
-                    </p>
-                </div>
-                <label class="relative inline-flex items-center" :class="isTtiConfigured ? 'cursor-pointer' : 'cursor-not-allowed'">
-                    <input type="checkbox" v-model="imageGenerationEnabled" class="sr-only peer" :disabled="!isTtiConfigured">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600 peer-disabled:opacity-50"></div>
-                </label>
-            </div>
 
-            <div v-if="imageGenerationEnabled && isTtiConfigured" class="space-y-4 mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
-                <!-- System Prompt -->
-                <div>
-                    <label for="image-gen-prompt" class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200">Image Generation System Prompt</label>
-                    <textarea id="image-gen-prompt" v-model="imageGenerationSystemPrompt" class="styled-textarea" placeholder="e.g., All images should be in a photorealistic style, 4k, detailed."></textarea>
-                    <p class="text-xs text-gray-500 mt-1">This prompt will be added to every image generation request made from within a chat message.</p>
-                </div>
-
-                <!-- Auto Activate Setting -->
+        <!-- Language and Dynamic Info -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div class="space-y-4">
                 <div class="flex items-center justify-between">
-                    <div class="flex-grow pr-4">
-                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Auto-Activate Generated Images</h4>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">If enabled, images generated by the AI will be automatically added to the conversation context for future turns.</p>
+                    <h3 class="text-sm font-bold">Force Response Language</h3>
+                    <label class="toggle-switch-sm"><input type="checkbox" v-model="forceAiResponseLanguage"><span class="slider-sm"></span></label>
+                </div>
+                <LanguageSelector v-model="aiResponseLanguage" :include-auto="true" :disabled="!forceAiResponseLanguage" />
+            </div>
+            
+            <div class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-bold">Dynamic Placeholders</h3>
+                    <label class="toggle-switch-sm"><input type="checkbox" v-model="shareDynamicInfo"><span class="slider-sm"></span></label>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                    <div v-for="info in staticInfo" :key="info.label" class="p-2 bg-gray-50 dark:bg-gray-900 rounded border dark:border-gray-700 text-[10px] flex justify-between items-center">
+                        <span class="text-gray-500">{{ info.label }}</span>
+                        <code class="text-blue-500 font-bold">{{ info.placeholder }}</code>
                     </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" v-model="activateGeneratedImages" class="sr-only peer">
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
                 </div>
             </div>
         </div>
 
-        <!-- Image Resizing Settings -->
-        <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg">
-            <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200 mb-2">Image Upload Resizing</h3>
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                Automatically resize images sent to the AI if they exceed these dimensions. Set to -1 to disable resizing.
-            </p>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                    <label for="max-image-width" class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Max Width (px)</label>
-                    <input type="number" id="max-image-width" v-model.number="maxImageWidth" class="input-field w-full" placeholder="-1">
-                </div>
-                <div>
-                    <label for="max-image-height" class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Max Height (px)</label>
-                    <input type="number" id="max-image-height" v-model.number="maxImageHeight" class="input-field w-full" placeholder="-1">
+        <!-- Personal Info & Credentials -->
+        <div class="section-card bg-amber-50 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-sm font-bold text-amber-800 dark:text-amber-200">Personal Info & Credentials</h3>
+                <label class="toggle-switch-sm"><input type="checkbox" v-model="sharePersonalInfo"><span class="slider-sm"></span></label>
+            </div>
+            <textarea v-model="personalInfo" class="input-field w-full h-24" placeholder="Store keys or personal details here..."></textarea>
+            <p class="text-[10px] text-amber-700 dark:text-amber-400 mt-2 italic">⚠️ Warning: Information here is sent in the context. Only use with trusted local models.</p>
+        </div>
+
+        <!-- Media Generation Features -->
+        <div class="p-6 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl space-y-6">
+            <div class="flex items-center justify-between">
+                <h3 class="font-black uppercase tracking-widest text-gray-400">Media & Document Creation</h3>
+                <div class="flex gap-2">
+                    <label class="feature-tag" :class="{'active': imageGenerationEnabled}"><input type="checkbox" v-model="imageGenerationEnabled"><span>ImgGen</span></label>
+                    <label class="feature-tag" :class="{'active': imageEditingEnabled}"><input type="checkbox" v-model="imageEditingEnabled"><span>ImgEdit</span></label>
+                    <label class="feature-tag" :class="{'active': slideMakerEnabled}"><input type="checkbox" v-model="slideMakerEnabled"><span>Slides</span></label>
+                    <label class="feature-tag" :class="{'active': noteGenerationEnabled}"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
                 </div>
             </div>
 
-             <!-- Compression Settings -->
-             <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-600">
-                <div class="flex items-center justify-between mb-3">
-                    <div class="flex-grow pr-4">
-                        <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-200">Compress Images</h4>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">Convert uploads to JPEG to reduce size (helps avoid API limits). Defaults to PNG if disabled.</p>
-                    </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" v-model="compressImages" class="sr-only peer">
-                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                    </label>
+            <div v-if="imageGenerationEnabled" class="space-y-4 animate-in zoom-in-95">
+                <div>
+                    <label class="text-xs font-bold mb-2 block">Generation System Prompt</label>
+                    <textarea v-model="imageGenerationSystemPrompt" class="input-field w-full h-20" placeholder="e.g. High quality, 4k, cinematic..."></textarea>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-medium">Auto-activate generated images in context</span>
+                    <label class="toggle-switch-sm"><input type="checkbox" v-model="activateGeneratedImages"><span class="slider-sm"></span></label>
                 </div>
                 
-                <div v-if="compressImages">
-                    <label for="compression-quality" class="block text-xs font-semibold mb-1 text-gray-600 dark:text-gray-300">Quality ({{ imageCompressionQuality }})</label>
-                    <input type="range" id="compression-quality" v-model.number="imageCompressionQuality" min="10" max="100" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div><label class="text-[10px] font-bold uppercase text-gray-500">Max Width (px)</label><input type="number" v-model.number="maxImageWidth" class="input-field w-full"></div>
+                    <div><label class="text-[10px] font-bold uppercase text-gray-500">Max Height (px)</label><input type="number" v-model.number="maxImageHeight" class="input-field w-full"></div>
+                </div>
+
+                <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-lg">
+                    <div class="flex items-center gap-3">
+                        <label class="flex items-center gap-2 text-xs font-bold"><input type="checkbox" v-model="compressImages"><span>Compress Uploads (JPEG)</span></label>
+                    </div>
+                    <div v-if="compressImages" class="flex items-center gap-2">
+                        <span class="text-[10px] font-bold text-gray-400">Quality: {{ imageCompressionQuality }}</span>
+                        <input type="range" v-model.number="imageCompressionQuality" min="10" max="100" class="w-24">
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- AI Language Setting -->
-        <div class="p-4 bg-gray-50 dark:bg-gray-700/50 border dark:border-gray-600 rounded-lg">
-            <div class="flex items-center justify-between mb-2">
-                <h3 class="text-sm font-semibold text-gray-700 dark:text-gray-200">AI Response Language</h3>
-                <label class="relative inline-flex items-center cursor-pointer">
-                    <input type="checkbox" v-model="forceAiResponseLanguage" class="sr-only peer">
-                    <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                </label>
-            </div>
-            <LanguageSelector v-model="aiResponseLanguage" id="aiResponseLanguage" :include-auto="true" :disabled="!forceAiResponseLanguage" />
-            <p v-if="forceAiResponseLanguage" class="mt-2 text-xs text-gray-500 dark:text-gray-400">Force the AI to respond in a specific language. 'Auto' will match the user's prompt language.</p>
-            <p v-else class="mt-2 text-xs text-gray-500 dark:text-gray-400">Language enforcement is disabled. The AI will respond based on its training and personality.</p>
-        </div>
-
-        <!-- Text Areas for Preferences -->
+        <!-- Formatting & Preferences -->
         <div class="space-y-4">
-            <div>
-                <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200">Coding Style Constraints</label>
-                <textarea v-model="codingStyle" class="styled-textarea" placeholder="e.g., Always follow PEP8 for Python code. Use pathlib instead of os.path."></textarea>
-            </div>
-            <div>
-                <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200">Programming Language & Library Preferences</label>
-                <textarea v-model="langPrefs" class="styled-textarea" placeholder="e.g., I prefer solutions in Python 3.10+. For web development, use Vue.js with Tailwind CSS."></textarea>
-            </div>
-            <div>
-                <label class="block text-sm font-semibold mb-2 text-gray-700 dark:text-gray-200">General Info / Notes</label>
-                <textarea v-model="generalInfo" class="styled-textarea" placeholder="Add any other information about yourself or general instructions for the AI."></textarea>
-            </div>
+            <div><label class="block text-sm font-bold mb-2">Coding Style Constraints</label><textarea v-model="codingStyle" class="input-field w-full h-24" placeholder="e.g. Use PEP8 for Python, Functional style for JS..."></textarea></div>
+            <div><label class="block text-sm font-bold mb-2">Language & Library Preferences</label><textarea v-model="langPrefs" class="input-field w-full h-24" placeholder="e.g. I prefer Tailwind CSS over Bootstrap..."></textarea></div>
+            <div><label class="block text-sm font-bold mb-2">General Info / Extra Rules</label><textarea v-model="generalInfo" class="input-field w-full h-32" placeholder="Shared rules for all your conversations..."></textarea></div>
         </div>
     </div>
     
-    <div class="px-4 py-3 bg-gray-50 dark:bg-gray-700/50 text-right sm:px-6 rounded-b-lg border-t border-gray-200 dark:border-gray-700">
+    <div class="px-4 py-4 bg-gray-50 dark:bg-gray-700/30 text-right rounded-b-lg border-t dark:border-gray-700">
         <button @click="handleSaveChanges" class="btn btn-primary" :disabled="!hasChanges || isSaving">
-            {{ isSaving ? 'Saving...' : 'Save Context Settings' }}
+            <IconAnimateSpin v-if="isSaving" class="w-4 h-4 mr-2 animate-spin" />
+            {{ isSaving ? 'Saving Changes...' : 'Save Context Settings' }}
         </button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.styled-textarea {
-    @apply w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-900 focus:ring-blue-500 focus:border-blue-500 transition text-sm min-h-[100px] resize-y;
-}
+.section-card { @apply p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm; }
+.toggle-switch { @apply relative inline-flex items-center cursor-pointer; }
+.toggle-switch input { @apply sr-only; }
+.toggle-switch .slider { @apply w-11 h-6 bg-gray-200 dark:bg-gray-700 rounded-full transition-colors; }
+.toggle-switch input:checked + .slider { @apply bg-blue-600; }
+.toggle-switch .slider:after { @apply content-[''] absolute top-[2px] left-[2px] bg-white border-gray-300 border rounded-full h-5 w-5 transition-all; }
+.toggle-switch input:checked + .slider:after { @apply translate-x-full; }
+
+.toggle-switch-sm { @apply relative inline-flex items-center cursor-pointer; }
+.toggle-switch-sm input { @apply sr-only; }
+.toggle-switch-sm .slider-sm { @apply w-8 h-4 bg-gray-200 dark:bg-gray-700 rounded-full transition-colors; }
+.toggle-switch-sm input:checked + .slider-sm { @apply bg-blue-600; }
+.toggle-switch-sm .slider-sm:after { @apply content-[''] absolute top-[2px] left-[2px] bg-white rounded-full h-3 w-3 transition-all; }
+.toggle-switch-sm input:checked + .slider-sm:after { @apply translate-x-4; }
+
+.tool-toggle { @apply flex items-center gap-2 p-2 border rounded-lg cursor-pointer transition-all border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-800; }
+.tool-toggle.active { @apply border-blue-500 bg-blue-500/10 text-blue-600; }
+.tool-toggle input { @apply sr-only; }
+
+.feature-tag { @apply flex items-center gap-2 px-3 py-1.5 border rounded-full text-[10px] font-black uppercase tracking-widest cursor-pointer transition-all opacity-40 border-gray-300 dark:border-gray-600; }
+.feature-tag.active { @apply opacity-100 border-blue-500 text-blue-600 bg-blue-500/5; }
+.feature-tag input { @apply sr-only; }
+
+.menu-item { @apply flex items-center w-full px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left; }
+.menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
 </style>

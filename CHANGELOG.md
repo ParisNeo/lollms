@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-06 01:58]
+
+- feat(settings): add user context settings component and rebuild frontend
+
 ## [2026-02-04 01:53]
 
 - feat(notebooks): add RLM flag support and enhance recursive processing
