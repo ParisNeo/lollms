@@ -39,6 +39,7 @@ const handleReset = async () => {
     
     try {
         await apiClient.post(`/api/admin/users/${user.value.id}/reset-password`, {
+            user_id: user.value.id,
             new_password: newPassword.value
         });
         uiStore.addNotification(`Password for ${user.value.username} has been reset.`, 'success');

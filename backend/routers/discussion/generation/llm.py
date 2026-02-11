@@ -18,7 +18,7 @@ import platform
 import time
 import requests
 from concurrent.futures import ThreadPoolExecutor
-
+from safe_store import SafeStore
 # Third-Party Imports
 import fitz  # PyMuPDF
 from PIL import Image # Needed for image resizing
@@ -86,6 +86,166 @@ executor = ThreadPoolExecutor(max_workers=50)
 
 
 import pipmaster as pm
+
+
+# Helper functions
+def build_rag_tool(
+    safe_store_instance,       # The safe store instance
+    owner_db_user,             # User with RAG settings
+    current_user               # Fallback user for default settings
+):
+    """
+    Builds a RAG tool for the chat() function.
+    
+    Args:
+        safe_store_instance: The initialized semantic search/RAG instance
+        owner_db_user: User object containing rag_top_k and rag_min_sim_percent
+        current_user: Fallback user for default RAG settings
+    
+    Returns:
+        Dict tool definition compatible with the chat() tools parameter
+    """
+    
+    def query_rag_callback(query: str, ss, rag_top_k=None, rag_min_similarity_percent=None) -> list:
+        if not ss:
+            return []
+        try:
+            # Apply defaults from users if not provided
+            if rag_top_k is None:
+                rag_top_k = owner_db_user.rag_top_k if owner_db_user.rag_top_k is not None else \
+                           (current_user.rag_top_k if current_user.rag_top_k is not None else 5)
+            if rag_min_similarity_percent is None:
+                rag_min_similarity_percent = owner_db_user.rag_min_sim_percent if owner_db_user.rag_min_sim_percent is not None else \
+                                            (current_user.rag_min_sim_percent if current_user.rag_min_sim_percent is not None else 50)
+            
+            retrieved_chunks = ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
+            revamped_chunks = []
+            
+            for entry in retrieved_chunks:
+                revamped_entry = {
+                    "metadata": entry.get('document_metadata', {}),
+                    "title": Path(entry.get("file_path", "unknown")).name,
+                    "content": entry.get("chunk_text", ""),
+                    "score": float(entry.get("similarity_percent", 0))
+                }
+                revamped_chunks.append(revamped_entry)
+            
+            return revamped_chunks
+            
+        except Exception as e:
+            trace_exception(e)
+            return [{"error": f"Error during RAG query: {e}"}]
+    
+    # Build the tool definition
+    rag_tool = {
+        "name": safe_store_instance.name,
+        "description": (
+            "Search the knowledge base for relevant documents and information. "
+            "Use this tool when you need to retrieve factual information, "
+            "documentation, or context from stored documents. "
+            "The tool performs semantic search to find the most relevant chunks "
+            "based on meaning, not just keyword matching."
+        ),
+        "parameters": [
+            {
+                "name": "query",
+                "type": "str",
+                "description": (
+                    "The search query. Frame this as a clear question or topic "
+                    "you want information about. Be specific for better results."
+                ),
+                "optional": False
+            },
+            {
+                "name": "rag_top_k",
+                "type": "int",
+                "description": (
+                    "Maximum number of document chunks to retrieve (1-20). "
+                    "Higher values give more context but may include less relevant results."
+                ),
+                "optional": True,
+                "default": owner_db_user.rag_top_k if owner_db_user.rag_top_k is not None else 5
+            },
+            {
+                "name": "rag_min_similarity_percent",
+                "type": "float",
+                "description": (
+                    "Minimum similarity threshold (0-100). Higher values return "
+                    "only highly relevant results. Lower values include more matches."
+                ),
+                "optional": True,
+                "default": owner_db_user.rag_min_sim_percent if owner_db_user.rag_min_sim_percent is not None else 50.0
+            }
+        ],
+        "output": [
+            {
+                "name": "results",
+                "type": "list",
+                "description": (
+                    "List of retrieved document chunks, each containing: "
+                    "metadata (document info), title (filename), "
+                    "content (text chunk), and score (relevance percentage)"
+                )
+            },
+            {
+                "name": "sources",
+                "type": "list",
+                "description": "List of source document titles used for attribution"
+            },
+            {
+                "name": "success",
+                "type": "bool",
+                "description": "Whether the search completed successfully"
+            },
+            {
+                "name": "count",
+                "type": "int",
+                "description": "Number of results retrieved"
+            }
+        ],
+        "callable": lambda query, rag_top_k=None, rag_min_similarity_percent=None: _wrap_rag_call(
+            query, rag_top_k, rag_min_similarity_percent, 
+            safe_store_instance, query_rag_callback
+        )
+    }
+    
+    return rag_tool
+
+def _wrap_rag_call(query, rag_top_k, rag_min_similarity_percent, ss, callback):
+    """
+    Wrapper to adapt the callback signature and format outputs consistently.
+    """
+    from pathlib import Path  # Ensure Path is available
+    
+    # Call the original callback
+    raw_results = callback(query, ss, rag_top_k, rag_min_similarity_percent)
+    
+    # Check for error
+    if raw_results and len(raw_results) == 1 and "error" in raw_results[0]:
+        return {
+            "results": [],
+            "sources": [],
+            "success": False,
+            "count": 0,
+            "error": raw_results[0]["error"]
+        }
+    
+    # Extract sources for attribution
+    sources = [
+        {
+            "source": r["title"],
+            "content": r["content"],
+            "score": r["score"],
+            "metadata": r["metadata"]
+        }
+        for r in raw_results
+    ]
+    return {
+        "results": raw_results,
+        "sources": sources,
+        "success": True,
+        "count": len(raw_results)
+    }
 
 
 def _sanitize_b64(data: str) -> str:
@@ -1023,28 +1183,17 @@ def build_llm_generation_router(router: APIRouter):
             return StreamingResponse(error_stream(), media_type="application/x-ndjson")
 
         # 3. Setup RAG Callback
-        def query_rag_callback(query: str, ss, rag_top_k=None, rag_min_similarity_percent=None) -> List[Dict]:
-            if not ss: return []
-            try:
-                if rag_top_k is None:
-                    rag_top_k = current_user.rag_top_k if current_user.rag_top_k is not None else 5
-                if rag_min_similarity_percent is None:
-                    rag_min_similarity_percent = current_user.rag_min_sim_percent if current_user.rag_min_sim_percent is not None else 50
-                retrieved_chunks = ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
-                revamped_chunks=[]
-                for entry in retrieved_chunks:
-                    revamped_entry = {
-                        "metadata": entry.get('document_metadata', {}),
-                        "title": Path(entry.get("file_path", "unknown")).name,
-                        "content": entry.get("chunk_text", ""),
-                        "score": float(entry.get("similarity_percent", 0))
-                    }
-                    revamped_chunks.append(revamped_entry)
-                return revamped_chunks
-            except Exception as e:
-                trace_exception(e)
-                return [{"error": f"Error during RAG query: {e}"}]
-        
+        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
+        rag_tools = {}
+        for ds_id in rag_datastore_ids:
+            ss = get_safe_store_instance(owner_username, ds_id, db)
+            if not ss:
+                continue
+            rag_tools[ss.name]=build_rag_tool(
+                                    safe_store_instance=ss,  # Your SS (semantic search) instance
+                                    owner_db_user=owner_db_user,             # User with RAG settings
+                                    current_user=current_user               # Fallback user for default settings
+                                )
         # 4. Construct Context (Memory + Dynamic Preamble)
         memory_content = ""
         memory_instructions = ""
@@ -1126,9 +1275,7 @@ def build_llm_generation_router(router: APIRouter):
                     print(f"Warning: Could not load personality datastore {db_pers.data_source}: {e}")
                     personality_data_source = None
         
-        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
-        use_rag = {ss.name: {"name": ss.name, "description": ss.description, "callable": partial(query_rag_callback, ss=ss)} 
-                   for ds_id in rag_datastore_ids if (ss := get_safe_store_instance(owner_username, ds_id, db))}
+
 
         # 5. Build Dynamic Preamble
         preamble_parts = []
@@ -1292,12 +1439,13 @@ def build_llm_generation_router(router: APIRouter):
 
                     # Core Generation
                     result = discussion_obj.chat(
-                        branch_tip_id=parent_message_id if is_resend else None,
                         user_message=final_prompt, personality=active_personality,
-                        use_mcps=combined_mcps, use_data_store=use_rag, images=images_for_message,
+                        branch_tip_id=parent_message_id if is_resend else None,
+                        
+                        images=images_for_message,
                         streaming_callback=llm_callback, think=owner_db_user.reasoning_activation,
                         reasoning_effort=owner_db_user.reasoning_effort, add_user_message=not is_resend,
-                        use_rlm=owner_db_user.rlm_enabled,
+                        tools=rag_tools
 
                     )
                     
