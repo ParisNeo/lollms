@@ -79,7 +79,7 @@ pyyaml==6.0.3
 filelock==3.19.1
 packaging==25.0
 jsonschema==4.25.1
-ScrapeMaster==0.6.0
+ScrapeMaster==0.8.0
 apscheduler==3.11.1
 feedparser==6.0.10
 
