@@ -58,8 +58,9 @@ These endpoints provide access to features unique to the LoLLMs architecture tha
 
 ### 🎙️ Text-to-Speech (TTS)
 *   **`POST /lollms/v1/audio/speech`**: Generates audio from text using the configured TTS engine. Compatible with OpenAI's `/audio/speech` endpoint.
-    *   *Payload:* `{"input": "Hello, this is a test", "voice": "alloy", "model": "binding/model", "response_format": "mp3", "speed": 1.0}`
+    *   *Payload:* `{"input": "Hello, this is a test", "voice": "alloy", "model": "binding/model", "response_format": "mp3", "speed": 1.0, "language": "en"}`
     *   *Response:* Raw audio bytes (content-type depends on `response_format`)
+    *   *Notes:* The `language` parameter is optional and defaults to `"en"` (English). Supported language codes depend on the TTS binding being used.
 *   **`GET /lollms/v1/audio/voices`**: Lists all available voices including user custom voices, binding voices, and OpenAI-compatible aliases (alloy, echo, fable, onyx, nova, shimmer).
 
 ### 📄 Long Context Processing

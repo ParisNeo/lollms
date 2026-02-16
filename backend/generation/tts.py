@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import APIRouter, Depends, HTTPException, Body, Response
 from sqlalchemy.orm import Session
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from pathlib import Path
 import re
 
@@ -21,6 +21,7 @@ class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None
     model: Optional[str] = None # For bindings that support multiple models
+    language: Optional[str] = Field(default="en", description="The language code for the text (e.g., 'en', 'fr', 'de')")
 
 def _clean_text_for_tts(text: str) -> str:
     if not text: return ""

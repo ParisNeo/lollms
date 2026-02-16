@@ -1,4 +1,5 @@
 # backend/routers/services/lollms_v1.py
+from pathlib import Path
 import time
 import datetime
 import json
@@ -102,6 +103,7 @@ class TTSRequest(BaseModel):
     model: Optional[str] = Field(default=None, description="The TTS model to use (format: 'binding_alias/model_name' or just model name)")
     response_format: Optional[str] = Field(default="mp3", description="The format of the audio output (mp3, opus, aac, flac, wav, pcm)")
     speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="The speed of the generated audio")
+    language: Optional[str] = None
 
 class VoiceInfo(BaseModel):
     voice_id: str
@@ -370,7 +372,7 @@ async def create_speech(
 
         # Resolve voice
         voice_to_use = request.voice
-        language_to_use = None
+        language_to_use = request.language
         temp_audio_path = None
         
         # Priority 1: Check for inline audio_sample (base64)
@@ -401,7 +403,6 @@ async def create_speech(
                     voice_file_path = user_voices_path / custom_voice.file_path
                     if voice_file_path.exists():
                         voice_to_use = str(voice_file_path.resolve())
-                        language_to_use = custom_voice.language
                     else:
                         raise HTTPException(status_code=404, detail=f"Custom voice file not found: {custom_voice.file_path}")
             
@@ -428,7 +429,7 @@ async def create_speech(
                     text=cleaned_text,
                     voice=voice_to_use,
                     model=tts_model_name,
-                    language=language_to_use,
+                    language=language_to_use or "en",
                     speed=request.speed
                 )
 
