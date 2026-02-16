@@ -8,7 +8,7 @@ import asyncio
 from typing import List, Optional, Dict, Any, Union
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -20,8 +20,10 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding, RAGBinding as DBRAGBinding
+from backend.db.models.datastore import DataStore as DBDataStore
+from backend.db.models.voice import UserVoice as DBUserVoice
 from backend.security import verify_api_key
-from backend.session import user_sessions, build_lollms_client_from_params, get_safe_store_instance
+from backend.session import user_sessions, build_lollms_client_from_params, get_safe_store_instance, get_user_data_root
 from backend.settings import settings
 from backend.utils import track_service_usage, check_rate_limit
 from backend.routers.services.openai_v1 import (
@@ -91,6 +93,47 @@ class ImageEditRequest(BaseModel):
 class CapabilitiesResponse(BaseModel):
     capabilities: List[str]
     active_bindings: Dict[str, List[str]]
+
+# --- NEW: TTS Models ---
+class TTSRequest(BaseModel):
+    input: str = Field(..., description="The text to generate audio for.")
+    voice: Optional[str] = Field(default=None, description="The voice to use (binding voice name, 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', a user custom voice ID, or a path to a voice file)")
+    audio_sample: Optional[str] = Field(default=None, description="Optional base64-encoded audio sample to use as the voice (e.g., a short voice recording for instant voice cloning). If provided, this takes precedence over 'voice'.")
+    model: Optional[str] = Field(default=None, description="The TTS model to use (format: 'binding_alias/model_name' or just model name)")
+    response_format: Optional[str] = Field(default="mp3", description="The format of the audio output (mp3, opus, aac, flac, wav, pcm)")
+    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="The speed of the generated audio")
+
+class VoiceInfo(BaseModel):
+    voice_id: str
+    name: str
+    category: Optional[str] = None  # 'system', 'user_custom', 'binding'
+    language: Optional[str] = None
+    description: Optional[str] = None
+    preview_url: Optional[str] = None
+
+class VoicesListResponse(BaseModel):
+    object: str = "list"
+    data: List[VoiceInfo]
+
+# --- NEW: RAG Database Models ---
+class RagDatabaseInfo(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    vectorizer: Optional[str] = None
+    vectorizer_index: Optional[str] = None
+    binding_used: Optional[str] = None
+    created_at: Optional[datetime.datetime] = None
+    updated_at: Optional[datetime.datetime] = None
+    is_public: bool = False
+    owner_username: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class RagDatabaseListResponse(BaseModel):
+    object: str = "list"
+    data: List[RagDatabaseInfo]
 
 # --- Endpoints ---
 
@@ -193,6 +236,48 @@ async def process_long_context(request: LongContextRequest, user: DBUser = Depen
 
     return await loop.run_in_executor(executor, _process)
 
+@lollms_v1_router.get("/rag/databases", response_model=RagDatabaseListResponse)
+async def list_rag_databases(
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Lists all RAG databases (datastores) available to the current user.
+    Includes user's own datastores and public datastores.
+    """
+    loop = asyncio.get_running_loop()
+    
+    def _fetch_databases():
+        # Query datastores that belong to user or are public
+        datastores = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(
+            or_(
+                DBDataStore.owner_user_id == user.id,
+                DBDataStore.is_public == True
+            )
+        ).order_by(DBDataStore.name).all()
+        
+        response_data = []
+        for ds in datastores:
+            owner_username = ds.owner.username if ds.owner else None
+            
+            info = RagDatabaseInfo(
+                id=str(ds.id),
+                name=ds.name,
+                description=ds.description,
+                vectorizer=ds.vectorizer,
+                vectorizer_index=ds.vectorizer_index,
+                binding_used=ds.binding_used,
+                created_at=ds.created_at,
+                updated_at=ds.updated_at,
+                is_public=ds.is_public,
+                owner_username=owner_username
+            )
+            response_data.append(info)
+        
+        return RagDatabaseListResponse(data=response_data)
+
+    return await loop.run_in_executor(executor, _fetch_databases)
+
 @lollms_v1_router.post("/rag/query")
 async def query_user_datastore(request: RagQueryRequest, user: DBUser = Depends(get_user_for_lollms_service), db: Session = Depends(get_db)):
     loop = asyncio.get_running_loop()
@@ -228,3 +313,240 @@ async def edit_image_lollms(request: ImageEditRequest, user: DBUser = Depends(ge
             raise HTTPException(status_code=500, detail=str(e))
 
     return await loop.run_in_executor(executor, _edit)
+
+# --- NEW: TTS Endpoints ---
+
+@lollms_v1_router.post("/audio/speech")
+async def create_speech(
+    request: TTSRequest,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Generates text-to-speech audio from the input text.
+    Compatible with OpenAI's /audio/speech endpoint.
+    """
+    loop = asyncio.get_running_loop()
+    
+    # Determine model to use
+    tts_binding_alias = None
+    tts_model_name = None
+    
+    if request.model:
+        if '/' in request.model:
+            tts_binding_alias, tts_model_name = request.model.split('/', 1)
+        else:
+            # Just model name, use default binding
+            default_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
+            if default_binding:
+                tts_binding_alias = default_binding.alias
+                tts_model_name = request.model
+    else:
+        # Use user's default
+        user_tts_model = user.tts_binding_model_name
+        if user_tts_model and '/' in user_tts_model:
+            tts_binding_alias, tts_model_name = user_tts_model.split('/', 1)
+        else:
+            default_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
+            if not default_binding:
+                raise HTTPException(status_code=400, detail="No TTS model specified and no default TTS binding configured.")
+            tts_binding_alias = default_binding.alias
+            tts_model_name = user_tts_model or default_binding.default_model_name
+
+    try:
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                load_llm=False,
+                load_tts=True,
+                tts_binding_alias=tts_binding_alias,
+                tts_model_name=tts_model_name
+            )
+        )
+        
+        if not hasattr(lc, 'tts') or not lc.tts:
+            raise HTTPException(status_code=500, detail=f"TTS functionality is not available for binding '{tts_binding_alias}'.")
+
+        # Resolve voice
+        voice_to_use = request.voice
+        language_to_use = None
+        temp_audio_path = None
+        
+        # Priority 1: Check for inline audio_sample (base64)
+        if request.audio_sample:
+            try:
+                import uuid
+                import tempfile
+                audio_bytes = base64.b64decode(request.audio_sample)
+                # Create temp file with appropriate extension based on content or default to wav
+                temp_dir = Path(tempfile.gettempdir()) / "lollms_tts_samples"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                temp_audio_path = temp_dir / f"{user.username}_{uuid.uuid4().hex[:8]}.wav"
+                with open(temp_audio_path, "wb") as f:
+                    f.write(audio_bytes)
+                voice_to_use = str(temp_audio_path.resolve())
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid audio_sample: {str(e)}")
+        
+        # Priority 2: Check if it's a user custom voice ID (only if no audio_sample)
+        if not voice_to_use:
+            if request.voice:
+                custom_voice = db.query(DBUserVoice).filter(
+                    DBUserVoice.id == request.voice,
+                    DBUserVoice.owner_user_id == user.id
+                ).first()
+                if custom_voice:
+                    user_voices_path = get_user_data_root(user.username) / "voices"
+                    voice_file_path = user_voices_path / custom_voice.file_path
+                    if voice_file_path.exists():
+                        voice_to_use = str(voice_file_path.resolve())
+                        language_to_use = custom_voice.language
+                    else:
+                        raise HTTPException(status_code=404, detail=f"Custom voice file not found: {custom_voice.file_path}")
+            
+            # If no voice specified, check for active voice
+            if not voice_to_use and user.active_voice_id:
+                active_voice = db.query(DBUserVoice).filter(DBUserVoice.id == user.active_voice_id).first()
+                if active_voice:
+                    user_voices_path = get_user_data_root(user.username) / "voices"
+                    voice_file_path = user_voices_path / active_voice.file_path
+                    if voice_file_path.exists():
+                        voice_to_use = str(voice_file_path.resolve())
+                        language_to_use = active_voice.language
+
+        # Clean text for TTS (remove markdown, emojis, etc.)
+        import re
+        cleaned_text = request.input
+        cleaned_text = re.sub(r'[*#]', '', cleaned_text)  # Remove markdown bold/italic/headers
+        cleaned_text = re.sub(r'[\U00010000-\U0010ffff]', '', cleaned_text)  # Remove emojis
+
+        try:
+            # Generate audio
+            def _generate():
+                return lc.tts.generate_audio(
+                    text=cleaned_text,
+                    voice=voice_to_use,
+                    model=tts_model_name,
+                    language=language_to_use,
+                    speed=request.speed
+                )
+
+            audio_bytes = await loop.run_in_executor(executor, _generate)
+
+        finally:
+            # Clean up temporary audio sample file if we created one
+            if temp_audio_path and temp_audio_path.exists():
+                try:
+                    temp_audio_path.unlink()
+                except Exception:
+                    pass  # Best effort cleanup
+
+        # Map response format to content type
+        format_to_mime = {
+            "mp3": "audio/mpeg",
+            "opus": "audio/opus",
+            "aac": "audio/aac",
+            "flac": "audio/flac",
+            "wav": "audio/wav",
+            "pcm": "audio/pcm"
+        }
+        content_type = format_to_mime.get(request.response_format, "audio/mpeg")
+
+        return Response(
+            content=audio_bytes,
+            media_type=content_type,
+            headers={"Content-Disposition": f"attachment; filename=speech.{request.response_format}"}
+        )
+
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        from ascii_colors import trace_exception
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
+
+@lollms_v1_router.get("/audio/voices", response_model=VoicesListResponse)
+async def list_voices(
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Lists all available voices for the user, including:
+    - System/binding provided voices
+    - User's custom cloned voices
+    """
+    loop = asyncio.get_running_loop()
+    
+    def _fetch_voices():
+        voices = []
+        
+        # Get user's custom voices
+        user_voices = db.query(DBUserVoice).filter(DBUserVoice.owner_user_id == user.id).all()
+        for uv in user_voices:
+            voices.append(VoiceInfo(
+                voice_id=str(uv.id),
+                name=uv.alias or uv.name or "Custom Voice",
+                category="user_custom",
+                language=uv.language,
+                description=f"User custom voice created on {uv.created_at.isoformat() if uv.created_at else 'unknown'}"
+            ))
+        
+        # Try to get binding voices if TTS is configured
+        try:
+            user_tts_model = user.tts_binding_model_name
+            tts_binding_alias = None
+            tts_model_name = None
+            
+            if user_tts_model and '/' in user_tts_model:
+                tts_binding_alias, tts_model_name = user_tts_model.split('/', 1)
+            else:
+                default_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).first()
+                if default_binding:
+                    tts_binding_alias = default_binding.alias
+            
+            if tts_binding_alias:
+                lc = build_lollms_client_from_params(
+                    user.username,
+                    load_llm=False,
+                    load_tts=True,
+                    tts_binding_alias=tts_binding_alias,
+                    tts_model_name=tts_model_name
+                )
+                if hasattr(lc, 'tts') and lc.tts and hasattr(lc.tts, 'list_voices'):
+                    binding_voices = lc.tts.list_voices()
+                    if isinstance(binding_voices, list):
+                        for bv in binding_voices:
+                            if isinstance(bv, dict):
+                                voices.append(VoiceInfo(
+                                    voice_id=bv.get('voice_id') or bv.get('id') or bv.get('name'),
+                                    name=bv.get('name') or bv.get('voice_id') or "Unknown",
+                                    category="binding",
+                                    language=bv.get('language') or bv.get('locale'),
+                                    description=bv.get('description') or bv.get('gender') or "Binding voice"
+                                ))
+                            elif isinstance(bv, str):
+                                voices.append(VoiceInfo(
+                                    voice_id=bv,
+                                    name=bv,
+                                    category="binding"
+                                ))
+        except Exception as e:
+            # Non-fatal: binding voices are optional
+            print(f"Could not fetch binding voices: {e}")
+        
+        # Add OpenAI-compatible aliases if not already present
+        openai_aliases = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+        existing_ids = {v.voice_id for v in voices}
+        for alias in openai_aliases:
+            if alias not in existing_ids:
+                voices.append(VoiceInfo(
+                    voice_id=alias,
+                    name=alias.capitalize(),
+                    category="system",
+                    description=f"OpenAI-compatible alias for {alias}"
+                ))
+        
+        return VoicesListResponse(data=voices)
+
+    return await loop.run_in_executor(executor, _fetch_voices)

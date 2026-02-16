@@ -7,6 +7,9 @@ import subprocess
 import sys
 from multiprocessing import cpu_count, Lock, set_start_method
 from urllib.parse import urlparse
+import pipmaster as pm
+pm.ensure_packages("ascii_colors",">=0.11.10")
+
 from ascii_colors import ASCIIColors, trace_exception
 import asyncio
 import time
@@ -740,19 +743,19 @@ if __name__ == "__main__":
             print(f"WARNING: HTTPS config error: {e}. Server will start without HTTPS.")
 
     print("")
-    ASCIIColors.cyan(f"--- LoLLMs Plateform (v{APP_VERSION}) ---")
+    content = ""
     protocol = "https" if ssl_params else "http"
 
     if host_setting == "0.0.0.0":
         from backend.utils import get_accessible_host
         accessible_host = get_accessible_host()
         if accessible_host != 'localhost':
-            ASCIIColors.magenta(f"Recommended public access URL: {protocol}://{accessible_host}:{port_setting}/")
-        ASCIIColors.magenta(f"Or access locally at: {protocol}://localhost:{port_setting}/")
+            content+=f"[magenta]Recommended public access URL:[/magenta] {protocol}://{accessible_host}:{port_setting}/\n"
+        content+=f"[magenta]Or access locally at:[/magenta] {protocol}://localhost:{port_setting}/\n"
     else:
-        ASCIIColors.magenta(f"Access UI at: {protocol}://{host_setting}:{port_setting}/")
+        content+=f"[magenta]Access UI at:[/magenta] {protocol}://{host_setting}:{port_setting}/\n"
     
-    ASCIIColors.green(f"Using {workers} Workers")
-    print("----------------------")
+    content+=f"[green]Using {workers} Workers[/green]"
+    ASCIIColors.panel(content,f"LoLLMs Plateform (v{APP_VERSION})", )
 
     uvicorn.run("main:app", host=host_setting, port=int(port_setting), reload=False, workers=workers, timeout_keep_alive=600, **ssl_params)

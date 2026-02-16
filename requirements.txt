@@ -1,6 +1,6 @@
 sse_starlette==3.0.2
 # --- Core FastAPI and Server ---
-fastapi==0.118.0
+fastapi==0.129.0
 uvicorn[standard]==0.37.0
 werkzeug==3.1.3
 websockets==15.0.1
@@ -16,7 +16,7 @@ bcrypt==4.0.1
 
 # --- LoLLMs Client Library and Common Backends ---
 lollms-client==1.11.5
-ascii_colors==0.11.9
+ascii_colors==0.11.11
 pipmaster==1.1.0
 
 # Dependencies for specific lollms_client backends (based on your config examples):
@@ -29,8 +29,8 @@ ollama==0.6.1
 # transformers
 # accelerate
 # (Note: lollms-client itself pulls in requests, ascii-colors, pillow, pipmaster, yaml, pydantic, lollmsvectordb, numpy)
-pydantic==2.11.10
-pydantic[email]==2.11.10
+pydantic==2.12.5
+pydantic[email]==2.12.5
 Pillow==11.3.0
 numpy==2.2.6
 
@@ -71,7 +71,7 @@ pandas==2.3.3
 extract-msg==0.55.0
 
 psutil==7.1.0
-nvidia-ml-py==13.580.82
+nvidia-ml-py==13.590.48
 
 # required for uploading pdfs
 PyMuPDF==1.26.4

@@ -602,8 +602,7 @@ async def list_models(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    ASCIIColors.info(f"------------ Open AI V1 --------------")
-    ASCIIColors.info(f" {user.username} is listing the models")
+    ASCIIColors.panel(f"{user.username} is listing the models", f"Open AI V1")
     
     # 1. Try DB Cache first (unless forced)
     if not force_refresh:
@@ -621,7 +620,7 @@ async def list_models(
 
         for binding in active_bindings:
             try:
-                ASCIIColors.bg_bright_blue(f">{binding.alias}")
+                ASCIIColors.rich_print(f">[bold green]{binding.alias}[\bold green]")
                 # Blocking IO: building client, listing models
                 lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
                 models = lc.list_models()

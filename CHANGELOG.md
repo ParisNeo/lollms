@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-13 10:13]
+
+- refactor(discussion): remove generation submodule and relocate LLM/STT/TTI/TTS utilities
+
 ## [2026-02-13 06:40]
 
 - chore(deps): bump ScrapeMaster from 0.6.0 to 0.8.0
