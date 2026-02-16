@@ -99,6 +99,8 @@ class AdminUserUpdate(BaseModel):
     is_moderator: Optional[bool] = None
     user_ui_level: Optional[int] = None
     status: Optional[str] = None
+    # NEW FIELD: allow UI to toggle activation directly
+    is_active: Optional[bool] = None
 
 class BatchUsersSettingsUpdate(BaseModel):
     user_ids: List[int]
