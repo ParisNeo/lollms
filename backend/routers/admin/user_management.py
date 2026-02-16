@@ -193,6 +193,13 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         if user_dict.get(field) is None:
             user_dict[field] = settings.get(setting_key)
     
+    # --- NEW LOGIC: Remove fields that may cause ORM init errors ---
+    # The ORM constructor can be sensitive to unexpected keyword arguments.
+    # `google_client_secret_json` is a valid column but may clash with internal
+    # SQLAlchemy handling during bulk creation. We omit it here and allow it
+    # to be set later via an explicit update if needed.
+    user_dict.pop('google_client_secret_json', None)
+
     new_user = DBUser(
         username=user_data.username,
         hashed_password=hash_password(user_data.password),
@@ -263,6 +270,9 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
     if user.username == INITIAL_ADMIN_USER_CONFIG.get("username") and update_data.is_admin is False:
         raise HTTPException(status_code=403, detail="Cannot revoke initial superadmin status.")
     
+    # Log incoming payload for debugging
+    print(f"[ADMIN UPDATE] User ID {user_id} payload: {update_data.dict(exclude_unset=True)}")
+
     update_dict = update_data.model_dump(exclude_unset=True)
     if 'is_admin' in update_dict and update_dict['is_admin']:
         update_dict['is_moderator'] = True
@@ -273,6 +283,16 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
             update_dict['is_active'] = True
         else:
             update_dict['is_active'] = False
+
+    # *** NEW LOGIC: keep status in sync when is_active is changed ***
+    if 'is_active' in update_dict:
+        # When the UI toggles activation we want the status column to reflect the same state.
+        # This mirrors the behaviour of the dedicated activate/deactivate endpoints.
+        if update_dict['is_active']:
+            update_dict['status'] = 'active'
+        else:
+            # Use the same inactive status the deactivate endpoint sets.
+            update_dict['status'] = 'inactivated_by_admin'
 
     for key, value in update_dict.items():
         setattr(user, key, value)
@@ -311,6 +331,9 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
     
+    # Log activation attempt
+    print(f"[ADMIN ACTIVATE] Activating user ID {user_id}")
+
     user.is_active = True
     user.status = "active"
     user.activation_token = user.password_reset_token = user.reset_token_expiry = None
@@ -326,6 +349,9 @@ async def admin_deactivate_user(user_id: int, db: Session = Depends(get_db), cur
     if user.id == current_admin.id:
         raise HTTPException(status_code=403, detail="Cannot deactivate own account.")
     
+    # Log deactivation attempt
+    print(f"[ADMIN DEACTIVATE] Deactivating user ID {user_id}")
+
     user.is_active = False
     user.status = "inactivated_by_admin"
     db.commit()
