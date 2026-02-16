@@ -11,6 +11,8 @@ import html
 import platform
 import tempfile
 import os
+import pipmaster as pm
+pm.ensure_packages("bleach")
 import bleach
 
 from fastapi import Depends
