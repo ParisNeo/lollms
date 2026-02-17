@@ -97,7 +97,7 @@ class User(Base):
     google_api_key = Column(String, nullable=True)
     google_cse_id = Column(String, nullable=True)
     web_search_enabled = Column(Boolean, default=False, nullable=False)
-    web_search_providers = Column(JSON, default=lambda: ["google"]) # NEW COLUMN
+    web_search_providers = Column(JSON, nullable=False, server_default='["google"]') # NEW COLUMN
     web_search_deep_analysis = Column(Boolean, default=False, nullable=False)
     street_view_enabled = Column(Boolean, default=False, nullable=False)
     scheduler_enabled = Column(Boolean, default=False, nullable=False)
