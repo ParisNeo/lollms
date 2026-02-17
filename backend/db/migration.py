@@ -303,7 +303,7 @@ def _bootstrap_lollms_user(connection):
                 "compress_images": False,
                 "image_compression_quality": 85,
                 "web_search_enabled": False,
-                "web_search_providers": ["google"],
+                "web_search_providers": "JSON DEFAULT '[\"google\"]'", # NEW COLUMN
                 "web_search_deep_analysis": False
             }
         )
