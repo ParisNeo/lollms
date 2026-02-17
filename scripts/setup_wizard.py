@@ -97,19 +97,19 @@ def main_wizard():
         # Important next steps
         console.print("\n" + "IMPORTANT NEXT STEPS:", style=Style(color="magenta", bold=True))
 
-        console.print(f"\n{Style(color='cyan').render('1. Change your password:')}")
+        console.print("\n[cyan bold]1. Change your password:[/]")
         console.print("   Log in to the web interface and go to "
-                      + "[bold yellow]Settings > Account[/] to set a secure password.")
+                      "[bold yellow]Settings > Account[/] to set a secure password.")
 
-        console.print(f"\n{Style(color='cyan').render('2. Configure AI Bindings:')}")
+        console.print("\n[cyan bold]2. Configure AI Bindings:[/]")
         console.print("   No AI models or providers are configured yet. You must do this manually.")
-        console.print("   Navigate to " + "[bold yellow]Settings > LLM Bindings[/] to add your first provider "
+        console.print("   Navigate to [bold yellow]Settings > LLM Bindings[/] to add your first provider "
                       "(e.g., Ollama, OpenAI, etc.).")
-        console.print("   You can also configure " + "[bold yellow]TTI (Images), TTS (Speech)[/]"
-                      + " and other services in their respective settings tabs.")
+        console.print("   You can also configure [bold yellow]TTI (Images), TTS (Speech)[/]"
+                      " and other services in their respective settings tabs.")
 
-        console.print("\n" + "-" * 60, style=Style(color="cyan"))
-        input(f"\n{Style(color='green').render('Setup finished.')}"
+        console.print("\n" + "-" * 60, style="cyan")
+        input(f"\n[green]Setup finished.[/]"
               " Press Enter to launch the LoLLMs application...")
 
     except Exception as e:
