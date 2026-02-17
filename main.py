@@ -8,7 +8,7 @@ import sys
 from multiprocessing import cpu_count, Lock, set_start_method
 from urllib.parse import urlparse
 import pipmaster as pm
-pm.ensure_packages("ascii_colors",">=0.11.10")
+pm.ensure_packages("ascii_colors>=0.11.11")
 
 from ascii_colors import ASCIIColors, trace_exception
 import asyncio
