@@ -4,8 +4,8 @@ import traceback
 from pathlib import Path
 
 # Rich imports for modern terminal styling
-from rich.console import Console
-from rich.style import Style
+from ascii_colors import Console
+from ascii_colors import Style
 
 # Setup PYTHONPATH to allow imports from backend
 project_root = Path(__file__).resolve().parent.parent
