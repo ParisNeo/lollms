@@ -16,7 +16,7 @@ from .core import router as core_router
 from .assets import router as assets_router
 from .ai import router as ai_router
 from .export import router as export_router
-
+import pipmaster as pm
 router = APIRouter(
     prefix="/api/notebooks",
     tags=["Notebooks"]
@@ -139,6 +139,7 @@ def search_arxiv_endpoint(
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """Searches Arxiv for papers matching the query."""
+    pm.ensure_package("arxiv")
     import arxiv
     client = arxiv.Client()
     search = arxiv.Search(
