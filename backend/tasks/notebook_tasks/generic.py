@@ -20,12 +20,11 @@ def process_generic(
 ):
     """
     Primary processor for generic, research, and technical notebooks.
-    Handles standard LLM synthesis and RLM (Recursive Language Model) deep-reasoning modes.
+    Handles standard LLM synthesis and RLM (Recursive Language Model) deep‑reasoning modes.
     """
     lc = get_user_lollms_client(username)
     
     # 1. Context Gathering
-    # Combines text from selected tabs and loaded files (artefacts)
     context = gather_context(notebook, input_tab_ids)
 
     # Add specifically selected artefacts to the context
@@ -35,20 +34,15 @@ def process_generic(
                 context += f"\n\n--- Source: {art['filename']} ---\n{art.get('content', '')}\n"
 
     # 2. Identify Target Tab
-    # If a specific ID was passed (usually for 'Update Active'), use it.
-    # Otherwise, the system defaults to a new tab creation logic within the action branches.
     target_tab = None
     if target_tab_id:
         target_tab = next((t for t in notebook.tabs if t['id'] == target_tab_id), None)
 
     # 3. Action Dispatcher
-    
-    # --- Group A: General Research, Synthesis, and RLM Mode ---
     if action in ['initial_process', 'generate_report', 'text_processing', 'summarize']:
         task.log(f"Initializing Processing (RLM Mode: {'ON' if use_rlm else 'OFF'})...")
         task.set_progress(10)
 
-        # Ensure we have a target tab for these general actions
         if not target_tab:
             target_tab = {
                 "id": str(uuid.uuid4()),
@@ -60,16 +54,14 @@ def process_generic(
             notebook.tabs.append(target_tab)
 
         if use_rlm:
-            # --- RLM STRATEGY (Enhanced) ---
-            # Treats context as an external variable for decomposition and recursive reasoning
             system_prompt = """You are a Recursive Language Model (RLM) engine.
 Your goal is to synthesize a comprehensive answer by recursively analyzing the provided context.
 
 RLM PROCEDURE:
-1. DECOMPOSE: Break down the user's request into key components or sub-questions.
+1. DECOMPOSE: Break down the user's request into key components or sub‑questions.
 2. RETRIEVE & ANALYZE: For each component, identify relevant evidence from the context chunks.
-3. SYNTHESIZE: Combine the evidence into a coherent, high-density technical report.
-4. REFINE: Ensure the final output is logical, well-cited, and directly addresses the user's prompt.
+3. SYNTHESIZE: Combine the evidence into a coherent, high‑density technical report.
+4. REFINE: Ensure the final output is logical, well‑cited, and directly addresses the user's prompt.
 
 Do not lose technical details. Maintain a high level of accuracy."""
             
@@ -88,10 +80,9 @@ Do not lose technical details. Maintain a high level of accuracy."""
             try:
                 task.log("Decomposing request using Recursive strategy...")
                 task.set_progress(30)
-                # long_context_processing handles chunking and summarization recursively
                 response = lc.long_context_processing(
                     text_to_process=context,
-                    contextual_prompt=prompt, # Pass prompt directly as contextual prompt for chunks
+                    contextual_prompt=prompt,
                     system_prompt=system_prompt
                 )
             except Exception as e:
@@ -99,10 +90,9 @@ Do not lose technical details. Maintain a high level of accuracy."""
                 use_rlm = False
 
         if not use_rlm:
-            # --- STANDARD LCP STRATEGY ---
-            system_prompt = """You are a professional research assistant. Organize information into a well-structured Markdown report.
-            Include Executive Summary, Key Findings, Detailed Analysis, and References.
-            Use headers, bold text, and lists for readability."""
+            system_prompt = """You are a professional research assistant. Organize information into a well‑structured Markdown report.
+Include Executive Summary, Key Findings, Detailed Analysis, and References.
+Use headers, bold text, and lists for readability."""
 
             user_prompt = f"""Analyze the research data and fulfill the request:
 
@@ -120,14 +110,29 @@ Do not lose technical details. Maintain a high level of accuracy."""
                 system_prompt=system_prompt
             )
 
-        # Handle potential dictionary responses from LollmsClient
+        # ---------- NEW: Strip thinking blocks ----------
+        if hasattr(lc, "remove_thinking_blocks"):
+            try:
+                response = lc.remove_thinking_blocks(response)
+            except Exception as e:
+                task.log(f"Failed to strip thinking blocks: {e}", "WARNING")
+        # -------------------------------------------------
+
+        # Handle possible dict responses
         if isinstance(response, dict):
             response = response.get('content', response.get('text', str(response)))
         
         target_tab['content'] = str(response)
+
+        # ---------- NEW: Update tab title ----------
+        if prompt:
+            target_tab['title'] = prompt[:25] + "..."
+        else:
+            target_tab['title'] = "Result"
+        # -----------------------------------------
+
         task.set_progress(100)
         return target_tab['id']
-
     # --- Group B: Targeted Analysis (Timeline, Key Points, Comparisons) ---
     elif action in ['generate_outline', 'extract_key_points', 'generate_timeline', 'compare_sources']:
         task.log(f"Running Analysis Tool: {action.replace('_', ' ').title()}")
@@ -167,7 +172,7 @@ Do not lose technical details. Maintain a high level of accuracy."""
         response = lc.generate_text(user_p, system_prompt=system_p)
         target_tab['content'] = response
         task.set_progress(100)
-        return target_tab['id']
+        return target_tab['id']  
 
     # --- Group C: Data Visualizations (HTML) ---
     elif action == 'generate_html':
@@ -252,3 +257,4 @@ Do not lose technical details. Maintain a high level of accuracy."""
 
     task.log(f"Unknown action requested: {action}", "ERROR")
     return None
+
