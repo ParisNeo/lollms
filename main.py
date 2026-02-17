@@ -8,9 +8,9 @@ import sys
 from multiprocessing import cpu_count, Lock, set_start_method
 from urllib.parse import urlparse
 import pipmaster as pm
-pm.ensure_packages("ascii_colors>=0.11.11")
+pm.ensure_packages("ascii_colors>=0.11.10")
 
-from ascii_colors import ASCIIColors, trace_exception
+from ascii_colors import ASCIIColors, trace_exception, Live, Panel, Console
 import asyncio
 import time
 import threading
@@ -212,256 +212,332 @@ def scheduled_email_proposal_job():
 
 
 def run_one_time_startup_tasks(lock: Lock):
+    """
+    Executes a series of one‑time initialization tasks.
+    The function now presents a live, rich progress panel that updates after
+    each major step, making the startup flow easier to follow.
+    """
     acquired = lock.acquire(block=False)
     if not acquired:
         return
     
     ASCIIColors.green(f"Worker {os.getpid()} acquired startup lock. Running one-time tasks...")
-    try:
-        # --- Election: Start the Communication Hub ---
-        db = db_session_module.SessionLocal()
+    
+    # Define the steps we want to visualise
+    steps = [
+        ("Database tables check/creation", False),
+        ("Schema migration & bootstrap", False),
+        ("Legacy discussion migration", False),
+        ("Default admin & DB entries", False),
+        ("App Zoo repository setup", False),
+        ("MCP Zoo repository setup", False),
+        ("Prompt Zoo repository setup", False),
+        ("Personality Zoo repository setup", False),
+        ("Filesystem‑DB synchronization", False),
+        ("Stale WebSocket & task cleanup", False),
+        ("Autostart & cleanup", False)
+    ]
+
+    def render_steps_panel():
+        """Render a Rich Panel showing a checklist of completed steps."""
+        lines = []
+        for description, done in steps:
+            checkbox = "[green]✔[/green]" if done else "[red]✘[/red]"
+            lines.append(f"{checkbox} {description}")
+        markdown = "\n".join(lines)
+        return ASCIIColors.panel(markdown, title="🛠️ Startup Progress", border_style="cyan")
+
+    # Use Rich Live to keep the panel refreshed
+    with ASCIIColors.live(render_steps_panel(), refresh_per_second=2) as live:
+        # ----------------------------------------------------------------------
+        # 1️⃣ Database tables check/creation
+        # ----------------------------------------------------------------------
         try:
-            settings.load_from_db(db)
-        finally:
-            db.close()
+            engine = db_session_module.engine
+            Base.metadata.create_all(bind=engine)
+            ASCIIColors.green("INFO: Database tables checked/created.")
+            steps[0] = (steps[0][0], True)
+            live.update(render_steps_panel())
+        except Exception as e:
+            ASCIIColors.error(f"Database table creation failed: {e}")
+            trace_exception(e)
+            lock.release()
+            raise
 
-        hub_port = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
-        
-        # Only start the communication hub if we are running in multi-worker mode
-        if SERVER_CONFIG.get("workers", 1) > 1:
-            threading.Thread(target=start_hub_server, args=('127.0.0.1', hub_port), daemon=True).start()
-            print(f"INFO: Multi-worker mode detected. Started Communication Hub on port {hub_port}.")
-        else:
-            print("INFO: Single-worker mode detected. Skipping Communication Hub startup.")
-        # ---------------------------------------------
-
-        print("--- Running One-Time Startup Tasks ---")
-        
-        engine = db_session_module.engine
-        Base.metadata.create_all(bind=engine)
-        print(f"INFO: Database tables checked/created using metadata at URL: {APP_DB_URL}")
-        with engine.connect() as connection:
-            inspector = inspect(connection)
-            try:
+        # ----------------------------------------------------------------------
+        # 2️⃣ Schema migration & bootstrap
+        # ----------------------------------------------------------------------
+        try:
+            with engine.connect() as connection:
+                inspector = inspect(connection)
                 run_schema_migrations_and_bootstrap(connection, inspector)
-                print("INFO: Database schema migration/check completed successfully.")
-            except Exception as e_migrate:
-                print(f"CRITICAL: Database migration failed: {e_migrate}.")
-                trace_exception(e_migrate)
-                raise
-        check_and_update_db_version(db_session_module.SessionLocal)
-        
-        print("\n--- Running Automated Discussion Migration ---")
-        db_session = None
-        if APP_SETTINGS.get("migrate"):
-            try:
-                db_session = next(get_db())
-                all_users = db_session.query(DBUser).all()
-                for user in all_users:
-                    username = user.username
-                    old_discussion_path = get_user_discussion_path(username)
-                    if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
-                        continue
-                    print(f"Found legacy discussion folder for '{username}'. Starting migration...")
-                    if username not in user_sessions:
-                        user_sessions[username] = {
-                                                    "lollms_model_name": user.lollms_model_name,
-                                                    "llm_params": {}
-                                                }
-                    db_path = get_user_data_root(username) / "discussions.db"
-                    dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
-                    migrated_count = 0
-                    for file_path in old_discussion_path.glob("*.yaml"):
-                        discussion_db_session = None
-                        try:
-                            old_disc = LegacyDiscussion.load_from_yaml(file_path)
-                            if not old_disc: continue
-                            discussion_db_session = dm.get_session()
-                            if discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
-                                discussion_db_session.close()
-                                continue
-                            new_db_disc_orm = dm.DiscussionModel(id=old_disc.discussion_id, discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids}, active_branch_id=old_disc.active_branch_id)
-                            discussion_db_session.add(new_db_disc_orm)
-                            for msg in old_disc.messages:
-                                msg_orm = dm.MessageModel(id=msg.id, discussion_id=new_db_disc_orm.id, parent_id=msg.parent_id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content, created_at=msg.created_at, binding_name=msg.binding_name, model_name=msg.model_name, tokens=msg.token_count, message_metadata={"sources": msg.sources, "steps": msg.steps})
-                                discussion_db_session.add(msg_orm)
-                            discussion_db_session.commit()
-                            migrated_count += 1
-                        except Exception as e:
-                            if discussion_db_session: discussion_db_session.rollback()
-                            print(f"    - FAILED to migrate {file_path.name}: {e}")
-                        finally:
-                            if discussion_db_session: discussion_db_session.close()
-                    if migrated_count > 0:
-                        backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-                        shutil.move(str(old_discussion_path), str(backup_path))
-                        print(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
-                
-            except Exception as e:
-                print(f"CRITICAL ERROR during migration: {e}")
-            finally:
-                if db_session: db_session.close()
-            print("--- Migration Finished ---\n")
+                ASCIIColors.green("INFO: Schema migration completed.")
+            check_and_update_db_version(db_session_module.SessionLocal)
+            steps[1] = (steps[1][0], True)
+            live.update(render_steps_panel())
+        except Exception as e:
+            ASCIIColors.error(f"Schema migration failed: {e}")
+            trace_exception(e)
+            lock.release()
+            raise
 
-        ASCIIColors.yellow("--- Verifying Default Database Entries & Repositories ---")
-        db_for_defaults: Optional[Session] = None
+        # ----------------------------------------------------------------------
+        # 3️⃣ Legacy discussion migration
+        # ----------------------------------------------------------------------
         try:
+            if APP_SETTINGS.get("migrate"):
+                db_session = None
+                try:
+                    db_session = next(get_db())
+                    all_users = db_session.query(DBUser).all()
+                    for user in all_users:
+                        username = user.username
+                        old_discussion_path = get_user_discussion_path(username)
+                        if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
+                            continue
+                        ASCIIColors.yellow(f"Found legacy discussion folder for '{username}'. Starting migration...")
+                        if username not in user_sessions:
+                            user_sessions[username] = {
+                                "lollms_model_name": user.lollms_model_name,
+                                "llm_params": {}
+                            }
+                        db_path = get_user_data_root(username) / "discussions.db"
+                        dm = LollmsDataManager(db_path=f"sqlite:///{db_path.resolve()}")
+                        migrated_count = 0
+                        for file_path in old_discussion_path.glob("*.yaml"):
+                            discussion_db_session = None
+                            try:
+                                old_disc = LegacyDiscussion.load_from_yaml(file_path)
+                                if not old_disc:
+                                    continue
+                                discussion_db_session = dm.get_session()
+                                if discussion_db_session.query(dm.DiscussionModel).filter_by(id=old_disc.discussion_id).first():
+                                    discussion_db_session.close()
+                                    continue
+                                new_db_disc_orm = dm.DiscussionModel(
+                                    id=old_disc.discussion_id,
+                                    discussion_metadata={"title": old_disc.title, "rag_datastore_ids": old_disc.rag_datastore_ids},
+                                    active_branch_id=old_disc.active_branch_id
+                                )
+                                discussion_db_session.add(new_db_disc_orm)
+                                for msg in old_disc.messages:
+                                    msg_orm = dm.MessageModel(
+                                        id=msg.id,
+                                        discussion_id=new_db_disc_orm.id,
+                                        parent_id=msg.parent_id,
+                                        sender=msg.sender,
+                                        sender_type=msg.sender_type,
+                                        content=msg.content,
+                                        created_at=msg.created_at,
+                                        binding_name=msg.binding_name,
+                                        model_name=msg.model_name,
+                                        tokens=msg.token_count,
+                                        message_metadata={"sources": msg.sources, "steps": msg.steps}
+                                    )
+                                    discussion_db_session.add(msg_orm)
+                                discussion_db_session.commit()
+                                migrated_count += 1
+                            except Exception as e:
+                                if discussion_db_session:
+                                    discussion_db_session.rollback()
+                                ASCIIColors.error(f"Failed to migrate {file_path.name}: {e}")
+                            finally:
+                                if discussion_db_session:
+                                    discussion_db_session.close()
+                        if migrated_count > 0:
+                            backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                            shutil.move(str(old_discussion_path), str(backup_path))
+                            ASCIIColors.green(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
+                finally:
+                    if db_session:
+                        db_session.close()
+            steps[2] = (steps[2][0], True)
+            live.update(render_steps_panel())
+        except Exception as e:
+            ASCIIColors.error(f"Legacy discussion migration error: {e}")
+            trace_exception(e)
+            # continue – not fatal for the rest of startup
+
+        # ----------------------------------------------------------------------
+        # 4️⃣ Default admin & DB entries verification
+        # ----------------------------------------------------------------------
+        try:
+            db_for_defaults: Optional[Session] = None
             db_for_defaults = next(get_db())
-            
             admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
             admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
             if admin_username and admin_password and not db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first():
                 new_admin = DBUser(username=admin_username, hashed_password=hash_password(admin_password), is_admin=True)
                 db_for_defaults.add(new_admin)
                 db_for_defaults.commit()
-                ASCIIColors.green(f"INFO: Initial admin user '{admin_username}' created successfully.")
-
+                ASCIIColors.green(f"Initial admin user '{admin_username}' created.")
             if not db_for_defaults.query(DBLLMBinding).first():
-                ASCIIColors.yellow("No LLM bindings found in the database. Make sure you create one.")
-
+                ASCIIColors.yellow("No LLM bindings found – you will need to add one via Settings.")
+            steps[3] = (steps[3][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"ERROR during admin/personality/prompt setup: {e}")
+            ASCIIColors.error(f"Error during default DB entry check: {e}")
             trace_exception(e)
-            if db_for_defaults: db_for_defaults.rollback()
         finally:
-            if db_for_defaults: db_for_defaults.close()
+            if db_for_defaults:
+                db_for_defaults.close()
 
-        db_for_repos: Optional[Session] = None
+        # ----------------------------------------------------------------------
+        # 5️⃣ App Zoo repository setup
+        # ----------------------------------------------------------------------
         try:
+            db_for_repos: Optional[Session] = None
             db_for_repos = next(get_db())
             app_zoo_name = "Official LoLLMs Apps Zoo"
             app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
             app_zoo_repo_path = APPS_ZOO_ROOT_PATH / app_zoo_name
-            
-            if not db_for_repos.query(DBAppZooRepository).filter(or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)).first():
+
+            if not db_for_repos.query(DBAppZooRepository).filter(
+                or_(DBAppZooRepository.name == app_zoo_name, DBAppZooRepository.url == app_zoo_url)
+            ).first():
                 default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
                 db_for_repos.add(default_repo)
                 db_for_repos.commit()
-                ASCIIColors.green(f"INFO: Default App Zoo repo '{app_zoo_name}' added to DB.")
-
+                ASCIIColors.green(f"Default App Zoo repo '{app_zoo_name}' added to DB.")
             if not app_zoo_repo_path.exists():
-                ASCIIColors.yellow(f"First setup: Cloning '{app_zoo_name}'. This may take a moment...")
+                ASCIIColors.yellow(f"Cloning App Zoo '{app_zoo_name}' (first run)...")
                 subprocess.run(["git", "clone", app_zoo_url, str(app_zoo_repo_path)], check=True)
-                ASCIIColors.green("Cloning complete.")
-
+                ASCIIColors.green("App Zoo cloned successfully.")
+            steps[4] = (steps[4][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"ERROR during App Zoo repository setup: {e}")
+            ASCIIColors.error(f"App Zoo repository setup error: {e}")
             trace_exception(e)
-            if db_for_repos: db_for_repos.rollback()
         finally:
-            if db_for_repos: db_for_repos.close()
-            
-        db_for_mcps: Optional[Session] = None
+            if db_for_repos:
+                db_for_repos.close()
+
+        # ----------------------------------------------------------------------
+        # 6️⃣ MCP Zoo repository setup
+        # ----------------------------------------------------------------------
         try:
+            db_for_mcps: Optional[Session] = None
             db_for_mcps = next(get_db())
             mcp_zoo_name = "lollms_mcps_zoo"
             mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
             mcp_zoo_repo_path = MCPS_ZOO_ROOT_PATH / mcp_zoo_name
 
-            if not db_for_mcps.query(DBMCPZooRepository).filter(or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)).first():
+            if not db_for_mcps.query(DBMCPZooRepository).filter(
+                or_(DBMCPZooRepository.name == mcp_zoo_name, DBMCPZooRepository.url == mcp_zoo_url)
+            ).first():
                 default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
                 db_for_mcps.add(default_mcp_repo)
                 db_for_mcps.commit()
-                ASCIIColors.green(f"INFO: Default MCP Zoo repo '{mcp_zoo_name}' added to DB.")
-
+                ASCIIColors.green(f"Default MCP Zoo repo '{mcp_zoo_name}' added to DB.")
             if not mcp_zoo_repo_path.exists():
-                ASCIIColors.yellow(f"First setup: Cloning '{mcp_zoo_name}'. This may take a moment...")
+                ASCIIColors.yellow(f"Cloning MCP Zoo '{mcp_zoo_name}' (first run)...")
                 subprocess.run(["git", "clone", mcp_zoo_url, str(mcp_zoo_repo_path)], check=True)
-                ASCIIColors.green("Cloning complete.")
+                ASCIIColors.green("MCP Zoo cloned successfully.")
+            steps[5] = (steps[5][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"ERROR during MCP Zoo repository setup: {e}")
+            ASCIIColors.error(f"MCP Zoo repository setup error: {e}")
             trace_exception(e)
-            if db_for_mcps: db_for_mcps.rollback()
         finally:
-            if db_for_mcps: db_for_mcps.close()
-        
-        db_for_prompts: Optional[Session] = None
+            if db_for_mcps:
+                db_for_mcps.close()
+
+        # ----------------------------------------------------------------------
+        # 7️⃣ Prompt Zoo repository setup
+        # ----------------------------------------------------------------------
         try:
-            db_for_defaults = next(get_db())
+            db_for_prompts: Optional[Session] = None
+            db_for_prompts = next(get_db())
             prompt_zoo_name = "lollms_prompts_zoo"
             prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
             prompt_zoo_repo_path = PROMPTS_ZOO_ROOT_PATH / prompt_zoo_name
 
-            if not db_for_defaults.query(DBPromptZooRepository).filter(or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)).first():
+            if not db_for_prompts.query(DBPromptZooRepository).filter(
+                or_(DBPromptZooRepository.name == prompt_zoo_name, DBPromptZooRepository.url == prompt_zoo_url)
+            ).first():
                 default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
-                db_for_defaults.add(default_prompt_repo)
-                db_for_defaults.commit()
-                ASCIIColors.green(f"INFO: Default Prompt Zoo repo '{prompt_zoo_name}' added to DB.")
-
+                db_for_prompts.add(default_prompt_repo)
+                db_for_prompts.commit()
+                ASCIIColors.green(f"Default Prompt Zoo repo '{prompt_zoo_name}' added to DB.")
             if not prompt_zoo_repo_path.exists():
-                ASCIIColors.yellow(f"First setup: Cloning '{prompt_zoo_name}'. This may take a moment...")
+                ASCIIColors.yellow(f"Cloning Prompt Zoo '{prompt_zoo_name}' (first run)...")
                 subprocess.run(["git", "clone", prompt_zoo_url, str(prompt_zoo_repo_path)], check=True)
-                ASCIIColors.green("Cloning complete.")
+                ASCIIColors.green("Prompt Zoo cloned successfully.")
+            steps[6] = (steps[6][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"ERROR during Prompt Zoo repository setup: {e}")
+            ASCIIColors.error(f"Prompt Zoo repository setup error: {e}")
             trace_exception(e)
-            if db_for_defaults: db_for_defaults.rollback()
         finally:
-            if db_for_defaults: db_for_defaults.close()
+            if db_for_prompts:
+                db_for_prompts.close()
 
-        db_for_personalities: Optional[Session] = None
+        # ----------------------------------------------------------------------
+        # 8️⃣ Personality Zoo repository setup
+        # ----------------------------------------------------------------------
         try:
-            db_for_defaults = next(get_db())
+            db_for_personalities: Optional[Session] = None
+            db_for_personalities = next(get_db())
             personality_zoo_name = "lollms_personalities_zoo"
             personality_zoo_url = "https://github.com/ParisNeo/lollms_personalities_zoo.git"
             personality_zoo_repo_path = PERSONALITIES_ZOO_ROOT_PATH / personality_zoo_name
 
-            if not db_for_defaults.query(DBPersonalityZooRepository).filter(or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)).first():
+            if not db_for_personalities.query(DBPersonalityZooRepository).filter(
+                or_(DBPersonalityZooRepository.name == personality_zoo_name, DBPersonalityZooRepository.url == personality_zoo_url)
+            ).first():
                 default_personality_repo = DBPersonalityZooRepository(name=personality_zoo_name, url=personality_zoo_url, is_deletable=False)
-                db_for_defaults.add(default_personality_repo)
-                db_for_defaults.commit()
-                ASCIIColors.green(f"INFO: Default Personality Zoo repo '{personality_zoo_name}' added to DB.")
-
+                db_for_personalities.add(default_personality_repo)
+                db_for_personalities.commit()
+                ASCIIColors.green(f"Default Personality Zoo repo '{personality_zoo_name}' added to DB.")
             if not personality_zoo_repo_path.exists():
-                ASCIIColors.yellow(f"First setup: Cloning '{personality_zoo_name}'. This may take a moment...")
+                ASCIIColors.yellow(f"Cloning Personality Zoo '{personality_zoo_name}' (first run)...")
                 subprocess.run(["git", "clone", personality_zoo_url, str(personality_zoo_repo_path)], check=True)
-                ASCIIColors.green("Cloning complete.")
+                ASCIIColors.green("Personality Zoo cloned successfully.")
+            steps[7] = (steps[7][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"ERROR during Personality Zoo repository setup: {e}")
+            ASCIIColors.error(f"Personality Zoo repository setup error: {e}")
             trace_exception(e)
-            if db_for_defaults: db_for_defaults.rollback()
         finally:
-            if db_for_defaults: db_for_defaults.close()
+            if db_for_personalities:
+                db_for_personalities.close()
 
-
-        ASCIIColors.yellow("--- Verifying Default Database Entries Verified ---")
-
-
-        ASCIIColors.yellow("--- Synchronizing Filesystem Installations with Database ---")
-        db_for_sync: Optional[Session] = None
+        # ----------------------------------------------------------------------
+        # 9️⃣ Filesystem‑DB synchronization
+        # ----------------------------------------------------------------------
         try:
+            db_for_sync: Optional[Session] = None
             db_for_sync = next(get_db())
             synchronize_filesystem_and_db(db_for_sync)
-            ASCIIColors.green("--- Synchronization Complete ---")
+            ASCIIColors.green("Filesystem‑DB synchronization completed.")
+            steps[8] = (steps[8][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"ERROR during startup synchronization: {e}")
+            ASCIIColors.error(f"Synchronization error: {e}")
             trace_exception(e)
-            if db_for_sync: db_for_sync.rollback()
         finally:
-            if db_for_sync: db_for_sync.close()
+            if db_for_sync:
+                db_for_sync.close()
 
-        db_for_cleanup: Optional[Session] = None
+        # ----------------------------------------------------------------------
+        # 🔟 Cleanup stale connections & interrupted tasks
+        # ----------------------------------------------------------------------
         try:
+            db_for_cleanup: Optional[Session] = None
             db_for_cleanup = next(get_db())
-            
             # 1. Cleanup WebSocket connections
             num_deleted_ws = db_for_cleanup.query(WebSocketConnection).delete()
-            
-            # 2. Cleanup Tasks
-            # Mark any running or pending tasks as failed because the server restarted
+            # 2. Mark interrupted tasks as FAILED
             interrupted_tasks = db_for_cleanup.query(DBTask).filter(
                 DBTask.status.in_([TaskStatus.RUNNING, TaskStatus.PENDING])
             ).all()
-            
             if interrupted_tasks:
                 for task in interrupted_tasks:
                     task.status = TaskStatus.FAILED
                     task.error = "Task interrupted by server restart."
                     task.completed_at = datetime.datetime.now(datetime.timezone.utc)
-                    # We can't easily append to JSON field safely in bulk update if it relies on existing value, 
-                    # so we updated objects. Now we just ensure logs exist.
-                    if task.logs is None: task.logs = []
-                    # Create a new list to force SQLAlchemy to detect the change on the JSON column
+                    if task.logs is None:
+                        task.logs = []
                     current_logs = list(task.logs)
                     current_logs.append({
                         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -469,36 +545,36 @@ def run_one_time_startup_tasks(lock: Lock):
                         "level": "ERROR"
                     })
                     task.logs = current_logs
-            
             db_for_cleanup.commit()
-
             if num_deleted_ws > 0:
-                ASCIIColors.yellow(f"--- Cleared {num_deleted_ws} stale WebSocket connection entries. ---")
-            
+                ASCIIColors.yellow(f"Cleared {num_deleted_ws} stale WebSocket entries.")
             if interrupted_tasks:
-                ASCIIColors.yellow(f"--- Updated {len(interrupted_tasks)} active tasks to FAILED due to restart. ---")
-
+                ASCIIColors.yellow(f"Marked {len(interrupted_tasks)} active tasks as FAILED.")
+            steps[9] = (steps[9][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"ERROR during cleanup: {e}")
+            ASCIIColors.error(f"Cleanup error: {e}")
             trace_exception(e)
-            if db_for_cleanup: db_for_cleanup.rollback()
         finally:
-            if db_for_cleanup: db_for_cleanup.close()
+            if db_for_cleanup:
+                db_for_cleanup.close()
 
-        load_cache()
-        task_manager.init_app(db_session_module.SessionLocal)
-
+        # ----------------------------------------------------------------------
+        # 1️⃣1️⃣ Load cache, init task manager, and run autostart
+        # ----------------------------------------------------------------------
         try:
-            ASCIIColors.yellow("--- Running App Cleanup and Autostart (once) ---")
+            load_cache()
+            task_manager.init_app(db_session_module.SessionLocal)
             cleanup_and_autostart_apps()
-            ASCIIColors.green("--- Autostart Complete ---")
+            steps[10] = (steps[10][0], True)
+            live.update(render_steps_panel())
         except Exception as e:
-            ASCIIColors.error(f"--- Autostart Failed: {e} ---")
+            ASCIIColors.error(f"Autostart failure: {e}")
             trace_exception(e)
-            
-    finally:
-        lock.release()
-        ASCIIColors.green(f"Worker {os.getpid()} released startup lock.")
+
+    # End of Live context – final panel is shown automatically
+    lock.release()
+    ASCIIColors.green(f"Worker {os.getpid()} released startup lock.")
 
 async def startup_event():
     global broadcast_listener_task, rss_scheduler, startup_lock
