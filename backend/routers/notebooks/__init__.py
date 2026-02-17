@@ -139,7 +139,7 @@ def search_arxiv_endpoint(
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """Searches Arxiv for papers matching the query."""
-    pm.ensure_package("arxiv")
+    pm.ensure_packages("arxiv")
     import arxiv
     client = arxiv.Client()
     search = arxiv.Search(
