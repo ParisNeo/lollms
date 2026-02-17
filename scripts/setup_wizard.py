@@ -109,7 +109,7 @@ def main_wizard():
                       " and other services in their respective settings tabs.")
 
         console.print("\n" + "-" * 60, style="cyan")
-        input(f"\n[green]Setup finished.[/]"
+        input("\n[green]Setup finished.[/]"
               " Press Enter to launch the LoLLMs application...")
 
     except Exception as e:
