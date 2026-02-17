@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-17 07:04]
+
+- chore(deps): enable and upgrade ScrapeMaster to 0.8.0
+
 ## [2026-02-16 03:30]
 
 - feat: add language parameter to TTS endpoints
