@@ -149,7 +149,7 @@ class User(Base):
     rag_n_hops = Column(Integer, nullable=True)
     rag_min_sim_percent = Column(Float, nullable=True)
     rag_use_graph = Column(Boolean, default=False, nullable=True, server_default='0')
-    rag_graph_response_type = Column(String, default="chunks_summary", nullable=True, server_default="'chunks_summary'")
+    rag_graph_response_type = Column(String, default="chunks_summary", nullable=True, server_default='chunks_summary')
     
     default_rag_chunk_size = Column(Integer, default=2048, nullable=True, server_default='2048')
     default_rag_chunk_overlap = Column(Integer, default=256, nullable=True, server_default='256')
