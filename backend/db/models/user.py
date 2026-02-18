@@ -1,3 +1,4 @@
+# backend/db/models/user.py
 from sqlalchemy import (
     Column, Integer, String, Boolean,
     ForeignKey, UniqueConstraint, CheckConstraint,
@@ -23,11 +24,11 @@ class User(Base):
     preferred_name = Column(String, nullable=True)
     hashed_password = Column(String, nullable=False)
     external_id = Column(String, unique=True, index=True, nullable=True)
-    is_admin = Column(Boolean, default=False)
-    is_moderator = Column(Boolean, default=False, nullable=False)
-    is_active = Column(Boolean, default=True, nullable=False, index=True)
+    is_admin = Column(Boolean, default=False, server_default='0')
+    is_moderator = Column(Boolean, default=False, nullable=False, server_default='0')
+    is_active = Column(Boolean, default=True, nullable=False, index=True, server_default='1')
     
-    status = Column(String, default="active", nullable=False, index=True) 
+    status = Column(String, default="active", nullable=False, index=True, server_default="'active'") 
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     last_activity_at = Column(DateTime(timezone=True), nullable=True, index=True)
@@ -39,71 +40,71 @@ class User(Base):
     email = Column(String, nullable=True, index=True, unique=True)
     birth_date = Column(Date, nullable=True)
     icon = Column(Text, nullable=True)
-    receive_notification_emails = Column(Boolean, default=True, nullable=False)
-    is_searchable = Column(Boolean, default=True, nullable=False, index=True)
-    first_login_done = Column(Boolean, default=False, nullable=False)
+    receive_notification_emails = Column(Boolean, default=True, nullable=False, server_default='1')
+    is_searchable = Column(Boolean, default=True, nullable=False, index=True, server_default='1')
+    first_login_done = Column(Boolean, default=False, nullable=False, server_default='0')
     
     data_zone = Column(Text, nullable=True)
     user_personal_info = Column(Text, nullable=True)
-    share_personal_info_with_llm = Column(Boolean, default=False, nullable=False)
+    share_personal_info_with_llm = Column(Boolean, default=False, nullable=False, server_default='0')
     
     coding_style_constraints = Column(Text, nullable=True)
     programming_language_preferences = Column(Text, nullable=True)
-    tell_llm_os = Column(Boolean, default=False, nullable=False)
-    share_dynamic_info_with_llm = Column(Boolean, default=True, nullable=False)
-    message_font_size = Column(Integer, default=14, nullable=False)
+    tell_llm_os = Column(Boolean, default=False, nullable=False, server_default='0')
+    share_dynamic_info_with_llm = Column(Boolean, default=True, nullable=False, server_default='1')
+    message_font_size = Column(Integer, default=14, nullable=False, server_default='14')
     last_discussion_id = Column(String, nullable=True)
     
     image_studio_prompt = Column(Text, nullable=True)
     image_studio_negative_prompt = Column(Text, nullable=True)
-    image_studio_image_size = Column(String, default="1024x1024")
-    image_studio_n_images = Column(Integer, default=1)
-    image_studio_seed = Column(Integer, default=-1)
+    image_studio_image_size = Column(String, default="1024x1024", server_default="'1024x1024'")
+    image_studio_n_images = Column(Integer, default=1, server_default='1')
+    image_studio_seed = Column(Integer, default=-1, server_default='-1')
     image_studio_generation_params = Column(JSON, nullable=True)
     
-    image_generation_enabled = Column(Boolean, default=False, nullable=False)
+    image_generation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     image_generation_system_prompt = Column(Text, nullable=True)
-    image_annotation_enabled = Column(Boolean, default=False, nullable=False)
-    image_editing_enabled = Column(Boolean, default=False, nullable=False)
-    slide_maker_enabled = Column(Boolean, default=False, nullable=False)
+    image_annotation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    image_editing_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    slide_maker_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     
-    activate_generated_images = Column(Boolean, default=False, nullable=False)
-    note_generation_enabled = Column(Boolean, default=False, nullable=False)
-    memory_enabled = Column(Boolean, default=False, nullable=False)
-    auto_memory_enabled = Column(Boolean, default=False, nullable=False)
+    activate_generated_images = Column(Boolean, default=False, nullable=False, server_default='0')
+    note_generation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    memory_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    auto_memory_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
 
-    reasoning_activation = Column(Boolean, default=False, nullable=True)
+    reasoning_activation = Column(Boolean, default=False, nullable=True, server_default='0')
     reasoning_effort = Column(String, nullable=True)
-    reasoning_summary = Column(Boolean, default=False, nullable=True)
-    rlm_enabled = Column(Boolean, default=False, nullable=False)
+    reasoning_summary = Column(Boolean, default=False, nullable=True, server_default='0')
+    rlm_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     
     # Herd Mode Settings
-    herd_mode_enabled = Column(Boolean, default=False, nullable=False)
+    herd_mode_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     herd_participants = Column(JSON, nullable=True) # Legacy/Fallback list
     herd_precode_participants = Column(JSON, nullable=True) # List of {model: str, personality: str}
     herd_postcode_participants = Column(JSON, nullable=True) # List of {model: str, personality: str}
-    herd_rounds = Column(Integer, default=2, nullable=False)
+    herd_rounds = Column(Integer, default=2, nullable=False, server_default='2')
     
     # New Dynamic Herd Settings
-    herd_dynamic_mode = Column(Boolean, default=False, nullable=False)
+    herd_dynamic_mode = Column(Boolean, default=False, nullable=False, server_default='0')
     herd_model_pool = Column(JSON, nullable=True) # List of {model: str, description: str}
 
 
-    max_image_width = Column(Integer, default=-1, nullable=True)
-    max_image_height = Column(Integer, default=-1, nullable=True)
-    compress_images = Column(Boolean, default=False, nullable=False)
-    image_compression_quality = Column(Integer, default=85, nullable=False)
+    max_image_width = Column(Integer, default=-1, nullable=True, server_default='-1')
+    max_image_height = Column(Integer, default=-1, nullable=True, server_default='-1')
+    compress_images = Column(Boolean, default=False, nullable=False, server_default='0')
+    image_compression_quality = Column(Integer, default=85, nullable=False, server_default='85')
     
     google_api_key = Column(String, nullable=True)
     google_cse_id = Column(String, nullable=True)
-    web_search_enabled = Column(Boolean, default=False, nullable=False)
+    web_search_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     web_search_providers = Column(JSON, nullable=False, server_default='["google"]') # NEW COLUMN
-    web_search_deep_analysis = Column(Boolean, default=False, nullable=False)
-    street_view_enabled = Column(Boolean, default=False, nullable=False)
-    scheduler_enabled = Column(Boolean, default=False, nullable=False)
-    google_drive_enabled = Column(Boolean, default=False, nullable=False)
-    google_calendar_enabled = Column(Boolean, default=False, nullable=False)
-    google_gmail_enabled = Column(Boolean, default=False, nullable=False)
+    web_search_deep_analysis = Column(Boolean, default=False, nullable=False, server_default='0')
+    street_view_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    scheduler_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    google_drive_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    google_calendar_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    google_gmail_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
 
     posts = relationship("Post", back_populates="author", cascade="all, delete-orphan")
     
@@ -140,28 +141,28 @@ class User(Base):
     llm_repeat_penalty = Column(Float, nullable=True)
     llm_repeat_last_n = Column(Integer, nullable=True)
 
-    put_thoughts_in_context = Column(Boolean, default=False, nullable=False)
-    include_memory_date_in_context = Column(Boolean, default=False, nullable=False)
+    put_thoughts_in_context = Column(Boolean, default=False, nullable=False, server_default='0')
+    include_memory_date_in_context = Column(Boolean, default=False, nullable=False, server_default='0')
     
     rag_top_k = Column(Integer, nullable=True)
     max_rag_len = Column(Integer, nullable=True)
     rag_n_hops = Column(Integer, nullable=True)
     rag_min_sim_percent = Column(Float, nullable=True)
-    rag_use_graph = Column(Boolean, default=False, nullable=True)
-    rag_graph_response_type = Column(String, default="chunks_summary", nullable=True)
+    rag_use_graph = Column(Boolean, default=False, nullable=True, server_default='0')
+    rag_graph_response_type = Column(String, default="chunks_summary", nullable=True, server_default="'chunks_summary'")
     
-    default_rag_chunk_size = Column(Integer, default=1024, nullable=True)
-    default_rag_chunk_overlap = Column(Integer, default=256, nullable=True)
-    default_rag_metadata_mode = Column(String, default="none", nullable=True)
+    default_rag_chunk_size = Column(Integer, default=2048, nullable=True, server_default='2048')
+    default_rag_chunk_overlap = Column(Integer, default=256, nullable=True, server_default='256')
+    default_rag_metadata_mode = Column(String, default="none", nullable=True, server_default="'none'")
 
-    auto_title = Column(Boolean, default=False, nullable=False)
-    user_ui_level = Column(Integer, default=0, nullable=True)
-    chat_active = Column(Boolean, default=True, nullable=False)
-    first_page = Column(String, default="feed", nullable=False)
-    ai_response_language = Column(String, default="auto", nullable=True)
-    force_ai_response_language = Column(Boolean, default=False, nullable=False)
-    fun_mode = Column(Boolean, default=False, nullable=True)
-    show_token_counter = Column(Boolean, default=True, nullable=False)
+    auto_title = Column(Boolean, default=False, nullable=False, server_default='0')
+    user_ui_level = Column(Integer, default=0, nullable=True, server_default='0')
+    chat_active = Column(Boolean, default=True, nullable=False, server_default='1')
+    first_page = Column(String, default="feed", nullable=False, server_default="'feed'")
+    ai_response_language = Column(String, default="auto", nullable=True, server_default="'auto'")
+    force_ai_response_language = Column(Boolean, default=False, nullable=False, server_default='0')
+    fun_mode = Column(Boolean, default=False, nullable=True, server_default='0')
+    show_token_counter = Column(Boolean, default=True, nullable=False, server_default='1')
     
     starred_discussions = relationship("UserStarredDiscussion", back_populates="user", cascade="all, delete-orphan")
     message_grades = relationship("UserMessageGrade", back_populates="user", cascade="all, delete-orphan")
@@ -222,4 +223,3 @@ class Friendship(Base):
     user2 = relationship("User", foreign_keys=[user2_id], backref="received_friend_requests_or_friendships")
     action_user = relationship("User", foreign_keys=[action_user_id])
     __table__args__ = (UniqueConstraint('user1_id', 'user2_id', name='uq_friendship_pair'),)
-
