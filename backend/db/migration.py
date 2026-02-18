@@ -237,7 +237,7 @@ def _bootstrap_lollms_user(connection):
         hashed_password = get_password_hash(dummy_password[:72])
         
         connection.execute(
-            text("""
+            text("""\
                 INSERT INTO users (
                     username, hashed_password, is_admin, is_active, is_searchable, 
                     first_login_done, receive_notification_emails, is_moderator,
@@ -250,7 +250,7 @@ def _bootstrap_lollms_user(connection):
                     default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status,
                     max_image_width, max_image_height,
                     slide_maker_enabled, activate_generated_images, compress_images, image_compression_quality,
-                    web_search_enabled, web_search_providers, web_search_deep_analysis
+                    web_search_enabled, web_search_deep_analysis
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
@@ -264,7 +264,7 @@ def _bootstrap_lollms_user(connection):
                     :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status,
                     -1, -1,
                     :slide_maker_enabled, :activate_generated_images, :compress_images, :image_compression_quality,
-                    :web_search_enabled, :web_search_providers, :web_search_deep_analysis
+                    :web_search_enabled, :web_search_deep_analysis
                 )
             """),
             {
