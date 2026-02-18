@@ -109,8 +109,9 @@ def main_wizard():
                       " and other services in their respective settings tabs.")
 
         console.print("\n" + "-" * 60, style="cyan")
-        input("\n[green]Setup finished.[/]"
-              " Press Enter to launch the LoLLMs application...")
+        console.print("\n[green]Setup finished.[/]")
+        console.print(" Press Enter to launch the LoLLMs application...")
+        input()
 
     except Exception as e:
         console.print(f"\n[ERROR] Setup failed: {e}", style=Style(color="red", bold=True))
