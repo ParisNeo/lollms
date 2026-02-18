@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-18 03:28]
+
+- chore: comment out verbose startup logs and bump ascii_colors to 0.11.13
+
 ## [2026-02-17 07:04]
 
 - chore(deps): enable and upgrade ScrapeMaster to 0.8.0

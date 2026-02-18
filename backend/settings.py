@@ -73,8 +73,8 @@ class _Settings:
             self._is_loaded = False
 
     def get(self, key: str, default: Optional[Any] = None) -> Any:
-        if not self._is_loaded:
-            print("WARNING: Settings accessed before being loaded. This may indicate an issue.")
+        # if not self._is_loaded:
+        #    print("WARNING: Settings accessed before being loaded. This may indicate an issue.")
         
         value = self._settings_cache.get(key, default)
         

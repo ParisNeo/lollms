@@ -452,7 +452,6 @@ def cleanup_and_autostart_apps():
     db_session = None
     try:
         with lock:
-            print("INFO: Acquired startup lock. Performing app cleanup and autostart...")
             db_session = next(get_db())
             
             # This logic will now run only once per server startup, by the first worker that gets the lock.
@@ -530,13 +529,13 @@ def cleanup_and_autostart_apps():
             
             if updated_count > 0:
                 db_session.commit()
-                print(f"INFO: Cleaned up status and fixed {updated_count} app records.")
+                #print(f"INFO: Cleaned up status and fixed {updated_count} app records.")
 
             # 2. Autostart
             apps_to_autostart = db_session.query(DBApp).filter(DBApp.is_installed == True, DBApp.autostart == True).all()
 
             if apps_to_autostart:
-                print(f"INFO: Found {len(apps_to_autostart)} apps to autostart.")
+                # print(f"INFO: Found {len(apps_to_autostart)} apps to autostart.")
                 for app in apps_to_autostart:
                     task_manager.submit_task(
                         name=f"Start app: {app.name} ({app.id})",
@@ -545,7 +544,7 @@ def cleanup_and_autostart_apps():
                         description=f"Automatically starting '{app.name}' on server boot.",
                         owner_username=None
                     )
-            print("INFO: App cleanup and autostart complete. Releasing lock.")
+            #print("INFO: App cleanup and autostart complete. Releasing lock.")
 
     except Timeout:
         print("INFO: Could not acquire startup lock. Another worker is performing startup. Skipping.")

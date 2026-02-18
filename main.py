@@ -8,7 +8,7 @@ import sys
 from multiprocessing import cpu_count, Lock, set_start_method
 from urllib.parse import urlparse
 import pipmaster as pm
-pm.ensure_packages("ascii_colors>=0.11.10")
+pm.ensure_packages("ascii_colors>=0.11.13")
 
 from ascii_colors import ASCIIColors, trace_exception, Live, Panel, Console
 import asyncio
@@ -546,10 +546,10 @@ def run_one_time_startup_tasks(lock: Lock):
                     })
                     task.logs = current_logs
             db_for_cleanup.commit()
-            if num_deleted_ws > 0:
-                ASCIIColors.yellow(f"Cleared {num_deleted_ws} stale WebSocket entries.")
-            if interrupted_tasks:
-                ASCIIColors.yellow(f"Marked {len(interrupted_tasks)} active tasks as FAILED.")
+            # if num_deleted_ws > 0:
+            #     ASCIIColors.yellow(f"Cleared {num_deleted_ws} stale WebSocket entries.")
+            # if interrupted_tasks:
+            #     ASCIIColors.yellow(f"Marked {len(interrupted_tasks)} active tasks as FAILED.")
             steps[9] = (steps[9][0], True)
             live.update(render_steps_panel())
         except Exception as e:
