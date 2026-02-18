@@ -111,7 +111,6 @@ def main_wizard():
         console.print("\n" + "-" * 60, style="cyan")
         console.print("\n[green]Setup finished.[/]")
         console.print(" Press Enter to launch the LoLLMs application...")
-        input()
 
     except Exception as e:
         console.print(f"\n[ERROR] Setup failed: {e}", style=Style(color="red", bold=True))
