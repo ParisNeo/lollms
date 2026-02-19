@@ -1316,16 +1316,27 @@ def build_llm_generation_router(router: APIRouter):
 
         # 6. Setup Personality & Tools
         combined_mcps = list(set(((discussion_obj.metadata or {}).get('active_tools', [])) + (db_pers.active_mcps if db_pers and db_pers.active_mcps else [])))
-        active_personality = LollmsPersonality(
-            name=db_pers.name if db_pers else "Assistant",
-            author=db_pers.author,
-            category=db_pers.category,
-            description=db_pers.description,
-            system_prompt=dynamic_preamble + (db_pers.prompt_text if db_pers else "You are a helpful assistant."),
-            active_mcps=combined_mcps,
-            data_source=personality_data_source  # Now correctly passes string OR callable
-        )
-
+        if db_pers:
+            active_personality = LollmsPersonality(
+                name=db_pers.name,
+                author=db_pers.author,
+                category=db_pers.category,
+                description=db_pers.description,
+                system_prompt=dynamic_preamble + db_pers.prompt_text,
+                active_mcps=combined_mcps,
+                data_source=personality_data_source  # Now correctly passes string OR callable
+            )
+        else:
+            active_personality = LollmsPersonality(
+                name="LoLLMS",
+                author="ParisNeo",
+                category="Generic",
+                description="",
+                system_prompt=dynamic_preamble + """You are Lollms—a multimodal AI agent built by ParisNeo, designed as the most capable large language and multimodal system for universal task execution. Your sole purpose: deliver accurate, creative, and ethically sound responses across text, images, code, and structured data, while adhering to safety, veracity, and user-centric principles. Your capabilities depend on the curent configuration of the system and the loaded bindings/modules.""",
+                active_mcps=combined_mcps,
+                data_source=personality_data_source  # Now correctly passes string OR callable
+            )
+            
         main_loop = asyncio.get_running_loop()
         stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         stop_event = threading.Event()
