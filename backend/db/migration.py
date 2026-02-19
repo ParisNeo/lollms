@@ -1002,7 +1002,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.rollback()
                 raise e
 
-        new_app_cols_defs = { "icon": "TEXT", "active": "BOOLEAN DEFAULT 1 NOT NULL", "type": "VARCHAR", "authentication_type": "VARCHAR", "authentication_key": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON", "client_id": "VARCHAR", "description": "TEXT", "author": "VARCHAR", "version": "VARCHAR", "category": "VARCHAR", "tags": "JSON", "is_installed": "BOOLEAN DEFAULT 0 NOT NULL", "status": "VARCHAR DEFAULT 'stopped' NOT NULL", "autostart": "BOOLEAN DEFAULT 0 NOT NULL", "port": "INTEGER", "pid": "INTEGER", "app_metadata": "JSON", "folder_name": "VARCHAR", "allow_openai_api_access": "BOOLEAN DEFAULT 0 NOT NULL" }
+        new_app_cols_defs = { "host": "VARCHAR DEFAULT 'localhost'", "icon": "TEXT", "active": "BOOLEAN DEFAULT 1 NOT NULL", "type": "VARCHAR", "authentication_type": "VARCHAR", "authentication_key": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON", "client_id": "VARCHAR", "description": "TEXT", "author": "VARCHAR", "version": "VARCHAR", "category": "VARCHAR", "tags": "JSON", "is_installed": "BOOLEAN DEFAULT 0 NOT NULL", "status": "VARCHAR DEFAULT 'stopped' NOT NULL", "autostart": "BOOLEAN DEFAULT 0 NOT NULL", "port": "INTEGER", "pid": "INTEGER", "app_metadata": "JSON", "folder_name": "VARCHAR", "allow_openai_api_access": "BOOLEAN DEFAULT 0 NOT NULL" }
         app_columns_db_after_rebuild = [col['name'] for col in inspector.get_columns('apps')]
         for col_name, col_sql_def in new_app_cols_defs.items():
             if col_name not in app_columns_db_after_rebuild:

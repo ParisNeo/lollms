@@ -73,6 +73,8 @@ class App(Base):
     __tablename__ = "apps"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)
     name = Column(String, nullable=False, index=True)
+    host = Column(String, nullable=True, default="localhost")
+    port = Column(Integer, nullable=True, unique=True)
     client_id = Column(String, unique=True, index=True, nullable=True) # NEW: SSO identifier
     folder_name = Column(String, nullable=True)
     url = Column(String, nullable=True)
@@ -95,7 +97,6 @@ class App(Base):
     is_installed = Column(Boolean, default=False, nullable=False, index=True)
     status = Column(String, default='stopped', nullable=False, index=True)
     autostart = Column(Boolean, default=False, nullable=False)
-    port = Column(Integer, nullable=True, unique=True)
     pid = Column(Integer, nullable=True)
     app_metadata = Column(JSON, nullable=True)
     allow_openai_api_access = Column(Boolean, default=False, nullable=False)

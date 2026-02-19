@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-19 22:25]
+
+- feat(db): add host field to App model and reorder columns
+
 ## [2026-02-18 03:28]
 
 - chore: comment out verbose startup logs and bump ascii_colors to 0.11.13
