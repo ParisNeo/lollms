@@ -149,7 +149,7 @@ workers_count = get_env_var("SERVER_WORKERS", cpu_count(), int)
 
 # Reverting the Windows worker cap to allow multiple workers, relying on the 'spawn' fix in main.py
 if os.name == 'nt' and workers_count > 1:
-    ASCIIColors.warning("WARNING: Capping SERVER_WORKERS to 1 on Windows to prevent WinError 10022 (Invalid argument).")
+    ASCIIColors.panel("⚠️  [bold orange]WARNING:[/bold orange] Capping [bold]SERVER_WORKERS[/bold] to 1 on Windows to prevent WinError 10022 (Invalid argument).")
     workers_count = 1
 
 SERVER_CONFIG = {
