@@ -221,9 +221,7 @@ def run_one_time_startup_tasks(lock: Lock):
     if not acquired:
         return
     
-    ASCIIColors.green(f"Worker {os.getpid()} acquired startup lock. Running one-time tasks...")
-    
-    # Define the steps we want to visualise
+    ASCIIColors.panel(f"ℹ️ Worker [bold]{os.getpid()}[/bold] acquired startup lock. Running one-time tasks... 🚀")    # Define the steps we want to visualise
     steps = [
         ("Database tables check/creation", False),
         ("Schema migration & bootstrap", False),
@@ -255,7 +253,7 @@ def run_one_time_startup_tasks(lock: Lock):
         try:
             engine = db_session_module.engine
             Base.metadata.create_all(bind=engine)
-            ASCIIColors.green("INFO: Database tables checked/created.")
+            #ASCIIColors.green("INFO: Database tables checked/created.")
             steps[0] = (steps[0][0], True)
             live.update(render_steps_panel())
         except Exception as e:
