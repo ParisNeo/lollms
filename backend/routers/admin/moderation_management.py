@@ -40,7 +40,7 @@ class ModerationItem(BaseModel):
 
 @router.get("/queue", response_model=List[ModerationItem])
 async def get_moderation_queue(
-    status_filter: Optional[str] = Query(None, regex="^(pending|flagged)$"),
+    status_filter: Optional[str] = Query(None, pattern="^(pending|flagged)$"),
     limit: int = 50,
     db: Session = Depends(get_db)
 ):
