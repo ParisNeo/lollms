@@ -66,6 +66,13 @@ const currentScrapeTask = ref(null);
 const dragOver = ref(false);
 const selectedFilesToDelete = ref(new Set());
 
+// Export/Import State
+const isExporting = ref(null);
+const isImporting = ref(false);
+const importInputRef = ref(null);
+const importStoreName = ref('');
+const importFile = ref(null);
+
 // Scrape URL State
 const scrapeUrl = ref('');
 const scrapeDepth = ref(0);
@@ -609,6 +616,107 @@ function copyContent() {
         uiStore.addNotification("Content copied to clipboard", "success");
     }
 }
+
+// Export/Import Functions
+async function handleExportStore(store) {
+    if (isExporting.value) return;
+    
+    const confirmed = await uiStore.showConfirmation({ 
+        title: `Export '${store.name}'?`, 
+        message: 'This will create a ZIP file containing the datastore database and all indexed documents.',
+        confirmText: 'Export'
+    });
+    
+    if (!confirmed.confirmed) return;
+    
+    isExporting.value = store.id;
+    try {
+        const response = await apiClient.get(`/api/datastores/${store.id}/export`, {
+            responseType: 'blob'
+        });
+        
+        // Extract filename from Content-Disposition header or use default
+        const contentDisposition = response.headers['content-disposition'];
+        let filename = `${store.name}_export.zip`;
+        if (contentDisposition) {
+            const filenameMatch = contentDisposition.match(/filename="?(.+?)"?$/);
+            if (filenameMatch) filename = filenameMatch[1];
+        }
+        
+        // Create download link
+        const url = window.URL.createObjectURL(new Blob([response.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', filename);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        
+        uiStore.addNotification('Datastore exported successfully', 'success');
+    } catch (error) {
+        console.error('Export failed:', error);
+        uiStore.addNotification('Failed to export datastore', 'error');
+    } finally {
+        isExporting.value = null;
+    }
+}
+
+function triggerImport() {
+    importInputRef.value?.click();
+}
+
+async function handleImportFileChange(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    if (!file.name.endsWith('.zip')) {
+        uiStore.addNotification('Please select a ZIP file', 'error');
+        return;
+    }
+    
+    importFile.value = file;
+    importStoreName.value = file.name.replace('_export.zip', '').replace('.zip', '');
+    
+    // Open modal to ask for name
+    uiStore.openModal('importDataStore');
+    
+    // Reset input
+    event.target.value = '';
+}
+
+async function handleImportStore() {
+    if (!importFile.value) return;
+    
+    isImporting.value = true;
+    const formData = new FormData();
+    formData.append('file', importFile.value);
+    if (importStoreName.value.trim()) {
+        formData.append('name', importStoreName.value.trim());
+    }
+    
+    try {
+        const response = await apiClient.post('/api/datastores/import', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        
+        uiStore.addNotification(`Datastore '${response.data.name}' imported successfully`, 'success');
+        await dataStore.fetchDataStores();
+        uiStore.closeModal('importDataStore');
+        
+        // Select the newly imported store
+        selectStore(response.data.id);
+        
+        // Cleanup
+        importFile.value = null;
+        importStoreName.value = '';
+    } catch (error) {
+        console.error('Import failed:', error);
+        uiStore.addNotification(error.response?.data?.detail || 'Failed to import datastore', 'error');
+    } finally {
+        isImporting.value = false;
+    }
+}
 </script>
 
 <template>
@@ -990,7 +1098,7 @@ function copyContent() {
     </div>
     
     <!-- Store Info Modal -->
-    <GenericModal modalName="storeInfoModal" :isOpen="showStoreInfo" @close="showStoreInfo = false" :title="currentSelectedStore ? `${currentSelectedStore.name} Details` : 'Store Details'">
+    <GenericModal :visible="showStoreInfo" @close="showStoreInfo = false" :title="currentSelectedStore ? `${currentSelectedStore.name} Details` : 'Store Details'">
         <template #body>
             <div v-if="currentSelectedStore" class="space-y-4">
                 <div>
@@ -1020,6 +1128,31 @@ function copyContent() {
                         <JsonRenderer :json="currentSelectedStore.vectorizer_config" />
                     </div>
                 </div>
+                
+                <!-- Actions -->
+                <div class="flex flex-wrap gap-2 pt-2">
+                    <button 
+                        v-if="currentSelectedStore.permission_level === 'owner'"
+                        @click="handleExportStore(currentSelectedStore)"
+                        :disabled="isExporting === currentSelectedStore.id"
+                        class="btn btn-secondary btn-sm flex items-center gap-2"
+                    >
+                        <IconAnimateSpin v-if="isExporting === currentSelectedStore.id" class="w-4 h-4 animate-spin" />
+                        <IconArrowUpTray v-else class="w-4 h-4 rotate-180" />
+                        {{ isExporting === currentSelectedStore.id ? 'Exporting...' : 'Export' }}
+                    </button>
+                    
+                    <button 
+                        v-if="currentSelectedStore.permission_level === 'owner'"
+                        @click="handleDeleteStore(currentSelectedStore)"
+                        :disabled="isLoadingAction === `delete_store_${currentSelectedStore.id}`"
+                        class="btn btn-ghost btn-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                    >
+                        <IconAnimateSpin v-if="isLoadingAction === `delete_store_${currentSelectedStore.id}`" class="w-4 h-4 animate-spin" />
+                        <IconTrash v-else class="w-4 h-4" />
+                        Delete
+                    </button>
+                </div>
             </div>
         </template>
         <template #footer>
@@ -1042,7 +1175,7 @@ function copyContent() {
                                 {{ viewingFile.filename }}
                             </p>
                         </div>
-                        <div class="text-right text-xs text-gray-500 dark:text-gray-400 space-y-1 flex-shrink-0 ml-4">
+                        <div class="text-right text-xs text-gray-500 dark:text-gray-400 space-y-1">
                             <div title="Total characters"><span class="font-semibold">{{ viewingFile.content.length.toLocaleString() }}</span> chars</div>
                             <div title="Approximate word count"><span class="font-semibold">{{ viewingFile.content.split(/\s+/).length.toLocaleString() }}</span> words</div>
                             <div title="Estimated tokens (char/4)"><span class="font-semibold">~{{ Math.ceil(viewingFile.content.length / 4).toLocaleString() }}</span> tokens</div>
@@ -1074,6 +1207,44 @@ function copyContent() {
         </template>
         <template #footer>
             <button @click="uiStore.closeModal('fileContent')" class="btn btn-primary">Close</button>
+        </template>
+    </GenericModal>
+    
+    <!-- Import Modal -->
+    <GenericModal modalName="importDataStore" title="Import Datastore" size="lg">
+        <template #body>
+            <div class="space-y-4">
+                <div v-if="importFile" class="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                    <IconFileText class="w-8 h-8 text-blue-500" />
+                    <div>
+                        <div class="font-medium text-sm">{{ importFile.name }}</div>
+                        <div class="text-xs text-gray-500">{{ (importFile.size / 1024 / 1024).toFixed(2) }} MB</div>
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="import-name" class="block text-sm font-medium">Datastore Name</label>
+                    <input 
+                        id="import-name" 
+                        v-model="importStoreName" 
+                        type="text" 
+                        class="input-field mt-1" 
+                        placeholder="Leave empty to use original name"
+                    >
+                </div>
+                
+                <p class="text-sm text-gray-500">
+                    This will create a new datastore with the imported configuration and documents.
+                    If a datastore with the same name exists, a number will be appended.
+                </p>
+            </div>
+        </template>
+        <template #footer>
+            <button @click="uiStore.closeModal('importDataStore'); importFile = null;" class="btn btn-secondary">Cancel</button>
+            <button @click="handleImportStore" :disabled="isImporting" class="btn btn-primary">
+                <IconAnimateSpin v-if="isImporting" class="w-4 h-4 mr-2 animate-spin" />
+                {{ isImporting ? 'Importing...' : 'Import' }}
+            </button>
         </template>
     </GenericModal>
 </template>

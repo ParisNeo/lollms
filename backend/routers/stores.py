@@ -4,6 +4,10 @@ import uuid
 from pathlib import Path
 from typing import List, Dict, Optional, Any
 import traceback
+import zipfile
+import tempfile
+import shutil
+from datetime import datetime
 from ascii_colors import trace_exception
 import os
 from pydantic import BaseModel
@@ -19,7 +23,8 @@ from fastapi import (
     UploadFile,
     Form,
     APIRouter,
-    status
+    status,
+    BackgroundTasks
 )
 from fastapi.responses import (
     JSONResponse,
@@ -1343,3 +1348,220 @@ async def leave_datastore(datastore_id: str, current_user: UserAuthDetails = Dep
         db.rollback()
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"DB error leaving datastore: {e}")
+
+
+@datastore_router.get("/{datastore_id}/export")
+async def export_datastore(
+    datastore_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Exports a datastore to a ZIP file containing:
+    - metadata.json (store info, config)
+    - documents.json (list of files and their metadata)
+    - The .db file (SafeStore database)
+    - The documents folder (safestore_docs)
+    """
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+
+    # Permission check: owner or revectorize permission required for full export
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="revectorize")
+    
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    if not datastore_record:
+        raise HTTPException(status_code=404, detail="Datastore not found.")
+
+    owner_username = datastore_record.owner.username
+    db_path = get_datastore_db_path(owner_username, datastore_id)
+    docs_path = get_user_datastore_root_path(owner_username) / "safestore_docs" / datastore_id
+
+    # Create a temporary directory for the export
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        export_dir = temp_dir_path / f"datastore_export_{datastore_id}"
+        export_dir.mkdir()
+
+        # 1. Save metadata
+        metadata = {
+            "id": datastore_record.id,
+            "name": datastore_record.name,
+            "description": datastore_record.description,
+            "owner_username": owner_username,
+            "vectorizer_name": datastore_record.vectorizer_name,
+            "vectorizer_config": datastore_record.vectorizer_config,
+            "chunk_size": datastore_record.chunk_size,
+            "chunk_overlap": datastore_record.chunk_overlap,
+            "created_at": datastore_record.created_at.isoformat() if datastore_record.created_at else None,
+            "exported_at": datetime.utcnow().isoformat(),
+            "version": "1.0"
+        }
+        
+        with open(export_dir / "metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
+
+        # 2. Export document list from SafeStore
+        with ss:
+            docs_list = ss.list_documents()
+        
+        with open(export_dir / "documents.json", "w") as f:
+            json.dump(docs_list, f, indent=2)
+
+        # 3. Copy the database file
+        if db_path.exists():
+            shutil.copy2(db_path, export_dir / "datastore.db")
+        else:
+            trace_exception(f"Database file not found for export: {db_path}")
+
+        # 4. Copy the documents folder if it exists
+        if docs_path.exists() and docs_path.is_dir():
+            shutil.copytree(docs_path, export_dir / "documents")
+        else:
+            # Create empty documents folder in export for clarity
+            (export_dir / "documents").mkdir()
+
+        # 5. Create ZIP file
+        zip_filename = f"{datastore_record.name}_export.zip"
+        zip_path = temp_dir_path / zip_filename
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for file_path in export_dir.rglob('*'):
+                if file_path.is_file():
+                    arcname = file_path.relative_to(export_dir)
+                    zipf.write(file_path, arcname)
+
+        # Read ZIP content for response
+        with open(zip_path, 'rb') as f:
+            zip_content = f.read()
+
+        # Return as downloadable file
+        from fastapi.responses import Response
+        return Response(
+            content=zip_content,
+            media_type='application/zip',
+            headers={
+                'Content-Disposition': f'attachment; filename="{zip_filename}"'
+            }
+        )
+
+
+@datastore_router.post("/import", status_code=status.HTTP_201_CREATED)
+async def import_datastore(
+    file: UploadFile = File(...),
+    name: Optional[str] = Form(None),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> DataStorePublic:
+    """
+    Imports a datastore from a ZIP archive.
+    Creates a new datastore with the contents.
+    """
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    
+    if not file.filename or not file.filename.endswith('.zip'):
+        raise HTTPException(status_code=400, detail="Please upload a .zip file.")
+
+    user_db = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+    if not user_db:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # Create temporary directory for extraction
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_dir_path = Path(temp_dir)
+        zip_path = temp_dir_path / "upload.zip"
+        
+        # Save uploaded file
+        with open(zip_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        # Extract
+        extract_dir = temp_dir_path / "extracted"
+        try:
+            with zipfile.ZipFile(zip_path, 'r') as zipf:
+                zipf.extractall(extract_dir)
+        except zipfile.BadZipFile:
+            raise HTTPException(status_code=400, detail="Invalid ZIP file.")
+
+        # Find metadata.json (might be in root or subdirectory)
+        metadata_file = next(extract_dir.rglob("metadata.json"), None)
+        if not metadata_file:
+            raise HTTPException(status_code=400, detail="Invalid export archive: metadata.json not found.")
+
+        export_root = metadata_file.parent
+
+        # Read metadata
+        with open(metadata_file, "r") as f:
+            metadata = json.load(f)
+
+        # Determine new datastore name
+        new_name = name or metadata.get("name", "Imported Datastore")
+        
+        # Ensure unique name
+        base_name = new_name
+        counter = 1
+        while db.query(DBDataStore).filter_by(owner_user_id=user_db.id, name=new_name).first():
+            new_name = f"{base_name} ({counter})"
+            counter += 1
+
+        # Create new datastore record
+        new_ds = DBDataStore(
+            owner_user_id=user_db.id,
+            name=new_name,
+            description=metadata.get("description", f"Imported from {file.filename}"),
+            vectorizer_name=metadata.get("vectorizer_name"),
+            vectorizer_config=metadata.get("vectorizer_config", {}),
+            chunk_size=metadata.get("chunk_size", 2048),
+            chunk_overlap=metadata.get("chunk_overlap", 256)
+        )
+        
+        try:
+            db.add(new_ds)
+            db.commit()
+            db.refresh(new_ds)
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=400, detail="Datastore with this name already exists.")
+        except Exception as e:
+            db.rollback()
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+        # Prepare paths
+        new_db_path = get_datastore_db_path(current_user.username, new_ds.id)
+        new_docs_path = get_user_datastore_root_path(current_user.username) / "safestore_docs" / new_ds.id
+        new_docs_path.mkdir(parents=True, exist_ok=True)
+
+        # Copy database file
+        imported_db = export_root / "datastore.db"
+        if imported_db.exists():
+            # Initialize SafeStore first to create the structure, then overwrite
+            get_safe_store_instance(current_user.username, new_ds.id, db, permission_level="revectorize")
+            shutil.copy2(imported_db, new_db_path)
+
+        # Copy documents folder
+        imported_docs = export_root / "documents"
+        if imported_docs.exists() and imported_docs.is_dir():
+            # Clear the empty folder created by SafeStore init if it exists
+            if new_docs_path.exists():
+                shutil.rmtree(new_docs_path)
+            shutil.copytree(imported_docs, new_docs_path)
+
+        # Clear the cache so it reloads with the new data
+        if current_user.username in user_sessions and new_ds.id in user_sessions[current_user.username].get("safe_store_instances", {}):
+            del user_sessions[current_user.username]["safe_store_instances"][new_ds.id]
+
+        return DataStorePublic(
+            id=new_ds.id,
+            name=new_ds.name,
+            description=new_ds.description,
+            owner_username=current_user.username,
+            permission_level="owner",
+            vectorizer_name=new_ds.vectorizer_name,
+            vectorizer_config=new_ds.vectorizer_config or {},
+            chunk_size=new_ds.chunk_size,
+            chunk_overlap=new_ds.chunk_overlap,
+            created_at=new_ds.created_at,
+            updated_at=new_ds.updated_at
+        )

@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-23 03:03]
+
+- chore: release build artifacts and add data store export functionality
+
+## [2026-02-22 20:58]
+
+- fix: replace deprecated 'regex' with 'pattern' in Query parameter
+
 ## [2026-02-19 22:25]
 
 - feat(db): add host field to App model and reorder columns
