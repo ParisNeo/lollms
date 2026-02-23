@@ -705,11 +705,16 @@ async def list_personalities(
 
     data = await loop.run_in_executor(executor, _fetch)
 
-    ASCIIColors.panel([
-        ("✅ Personalities fetched successfully!", ASCIIColors.green),
-        (f"   📊 Total: {len(data)} personalities", ASCIIColors.white),
-        (f"   👤 User: {user.username}", ASCIIColors.cyan)
-    ], title="🎭 Lollms Personalities", border_color=ASCIIColors.green)
+    text ="\n".join([
+        "✅ Personalities fetched successfully!\n",
+        f"   📊 Total: {len(data)} personalities\n",
+        f"   👤 User: {user.username}"])
+
+    ASCIIColors.panel(
+        text,
+        title="🎭 Lollms Personalities",
+        border_style="green"
+    )
 
     return PersonalityListResponse(data=data)
 
