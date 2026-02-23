@@ -51,9 +51,12 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
             await websocket.receive_text()
 
     except WebSocketDisconnect:
-        ASCIIColors.yellow(f"[WebSocket] User '{username}' (ID: {user_id}) disconnected.")
+        # Normal disconnection, no need to alarm
+        pass
     except Exception as e:
-        ASCIIColors.error(f"[WebSocket] Error in WebSocket for user '{username}' (ID: {user_id}): {e}")
+        # Only log non-disconnect errors
+        if "disconnect" not in str(e).lower():
+            ASCIIColors.error(f"[WebSocket] Error in WebSocket for user '{username}' (ID: {user_id}): {e}")
     finally:
         if is_admin:
             manager.unregister_admin(user_id)

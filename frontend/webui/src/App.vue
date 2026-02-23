@@ -101,32 +101,27 @@ onMounted(async () => {
 });
 
 // Watch for connection restoration to re-initialize UI state
+let isSyncing = false;
 watch(wsConnected, async (newVal, oldVal) => {
     if (newVal) {
-        // If this is the first successful connection in this session, just mark it.
-        // This prevents the overlay from flashing on initial load.
         if (!hasConnectedOnce.value) {
             hasConnectedOnce.value = true;
         } 
-        // If we were previously disconnected (oldVal was explicitly false, not undefined) 
-        // AND we are logged in, trigger synchronization logic.
-        else if (oldVal === false && isAuthenticated.value) {
+        else if (oldVal === false && isAuthenticated.value && !isSyncing) {
+            isSyncing = true;
             isReconnecting.value = true;
             try {
                 console.log("[App] Connection restored. Re-initializing...");
-                // 1. Refresh User Data/Settings
                 await authStore.refreshUser(); 
-                // 2. Restart Task Listeners/Polling
                 tasksStore.startPolling();
-                // 3. Notify user
-                uiStore.addNotification("Server connection restored. UI refreshed.", "success");
+                uiStore.addNotification("Server connection restored.", "success");
             } catch (e) {
                 console.error("[App] Re-initialization failed:", e);
             } finally {
-                // Small delay to let user see "Reconnected" status before hiding overlay
                 setTimeout(() => {
                     isReconnecting.value = false;
-                }, 800);
+                    isSyncing = false;
+                }, 1000);
             }
         }
     }
@@ -150,10 +145,10 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 
     <!-- Connection Lost Overlay -->
     <Transition
-        enter-active-class="transition ease-out duration-300"
+        enter-active-class="transition ease-out duration-500"
         enter-from-class="opacity-0"
         enter-to-class="opacity-100"
-        leave-active-class="transition ease-in duration-200"
+        leave-active-class="transition ease-in duration-300"
         leave-from-class="opacity-100"
         leave-to-class="opacity-0"
     >
@@ -168,17 +163,17 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     <!-- Splash Screen -->
     <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col bg-gray-50 dark:bg-gray-950 transition-all duration-700 overflow-hidden">
         
-        <!-- Background Decor -->
-        <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-all duration-1000" :class="{'blur-3xl opacity-20 scale-110': isFunFactHanging}">
-            <div class="absolute top-[-5%] left-[-5%] w-2/3 h-2/3 rounded-full bg-blue-500/10 blur-[140px] animate-pulse"></div>
-            <div class="absolute bottom-[-5%] right-[-5%] w-2/3 h-2/3 rounded-full bg-indigo-500/10 blur-[140px] animate-pulse delay-1000"></div>
+        <!-- Background Decor (Reduced blur to prevent STATUS_BREAKPOINT crash) -->
+        <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-all duration-1000" :class="{'blur-xl opacity-20 scale-110': isFunFactHanging}">
+            <div class="absolute top-[-5%] left-[-5%] w-2/3 h-2/3 rounded-full bg-blue-500/5 blur-[80px] animate-pulse"></div>
+            <div class="absolute bottom-[-5%] right-[-5%] w-2/3 h-2/3 rounded-full bg-indigo-500/5 blur-[80px] animate-pulse delay-1000"></div>
         </div>
 
         <!-- Backdrop for expanded state -->
-        <div v-if="isFunFactHanging" class="fixed inset-0 bg-white/40 dark:bg-black/60 backdrop-blur-xl z-[140] transition-all duration-500" @click="toggleFactHang"></div>
+        <div v-if="isFunFactHanging" class="fixed inset-0 bg-white/40 dark:bg-black/60 backdrop-blur-md z-[140] transition-all duration-500" @click="toggleFactHang"></div>
 
         <!-- Main Layout Container: Splits Top branding/fact from Bottom progress -->
-        <div class="flex-grow flex flex-col relative z-10 transition-all duration-500" :class="{'blur-2xl opacity-10 scale-95 pointer-events-none': isFunFactHanging}">
+        <div class="flex-grow flex flex-col relative z-10 transition-all duration-500" :class="{'blur-lg opacity-10 scale-95 pointer-events-none': isFunFactHanging}">
             
             <!-- Branding & Fact Group: Pushed toward top-middle -->
             <div class="flex-grow flex flex-col items-center justify-center p-6 space-y-8 sm:space-y-12">
@@ -196,11 +191,11 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
                     </p>
                 </div>
 
-                <!-- Fact Card (Natural flow, z-index 20) -->
+                <!-- Fact Card (Stabilized rendering: removed backdrop-blur and rapid re-mounting key) -->
                 <div v-if="authStore.funFact" 
                     class="w-full max-w-md cursor-pointer group transition-all duration-500"
                     @click="toggleFactHang()">
-                    <div class="p-6 sm:p-8 border-l-[8px] rounded-2xl text-left shadow-xl bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl border border-gray-100 dark:border-gray-700 overflow-hidden transform group-hover:scale-[1.02]" :style="funFactStyle">
+                    <div class="p-6 sm:p-8 border-l-[8px] rounded-2xl text-left shadow-xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 overflow-hidden transform group-hover:scale-[1.02]" :style="funFactStyle">
                         <div class="flex items-center justify-between mb-4">
                             <div class="flex items-center gap-3">
                                 <span class="text-2xl">💡</span>
@@ -208,9 +203,10 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
                             </div>
                         </div>
                         <div class="max-h-[15vh] overflow-y-auto custom-scrollbar pr-2">
-                            <MessageContentRenderer :key="authStore.funFact" :content="authStore.funFact" class="text-gray-900 dark:text-gray-100 text-sm sm:text-base line-clamp-4" />
+                            <!-- REMOVED :key - prevent component destruction loop during character streams -->
+                            <MessageContentRenderer :content="authStore.funFact" class="text-gray-900 dark:text-gray-100 text-sm sm:text-base line-clamp-4" />
                         </div>
-                        <div class="mt-4 text-[8px] text-center text-gray-400 dark:text-gray-500 font-black uppercase tracking-[0.2em] animate-pulse">Tap to expand</div>
+                        <div class="mt-4 text-[8px] text-center text-gray-400 dark:text-gray-500 font-black uppercase tracking-[0.2em]">Tap to expand</div>
                     </div>
                 </div>
             </div>

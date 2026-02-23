@@ -167,30 +167,43 @@ onUnmounted(() => {
 });
 
 watch(() => router.currentRoute.value.query.storeId, (newId) => {
-    if (newId) {
+    // Only update if the ID has actually changed and is different from internal state
+    if (newId && newId !== selectedStoreId.value) {
         selectStore(newId);
     }
 }, { immediate: true });
 
-watch(tasks, (newTasks) => {
-    if (!currentSelectedStore.value) { currentUploadTask.value = null; currentGraphTask.value = null; currentScrapeTask.value = null; return; }
-    const storeName = currentSelectedStore.value.name;
-    const findLatestTask = (namePrefix) => newTasks.filter(task => task.name.startsWith(namePrefix) && task.name.includes(storeName) && (task.status === 'running' || task.status === 'pending')).sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
-    const latestUploadTask = findLatestTask('Add files to DataStore:');
-    const latestGraphTask = findLatestTask('Generate Graph for:') || findLatestTask('Update Graph for:');
-    const latestScrapeTask = findLatestTask('Scrape URL to DataStore:');
-    
-    if (
-        (currentUploadTask.value && !latestUploadTask && (currentUploadTask.value.status === 'running' || currentUploadTask.value.status === 'pending')) ||
-        (currentScrapeTask.value && !latestScrapeTask && (currentScrapeTask.value.status === 'running' || currentScrapeTask.value.status === 'pending'))
-    ) { 
-        fetchFilesInStore(currentSelectedStore.value.id); 
+// Memoize store name to avoid reactive overhead in the task filter
+const currentStoreName = computed(() => currentSelectedStore.value?.name || '');
+
+// Computed properties are more efficient than deep watchers for high-frequency updates
+const storeSpecificTasks = computed(() => {
+    if (!currentStoreName.value) return [];
+    return tasks.value.filter(t => t.name.includes(currentStoreName.value));
+});
+
+watch(storeSpecificTasks, (newStoreTasks) => {
+    const findLatest = (prefix) => newStoreTasks
+        .filter(t => t.name.startsWith(prefix) && (t.status === 'running' || t.status === 'pending'))
+        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
+
+    const latestUpload = findLatest('Add files to DataStore:');
+    const latestGraph = findLatest('Generate Graph for:') || findLatest('Update Graph for:');
+    const latestScrape = findLatest('Scrape URL to DataStore:');
+
+    // Detect task completion to refresh file list
+    const uploadFinished = currentUploadTask.value && !latestUpload;
+    const scrapeFinished = currentScrapeTask.value && !latestScrape;
+
+    if ((uploadFinished || scrapeFinished) && selectedStoreId.value) {
+        // Use a timeout to de-prioritize the refresh and prevent UI blocking loops
+        setTimeout(() => fetchFilesInStore(selectedStoreId.value), 500);
     }
-    
-    currentUploadTask.value = latestUploadTask;
-    currentGraphTask.value = latestGraphTask;
-    currentScrapeTask.value = latestScrapeTask;
-}, { deep: true });
+
+    currentUploadTask.value = latestUpload;
+    currentGraphTask.value = latestGraph;
+    currentScrapeTask.value = latestScrape;
+});
 
 watch(selectedStoreId, (newId) => {
     isAddFormVisible.value = false;

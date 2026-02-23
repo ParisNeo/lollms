@@ -43,6 +43,9 @@ export const useAuthStore = defineStore('auth', () => {
     const audioChime = new Audio('/audio/chime_aud.wav');
     const audioLost = new Audio('/audio/connection_lost.wav');
     const audioRecovered = new Audio('/audio/connection_recovered.wav');
+    
+    // Throttling for connection lost sound to prevent "Ai Ai Ai" spam loop
+    let lastConnectionLostTime = 0;
 
     // --- Getters ---
     const isAuthenticated = computed(() => !!user.value);
@@ -136,26 +139,30 @@ export const useAuthStore = defineStore('auth', () => {
             }, 30000); 
         };
 
-        ws.value.onmessage = async (event) => {
+        ws.value.onmessage = (event) => {
             if (event.data === "pong") return;
+            if (!ws.value || ws.value.readyState !== WebSocket.OPEN) return;
+
             let data;
             try { data = JSON.parse(event.data); } catch (e) { return; }
             
-            const { useSocialStore } = await import('./social');
-            const { useTasksStore } = await import('./tasks');
-            const { useDataStore } = await import('./data');
-            const { useDiscussionsStore } = await import('./discussions');
-            
-            const socialStore = useSocialStore();
+            // Move store resolution inside an immediate scope to avoid async gaps
+            // during high-frequency updates
             const uiStore = useUiStore();
-            const tasksStore = useTasksStore();
-            const dataStore = useDataStore();
-            const discussionsStore = useDiscussionsStore();
+            
+            // Helper to get stores without async imports in the loop
+            const getSocialStore = () => import('./social').then(m => m.useSocialStore());
+            const getTasksStore = () => import('./tasks').then(m => m.useTasksStore());
+            const getDataStore = () => import('./data').then(m => m.useDataStore());
+            const getDiscussionsStore = () => import('./discussions').then(m => m.useDiscussionsStore());
 
+            // Process message type
             switch (data.type) {
-                case 'notification': uiStore.addNotification(data.data.message, data.data.type || 'info', data.data.duration || 3000); break;
+                case 'notification': 
+                    uiStore.addNotification(data.data.message, data.data.type || 'info', data.data.duration || 3000); 
+                    break;
                 case 'new_dm': 
-                    socialStore.handleNewDm(data.data);
+                    getSocialStore().then(s => s.handleNewDm(data.data));
                     if (user.value && data.data.sender_id !== user.value.id) {
                         audioChime.play().catch(() => {});
                         if ("Notification" in window && Notification.permission === "granted") {
@@ -163,46 +170,84 @@ export const useAuthStore = defineStore('auth', () => {
                         }
                     }
                     break;
-                case 'new_comment': socialStore.handleNewComment(data.data); break;
-                case 'new_friend_request': socialStore.handleIncomingFriendRequest(data.data); break;
-                case 'friend_online': uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon); break;
-                case 'new_shared_discussion': discussionsStore.fetchSharedWithMe(); uiStore.addNotification(`'${data.data.discussion_title}' was shared by ${data.data.from_user}.`, 'info'); break;
+                case 'new_comment': 
+                    getSocialStore().then(s => s.handleNewComment(data.data)); 
+                    break;
+                case 'new_friend_request': 
+                    getSocialStore().then(s => s.handleIncomingFriendRequest(data.data)); 
+                    break;
+                case 'friend_online': 
+                    uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon); 
+                    break;
+                case 'new_shared_discussion': 
+                    getDiscussionsStore().then(s => {
+                        s.fetchSharedWithMe(); 
+                        uiStore.addNotification(`'${data.data.discussion_title}' was shared by ${data.data.from_user}.`, 'info');
+                    });
+                    break;
                 case 'discussion_updated':
-                    if (discussionsStore.currentDiscussionId === data.data.discussion_id) {
-                        uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
-                        discussionsStore.refreshActiveDiscussionMessages();
-                    }
-                    discussionsStore.loadDiscussions();
+                    getDiscussionsStore().then(s => {
+                        if (s.currentDiscussionId === data.data.discussion_id) {
+                            uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
+                            s.refreshActiveDiscussionMessages();
+                        }
+                        s.loadDiscussions();
+                    });
                     break;
                 case 'data_zone_processed': 
-                    discussionsStore.handleDataZoneUpdate(data.data); 
+                    getDiscussionsStore().then(s => s.handleDataZoneUpdate(data.data)); 
                     break;
                 case 'discussion_images_updated':
-                    discussionsStore.handleDiscussionImagesUpdated(data.data);
+                    getDiscussionsStore().then(s => s.handleDiscussionImagesUpdated(data.data));
                     break;
-                case 'new_message_from_task': discussionsStore.handleNewMessageFromTask(data.data); break;
-                case 'admin_broadcast': uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); break;
-                case 'task_update': tasksStore.addTask(data.data); break;
+                case 'new_message_from_task': 
+                    getDiscussionsStore().then(s => s.handleNewMessageFromTask(data.data)); 
+                    break;
+                case 'admin_broadcast': 
+                    uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); 
+                    break;
+                case 'task_update': 
+                    getTasksStore().then(s => s.addTask(data.data)); 
+                    break;
                 case 'task_end': {
-                    tasksStore.addTask(data.data);
-                    const task = data.data;
-                    if (task.status === 'completed' && task.result?.status === 'image_generated_in_message') {
-                        discussionsStore.handleNewMessageFromTask({ discussion_id: task.result.discussion_id, message: task.result.new_message });
-                        uiStore.addNotification(`Image generated.`, 'success');
-                    } else if (task.name === 'Generate User Avatar' && task.result?.new_icon_url) {
-                        refreshUser();
-                        uiStore.addNotification('Avatar updated!', 'success');
-                    }
+                    getTasksStore().then(ts => {
+                        ts.addTask(data.data);
+                        const task = data.data;
+                        if (task.status === 'completed' && task.result?.status === 'image_generated_in_message') {
+                            getDiscussionsStore().then(ds => ds.handleNewMessageFromTask({ discussion_id: task.result.discussion_id, message: task.result.new_message }));
+                            uiStore.addNotification(`Image generated.`, 'success');
+                        } else if (task.name === 'Generate User Avatar' && task.result?.new_icon_url) {
+                            refreshUser();
+                            uiStore.addNotification('Avatar updated!', 'success');
+                        }
+                    });
                     break;
                 }
-                case 'settings_updated': await Promise.all([refreshUser(), fetchWelcomeInfo()]); break;
-                case 'bindings_updated': await Promise.all([dataStore.fetchAvailableLollmsModels(), dataStore.fetchAvailableTtiModels(), dataStore.fetchAvailableTtsModels(), dataStore.fetchAvailableSttModels(), refreshUser()]); break;
+                case 'settings_updated': 
+                    Promise.all([refreshUser(), fetchWelcomeInfo()]); 
+                    break;
+                case 'bindings_updated': 
+                    getDataStore().then(ds => {
+                        Promise.all([
+                            ds.fetchAvailableLollmsModels(), 
+                            ds.fetchAvailableTtiModels(), 
+                            ds.fetchAvailableTtsModels(), 
+                            ds.fetchAvailableSttModels(), 
+                            refreshUser()
+                        ]);
+                    });
+                    break;
             }
         };
 
         ws.value.onclose = (event) => {
             if (wsConnected.value) {
-                audioLost.play().catch(() => {});
+                const now = Date.now();
+                // Debounce audio: only play if at least 10 seconds passed since last play
+                if (now - lastConnectionLostTime > 10000) {
+                    audioLost.play().catch(() => {});
+                    lastConnectionLostTime = now;
+                }
                 useUiStore().addNotification('Connection lost', 'error');
             }
             wsConnected.value = false;

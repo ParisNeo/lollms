@@ -23,13 +23,20 @@ def _serialize_task(db_task: DBTask) -> Optional[dict]:
         return None
     
     try:
+        # Optimization: Only send the latest logs over WebSocket to prevent 
+        # browser memory crashes (STATUS_BREAKPOINT) from massive JSON payloads.
+        recent_logs = db_task.logs[-5:] if db_task.logs else []
+        
+        
         task_info = {
             "id": db_task.id,
             "name": db_task.name,
             "description": db_task.description,
             "status": db_task.status,
             "progress": db_task.progress,
-            "logs": db_task.logs or [],
+            "logs": recent_logs,
+            "result": db_task.result,
+            "error": db_task.error,
             "result": db_task.result,
             "error": db_task.error,
             "created_at": db_task.created_at,
@@ -52,6 +59,8 @@ def _serialize_task(db_task: DBTask) -> Optional[dict]:
         return None
 
 
+import time
+
 class Task:
     """
     Represents a runnable task that updates its state in the database.
@@ -69,13 +78,25 @@ class Task:
         self.cancellation_event = threading.Event()
         self.process = None
         self.db_lock = threading.Lock()
+        
+        # Throttling state to prevent WebSocket flooding and frontend crashes (STATUS_BREAKPOINT)
+        self.last_broadcast_time = 0
+        self.broadcast_interval = 0.1  # Max 10 updates per second
 
-    def _broadcast_update(self, db_task: DBTask):
-        """Sends a WebSocket update for the task."""
+    def _broadcast_update(self, db_task: DBTask, force: bool = False):
+        """Sends a WebSocket update for the task. Throttled to prevent UI flooding."""
         if not db_task:
             return
         
+        now = time.time()
+        # Always broadcast if it's a final state or forced, otherwise check interval
+        is_final_state = db_task.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+        
+        if not force and not is_final_state and (now - self.last_broadcast_time < self.broadcast_interval):
+            return
+
         try:
+            self.last_broadcast_time = now
             task_data = _serialize_task(db_task)
             if not task_data:
                 return
@@ -118,7 +139,10 @@ class Task:
                     
                     db.commit()
                     db.refresh(task_record, ['owner'])
-                    self._broadcast_update(task_record)
+                    
+                    # If we are setting a final status, force the broadcast
+                    force_broadcast = "status" in kwargs and kwargs["status"] in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]
+                    self._broadcast_update(task_record, force=force_broadcast)
                 except Exception as e:
                     print(f"CRITICAL: Task {self.id} - Failed to update database: {e}")
                     traceback.print_exc()

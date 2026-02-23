@@ -221,7 +221,25 @@ class ConnectionManager:
         """
         if not isinstance(message_data, dict):
             return
+
+        # Safety Check: Prevent huge payloads from crashing the browser (STATUS_BREAKPOINT)
+        # 1MB is a reasonable limit for routine WebSocket updates
+        try:
+            encoded_len = len(json.dumps(message_data))
+            if encoded_len > 1024 * 1024: 
+                ASCIIColors.warning(f"WS Payload too large ({encoded_len} bytes). Dropping to protect UI.")
+                return
+        except Exception:
+            pass
         
+        # DEBUG LOGGING: Use this to see the "Storm" in your terminal
+        msg_type = message_data.get("type")
+        if msg_type == "personal":
+            inner_type = message_data.get("data", {}).get("type", "unknown")
+            ASCIIColors.debug(f"[WS-SEND] -> User {message_data.get('user_id')}: {inner_type}")
+        else:
+            ASCIIColors.debug(f"[WS-SEND] -> Global: {msg_type}")
+
         message_data["_pid"] = os.getpid()
 
         if self._loop and self._loop.is_running():

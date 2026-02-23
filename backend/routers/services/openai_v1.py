@@ -685,11 +685,8 @@ async def list_personalities(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    ASCIIColors.info(f"------------ Open AI V1 --------------")
-    ASCIIColors.info(f"Personalities listing (lollms custom)")
-    
     loop = asyncio.get_running_loop()
-    
+
     def _fetch():
         personalities_db = db.query(DBPersonality).options(joinedload(DBPersonality.owner)).filter(
             or_(
@@ -697,7 +694,7 @@ async def list_personalities(
                 DBPersonality.owner_user_id == user.id
             )
         ).order_by(DBPersonality.category, DBPersonality.name).all()
-        
+
         response_data = []
         for p in personalities_db:
             owner_username = p.owner.username if p.owner else "System"
@@ -705,9 +702,15 @@ async def list_personalities(
             p_info.owner_username = owner_username
             response_data.append(p_info)
         return response_data
-        
+
     data = await loop.run_in_executor(executor, _fetch)
-    ASCIIColors.info(f"------------ DONE --------------")
+
+    ASCIIColors.panel([
+        ("✅ Personalities fetched successfully!", ASCIIColors.green),
+        (f"   📊 Total: {len(data)} personalities", ASCIIColors.white),
+        (f"   👤 User: {user.username}", ASCIIColors.cyan)
+    ], title="🎭 Lollms Personalities", border_color=ASCIIColors.green)
+
     return PersonalityListResponse(data=data)
 
 @openai_v1_router.post("/chat/completions")
@@ -716,11 +719,6 @@ async def chat_completions(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    ASCIIColors.info("------------ Open AI V1 --------------")
-    ASCIIColors.bold(f"Received Chat Completion Request from user: {user.username} Model: {request.model}, Stream: {request.stream}")
-    # for message in request.messages:
-    #     ASCIIColors.bold(f"{message.role}:")
-    #     ASCIIColors.green(str(message.content))
 
     try:
         binding_alias, model_name = resolve_model_name(db, request.model)
@@ -766,13 +764,13 @@ async def chat_completions(
     if request.reasoning_effort:
         generation_kwargs["reasoning_effort"] = request.reasoning_effort
 
-    ASCIIColors.info(f"Received images: {len(images)}")
+    t = '\nTools requested in stream mode.' if request.tools else ""
+    ASCIIColors.panel(f"[bold]Open AI V1[/bold]\n[bold]User:[/bold] {user.username}\n[bold]Model:[/bold] {request.model}\n[bold]Stream:[/bold] {request.stream}\n[bold]Received images:[/bold] {len(images)}", title="Chat Completion Request{t}", border_style="cyan")    # for message in request.messages:
 
     if request.stream:
         async def stream_generator():
             try:
                 if request.tools:
-                    ASCIIColors.info("Tools requested in stream mode. Buffering generation for safe parsing...")
                     generation_kwargs["ctx_size"]=user.llm_ctx_size
                     
                     # Blocking generation for tools
@@ -905,12 +903,10 @@ async def chat_completions(
                 ASCIIColors.error(f"Stream Generator Crash: {e}")
                 yield "data: [DONE]\n\n"
 
-        ASCIIColors.info(f"------------ DONE --------------")
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
     else:
         try:
-            ASCIIColors.info("Generating non-streaming response...")
             generation_kwargs["ctx_size"]=user.llm_ctx_size
             
             # Use executor for non-streaming blocking call as well

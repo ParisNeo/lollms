@@ -529,20 +529,16 @@ def run_one_time_startup_tasks(lock: Lock):
             DBTask.status.in_([TaskStatus.RUNNING, TaskStatus.PENDING])
         ).all()
         if interrupted_tasks:
+            ASCIIColors.yellow(f"Cleaning up {len(interrupted_tasks)} interrupted tasks...")
             for task in interrupted_tasks:
                 task.status = TaskStatus.FAILED
                 task.error = "Task interrupted by server restart."
                 task.completed_at = datetime.datetime.now(datetime.timezone.utc)
-                if task.logs is None:
-                    task.logs = []
-                current_logs = list(task.logs)
-                current_logs.append({
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    "message": "Server restarted. Task forced to failed state.",
-                    "level": "ERROR"
-                })
-                task.logs = current_logs
-        db_for_cleanup.commit()
+                # Avoid heavy log strings here to prevent DB/WS bloat
+                task.logs = [{"timestamp": datetime.datetime.now(timezone.utc).isoformat(), "message": "System Restart Recovery", "level": "ERROR"}]
+            # Single commit for all tasks to avoid triggering multiple DB change listeners
+            db_for_cleanup.commit()
+            ASCIIColors.green("Cleanup complete.")
         # if num_deleted_ws > 0:
         #     ASCIIColors.yellow(f"Cleared {num_deleted_ws} stale WebSocket entries.")
         # if interrupted_tasks:

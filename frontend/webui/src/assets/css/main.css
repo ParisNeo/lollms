@@ -340,3 +340,19 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 }
 
 
+/* Stabilize rendering process to prevent STATUS_BREAKPOINT crashes */
+* {
+    /* Large radius blurs are extremely heavy on the GPU/Renderer process */
+    --backdrop-blur-limit: blur(8px);
+}
+
+.backdrop-blur-xl, .backdrop-blur-2xl, .backdrop-blur-3xl {
+    backdrop-filter: var(--backdrop-blur-limit) !important;
+    -webkit-backdrop-filter: var(--backdrop-blur-limit) !important;
+}
+
+/* Limit transition complexity during load */
+.is-authenticating * {
+    transition: none !important;
+    animation-duration: 0.1s !important;
+}
