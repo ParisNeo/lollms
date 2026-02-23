@@ -955,7 +955,6 @@ async def chat_completions(
             prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(openai_messages)))
             completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(result_content))
             
-            ASCIIColors.info(f"------------ DONE --------------")
             
             return ChatCompletionResponse(
                 id=f"chatcmpl-{uuid.uuid4().hex}",

@@ -44,6 +44,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 ## [2026-02-23 14:35]
 
+- refactor(openai_v1): remove debug print statement
+
+## [2026-02-23 14:35]
+
 - refactor(openai_v1): simplify personality success logging
 
 ## [2026-02-23 14:29]
