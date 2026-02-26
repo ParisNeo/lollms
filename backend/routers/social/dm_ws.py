@@ -32,7 +32,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         user_id = user.id
         is_admin = user.is_admin
         username = user.username
-        ASCIIColors.green(f"[WebSocket] User '{username}' (ID: {user_id}) authenticated for WebSocket.")
+        ASCIIColors.panel(f"[WebSocket] User '{username}' (ID: {user_id}) authenticated for WebSocket.")
 
     except HTTPException:
         ASCIIColors.error(f"[WebSocket] Authentication raised HTTPException for token: ...{token[-6:]}")

@@ -61,7 +61,7 @@ class ConnectionManager:
                 # This ensures broadcast_to_admins reaches them if they are on another worker
                 if connecting_user.is_admin:
                     self.register_admin(user_id)
-                    ASCIIColors.cyan(f"Worker {os.getpid()}: Registered admin user {user_id}")
+                    ASCIIColors.panel(f"Worker {os.getpid()}: Registered admin user {user_id}")
 
                 db.commit()
 

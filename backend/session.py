@@ -753,7 +753,7 @@ def build_lollms_client_from_params(
             client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
 
         try:
-            ASCIIColors.magenta(f"INFO: Initializing LollmsClient for user '{username}'.")
+            ASCIIColors.panel(f"Initializing LollmsClient for user '{username}'.")
             lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
             return lc
         except Exception as e:
