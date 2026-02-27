@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-02-27 13:01]
+
+- feat(ws): add detailed diagnostics for oversized WebSocket payloads
+
 ## [2026-02-26 01:51]
 
 - refactor(logging): unify output styling with ASCIIColors.panel()

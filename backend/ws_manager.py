@@ -225,11 +225,48 @@ class ConnectionManager:
         # Safety Check: Prevent huge payloads from crashing the browser (STATUS_BREAKPOINT)
         # 1MB is a reasonable limit for routine WebSocket updates
         try:
-            encoded_len = len(json.dumps(message_data))
-            if encoded_len > 1024 * 1024: 
-                ASCIIColors.warning(f"WS Payload too large ({encoded_len} bytes). Dropping to protect UI.")
+            encoded_payload = json.dumps(message_data)
+            encoded_len = len(encoded_payload)
+            if encoded_len > 1024 * 1024:
+                # Gather detailed statistics about the payload
+                msg_type = type(message_data).__name__
+                key_count = len(message_data.keys()) if isinstance(message_data, dict) else 'N/A'
+
+                # Create a safe snapshot (first 500 chars, escaped)
+                snapshot = repr(encoded_payload[:500])
+
+                # Calculate size breakdown if dict
+                size_breakdown = {}
+                if isinstance(message_data, dict):
+                    for k, v in message_data.items():
+                        try:
+                            size_breakdown[k] = len(json.dumps({k: v}))
+                        except Exception:
+                            size_breakdown[k] = 'unmeasurable'
+                    top_heavy = sorted(size_breakdown.items(), key=lambda x: x[1] if isinstance(x[1], int) else 0, reverse=True)[:3]
+                    top_keys_str = ', '.join([f"{k}={v}b" for k, v in top_heavy])
+                else:
+                    top_keys_str = 'N/A (not a dict)'
+
+                # Build warning panel
+                panel_content = (
+                    f"\n{'='*60}\n"
+                    f"  WEBSOCKET PAYLOAD TOO LARGE - DROPPED TO PROTECT UI\n"
+                    f"{'='*60}\n"
+                    f"  Total Size:        {encoded_len:,} bytes ({encoded_len/1024/1024:.2f} MB)\n"
+                    f"  Limit:             {1024*1024:,} bytes (1.0 MB)\n"
+                    f"  Data Type:         {msg_type}\n"
+                    f"  Top-Level Keys:    {key_count}\n"
+                    f"  Top 3 Heavy Keys:  {top_keys_str}\n"
+                    f"{'-'*60}\n"
+                    f"  Payload Snapshot (first 500 chars):\n"
+                    f"  {snapshot}\n"
+                    f"{'='*60}"
+                )
+                ASCIIColors.warning(panel_content)
                 return
-        except Exception:
+        except Exception as e:
+            ASCIIColors.warning(f"WS Safety Check failed with error: {e}")
             pass
         
         # DEBUG LOGGING: Use this to see the "Storm" in your terminal
