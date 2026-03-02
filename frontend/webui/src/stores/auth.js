@@ -237,6 +237,13 @@ export const useAuthStore = defineStore('auth', () => {
                         ]);
                     });
                     break;
+                case 'dm_deleted':
+                    if (activeConversations.value[data.data.partner_id] || (data.data.conversation_id && activeConversations.value[data.data.conversation_id])) {
+                        const targetId = data.data.conversation_id || data.data.partner_id;
+                        activeConversations.value[targetId].messages = activeConversations.value[targetId].messages.filter(m => m.id !== data.data.message_id);
+                    }
+                    fetchConversations();
+                    break;
             }
         };
 

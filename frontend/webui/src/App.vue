@@ -143,20 +143,20 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     <!-- Maintenance Overlay -->
     <MaintenanceOverlay v-if="layoutState === 'maintenance'" />
 
-    <!-- Connection Lost Overlay -->
+    <!-- Connection Status Indicator (Subtle/Non-blocking) -->
     <Transition
         enter-active-class="transition ease-out duration-500"
-        enter-from-class="opacity-0"
-        enter-to-class="opacity-100"
+        enter-from-class="opacity-0 -translate-y-4"
+        enter-to-class="opacity-100 translate-y-0"
         leave-active-class="transition ease-in duration-300"
-        leave-from-class="opacity-100"
-        leave-to-class="opacity-0"
+        leave-from-class="opacity-100 translate-y-0"
+        leave-to-class="opacity-0 -translate-y-4"
     >
         <!-- Shows when WS drops OR when the API detects the server is stopped (isConnectionLost) -->
         <ConnectionOverlay 
             v-if="((!wsConnected || isConnectionLost) && isAuthenticated && hasConnectedOnce && layoutState !== 'maintenance') || isReconnecting" 
             :message="isReconnecting ? 'Synchronizing data...' : 'Searching for server'"
-            :sub-message="isReconnecting ? 'Reconnected' : 'Connection Lost'"
+            :sub-message="isReconnecting ? 'Reconnected' : 'Offline'"
         />
     </Transition>
 

@@ -100,25 +100,34 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="fixed bottom-4 right-4 z-[9999] w-full max-w-sm space-y-2 flex flex-col items-end">
+  <div class="fixed bottom-4 right-4 z-[9999] w-full max-w-sm space-y-2 flex flex-col items-end pointer-events-none">
     <!-- Clear All Button -->
     <button 
-        v-if="notifications.length > 1" 
-        @click="clearAll"
-        class="mb-2 px-3 py-1 bg-gray-800 text-white text-xs rounded-full shadow hover:bg-gray-700 transition-colors flex items-center gap-1"
+        v-if="notifications.length > 0" 
+        @click="uiStore.notifications = []"
+        class="pointer-events-auto mb-2 px-4 py-2 bg-gray-900/90 backdrop-blur text-white text-xs font-bold uppercase tracking-wider rounded-full shadow-2xl hover:bg-black transition-all flex items-center gap-2 border border-white/10"
     >
-        <IconTrash class="w-3 h-3" /> Clear All
+        <IconTrash class="w-3.5 h-3.5" /> Clear All Alerts
     </button>
 
     <transition-group name="list">
       <div
         v-for="notification in notifications"
         :key="notification.id"
-        class="flex items-start p-3 rounded-md shadow-lg w-full"
+        class="flex items-start p-3 rounded-md shadow-lg w-full group/notify border border-white/10"
         :class="getTypeClass(notification.type)"
         @mouseenter="pauseAndClearTimer(notification.id)"
         @mouseleave="startTimer(notification, 1000)"
       >
+        <!-- Individual Close Button (Kill Button) -->
+        <button 
+            @click.stop="handleClose(notification.id)"
+            class="absolute -top-2 -right-2 w-6 h-6 bg-gray-900 text-white rounded-full flex items-center justify-center shadow-lg opacity-0 group-hover/notify:opacity-100 transition-opacity z-10 hover:bg-black"
+            title="Dismiss"
+        >
+            <IconClose class="w-3.5 h-3.5" />
+        </button>
+
         <div class="flex items-center flex-grow min-w-0">
           <div class="flex-shrink-0 w-6 h-6 flex items-center justify-center">
             <component :is="getIcon(notification.type)" class="h-5 w-5" />

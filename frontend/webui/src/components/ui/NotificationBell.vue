@@ -59,9 +59,9 @@ const vOnClickOutside = {
             <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
             </svg>
-            <span v-if="totalUnreadCount > 0" class="absolute -top-1 -right-1 flex h-5 w-5">
+            <span v-if="totalUnreadCount > 0" class="absolute -top-1 -right-1 flex h-5 w-5 pointer-events-none">
                 <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span class="relative inline-flex rounded-full h-5 w-5 bg-red-500 text-white text-xs items-center justify-center">
+                <span class="relative inline-flex rounded-full h-5 w-5 bg-red-600 text-white text-[10px] font-black items-center justify-center shadow-sm">
                     {{ totalUnreadCount }}
                 </span>
             </span>
@@ -79,22 +79,38 @@ const vOnClickOutside = {
                 v-on-click-outside="closeDropdown"
                 class="absolute right-0 mt-2 w-80 origin-top-right rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 z-20"
             >
-                <div class="p-2 border-b dark:border-gray-700">
+                <div class="p-2 border-b dark:border-gray-700 flex justify-between items-center">
                     <h3 class="font-semibold text-sm">Notifications</h3>
+                    <button 
+                        v-if="totalUnreadCount > 0"
+                        @click="socialStore.conversations.forEach(c => socialStore.markConversationAsRead(c.partner_user_id || c.id))" 
+                        class="text-[10px] uppercase font-bold text-blue-600 hover:underline"
+                    >
+                        Mark all as read
+                    </button>
                 </div>
                 <div class="max-h-96 overflow-y-auto">
                     <div v-if="recentConversations.length === 0" class="p-4 text-center text-sm text-gray-500">
                         No new notifications.
                     </div>
-                    <ul v-else>
-                        <li v-for="convo in recentConversations" :key="convo.partner_user_id">
-                            <a href="#" @click.prevent="goToMessages(convo)" class="flex items-center p-3 hover:bg-gray-100 dark:hover:bg-gray-700">
+                    <ul v-else class="divide-y dark:divide-gray-700">
+                        <li v-for="convo in recentConversations" :key="convo.partner_user_id" class="group/notif relative">
+                            <a href="#" @click.prevent="goToMessages(convo)" class="flex items-center p-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                 <UserAvatar :icon="convo.partner_icon" :username="convo.partner_username" size-class="h-8 w-8" />
-                                <div class="ml-3">
-                                    <p class="text-sm font-medium">{{ convo.partner_username }}</p>
-                                    <p class="text-xs text-gray-500 truncate max-w-xs">{{ convo.last_message }}</p>
+                                <div class="ml-3 flex-1 min-w-0">
+                                    <p class="text-sm font-bold text-gray-900 dark:text-gray-100">{{ convo.partner_username }}</p>
+                                    <p class="text-xs text-gray-500 truncate">{{ convo.last_message }}</p>
                                 </div>
-                                <span class="ml-auto text-xs font-bold text-white bg-red-500 rounded-full h-5 w-5 flex items-center justify-center">{{ convo.unread_count }}</span>
+                                <span class="ml-auto text-xs font-bold text-white bg-red-500 rounded-full h-5 w-5 flex items-center justify-center shadow-sm group-hover/notif:hidden">{{ convo.unread_count }}</span>
+                                
+                                <!-- Kill button for specific notification -->
+                                <button 
+                                    @click.stop="socialStore.markConversationAsRead(convo.partner_user_id || convo.id)"
+                                    class="hidden group-hover/notif:flex ml-auto p-1.5 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-gray-700"
+                                    title="Mark as Read"
+                                >
+                                    <IconXMark class="w-4 h-4" />
+                                </button>
                             </a>
                         </li>
                     </ul>

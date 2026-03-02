@@ -468,12 +468,40 @@ async def delete_direct_message(
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
     
-    if msg.sender_id != current_user.id and not current_user.is_admin:
-        raise HTTPException(status_code=403, detail="You can only delete your own messages")
-        
+    # Permission check: Sender, Recipient, or Admin
+    # This allows either party to clear content from the conversation.
+    is_sender = msg.sender_id == current_user.id
+    is_recipient = msg.receiver_id == current_user.id
+    
+    if not (is_sender or is_recipient or current_user.is_admin):
+        raise HTTPException(status_code=403, detail="You do not have permission to delete this message.")
+    
+    convo_id = msg.conversation_id
+    partner_id = msg.receiver_id if msg.sender_id == current_user.id else msg.sender_id
+
     db.delete(msg)
     db.commit()
     
+    # Notify involved parties to refresh their view
+    refresh_payload = {
+        "type": "dm_deleted",
+        "data": {
+            "message_id": message_id,
+            "conversation_id": convo_id,
+            "partner_id": partner_id
+        }
+    }
+    
+    if convo_id:
+        # Group: notify all members
+        members = db.query(DBConversationMember).filter_by(conversation_id=convo_id).all()
+        for m in members:
+            manager.send_personal_message_sync(refresh_payload, m.user_id)
+    else:
+        # 1-on-1: notify both
+        manager.send_personal_message_sync(refresh_payload, current_user.id)
+        manager.send_personal_message_sync(refresh_payload, partner_id)
+
     return {"message": "Message deleted"}
 
 @dm_router.delete("/conversations/{conversation_id}", status_code=200)

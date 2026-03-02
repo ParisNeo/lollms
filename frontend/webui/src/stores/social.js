@@ -391,6 +391,9 @@ export const useSocialStore = defineStore('social', () => {
         
         activeConversationId.value = convoId;
         useUiStore().isChatSidebarOpen = true;
+        
+        // Auto-mark as read when opening
+        markConversationAsRead(convoId);
     }
 
     async function fetchMessages(targetId, isGroup) {
@@ -460,21 +463,39 @@ export const useSocialStore = defineStore('social', () => {
     async function deleteMessage(messageId) {
         try {
             await apiClient.delete(`/api/dm/messages/${messageId}`);
+            // Local state update
             for (const cid in activeConversations.value) {
-                const c = activeConversations.value[cid];
-                c.messages = c.messages.filter(m => m.id !== messageId);
+                const convo = activeConversations.value[cid];
+                const index = convo.messages.findIndex(m => m.id === messageId);
+                if (index !== -1) {
+                    convo.messages.splice(index, 1);
+                    // If we deleted the last message, we need to refresh the conversation list summary
+                    fetchConversations();
+                }
             }
             useUiStore().addNotification('Message deleted.', 'success');
-        } catch(e) { useUiStore().addNotification('Failed to delete message.', 'error'); }
+        } catch(e) { 
+            useUiStore().addNotification('Failed to delete message.', 'error'); 
+        }
     }
 
     async function deleteConversation(id, isGroup) {
         try {
             await apiClient.delete(`/api/dm/conversations/${id}`, { params: { is_group: isGroup } });
             delete activeConversations.value[id];
+            // Remove from list and force reactivity
             conversations.value = conversations.value.filter(c => isGroup ? c.id !== id : c.partner_user_id !== id);
+            
+            // If the deleted conversation was the one open, clear it
+            if (activeConversationId.value === id) {
+                activeConversationId.value = null;
+            }
+            
             useUiStore().addNotification(isGroup ? 'Left group' : 'History cleared', 'success');
-        } catch(e) { useUiStore().addNotification('Failed to delete conversation', 'error'); }
+        } catch(e) { 
+            console.error("Delete conversation failed", e);
+            useUiStore().addNotification('Failed to delete conversation', 'error'); 
+        }
     }
 
     async function exportConversation(id, isGroup, title) {
@@ -517,6 +538,8 @@ export const useSocialStore = defineStore('social', () => {
         const currentUser = authStore.user;
         if (!currentUser) return;
 
+        // If we get a new message for a conversation we just deleted locally, 
+        // fetch the list again to restore it
         let convoKey = message.conversation_id || (message.sender_id === currentUser.id ? message.receiver_id : message.sender_id);
         let isGroup = !!message.conversation_id;
 

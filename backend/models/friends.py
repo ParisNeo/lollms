@@ -18,6 +18,8 @@ class FriendPublic(BaseModel):
     icon: Optional[str] = None
     friendship_id: int
     status_with_current_user: FriendshipStatus
+    mutual_friends_count: Optional[int] = 0
+    status_message: Optional[str] = None # e.g. "Coding a React App"
     class Config:
         from_attributes = True
 

@@ -47,6 +47,7 @@ const uploadedFiles = ref([]);
 
 const isCompiling = ref(false);
 const compilationResult = ref(null);
+const lastRenderedMermaidSvg = ref(null);
 
 const canvasId = `code-canvas-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
 const canvasSelector = `#${canvasId}`;
@@ -280,26 +281,65 @@ async function executeCode() {
             executionOutput.value = 'SVG rendered in a modal window.';
         } else if (lang === 'mermaid') {
             try {
-                await mermaid.parse(props.code);
+                // Stable initialization: keep configuration minimal during render loops.
+                mermaid.initialize({ 
+                    startOnLoad: false, 
+                    theme: uiStore.currentTheme === 'dark' ? 'dark' : 'default',
+                    securityLevel: 'loose'
+                });
+
+                const id = `mermaid-svg-${Date.now()}`;
+                
+                // [FIX] Rendering into a temporary DOM element helps browsers resolve 
+                // dynamic modules correctly in certain bundled environments.
+                const container = document.createElement('div');
+                container.style.position = 'absolute';
+                container.style.top = '-9999px';
+                container.id = `container-${id}`;
+                document.body.appendChild(container);
+
+                // Render to SVG string using the container anchor
+                const { svg } = await mermaid.render(id, props.code, container);
+                lastRenderedMermaidSvg.value = svg;
+                
+                document.body.removeChild(container);
+                
+                const background = uiStore.currentTheme === 'dark' ? '#111827' : '#ffffff';
+                const htmlContent = `
+                    <div style="
+                        display: flex; 
+                        justify-content: center; 
+                        align-items: center; 
+                        min-height: 100%; 
+                        width: 100%; 
+                        background-color: ${background}; 
+                        padding: 2rem;
+                        box-sizing: border-box;
+                    ">
+                        <div style="max-width: 100%; height: auto;">${svg}</div>
+                    </div>
+                `;
+
                 uiStore.openModal('interactiveOutput', {
-                    title: 'Interactive Mermaid Diagram',
+                    title: 'Mermaid Diagram',
+                    htmlContent: htmlContent,
                     contentType: 'mermaid',
-                    interactive: true,
                     sourceCode: props.code
                 });
-                executionOutput.value = 'Interactive Mermaid diagram opened.';
-            } catch (parseError) {
-                try {
-                    mermaid.initialize({ startOnLoad: false, theme: uiStore.currentTheme, securityLevel: 'loose' });
-                    const { svg } = await mermaid.render(`mermaid-graph-${canvasId}`, props.code);
-                    const background = uiStore.currentTheme === 'dark' ? '#1f2937' : '#f9fafb';
-                    const htmlContent = `<body style="margin:0; display:flex; justify-content:center; align-items:center; height:100vh; background-color: ${background}; padding: 1rem;"><div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">${svg}</div></body>`;
-                    uiStore.openModal('interactiveOutput', { htmlContent, title: 'Mermaid Diagram (Static)', contentType: 'mermaid', sourceCode: props.code });
-                    executionOutput.value = 'Mermaid diagram rendered successfully as a static image due to parsing issues for interactive mode.';
-                } catch (renderError) {
-                    isError.value = true;
-                    executionOutput.value = `Mermaid render error: ${renderError.message}`;
-                }
+                
+                executionOutput.value = 'Mermaid diagram rendered and opened.';
+            } catch (err) {
+                isError.value = true;
+                executionOutput.value = `Mermaid Error: ${err.message}`;
+                console.error("Mermaid rendering failed:", err);
+                
+                // Fallback: If SVG rendering fails, open the modal with source code
+                // allowing the modal component to attempt its own rendering.
+                uiStore.openModal('interactiveOutput', {
+                    title: 'Mermaid Diagram (Fallback)',
+                    contentType: 'mermaid',
+                    sourceCode: props.code
+                });
             }
         } else if (lang === 'javascript') {
             let capturedOutput = '';
@@ -362,6 +402,59 @@ Correct the LaTeX code block below:
     compilationResult.value = null;
 }
 
+
+function downloadMermaidAsSVG() {
+    if (!lastRenderedMermaidSvg.value) return;
+    const blob = new Blob([lastRenderedMermaidSvg.value], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `diagram.svg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function downloadMermaidAsPNG() {
+    if (!lastRenderedMermaidSvg.value) {
+        uiStore.addNotification('No rendered diagram found.', 'warning');
+        return;
+    }
+    
+    const svgData = lastRenderedMermaidSvg.value;
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    
+    // Encapsulate SVG in a blob URL
+    const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(svgBlob);
+    
+    img.onload = () => {
+        // Set canvas size (multiplying by 2 for better resolution)
+        const scale = 2;
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        
+        // Fill background color based on theme
+        ctx.fillStyle = uiStore.currentTheme === 'dark' ? '#111827' : '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        
+        const pngUrl = canvas.toDataURL('image/png');
+        const a = document.createElement('a');
+        a.href = pngUrl;
+        a.download = `diagram.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+    
+    img.src = url;
+}
 
 async function downloadCreatedFile(filename) {
     const fileData = await pyodideStore.readFile(filename);
@@ -453,7 +546,13 @@ async function downloadCreatedFile(filename) {
 
     <div v-if="!isCollapsed && (executionOutput || executionImage || createdFiles.length > 0 || compilationResult)" class="code-execution-output" :class="{'is-error': isError || compilationResult?.error}">
         <div v-if="executionOutput" class="output-section">
-            <div class="output-header">Execution Output</div>
+            <div class="output-header flex justify-between items-center">
+                <span>Execution Output</span>
+                <div v-if="language.toLowerCase() === 'mermaid' && lastRenderedMermaidSvg" class="flex gap-2">
+                    <button @click="downloadMermaidAsSVG" class="text-[10px] bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 transition-colors">Save SVG</button>
+                    <button @click="downloadMermaidAsPNG" class="text-[10px] bg-green-50 dark:bg-green-900/30 text-green-600 px-2 py-0.5 rounded hover:bg-green-100 transition-colors">Save PNG</button>
+                </div>
+            </div>
             <pre>{{ executionOutput }}</pre>
         </div>
         <div v-if="compilationResult" class="output-section">

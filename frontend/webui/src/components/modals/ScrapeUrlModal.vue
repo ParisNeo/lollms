@@ -7,6 +7,8 @@ import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconWikipedia from '../../assets/icons/IconWikipedia.vue';
 import IconYoutube from '../../assets/icons/IconYoutube.vue';
+import IconServer from '../../assets/icons/IconServer.vue'; // Using for Arxiv
+import apiClient from '../../services/api';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
@@ -19,9 +21,23 @@ const depth = ref(0);
 const processWithAi = ref(false);
 const isLoading = ref(false);
 const mode = ref('url');
-const wikiQuery = ref('');
 const youtubeUrl = ref('');
-const youtubeLanguage = ref(''); // Added for language input
+const youtubeLanguage = ref('en');
+
+// Search Results state
+const searchResults = ref([]);
+const selectedIndices = ref(new Set());
+const isSearching = ref(false);
+
+// Wikipedia state
+const wikiQuery = ref('');
+
+// Arxiv state
+const arxivQuery = ref('');
+const arxivAuthor = ref('');
+const arxivYear = ref(null);
+const arxivMax = ref(5);
+const arxivModes = ref({}); // Map of ID -> "abstract" or "full"
 
 watch(() => uiStore.isModalOpen('scrapeUrl'), async (isOpen) => {
     if (isOpen) {
@@ -30,13 +46,46 @@ watch(() => uiStore.isModalOpen('scrapeUrl'), async (isOpen) => {
         processWithAi.value = false;
         wikiQuery.value = '';
         youtubeUrl.value = '';
-        youtubeLanguage.value = ''; // Reset language
+        youtubeLanguage.value = 'en';
+        searchResults.value = [];
+        selectedIndices.value.clear();
         
         await nextTick();
         const data = uiStore.modalData('scrapeUrl');
         mode.value = data?.mode || 'url';
     }
 });
+
+async function handleSearch() {
+    isSearching.value = true;
+    searchResults.value = [];
+    selectedIndices.value.clear();
+    try {
+        if (mode.value === 'wikipedia') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/wikipedia/search`, { query: wikiQuery.value });
+            searchResults.value = resp.data;
+        } else if (mode.value === 'arxiv') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/arxiv/search`, { 
+                query: arxivQuery.value,
+                author: arxivAuthor.value,
+                year: arxivYear.value,
+                max_results: arxivMax.value
+            });
+            searchResults.value = resp.data;
+            // Initialize modes
+            resp.data.forEach(r => arxivModes.value[r.id] = 'abstract');
+        }
+    } catch (e) {
+        uiStore.addNotification("Search failed.", "error");
+    } finally {
+        isSearching.value = false;
+    }
+}
+
+function toggleSelection(idx) {
+    if (selectedIndices.value.has(idx)) selectedIndices.value.delete(idx);
+    else selectedIndices.value.add(idx);
+}
 
 async function handleSubmit() {
     if (!discussionId.value) return;
@@ -59,16 +108,28 @@ async function handleSubmit() {
             isLoading.value = false;
         }
     } else if (mode.value === 'wikipedia') {
-        if (!wikiQuery.value.trim()) {
-            uiStore.addNotification('Search query is required.', 'warning');
-            return;
-        }
+        if (selectedIndices.value.size === 0) return;
         isLoading.value = true;
         try {
-            await discussionsStore.importWikipediaArtefact(
-                discussionId.value,
-                wikiQuery.value.trim()
-            );
+            const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+            await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/wikipedia/import`, { items, auto_load: true });
+            uiStore.addNotification("Articles imported.", "success");
+            await discussionsStore.fetchArtefacts(discussionId.value);
+            uiStore.closeModal('scrapeUrl');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'arxiv') {
+        if (selectedIndices.value.size === 0) return;
+        isLoading.value = true;
+        try {
+            const items = Array.from(selectedIndices.value).map(idx => {
+                const r = searchResults.value[idx];
+                return { id: r.id, title: r.title, mode: arxivModes.value[r.id] };
+            });
+            await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/arxiv/import`, { items, auto_load: true });
+            uiStore.addNotification("Papers imported.", "success");
+            await discussionsStore.fetchArtefacts(discussionId.value);
             uiStore.closeModal('scrapeUrl');
         } finally {
             isLoading.value = false;
@@ -127,6 +188,14 @@ async function handleSubmit() {
                         <IconYoutube class="w-4 h-4" />
                         YouTube
                     </button>
+                    <button 
+                        @click="mode = 'arxiv'"
+                        class="flex-1 pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-2"
+                        :class="mode === 'arxiv' ? 'border-orange-500 text-orange-600 dark:text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconServer class="w-4 h-4" />
+                        Arxiv
+                    </button>
                 </div>
 
                 <!-- URL Mode Content -->
@@ -178,24 +247,93 @@ async function handleSubmit() {
 
                 <!-- Wikipedia Mode Content -->
                 <div v-if="mode === 'wikipedia'" class="space-y-4">
-                    <p class="text-sm text-gray-600 dark:text-gray-300">
-                        Search for a Wikipedia article to import.
-                    </p>
-                    
-                    <div>
-                        <label for="wiki-query" class="label">Search Query</label>
-                        <div class="relative mt-1">
+                    <div class="flex gap-2">
+                        <div class="relative flex-grow">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <IconWikipedia class="h-4 w-4 text-gray-400" />
                             </div>
                             <input
-                                id="wiki-query"
                                 v-model="wikiQuery"
                                 type="text"
                                 class="input-field pl-10"
-                                placeholder="e.g. Artificial Intelligence"
-                                @keyup.enter="handleSubmit"
+                                placeholder="Article title or URL"
+                                @keyup.enter="handleSearch"
                             />
+                        </div>
+                        <button @click="handleSearch" class="btn btn-secondary" :disabled="isSearching || !wikiQuery">
+                            <IconAnimateSpin v-if="isSearching" class="w-4 h-4 animate-spin" />
+                            <span v-else>Search</span>
+                        </button>
+                    </div>
+
+                    <!-- Search Results -->
+                    <div v-if="searchResults.length > 0" class="max-h-60 overflow-y-auto space-y-2 border rounded p-2 bg-gray-50 dark:bg-gray-900/50">
+                        <div v-for="(res, idx) in searchResults" :key="idx" 
+                             @click="toggleSelection(idx)"
+                             class="p-2 border rounded cursor-pointer transition-colors"
+                             :class="selectedIndices.has(idx) ? 'bg-blue-50 border-blue-500 dark:bg-blue-900/30' : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750'">
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" :checked="selectedIndices.has(idx)" class="rounded text-blue-600">
+                                <span class="font-bold text-sm">{{ res.title }}</span>
+                            </div>
+                            <p class="text-[10px] text-gray-500 line-clamp-1 mt-1">{{ res.snippet }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Arxiv Mode Content -->
+                <div v-if="mode === 'arxiv'" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="col-span-2">
+                            <label class="text-[10px] font-bold uppercase text-gray-400">Search Query</label>
+                            <input v-model="arxivQuery" type="text" class="input-field" placeholder="Topic keywords...">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-gray-400">Author</label>
+                            <input v-model="arxivAuthor" type="text" class="input-field" placeholder="Einstein">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-gray-400">Year</label>
+                            <input v-model.number="arxivYear" type="number" class="input-field" placeholder="2024">
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center">
+                         <div class="flex items-center gap-2">
+                             <label class="text-xs">Count:</label>
+                             <input v-model.number="arxivMax" type="number" class="input-field !w-16" min="1" max="50">
+                         </div>
+                         <button @click="handleSearch" class="btn btn-primary" :disabled="isSearching || (!arxivQuery && !arxivAuthor)">
+                            <IconAnimateSpin v-if="isSearching" class="w-4 h-4 animate-spin mr-2" />
+                            Search Arxiv
+                        </button>
+                    </div>
+
+                    <!-- Arxiv Results -->
+                    <div v-if="searchResults.length > 0" class="max-h-60 overflow-y-auto space-y-2 border rounded p-2 bg-gray-50 dark:bg-gray-900/50">
+                        <div v-for="(res, idx) in searchResults" :key="idx" 
+                             class="p-2 border rounded bg-white dark:bg-gray-800"
+                             :class="selectedIndices.has(idx) ? 'border-orange-500' : 'dark:border-gray-700'">
+                            <div class="flex items-start gap-2">
+                                <input type="checkbox" :checked="selectedIndices.has(idx)" @change="toggleSelection(idx)" class="mt-1 rounded text-orange-600">
+                                <div class="flex-grow min-w-0">
+                                    <div class="font-bold text-xs truncate" :title="res.title">{{ res.title }}</div>
+                                    <div class="text-[9px] text-gray-500">{{ res.authors.join(', ') }} ({{ res.year }})</div>
+                                    
+                                    <!-- Mode Toggle -->
+                                    <div class="mt-2 flex gap-1 bg-gray-100 dark:bg-gray-900 p-0.5 rounded-lg w-fit">
+                                        <button @click="arxivModes[res.id] = 'abstract'" 
+                                                class="px-2 py-0.5 text-[9px] font-bold rounded transition-all"
+                                                :class="arxivModes[res.id] === 'abstract' ? 'bg-white dark:bg-gray-700 shadow-sm text-orange-600' : 'text-gray-400'">
+                                            Abstract
+                                        </button>
+                                        <button @click="arxivModes[res.id] = 'full'" 
+                                                class="px-2 py-0.5 text-[9px] font-bold rounded transition-all"
+                                                :class="arxivModes[res.id] === 'full' ? 'bg-white dark:bg-gray-700 shadow-sm text-orange-600' : 'text-gray-400'">
+                                            Full Text
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -223,19 +361,20 @@ async function handleSubmit() {
                         </div>
                     </div>
 
-                    <!-- New Language Input -->
+                    <!-- Language Selection -->
                     <div>
-                        <label for="youtube-lang" class="label">Language Code (Optional)</label>
-                        <input
+                        <label for="youtube-lang" class="label">Transcript Language</label>
+                        <select
                             id="youtube-lang"
                             v-model="youtubeLanguage"
-                            type="text"
                             class="input-field mt-1"
-                            placeholder="e.g. en, fr, es"
-                            @keyup.enter="handleSubmit"
-                        />
+                        >
+                            <option v-for="lang in commonLanguages" :key="lang.value" :value="lang.value">
+                                {{ lang.label }} ({{ lang.value }})
+                            </option>
+                        </select>
                         <p class="text-[10px] text-gray-500 mt-1">
-                            Leave empty for auto-detect (English priority).
+                            The system will try to find this language or translate the original captions to it.
                         </p>
                     </div>
                 </div>
@@ -244,8 +383,18 @@ async function handleSubmit() {
         <template #footer>
             <div class="flex justify-end gap-3">
                 <button @click="uiStore.closeModal('scrapeUrl')" type="button" class="btn btn-secondary">Cancel</button>
+                
+                <!-- Conditionally show Select Count -->
+                <span v-if="(mode === 'wikipedia' || mode === 'arxiv') && selectedIndices.size > 0" class="text-xs text-gray-500 self-center">
+                    {{ selectedIndices.size }} selected
+                </span>
+
                 <button @click="handleSubmit" type="button" class="btn btn-primary" 
-                    :disabled="isLoading || (mode === 'url' && !url.trim()) || (mode === 'wikipedia' && !wikiQuery.trim()) || (mode === 'youtube' && !youtubeUrl.trim())">
+                    :disabled="isLoading || 
+                              (mode === 'url' && !url.trim()) || 
+                              (mode === 'wikipedia' && selectedIndices.size === 0) || 
+                              (mode === 'arxiv' && selectedIndices.size === 0) ||
+                              (mode === 'youtube' && !youtubeUrl.trim())">
                     <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
                     {{ isLoading ? 'Importing...' : 'Import' }}
                 </button>

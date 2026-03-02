@@ -900,7 +900,8 @@ def process_herd_logic(
     prompt: str, 
     main_loop, 
     stream_queue, 
-    db_session: Session
+    db_session: Session,
+    all_events: List[Dict] = None
 ):
     """
     Executes the 4-phase Herd Mode workflow:
@@ -1066,7 +1067,10 @@ Return ONLY a valid JSON object. No markdown formatting.
                 sys_prompt += "\n\nTask: Review the proposed solution/code. Look for bugs, security issues, logic errors, or missing requirements. Be critical but constructive."
 
         # Emit step start
-        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": f"**{display_name}** ({phase_name} Round {round_num})" })) + "\n")
+        step_start_payload = {"type": "step_start", "content": f"**{display_name}** ({phase_name} Round {round_num})"}
+        if all_events is not None:
+            all_events.append(step_start_payload)
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(step_start_payload)) + "\n")
         
         try:
             temp_client = build_lollms_client_from_params(
@@ -1088,7 +1092,10 @@ Return ONLY a valid JSON object. No markdown formatting.
             )
             
             # Emit step end with result content
-            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": response })) + "\n")
+            step_end_payload = {"type": "step_end", "content": response}
+            if all_events is not None:
+                all_events.append(step_end_payload)
+            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(step_end_payload)) + "\n")
             return f"\n\n[{phase_name} - {display_name}]:\n{response}"
         except Exception as e:
             err = f"Agent {display_name} failed: {e}"
@@ -1114,7 +1121,9 @@ Return ONLY a valid JSON object. No markdown formatting.
                 break
         
     # --- PHASE 2: Answer Crafting (Leader Draft) ---
-    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_start", "content": "Phase 2: Leader drafting solution..."})) + "\n")
+    draft_start = {"type": "step_start", "content": "Phase 2: Leader drafting solution..."}
+    if all_events is not None: all_events.append(draft_start)
+    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(draft_start)) + "\n")
     
     leader_client = get_user_lollms_client(user.username)
     leader_prompt = f"{full_context_history}\n\n[INSTRUCTION]: Act as the Team Leader. Based on the brainstorming above, create a complete draft solution/implementation."
@@ -1122,7 +1131,9 @@ Return ONLY a valid JSON object. No markdown formatting.
     try:
         draft_response = leader_client.generate_text(leader_prompt, max_new_tokens=2048)
         full_context_history += f"\n\n[Leader Draft]:\n{draft_response}"
-        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": draft_response })) + "\n")
+        draft_end = {"type": "step_end", "content": draft_response}
+        if all_events is not None: all_events.append(draft_end)
+        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(draft_end)) + "\n")
     except Exception as e:
         full_context_history += f"\n\n[Leader Draft]: [FAILED] {e}"
         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "step_end", "content": f"Draft generation failed: {e}", "status": "error"})) + "\n")
@@ -1438,26 +1449,40 @@ def build_llm_generation_router(router: APIRouter):
                     herd_context = ""
                     if owner_db_user.herd_mode_enabled:
                         db_herd = next(get_db())
-                        try: herd_context = process_herd_logic(owner_db_user, discussion_obj, prompt, main_loop, stream_queue, db_herd)
+                        try: herd_context = process_herd_logic(owner_db_user, discussion_obj, prompt, main_loop, stream_queue, db_herd, all_events=all_events)
                         finally: db_herd.close()
 
-                    # Final Prompt Assembly
+                    # Final Prompt Assembly (Context only, not saved to DB user message)
                     final_prompt = prompt
                     if search_context:
                         active_personality.system_prompt += f"\n\n{search_context}\nUse this context to answer. Cite using [1], [2] tags."
                     if herd_context:
                         final_prompt += f"\n\n[Debate History]:\n{herd_context}\n\n[Final Instruction]: Synthesize the definitive answer."
 
-                    # Core Generation
-                    result = discussion_obj.chat(
-                        user_message=final_prompt, personality=active_personality,
-                        branch_tip_id=parent_message_id if is_resend else None,
-                        
-                        images=images_for_message,
-                        streaming_callback=llm_callback, think=owner_db_user.reasoning_activation,
-                        reasoning_effort=owner_db_user.reasoning_effort, add_user_message=not is_resend,
-                        tools=rag_tools
+                    # Core Generation Logic: 
+                    # 1. Manually handle user message to keep it clean (original prompt)
+                    # 2. Call chat with add_user_message=False to use final_prompt for context only
+                    user_msg = None
+                    if not is_resend:
+                        user_msg = discussion_obj.add_message(
+                            sender=current_user.username,
+                            content=prompt,
+                            images=images_for_message,
+                            sender_type='user',
+                            parent_id=parent_message_id
+                        )
+                        discussion_obj.commit()
 
+                    result = discussion_obj.chat(
+                        user_message=final_prompt, 
+                        personality=active_personality,
+                        branch_tip_id=user_msg.id if user_msg else parent_message_id,
+                        images=images_for_message,
+                        streaming_callback=llm_callback, 
+                        think=owner_db_user.reasoning_activation,
+                        reasoning_effort=owner_db_user.reasoning_effort, 
+                        add_user_message=False, # We added it ourselves or it's a resend
+                        tools=rag_tools
                     )
                     
                     ai_msg = result.get('ai_message')
@@ -1531,9 +1556,12 @@ def build_llm_generation_router(router: APIRouter):
                     # Finalize
                     def msg_to_out(m): return None if not m else {"id": m.id, "sender": m.sender, "content": m.content, "metadata": m.metadata, "sender_type": m.sender_type, "image_references": [f"data:image/png;base64,{i}" for i in (m.images or [])]}
                     
+                    # Ensure the result dictionary contains the user message we added manually if applicable
+                    effective_user_msg = result.get('user_message') or user_msg
+
                     finalize_payload = {
                         "type": "finalize",
-                        "data": {"user_message": msg_to_out(result.get('user_message')), "ai_message": msg_to_out(ai_msg)},
+                        "data": {"user_message": msg_to_out(effective_user_msg), "ai_message": msg_to_out(ai_msg)},
                         "discussion": {"id": discussion_id, "discussion_data_zone": discussion_obj.discussion_data_zone}
                     }
                     if current_user.auto_title and discussion_obj.metadata.get('title',"").startswith("New Discussion"):

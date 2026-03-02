@@ -125,11 +125,12 @@ async function handleImport(e) {
                 <span class="font-bold truncate">{{ title }}</span>
             </div>
             <div class="flex items-center gap-1">
+                <button @click="handleDeleteConversation" class="btn-icon p-1 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20" :title="conversation.isGroup ? 'Leave Group' : 'Clear Chat History'">
+                    <IconTrash class="w-5 h-5" />
+                </button>
                 <DropdownMenu icon="ellipsis-vertical" buttonClass="btn-icon p-1">
                     <button @click="handleExport" class="menu-item"><IconArrowDownTray class="w-4 h-4 mr-2"/>Export JSON</button>
                     <button @click="triggerImport" class="menu-item"><IconArrowUpTray class="w-4 h-4 mr-2"/>Import JSON</button>
-                    <div class="menu-divider"></div>
-                    <button @click="handleDeleteConversation" class="menu-item text-red-500"><IconTrash class="w-4 h-4 mr-2"/>{{ conversation.isGroup ? 'Leave Group' : 'Clear History' }}</button>
                 </DropdownMenu>
                 <input type="file" ref="importInput" class="hidden" accept=".json" @change="handleImport">
                 <button @click="uiStore.isChatSidebarOpen = false" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700"><IconXMark class="w-5 h-5" /></button>

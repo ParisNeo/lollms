@@ -30,6 +30,11 @@ async def get_my_friends(
         Friendship.status == FriendshipStatus.ACCEPTED
     ).all()
 
+    # Get my friend IDs for mutual calculation
+    my_friend_ids = set()
+    for fs in friendships_db:
+        my_friend_ids.add(fs.user2_id if fs.user1_id == current_db_user.id else fs.user1_id)
+
     # Get online users
     online_user_ids = {r[0] for r in db.query(WebSocketConnection.user_id).distinct().all()}
     
@@ -52,13 +57,27 @@ async def get_my_friends(
                     if (now - last_active) > timedelta(minutes=5):
                         user_status = "absent"
 
+            # Calculate mutual friends
+            friend_of_friend_ids = db.query(Friendship).filter(
+                or_(Friendship.user1_id == friend_user.id, Friendship.user2_id == friend_user.id),
+                Friendship.status == FriendshipStatus.ACCEPTED
+            ).all()
+            
+            fof_set = set()
+            for ffs in friend_of_friend_ids:
+                fof_set.add(ffs.user2_id if ffs.user1_id == friend_user.id else ffs.user1_id)
+            
+            mutual_count = len(my_friend_ids.intersection(fof_set))
+
             friends_list.append(FriendPublicWithStatus(
                 id=friend_user.id,
                 username=friend_user.username,
                 icon=friend_user.icon,
                 friendship_id=fs.id,
                 status_with_current_user=fs.status,
-                status=user_status
+                status=user_status,
+                mutual_friends_count=mutual_count,
+                status_message=None # Placeholder for real-time activity
             ))
     
     # Sort by status (Connected first) then name

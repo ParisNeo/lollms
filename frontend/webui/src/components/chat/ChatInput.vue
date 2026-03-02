@@ -880,7 +880,17 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                 </div>
 
                 <div class="flex items-center gap-1 pb-1 pr-1">
-                    <button v-if="isSttConfigured" @click="toggleRecording" class="w-9 h-9 flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-800 rounded-xl" :class="{'text-red-500 animate-pulse bg-red-50 dark:bg-red-900/20': isRecording, 'text-gray-500': !isRecording}"><IconMicrophone class="w-5.5 h-5.5" /></button>
+                    <button v-if="isSttConfigured" 
+                            @click="toggleRecording" 
+                            class="w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 active:scale-95" 
+                            :class="{
+                                'text-red-500 animate-pulse bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800': isRecording, 
+                                'text-gray-500 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700': !isRecording
+                            }"
+                            title="Voice Input">
+                        <IconMicrophone class="w-5 h-5" />
+                    </button>
+                    
                     <button v-if="!generationInProgress" @click="handleSendMessage" class="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm transition-all active:scale-95">
                          <IconSend class="w-5 h-5" />
                     </button>

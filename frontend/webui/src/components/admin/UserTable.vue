@@ -202,7 +202,9 @@ onMounted(() => {
                             <th scope="col" class="table-header">
                                 <button @click="handleSort('username')" class="flex items-center gap-1">User <span v-if="sortKey === 'username'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
-                            <th scope="col" class="table-header">Status</th>
+                            <th scope="col" class="table-header">
+                                <button @click="handleSort('status')" class="flex items-center gap-1">Status <span v-if="sortKey === 'status'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
+                            </th>
                              <th scope="col" class="table-header">
                                 <button @click="handleSort('connection_count')" class="flex items-center gap-1">Connections<span v-if="sortKey === 'connection_count'">{{ sortOrder === 'asc' ? '▲' : '▼' }}</span></button>
                             </th>
@@ -237,8 +239,10 @@ onMounted(() => {
                             </td>
                             <td class="table-cell">
                                 <div class="flex items-center gap-2">
-                                    <span class="w-3 h-3 rounded-full" :class="user.is_online ? 'bg-green-500' : 'bg-gray-400'" :title="user.is_online ? 'Online' : 'Offline'"></span>
-                                    <span :class="user.is_active ? 'status-badge-green' : 'status-badge-red'" class="status-badge">{{ user.is_active ? 'Active' : 'Inactive' }}</span>
+                                    <span class="w-3 h-3 rounded-full" :class="user.connection_count > 0 ? 'bg-green-500' : 'bg-gray-400'" :title="user.connection_count > 0 ? 'Online' : 'Offline'"></span>
+                                    <span :class="user.status === 'active' ? 'status-badge-green' : 'status-badge-red'" class="status-badge">
+                                        {{ user.status.replace('_', ' ') }}
+                                    </span>
                                 </div>
                             </td>
                             <td class="table-cell text-sm text-center font-mono text-gray-500 dark:text-gray-400">

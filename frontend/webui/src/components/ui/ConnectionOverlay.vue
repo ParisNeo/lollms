@@ -42,53 +42,64 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="fixed inset-0 z-[10000] flex flex-col items-center justify-center bg-gray-900/90 backdrop-blur-sm transition-opacity duration-300 cursor-wait">
-        <div class="relative flex items-center justify-center mb-10">
-            <!-- Radar Scanner Animation -->
-            <div class="radar-container">
-                <div class="radar-sweep"></div>
-                <div class="radar-ring ring-1"></div>
-                <div class="radar-ring ring-2"></div>
-                <div class="radar-ring ring-3"></div>
+    <div class="fixed top-0 left-0 right-0 z-[10000] pointer-events-none flex justify-center p-4">
+        <div class="pointer-events-auto flex items-center gap-4 bg-gray-900/95 dark:bg-black/90 backdrop-blur-md px-6 py-3 rounded-2xl shadow-2xl border border-blue-500/30 animate-fade-in-down">
+            
+            <div class="relative flex items-center justify-center w-10 h-10">
+                <!-- Radar Scanner Animation (Scaled Down) -->
+                <div class="radar-container">
+                    <div class="radar-sweep"></div>
+                    <div class="radar-ring ring-1"></div>
+                    <div class="radar-ring ring-2"></div>
+                </div>
+                
+                <!-- Center Icon -->
+                <div class="relative z-10 p-1.5 rounded-full text-blue-500">
+                     <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                </div>
             </div>
             
-            <!-- Center Icon -->
-            <div class="relative z-10 bg-gray-900 p-5 rounded-full border border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.6)]">
-                 <svg xmlns="http://www.w3.org/2000/svg" class="h-12 w-12 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+            <div class="flex flex-col">
+                <h2 class="text-sm font-black text-white uppercase tracking-tighter">{{ subMessage }}</h2>
+                <p class="text-[10px] text-blue-400 font-mono uppercase tracking-widest animate-pulse whitespace-nowrap">{{ message }}{{ dots }}</p>
             </div>
-        </div>
-        
-        <h2 class="text-3xl font-bold text-white mb-3 tracking-wide">{{ subMessage }}</h2>
-        <p class="text-blue-400 font-mono text-base uppercase tracking-widest animate-pulse">{{ message }}{{ dots }}</p>
-        
-        <div class="mt-10 w-64 h-1 bg-gray-800 rounded-full overflow-hidden">
-            <div class="h-full bg-blue-500 animate-progress-indeterminate"></div>
+
+            <!-- Tiny Progress Line -->
+            <div class="w-16 h-1 bg-gray-800 rounded-full overflow-hidden ml-2 hidden sm:block">
+                <div class="h-full bg-blue-500 animate-progress-indeterminate"></div>
+            </div>
         </div>
     </div>
 </template>
 
 <style scoped>
+@keyframes fadeInDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-down {
+    animation: fadeInDown 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
 .radar-container {
-    @apply absolute w-80 h-80 flex items-center justify-center;
+    @apply absolute w-12 h-12 flex items-center justify-center;
 }
 
 .radar-sweep {
     @apply absolute w-full h-full rounded-full;
-    background: conic-gradient(from 0deg, transparent 0deg, rgba(59, 130, 246, 0.1) 60deg, transparent 60deg);
+    background: conic-gradient(from 0deg, transparent 0deg, rgba(59, 130, 246, 0.2) 60deg, transparent 60deg);
     animation: radar-spin 2s linear infinite;
-    border-radius: 50%;
 }
 
 .radar-ring {
-    @apply absolute rounded-full border border-blue-500/20;
+    @apply absolute rounded-full border border-blue-500/30;
     animation: radar-ping 3s infinite cubic-bezier(0, 0, 0.2, 1);
 }
 
-.ring-1 { width: 30%; height: 30%; animation-delay: 0s; }
-.ring-2 { width: 60%; height: 60%; animation-delay: 1s; }
-.ring-3 { width: 90%; height: 90%; animation-delay: 2s; }
+.ring-1 { width: 40%; height: 40%; animation-delay: 0s; }
+.ring-2 { width: 100%; height: 100%; animation-delay: 1.5s; }
 
 @keyframes radar-spin {
     from { transform: rotate(0deg); }

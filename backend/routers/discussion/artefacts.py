@@ -9,8 +9,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse, unquote
-from typing import List, Optional, Dict
-
+from typing import List, Optional, Dict, Any
+import pipmaster as pm
 try:
     from docx import Document as DocxDocument
     from pptx import Presentation
@@ -49,16 +49,50 @@ except ImportError:
 from backend.db import get_db
 from pydantic import BaseModel
 
+# --- New Models for Search/Select ---
+class WikipediaSearchRequest(BaseModel):
+    query: str
+
+class WikipediaImportItem(BaseModel):
+    title: str
+    url: str
+
+class WikipediaImportSelectedRequest(BaseModel):
+    items: List[WikipediaImportItem]
+    auto_load: bool = True
+
+class ArxivSearchRequest(BaseModel):
+    query: Optional[str] = None
+    author: Optional[str] = None
+    year: Optional[int] = None
+    max_results: int = 5
+
+class ArxivImportItem(BaseModel):
+    id: str
+    title: str
+    mode: str = "abstract" # "abstract" or "full"
+
+class ArxivImportSelectedRequest(BaseModel):
+    items: List[ArxivImportItem]
+    auto_load: bool = True
+
 class WikipediaImportRequest(BaseModel):
     query: str
     auto_load: bool = True
 
 class YoutubeTranscriptImportRequest(BaseModel):
     video_url: str
-    language: Optional[str] = None
+    language: str = "en"
     auto_load: bool = True
 
 def build_artefacts_router(router: APIRouter):
+    # Ensure Arxiv is available
+    try:
+        import arxiv
+    except ImportError:
+        pm.ensure_packages("arxiv")
+        import arxiv
+
      # safe_store is needed for RAG callbacks
     @router.get("/{discussion_id}/artefacts", response_model=List[ArtefactInfo])
     async def list_discussion_artefacts(
@@ -296,114 +330,197 @@ def build_artefacts_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to add artefact: {e}")
 
-    @router.post("/{discussion_id}/artefacts/wikipedia", response_model=ArtefactAndDataZoneUpdateResponse)
-    async def import_wikipedia_artefact(
+    @router.post("/{discussion_id}/artefacts/wikipedia/search", response_model=List[Dict[str, str]])
+    async def search_wikipedia(
         discussion_id: str,
-        request: WikipediaImportRequest,
+        request: WikipediaSearchRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        try:
+            query = request.query.strip()
+            lang = "en"
+            
+            # Check if it's a URL to just return that specific one
+            if query.startswith("http://") or query.startswith("https://"):
+                parsed = urlparse(query)
+                if "wikipedia.org" in parsed.netloc:
+                    title = unquote(parsed.path.split('/')[-1]).replace('_', ' ')
+                    return [{"title": title, "url": query, "snippet": "Direct URL import."}]
+
+            api_url = f"https://{lang}.wikipedia.org/w/api.php"
+            params = {
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "format": "json",
+                "srlimit": 10
+            }
+            resp = requests.get(api_url, params=params)
+            resp.raise_for_status()
+            data = resp.json()
+            
+            results = []
+            for item in data.get("query", {}).get("search", []):
+                results.append({
+                    "title": item["title"],
+                    "url": f"https://{lang}.wikipedia.org/wiki/{item['title'].replace(' ', '_')}",
+                    "snippet": item["snippet"].replace('<span class="searchmatch">', '').replace('</span>', '')
+                })
+            return results
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Wikipedia search failed: {e}")
+
+    @router.post("/{discussion_id}/artefacts/wikipedia/import", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def import_wikipedia_selected(
+        discussion_id: str,
+        request: WikipediaImportSelectedRequest,
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         try:
-            query = request.query.strip()
-            lang = "en"
-            title = None
-            
-            # Detect if it's a URL and parse it
-            if query.startswith("http://") or query.startswith("https://"):
-                try:
-                    parsed = urlparse(query)
-                    if "wikipedia.org" in parsed.netloc:
-                        domain_parts = parsed.netloc.split('.')
-                        if len(domain_parts) >= 3:
-                            if 'm' in domain_parts:
-                                m_idx = domain_parts.index('m')
-                                if m_idx > 0: lang = domain_parts[m_idx - 1]
-                            elif domain_parts[0] != 'www':
-                                lang = domain_parts[0]
-
-                        path_parts = parsed.path.split('/')
-                        if len(path_parts) > 2 and path_parts[1] == 'wiki':
-                            title = unquote(path_parts[2])
-                except Exception:
-                    pass
-
-            api_url = f"https://{lang}.wikipedia.org/w/api.php"
-            
-            headers = {
-                "User-Agent": "Lollms/1.0 (https://github.com/ParisNeo/lollms; contact@lollms.com)"
-            }
-
-            with requests.Session() as session:
-                if not title:
-                    search_params = {
-                        "action": "opensearch",
-                        "search": query,
-                        "limit": 1,
-                        "namespace": 0,
-                        "format": "json"
-                    }
-                    resp = session.get(api_url, params=search_params, headers=headers)
-                    resp.raise_for_status()
-                    data = resp.json()
-                    
-                    if not data or len(data) < 2 or not data[1]:
-                        raise HTTPException(status_code=404, detail=f"No Wikipedia article found for '{request.query}'")
-                    
-                    title = data[1][0]
-                
-                content_params = {
+            for item in request.items:
+                api_url = "https://en.wikipedia.org/w/api.php"
+                params = {
                     "action": "query",
                     "prop": "extracts",
-                    "exlimit": 1,
-                    "titles": title,
+                    "titles": item.title,
                     "explaintext": 1,
                     "format": "json"
                 }
-                
-                resp_content = session.get(api_url, params=content_params, headers=headers)
-                resp_content.raise_for_status()
-                cdata = resp_content.json()
-                
-                pages = cdata.get("query", {}).get("pages", {})
+                resp = requests.get(api_url, params=params)
+                data = resp.json()
+                pages = data.get("query", {}).get("pages", {})
                 page_id = list(pages.keys())[0]
-                if page_id == "-1":
-                     raise HTTPException(status_code=404, detail=f"Article content not found for title: {title}")
-                
-                page_content = pages[page_id].get("extract", "")
-                final_url = f"https://{lang}.wikipedia.org/wiki/{title.replace(' ', '_')}"
-                full_content = f"# {title}\nSource: {final_url}\n\n{page_content}"
-                
-                artefact_name = f"{title}.md"
-                artefact_info = discussion.add_artefact(
-                    title=artefact_name, content=full_content, author=current_user.username
-                )
-                
-                if request.auto_load:
-                     discussion.load_artefact_into_data_zone(title=artefact_name, version=artefact_info['version'])
-                
-                discussion.commit()
-                
-                artefacts = discussion.list_artefacts()
-                for artefact in artefacts:
-                    if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
-                    if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
+                if page_id != "-1":
+                    content = pages[page_id].get("extract", "")
+                    full_md = f"# {item.title}\nSource: {item.url}\n\n{content}"
+                    art_info = discussion.add_artefact(title=f"{item.title}.md", content=full_md, author=current_user.username)
+                    if request.auto_load:
+                        discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+            
+            discussion.commit()
+            
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
 
-                lc = get_user_lollms_client(current_user.username)
-                token_count = len(lc.tokenize(discussion.discussion_data_zone))
-                all_images_info = discussion.get_discussion_images()
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            all_images_info = discussion.get_discussion_images()
 
-                return {
-                    "discussion_data_zone": discussion.discussion_data_zone,
-                    "artefacts": artefacts,
-                    "discussion_data_zone_tokens": token_count,
-                    "discussion_images": [img['data'] for img in all_images_info],
-                    "active_discussion_images": [img['active'] for img in all_images_info]
-                }
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"Failed to import from Wikipedia: {e}")
+            raise HTTPException(status_code=500, detail=f"Wikipedia import failed: {e}")
+
+    @router.post("/{discussion_id}/artefacts/arxiv/search", response_model=List[Dict[str, Any]])
+    async def search_arxiv(
+        discussion_id: str,
+        request: ArxivSearchRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        import arxiv
+        try:
+            query_parts = []
+            if request.query: query_parts.append(request.query)
+            if request.author: query_parts.append(f"au:{request.author}")
+            
+            # Construct final query string
+            query_str = " AND ".join(query_parts) if query_parts else "all:*"
+            
+            search = arxiv.Search(
+                query=query_str,
+                max_results=request.max_results,
+                sort_by=arxiv.SortCriterion.Relevance
+            )
+            
+            results = []
+            for r in search.results():
+                # Filter by year client-side if requested
+                if request.year and r.published.year != request.year:
+                    continue
+                    
+                results.append({
+                    "id": r.entry_id.split('/')[-1],
+                    "title": r.title,
+                    "authors": [a.name for a in r.authors],
+                    "year": r.published.year,
+                    "abstract": r.summary,
+                    "pdf_url": r.pdf_url
+                })
+            return results
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Arxiv search failed: {e}")
+
+    @router.post("/{discussion_id}/artefacts/arxiv/import", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def import_arxiv_selected(
+        discussion_id: str,
+        request: ArxivImportSelectedRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        import arxiv
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        try:
+            for item in request.items:
+                search = arxiv.Search(id_list=[item.id])
+                paper = next(search.results())
+                
+                if item.mode == "full":
+                    # Download PDF and extract
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tf:
+                        paper.download_pdf(filename=tf.name)
+                        pdf_path = tf.name
+                    
+                    pdf_doc = fitz.open(pdf_path)
+                    text = "\n".join([page.get_text() for page in pdf_doc])
+                    pdf_doc.close()
+                    os.unlink(pdf_path)
+                    
+                    content = f"# {paper.title}\nAuthors: {', '.join([a.name for a in paper.authors])}\nSource: {paper.entry_id}\n\n{text}"
+                else:
+                    content = f"# {paper.title} (Abstract)\nAuthors: {', '.join([a.name for a in paper.authors])}\nSource: {paper.entry_id}\n\n{paper.summary}"
+                
+                art_info = discussion.add_artefact(title=f"Arxiv_{item.id}.md", content=content, author=current_user.username)
+                if request.auto_load:
+                    discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+            
+            discussion.commit()
+            
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
+
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            all_images_info = discussion.get_discussion_images()
+
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Arxiv import failed: {e}")
 
     @router.post("/{discussion_id}/artefacts/youtube", response_model=ArtefactAndDataZoneUpdateResponse)
     async def import_youtube_transcript(

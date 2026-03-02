@@ -32,13 +32,18 @@ user_management_router = APIRouter()
 
 def safe_datetime(value: Any) -> datetime:
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
         return value
     if isinstance(value, str):
         try:
-            return datetime.fromisoformat(value)
+            dt = datetime.fromisoformat(value)
+            if dt.tzinfo is None:
+                return dt.replace(tzinfo=timezone.utc)
+            return dt
         except ValueError:
             pass
-    return datetime.utcnow()
+    return datetime.now(timezone.utc)
 
 
 def _to_task_info(db_task) -> "TaskInfo":
