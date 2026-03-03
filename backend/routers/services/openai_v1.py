@@ -770,7 +770,7 @@ async def chat_completions(
         generation_kwargs["reasoning_effort"] = request.reasoning_effort
 
     stream_style = '\nTools requested in stream mode.' if request.tools else ""
-    ASCIIColors.panel(f"[bold]Open AI V1[/bold]\n[bold]User:[/bold] {user.username}\n[bold]Model:[/bold] {request.model}\n[bold]Stream:[/bold] {request.stream}{stream_style}\n[bold]Thinking:[/bold] {'active' if request.thinking else 'inactive'}\n[bold]Received images:[/bold] {len(images)}", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
+    ASCIIColors.panel(f"[bold]Open AI V1[/bold]\n[bold]User:[/bold] {user.username}\n[bold]Model:[/bold] {request.model}\n[bold]Stream:[/bold] {request.stream}{stream_style}\n[bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}\n[bold]Received images:[/bold] {len(images)}", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
     if request.stream:
         async def stream_generator():
             try:
