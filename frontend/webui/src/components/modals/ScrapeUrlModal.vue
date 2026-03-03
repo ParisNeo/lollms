@@ -2,6 +2,7 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
+import { useAuthStore } from '../../stores/auth';
 import GenericModal from './GenericModal.vue';
 import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
@@ -12,6 +13,7 @@ import apiClient from '../../services/api';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
+const authStore = useAuthStore();
 
 const modalData = computed(() => uiStore.modalData('scrapeUrl'));
 const discussionId = computed(() => modalData.value?.discussionId);
@@ -29,8 +31,12 @@ const searchResults = ref([]);
 const selectedIndices = ref(new Set());
 const isSearching = ref(false);
 
-// Wikipedia state
-const wikiQuery = ref('');
+// Unified Search state (Wikipedia, DDG, Google)
+const searchQuery = ref('');
+
+const hasGoogleConfig = computed(() => {
+    return !!authStore.user?.google_api_key && !!authStore.user?.google_cse_id;
+});
 
 // Arxiv state
 const arxivQuery = ref('');
@@ -39,12 +45,30 @@ const arxivYear = ref(null);
 const arxivMax = ref(5);
 const arxivModes = ref({}); // Map of ID -> "abstract" or "full"
 
+const commonLanguages =[
+    { value: 'en', label: 'English' },
+    { value: 'es', label: 'Spanish' },
+    { value: 'fr', label: 'French' },
+    { value: 'de', label: 'German' },
+    { value: 'it', label: 'Italian' },
+    { value: 'pt', label: 'Portuguese' },
+    { value: 'nl', label: 'Dutch' },
+    { value: 'pl', label: 'Polish' },
+    { value: 'ru', label: 'Russian' },
+    { value: 'zh', label: 'Chinese' },
+    { value: 'ja', label: 'Japanese' },
+    { value: 'ko', label: 'Korean' },
+    { value: 'ar', label: 'Arabic' },
+    { value: 'hi', label: 'Hindi' },
+    { value: 'tr', label: 'Turkish' }
+];
+
 watch(() => uiStore.isModalOpen('scrapeUrl'), async (isOpen) => {
     if (isOpen) {
         url.value = '';
         depth.value = 0;
         processWithAi.value = false;
-        wikiQuery.value = '';
+        searchQuery.value = '';
         youtubeUrl.value = '';
         youtubeLanguage.value = 'en';
         searchResults.value = [];
@@ -62,7 +86,13 @@ async function handleSearch() {
     selectedIndices.value.clear();
     try {
         if (mode.value === 'wikipedia') {
-            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/wikipedia/search`, { query: wikiQuery.value });
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/wikipedia/search`, { query: searchQuery.value });
+            searchResults.value = resp.data;
+        } else if (mode.value === 'duckduckgo' || mode.value === 'google') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/web/search`, { 
+                query: searchQuery.value,
+                provider: mode.value
+            });
             searchResults.value = resp.data;
         } else if (mode.value === 'arxiv') {
             const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/arxiv/search`, { 
@@ -103,6 +133,24 @@ async function handleSubmit() {
                 depth.value, 
                 processWithAi.value
             );
+            uiStore.closeModal('scrapeUrl');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'duckduckgo' || mode.value === 'google') {
+        if (selectedIndices.value.size === 0) return;
+        isLoading.value = true;
+        try {
+            const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+            for (const item of items) {
+                await discussionsStore.importArtefactFromUrl(
+                    discussionId.value, 
+                    item.url, 
+                    0, 
+                    false
+                );
+            }
+            uiStore.addNotification(`${items.length} pages queued for import.`, "success");
             uiStore.closeModal('scrapeUrl');
         } finally {
             isLoading.value = false;
@@ -157,44 +205,61 @@ async function handleSubmit() {
 <template>
     <GenericModal
         modalName="scrapeUrl"
-        :title="mode === 'url' ? 'Scrape URL' : mode === 'wikipedia' ? 'Import Wikipedia' : 'Import YouTube Transcript'"
-        maxWidthClass="max-w-lg"
+        :title="mode === 'url' ? 'Scrape URL' : mode === 'wikipedia' ? 'Import Wikipedia' : mode === 'youtube' ? 'Import YouTube' : mode === 'arxiv' ? 'Import Arxiv' : 'Web Search'"
+        maxWidthClass="max-w-xl"
     >
         <template #body>
             <div class="space-y-4 p-1">
                 <!-- Mode Toggle Tabs -->
-                <div class="flex border-b border-gray-200 dark:border-gray-700 mb-4">
+                <div class="flex flex-wrap gap-y-2 border-b border-gray-200 dark:border-gray-700 mb-4">
                     <button 
                         @click="mode = 'url'"
-                        class="flex-1 pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-2"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
                         :class="mode === 'url' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     >
-                        <IconWeb class="w-4 h-4" />
-                        Web
+                        <IconWeb class="w-4 h-4 hidden sm:block" />
+                        URL
+                    </button>
+                    <button 
+                        @click="mode = 'duckduckgo'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'duckduckgo' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconWeb class="w-4 h-4 hidden sm:block" />
+                        DDG
+                    </button>
+                    <button 
+                        v-if="hasGoogleConfig"
+                        @click="mode = 'google'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'google' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconWeb class="w-4 h-4 hidden sm:block" />
+                        Google
                     </button>
                     <button 
                         @click="mode = 'wikipedia'"
-                        class="flex-1 pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-2"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
                         :class="mode === 'wikipedia' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     >
-                        <IconWikipedia class="w-4 h-4" />
-                        Wikipedia
-                    </button>
-                    <button 
-                        @click="mode = 'youtube'"
-                        class="flex-1 pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-2"
-                        :class="mode === 'youtube' ? 'border-red-500 text-red-600 dark:text-red-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
-                    >
-                        <IconYoutube class="w-4 h-4" />
-                        YouTube
+                        <IconWikipedia class="w-4 h-4 hidden sm:block" />
+                        Wiki
                     </button>
                     <button 
                         @click="mode = 'arxiv'"
-                        class="flex-1 pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-2"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
                         :class="mode === 'arxiv' ? 'border-orange-500 text-orange-600 dark:text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     >
-                        <IconServer class="w-4 h-4" />
+                        <IconServer class="w-4 h-4 hidden sm:block" />
                         Arxiv
+                    </button>
+                    <button 
+                        @click="mode = 'youtube'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'youtube' ? 'border-red-500 text-red-600 dark:text-red-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconYoutube class="w-4 h-4 hidden sm:block" />
+                        YouTube
                     </button>
                 </div>
 
@@ -245,22 +310,23 @@ async function handleSubmit() {
                     </div>
                 </div>
 
-                <!-- Wikipedia Mode Content -->
-                <div v-if="mode === 'wikipedia'" class="space-y-4">
+                <!-- Unified Search Mode Content (Wikipedia, DDG, Google) -->
+                <div v-if="mode === 'wikipedia' || mode === 'duckduckgo' || mode === 'google'" class="space-y-4">
                     <div class="flex gap-2">
                         <div class="relative flex-grow">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                <IconWikipedia class="h-4 w-4 text-gray-400" />
+                                <IconWikipedia v-if="mode === 'wikipedia'" class="h-4 w-4 text-gray-400" />
+                                <IconWeb v-else class="h-4 w-4 text-gray-400" />
                             </div>
                             <input
-                                v-model="wikiQuery"
+                                v-model="searchQuery"
                                 type="text"
                                 class="input-field pl-10"
-                                placeholder="Article title or URL"
+                                :placeholder="mode === 'wikipedia' ? 'Article title or URL' : 'Search query...'"
                                 @keyup.enter="handleSearch"
                             />
                         </div>
-                        <button @click="handleSearch" class="btn btn-secondary" :disabled="isSearching || !wikiQuery">
+                        <button @click="handleSearch" class="btn btn-secondary" :disabled="isSearching || !searchQuery">
                             <IconAnimateSpin v-if="isSearching" class="w-4 h-4 animate-spin" />
                             <span v-else>Search</span>
                         </button>
@@ -276,7 +342,8 @@ async function handleSubmit() {
                                 <input type="checkbox" :checked="selectedIndices.has(idx)" class="rounded text-blue-600">
                                 <span class="font-bold text-sm">{{ res.title }}</span>
                             </div>
-                            <p class="text-[10px] text-gray-500 line-clamp-1 mt-1">{{ res.snippet }}</p>
+                            <a :href="res.url" target="_blank" @click.stop class="text-[10px] text-blue-500 hover:underline mt-1 block truncate">{{ res.url }}</a>
+                            <p class="text-[10px] text-gray-500 line-clamp-2 mt-1">{{ res.snippet }}</p>
                         </div>
                     </div>
                 </div>
@@ -385,15 +452,14 @@ async function handleSubmit() {
                 <button @click="uiStore.closeModal('scrapeUrl')" type="button" class="btn btn-secondary">Cancel</button>
                 
                 <!-- Conditionally show Select Count -->
-                <span v-if="(mode === 'wikipedia' || mode === 'arxiv') && selectedIndices.size > 0" class="text-xs text-gray-500 self-center">
+                <span v-if="['wikipedia', 'duckduckgo', 'google', 'arxiv'].includes(mode) && selectedIndices.size > 0" class="text-xs text-gray-500 self-center">
                     {{ selectedIndices.size }} selected
                 </span>
 
                 <button @click="handleSubmit" type="button" class="btn btn-primary" 
                     :disabled="isLoading || 
                               (mode === 'url' && !url.trim()) || 
-                              (mode === 'wikipedia' && selectedIndices.size === 0) || 
-                              (mode === 'arxiv' && selectedIndices.size === 0) ||
+                              (['wikipedia', 'duckduckgo', 'google', 'arxiv'].includes(mode) && selectedIndices.size === 0) ||
                               (mode === 'youtube' && !youtubeUrl.trim())">
                     <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
                     {{ isLoading ? 'Importing...' : 'Import' }}

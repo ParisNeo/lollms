@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-03 07:22]
+
+- chore: rebuild frontend assets and update artefacts router
+
 ## [2026-03-01 21:03]
 
 - chore(deps): bump lollms-client to 1.11.11 and ascii_colors to 0.11.15

@@ -48,6 +48,7 @@ except ImportError:
     YouTubeTranscriptApi = None
 
 from backend.db import get_db
+from backend.db.models.user import User as DBUser
 from pydantic import BaseModel
 
 # --- New Models for Search/Select ---
@@ -77,6 +78,10 @@ class ArxivImportSelectedRequest(BaseModel):
     items: List[ArxivImportItem]
     auto_load: bool = True
 
+class WebSearchRequest(BaseModel):
+    query: str
+    provider: str
+
 class WikipediaImportRequest(BaseModel):
     query: str
     auto_load: bool = True
@@ -93,6 +98,42 @@ def build_artefacts_router(router: APIRouter):
     except ImportError:
         pm.ensure_packages("arxiv")
         import arxiv
+
+    @router.post("/{discussion_id}/artefacts/web/search", response_model=List[Dict[str, Any]])
+    async def search_web(
+        discussion_id: str,
+        request: WebSearchRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        results =[]
+        try:
+            if request.provider == "duckduckgo":
+                pm.ensure_packages("duckduckgo-search") # using duckduckgo-search to avoid ddgs rename warning if possible or handle it
+                try:
+                    from duckduckgo_search import DDGS
+                except ImportError:
+                    from ddgs import DDGS
+                with DDGS() as ddgs:
+                    raw_results =[r for r in ddgs.text(request.query, max_results=10)]
+                    results =[{'title': r.get('title'), 'url': r.get('href'), 'snippet': r.get('body')} for r in raw_results]
+            elif request.provider == "google":
+                pm.ensure_packages("google-api-python-client")
+                from googleapiclient.discovery import build as google_build
+                
+                db_user = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+                if not db_user or not db_user.google_api_key or not db_user.google_cse_id:
+                    raise HTTPException(status_code=400, detail="Google Search API is not configured in settings.")
+                    
+                service = google_build("customsearch", "v1", developerKey=db_user.google_api_key)
+                res = service.cse().list(q=request.query, cx=db_user.google_cse_id, num=10).execute()
+                items = res.get('items', [])
+                results =[{'title': item.get('title'), 'url': item.get('link'), 'snippet': item.get('snippet')} for item in items]
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Search failed: {e}")
+        
+        return results
 
      # safe_store is needed for RAG callbacks
     @router.get("/{discussion_id}/artefacts", response_model=List[ArtefactInfo])
@@ -357,7 +398,10 @@ def build_artefacts_router(router: APIRouter):
                 "format": "json",
                 "srlimit": 10
             }
-            resp = requests.get(api_url, params=params)
+            headers = {
+                "User-Agent": "LoLLMs/1.0 (https://github.com/ParisNeo/lollms; parisneo@gmail.com)"
+            }
+            resp = requests.get(api_url, params=params, headers=headers)
             resp.raise_for_status()
             data = resp.json()
             
@@ -392,7 +436,10 @@ def build_artefacts_router(router: APIRouter):
                     "explaintext": 1,
                     "format": "json"
                 }
-                resp = requests.get(api_url, params=params)
+                headers = {
+                    "User-Agent": "LoLLMs/1.0 (https://github.com/ParisNeo/lollms; parisneo_ai@gmail.com)"
+                }
+                resp = requests.get(api_url, params=params, headers=headers)
                 data = resp.json()
                 pages = data.get("query", {}).get("pages", {})
                 page_id = list(pages.keys())[0]

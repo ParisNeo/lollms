@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from './GenericModal.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
+import InteractiveMermaid from './InteractiveMermaid.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
@@ -11,21 +12,21 @@ import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const uiStore = useUiStore();
-const props = computed(() => uiStore.modalData('interactiveOutput'));
+const modalProps = computed(() => uiStore.modalData('interactiveOutput'));
 
-const title = computed(() => props.value?.title || 'Execution Results');
+const title = computed(() => modalProps.value?.title || 'Execution Results');
 const results = computed(() => {
-    const rawResults = props.value?.results;
+    const rawResults = modalProps.value?.results;
     if (rawResults && Object.keys(rawResults).length > 0) return rawResults;
     
     // Fallback for direct content display (e.g. from ChatInput feature info)
-    if (props.value?.content) {
-        return { "Info": { "content": props.value.content } };
+    if (modalProps.value?.content) {
+        return { "Info": { "content": modalProps.value.content } };
     }
 
     // Fallback for direct HTML content (e.g. from CodeBlock)
-    if (props.value?.htmlContent) {
-        return { "Preview": { "html_output": props.value.htmlContent } };
+    if (modalProps.value?.htmlContent) {
+        return { "Preview": { "html_output": modalProps.value.htmlContent } };
     }
     return {};
 });
@@ -138,6 +139,11 @@ function handleClose() {
                                             </button>
                                         </div>
                                     </div>
+                                </div>
+
+                                <!-- MERMAID RENDERING -->
+                                <div v-else-if="modalProps?.contentType === 'mermaid' && modalProps?.sourceCode" class="w-full h-[600px] border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative">
+                                    <InteractiveMermaid :mermaid-code="modalProps.sourceCode" />
                                 </div>
 
                                 <!-- HTML / INTERACTIVE RENDERING -->

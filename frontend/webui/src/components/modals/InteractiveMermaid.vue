@@ -4,12 +4,24 @@
     <div ref="mountRef" class="w-full h-full mermaid-container"></div>
     
     <!-- Diagram type label -->
-    <div v-if="detectedTypeLabel" class="absolute top-3 right-3 px-2 py-1 text-xs rounded-md bg-black/10 dark:bg-white/10 text-gray-800 dark:text-gray-100 backdrop-blur-sm">
+    <div v-if="detectedTypeLabel" class="absolute top-4 left-4 px-2 py-1 text-xs rounded-md bg-black/10 dark:bg-white/10 text-gray-800 dark:text-gray-100 backdrop-blur-sm pointer-events-none z-10">
       {{ detectedTypeLabel }}
     </div>
     
+    <!-- Export Actions Overlay -->
+    <div v-if="isInteractive" class="absolute top-4 right-4 flex gap-2 z-20">
+      <button @click="exportSVG()" class="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded shadow-md transition-colors flex items-center gap-1" title="Save as SVG">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+        SVG
+      </button>
+      <button @click="exportPNG()" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded shadow-md transition-colors flex items-center gap-1" title="Save as PNG">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+        PNG
+      </button>
+    </div>
+
     <!-- Interactive SVG Indicator -->
-    <div v-if="isInteractive" class="absolute left-4 bottom-4 text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2 z-10 p-1 rounded-md bg-white/50 dark:bg-black/50 backdrop-blur-sm">
+    <div v-if="isInteractive" class="absolute left-4 bottom-4 text-sm text-gray-600 dark:text-gray-400 flex items-center gap-2 z-10 p-1 rounded-md bg-white/50 dark:bg-black/50 backdrop-blur-sm pointer-events-none">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5v-4m0 4h-4m4 0l-5-5" />
       </svg>
@@ -93,32 +105,23 @@ function cleanup() {
   }
 }
 
-// Enhanced text sanitization for nested brackets and parentheses
-function sanitizeMermaidText(text) {
-  if (!text) return text;
-  
-  // Replace problematic characters with HTML entities
-  return text
-    .replace(/\[/g, '&#91;')   // Escape [
-    .replace(/\]/g, '&#93;')   // Escape ]
-    .replace(/\(/g, '&#40;')   // Escape (
-    .replace(/\)/g, '&#41;')   // Escape )
-    .replace(/{/g, '&#123;')   // Escape {
-    .replace(/}/g, '&#125;');  // Escape }
-}
-
 function processMermaidCode(code) {
   if (!code) return code;
   
   const lines = code.split('\n');
   const processedLines = lines.map(line => {
-    // Handle node definitions with labels containing brackets/parentheses
-    // This regex matches: nodeId[any content] or nodeId(any content) or nodeId{any content}
+    // Handle node definitions with labels containing brackets, parentheses, and accents
+    // Matches NodeID, Opener, Content, Closer for all standard Mermaid shapes
     return line.replace(
-      /(\b[A-Za-z0-9_]+\s*)([[({])([^\]})]*)([\]})])/g,
+      /([A-Za-z0-9_]+)\s*(\[\[|\[\(|\(\(|\[\/|\[\\|\{\{|\(\[|\[|\(|\{|\>)(.*?)(\]\]|\)\]|\)\)|\/\]|\\\]|\}\}|\]\)|\]|\)|\})/g,
       (match, nodeId, openDelim, content, closeDelim) => {
-        const sanitizedContent = sanitizeMermaidText(content);
-        return `${nodeId}${openDelim}${sanitizedContent}${closeDelim}`;
+        const trimmed = content.trim();
+        // If already quoted or empty, leave it alone
+        if (!trimmed || trimmed.startsWith('"')) return match;
+        
+        // Escape any existing double quotes to avoid breaking the Mermaid parser
+        const safeContent = trimmed.replace(/"/g, '#quot;');
+        return `${nodeId}${openDelim}"${safeContent}"${closeDelim}`;
       }
     );
   });
