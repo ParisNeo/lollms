@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-04 15:23]
+
+- chore: rebuild frontend assets and update Mermaid diagram support
+
 ## [2026-03-04 12:49]
 
 - feat: update LLM generation logic and rebuild frontend assets

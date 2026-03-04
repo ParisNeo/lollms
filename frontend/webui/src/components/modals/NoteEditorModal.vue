@@ -21,6 +21,7 @@ const title = ref('');
 const content = ref('');
 const groupId = ref(null);
 const isLoading = ref(false);
+const editorMode = ref('edit');
 
 function initForm() {
     if (note.value && note.value.id) {
@@ -28,11 +29,13 @@ function initForm() {
         title.value = note.value.title;
         content.value = note.value.content;
         groupId.value = note.value.group_id;
+        editorMode.value = 'view';
     } else {
         // Creating a new note (possibly from AI generation)
         title.value = prefillTitle.value || 'New Note';
         content.value = prefillContent.value || '';
         groupId.value = null;
+        editorMode.value = 'edit';
     }
 }
 
@@ -109,7 +112,12 @@ async function handleImportToDataZone() {
                     </div>
                 </div>
                 <div class="flex-grow min-h-0 border rounded-md overflow-hidden dark:border-gray-700">
-                     <CodeMirrorEditor v-model="content" class="h-full" />
+                     <CodeMirrorEditor 
+                        v-model="content" 
+                        class="h-full" 
+                        :renderable="true"
+                        :initialMode="editorMode"
+                     />
                 </div>
             </div>
         </template>

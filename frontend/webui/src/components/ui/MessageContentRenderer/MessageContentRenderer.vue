@@ -495,6 +495,26 @@ function handleContentClick(event) {
         if (index) emit('citation-click', parseInt(index));
     }
 }
+
+// Auto-size mermaid containers based on rendered SVG natural height
+function onMermaidReady({ svg }, partIndex) {
+    nextTick(() => {
+        try {
+            const viewBox = svg.getAttribute('viewBox');
+            if (!viewBox) return;
+            const [, , , vbHeight] = viewBox.split(' ').map(Number);
+            if (!vbHeight || vbHeight <= 0) return;
+            // Find the wrapper div for this part and set its height
+            // Add padding for toolbar (48px) + some breathing room
+            const minH = 300, maxH = 1200;
+            const targetH = Math.min(maxH, Math.max(minH, vbHeight + 80));
+            const wrappers = messageContentRef.value?.querySelectorAll('.mermaid-wrapper');
+            if (wrappers && wrappers[partIndex]) {
+                wrappers[partIndex].style.height = `${targetH}px`;
+            }
+        } catch (e) { /* ignore */ }
+    });
+}
 </script>
 
 <template>
@@ -505,8 +525,8 @@ function handleContentClick(event) {
         <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
           
           <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
-          <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm" style="height: 480px;">
-            <MermaidViewer :mermaid-code="part.code" />
+          <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm mermaid-wrapper">
+            <MermaidViewer :mermaid-code="part.code" @ready="onMermaidReady($event, index)" />
           </div>
 
           <!-- ── Regular code / text tokens ────────────────────────────── -->
@@ -685,6 +705,12 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .document-summary::-webkit-details-marker { display: none; }
 details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 .document-content { @apply p-3; }
+
+/* Mermaid wrapper — starts at a sensible default, auto-sized by onMermaidReady */
+.mermaid-wrapper {
+  height: 500px;
+  transition: height 0.2s ease;
+}
 
 /* Note block */
 .note-block {

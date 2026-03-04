@@ -204,7 +204,7 @@ function processMermaidCode(code) {
   // 5. Remove trailing hallucinated brackets after :::class
   processed = processed.replace(/(:::[a-zA-Z0-9_-]+)[)\]\s]+$/gm, '$1')
 
-  // 6. Line-by-line normalization — only for nodes with UNQUOTED labels
+  // 6. Line-by-line normalization — only for nodes with UNQUOTED labels outside subgraphs
   const reserved = new Set([
     'flowchart','graph','subgraph','end','classdef','click','style','direction',
     'class','statediagram','sequencediagram','pie','gantt','erdiagram',
@@ -222,27 +222,50 @@ function processMermaidCode(code) {
     t.startsWith('style ') ||
     t.startsWith('click ')
 
-  // ★ THE CRITICAL FIX:
-  // If the line already has a properly quoted label (bracket immediately followed by " or '),
-  // do NOT touch it. This prevents L1["LLM Module"]:::llm from being double-processed.
   const alreadyQuoted = (line) => /[A-Za-z0-9_]+\s*[\[\(\{]{1,3}["']/.test(line)
 
-  // Also skip pure edge lines (no shape bracket on the left side of the arrow)
   const isPureEdge = (t) =>
     /^[A-Za-z0-9_]+\s*(?:-->|-.->|==>|--o|--x|~~~|<-->|--\s)/.test(t) &&
     !/^[A-Za-z0-9_]+\s*[\[\(\{]/.test(t)
 
+  // ★ SUBGRAPH STRATEGY:
+  // Mermaid does NOT allow quoted labels (STR tokens) OR :::class inline on nodes
+  // inside subgraph blocks in most versions. The safe approach:
+  // 1. Strip :::class from ALL node definitions inside subgraphs
+  // 2. Collect them as deferred `class nodeId className` statements
+  // 3. Append those statements after the diagram — mermaid accepts them globally
+  let subgraphDepth = 0
+  const deferredClasses = [] // { nodeId, className }
+
   const lines = processed.split('\n')
   const normalized = lines.map(line => {
     const trimmed = line.trim()
+
+    // Track subgraph nesting
+    if (/^subgraph(\s|$)/.test(trimmed)) { subgraphDepth++; return line }
+    if (trimmed === 'end' && subgraphDepth > 0) { subgraphDepth--; return line }
+
     if (!trimmed) return line
     if (skipLine(trimmed)) return line
-    if (alreadyQuoted(trimmed)) return line   // ← already correct, hands off
+
+    if (subgraphDepth > 0) {
+      // Inside subgraph: strip :::class suffix from ANY node line and defer it
+      const nodeId = trimmed.match(/^([A-Za-z0-9_]+)/)?.[1]
+      const classSuffix = trimmed.match(/(:::[a-zA-Z0-9_-]+)\s*$/)?.[1]
+      if (nodeId && classSuffix) {
+        deferredClasses.push({ nodeId, className: classSuffix.replace(':::', '') })
+        // Return line with :::class stripped
+        return line.replace(/\s*:::[a-zA-Z0-9_-]+\s*$/, '')
+      }
+      return line
+    }
+
+    if (alreadyQuoted(trimmed)) return line
     if (isPureEdge(trimmed)) return line
 
-    // Match node with unquoted label that needs wrapping
+    // Quote unquoted multi-word labels outside subgraphs
     const m = line.match(
-      /^(\s*)([A-Za-z0-9_]+)\s*([\[\(\{]{1,3})((?:[^"'\[\]\(\)\{\}])*)  ([\]\)\}]{1,3})(:::[\w-]+)?(\s*(?:-->|-.->|==>|--o|--x|~~~|<-->|--\s).*)?\s*$/
+      /^(\s*)([A-Za-z0-9_]+)\s*([\[\(\{]{1,3})((?:[^"'\[\]\(\)\{\}])*)([\]\)\}]{1,3})(:::[\w-]+)?(\s*(?:-->|-.->|==>|--o|--x|~~~|<-->|--\s).*)?\s*$/
     )
     if (!m) return line
 
@@ -277,7 +300,19 @@ function processMermaidCode(code) {
     return `${indent}${id}${op}${safeLabel}${cl}${classSuffix || ''}${edgePart || ''}`
   })
 
-  return normalized.join('\n')
+  // Flush deferred class assignments (from subgraph nodes) as `class id className` statements
+  let result = normalized.join('\n')
+  if (deferredClasses.length > 0) {
+    const byClass = {}
+    deferredClasses.forEach(({ nodeId, className }) => {
+      if (!byClass[className]) byClass[className] = []
+      byClass[className].push(nodeId)
+    })
+    const classLines = Object.entries(byClass)
+      .map(([cls, ids]) => `    class ${ids.join(',')} ${cls}`)
+    result = result.trimEnd() + '\n' + classLines.join('\n')
+  }
+  return result
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
