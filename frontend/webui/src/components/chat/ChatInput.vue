@@ -352,6 +352,30 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Long-Term Memory Bank\n[Memory #1] ...\n## Memory Management\nManage memories using these tags:\n- Add: <new_memory>...'
         });
     }
+    if (user.value?.skills_library_enabled) {
+        features.push({ 
+            id: 'skills_lib', 
+            icon: IconDatabase, 
+            label: 'Skill Auto-Search', 
+            colorClass: 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/20 border-emerald-200 dark:border-emerald-800', 
+            title: 'Skill Auto-Search Active.',
+            modalTitle: 'Skill Auto-Search',
+            modalDescription: 'Automatically searches your Skills library and injects relevant skills into the context.',
+            systemPrompt: '## Relevant Skills Retrieved:\n--- Skill: Name ---\n...'
+        });
+    }
+    if (user.value?.skills_building_enabled) {
+        features.push({ 
+            id: 'skills_build', 
+            icon: IconPencil, 
+            label: 'Skill Builder', 
+            colorClass: 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/20 border-sky-200 dark:border-sky-800', 
+            title: 'Skill Builder Enabled.',
+            modalTitle: 'Skill Builder',
+            modalDescription: 'Allows the AI to save new skills to your library based on conversations.',
+            systemPrompt: '## Skill Building: Use <skill title="..." description="..." category="...">content</skill> to remember reusable code patterns or rules.'
+        });
+    }
     if (currentModelVisionSupport.value) {
         features.push({ 
             id: 'vision', 
@@ -664,6 +688,25 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
+                                <!-- Skills Library Toggle -->
+                                <button @click.stop="toggleUserPref('skills_library_enabled', user.skills_library_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconDatabase class="w-4 h-4 text-emerald-500" />
+                                        <span>Skills Auto-Search</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.skills_library_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Skills Building Toggle -->
+                                <button v-if="user?.skills_library_enabled" @click.stop="toggleUserPref('skills_building_enabled', user.skills_building_enabled)" class="menu-item flex justify-between items-center group/item pl-8 text-xs">
+                                    <span class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
+                                        <span>↳ AI Skill Builder</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.skills_building_enabled" class="w-3.5 h-3.5 text-green-500" />
+                                    <IconCircle v-else class="w-3.5 h-3.5 text-gray-400" />
+                                </button>
+
                                 <!-- Street View Toggle -->
                                 <button @click.stop="toggleUserPref('street_view_enabled', user.street_view_enabled)" class="menu-item flex justify-between items-center group/item">
                                     <span class="flex items-center gap-2">
@@ -806,6 +849,16 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                         <span>Notes Gen</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.note_generation_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Skill Builder Toggle -->
+                                <button @click.stop="toggleUserPref('skills_building_enabled', user.skills_building_enabled)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="flex items-center gap-2">
+                                        <IconPencil class="w-4 h-4 text-sky-500" />
+                                        <span>Skill Builder</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.skills_building_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 

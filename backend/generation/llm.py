@@ -331,6 +331,50 @@ def build_image_dicts(images_b64):
     return res
 
 
+def process_skill_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool, List[str]]:
+    """
+    Parses <skill> tags to save new skills to the user's library.
+    """
+    pattern = re.compile(r'<skill\s+title="([^"]*)"\s+description="([^"]*)"\s+category="([^"]*)">(.*?)</skill>', re.DOTALL | re.IGNORECASE)
+    matches = list(pattern.finditer(text))
+    if not matches:
+        return text, False, []
+    
+    actions_performed = False
+    saved_titles =[]
+    from backend.db.models.skill import Skill as DBSkill
+    for match in matches:
+        title = match.group(1).strip()
+        desc = match.group(2).strip()
+        cat = match.group(3).strip()
+        content = match.group(4).strip()
+        
+        if title and content:
+            try:
+                existing = db.query(DBSkill).filter(DBSkill.owner_user_id == user_id, DBSkill.name == title).first()
+                if existing:
+                    existing.content = content
+                    existing.description = desc
+                    existing.category = cat
+                    existing.updated_at = func.now()
+                else:
+                    new_skill = DBSkill(owner_user_id=user_id, name=title, description=desc, category=cat, content=content, language="markdown")
+                    db.add(new_skill)
+                db.commit()
+                actions_performed = True
+                saved_titles.append(title)
+            except Exception as e:
+                db.rollback()
+                print(f"Error saving skill: {e}")
+    
+    cleaned_text = text
+    for match in matches:
+        title = match.group(1).strip()
+        cleaned_text = cleaned_text.replace(match.group(0), f"\n> 💡 **Skill saved/updated:** {title}\n")
+        
+    return cleaned_text, actions_performed, saved_titles
+
+
 def process_memory_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool]:
     """
     Parses memory tags from the AI output, executes the corresponding DB operations,
@@ -1316,6 +1360,34 @@ def build_llm_generation_router(router: APIRouter):
         if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use <note title=\"Title\">...</note> for structured data.")
         if memory_instructions: preamble_parts.append(memory_instructions)
 
+        if getattr(owner_db_user, 'skills_building_enabled', False):
+            preamble_parts.append("## Skill Building: If the user asks to save this as a skill, learn a new trick, or remember a pattern, wrap the detailed documentation or code pattern in `<skill title=\"Clear Name\" description=\"What this teaches/provides\" category=\"programming/language/feature\">content</skill>`. Make sure the category uses forward slashes.")
+
+        # --- SKILL AUTO SEARCH ---
+        if getattr(owner_db_user, 'skills_library_enabled', False):
+            db_skills = next(get_db())
+            try:
+                from backend.db.models.skill import Skill as DBSkill
+                user_skills = db_skills.query(DBSkill).filter(DBSkill.owner_user_id == owner_db_user.id).all()
+                if user_skills:
+                    prompt_lower = prompt.lower()
+                    matched_skills =[]
+                    for sk in user_skills:
+                        name_parts = sk.name.lower().replace('_', ' ').replace('-', ' ').split()
+                        cat_parts = sk.category.lower().split('/') if sk.category else[]
+                        
+                        if sk.name.lower() in prompt_lower or any(p in prompt_lower for p in name_parts if len(p) > 4) or any(p in prompt_lower for p in cat_parts if len(p) > 3):
+                            matched_skills.append(sk)
+                    
+                    if matched_skills:
+                        matched_skills = matched_skills[:3] # Limit to top 3 to preserve context
+                        skill_texts = "\n\n".join([f"--- Skill: {sk.name} ---\n{sk.content}" for sk in matched_skills])
+                        preamble_parts.append(f"## Relevant Skills Retrieved:\n{skill_texts}\nUse these skills to guide your response if applicable.")
+            except Exception as e:
+                trace_exception(e)
+            finally:
+                db_skills.close()
+
         dynamic_preamble = "## Dynamic Context\n" + "\n".join(preamble_parts) + "\n\n" if preamble_parts else ""
         
         # User Data Zone processing
@@ -1507,6 +1579,16 @@ def build_llm_generation_router(router: APIRouter):
                                     ai_msg.content = cleaned
                                     manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory"}}, current_user.id)
                             finally: db_mem.close()
+
+                        if getattr(owner_db_user, 'skills_building_enabled', False):
+                            db_skill = next(get_db())
+                            try:
+                                cleaned, action, saved_titles = process_skill_tags(ai_msg.content, owner_db_user.id, db_skill)
+                                if action:
+                                    ai_msg.content = cleaned
+                                    for t in saved_titles:
+                                        manager.send_personal_message_sync({"type": "skill_saved", "data": {"title": t}}, current_user.id)
+                            finally: db_skill.close()
 
                         if owner_db_user.image_generation_enabled:
                             db_img = next(get_db())

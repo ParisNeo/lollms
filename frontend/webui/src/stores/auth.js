@@ -197,6 +197,10 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'data_zone_processed': 
                     getDiscussionsStore().then(s => s.handleDataZoneUpdate(data.data)); 
                     break;
+                case 'skill_saved':
+                    import('./skills').then(s => s.useSkillsStore().fetchSkills());
+                    uiStore.addNotification(`Skill saved: ${data.data.title}`, 'success');
+                    break;
                 case 'discussion_images_updated':
                     getDiscussionsStore().then(s => s.handleDiscussionImagesUpdated(data.data));
                     break;

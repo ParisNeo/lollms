@@ -52,6 +52,8 @@ const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
 const memoryEnabled = ref(false);
 const autoMemoryEnabled = ref(false);
+const skillsLibraryEnabled = ref(false);
+const skillsBuildingEnabled = ref(false);
 const reasoningActivation = ref(false);
 const reasoningEffort = ref('medium');
 const rlmEnabled = ref(false);
@@ -137,6 +139,8 @@ function populateForm() {
     noteGenerationEnabled.value = !!user.value.note_generation_enabled;
     memoryEnabled.value = !!user.value.memory_enabled;
     autoMemoryEnabled.value = !!user.value.auto_memory_enabled;
+    skillsLibraryEnabled.value = !!user.value.skills_library_enabled;
+    skillsBuildingEnabled.value = !!user.value.skills_building_enabled;
     reasoningActivation.value = !!user.value.reasoning_activation;
     reasoningEffort.value = user.value.reasoning_effort || 'medium';
     rlmEnabled.value = !!user.value.rlm_enabled;
@@ -189,7 +193,7 @@ watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
-    memoryEnabled, autoMemoryEnabled, reasoningActivation, reasoningEffort, rlmEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
+    memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, reasoningActivation, reasoningEffort, rlmEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
     googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis, webSearchProviders,
     herdModeEnabled, herdRounds, herdPrecodeParticipants, herdPostcodeParticipants, 
     streetViewEnabled, googleDriveEnabled, googleCalendarEnabled, googleGmailEnabled, googleClientSecret, schedulerEnabled,
@@ -239,6 +243,8 @@ async function handleSaveChanges() {
             note_generation_enabled: noteGenerationEnabled.value,
             memory_enabled: memoryEnabled.value,
             auto_memory_enabled: autoMemoryEnabled.value,
+            skills_library_enabled: skillsLibraryEnabled.value,
+            skills_building_enabled: skillsBuildingEnabled.value,
             reasoning_activation: reasoningActivation.value,
             reasoning_effort: reasoningEffort.value,
             rlm_enabled: rlmEnabled.value,
@@ -469,7 +475,17 @@ async function handleSaveChanges() {
                 </div>
             </div>
 
-            <div class="p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-800 rounded-xl space-y-3">
+            <div class="p-4 bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">Skills Auto-Search</h3><p class="text-xs text-gray-500">Automatically find and inject relevant skills.</p></div>
+                <label class="toggle-switch"><input type="checkbox" v-model="skillsLibraryEnabled"><span class="slider"></span></label>
+            </div>
+
+            <div class="p-4 bg-sky-50 dark:bg-sky-900/10 border border-sky-200 dark:border-sky-800 rounded-xl flex items-center justify-between">
+                <div><h3 class="text-sm font-bold">AI Skill Builder</h3><p class="text-xs text-gray-500">Allow AI to create and save new skills.</p></div>
+                <label class="toggle-switch"><input type="checkbox" v-model="skillsBuildingEnabled"><span class="slider"></span></label>
+            </div>
+
+            <div class="p-4 bg-indigo-50 dark:bg-indigo-900/10 border border-indigo-200 dark:border-indigo-800 rounded-xl space-y-3 md:col-span-2">
                 <div class="flex items-center justify-between">
                     <div><h3 class="text-sm font-bold">Thinking Mode</h3><p class="text-xs text-gray-500">Enable deep reasoning processes.</p></div>
                     <label class="toggle-switch"><input type="checkbox" v-model="reasoningActivation"><span class="slider"></span></label>

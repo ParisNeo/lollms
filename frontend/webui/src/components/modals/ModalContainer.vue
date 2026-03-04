@@ -71,6 +71,7 @@ const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactI
 const NotebookWizardModal = defineAsyncComponent(() => import('./NotebookWizardModal.vue'));
 const AdminCreateUserModal = defineAsyncComponent(() => import('./AdminCreateUserModal.vue'));
 const CreateArtefactModal = defineAsyncComponent(() => import('./CreateArtefactModal.vue'));
+const SkillEditorModal = defineAsyncComponent(() => import('./SkillEditorModal.vue'));
 </script>
 
 <template>
@@ -140,6 +141,7 @@ const CreateArtefactModal = defineAsyncComponent(() => import('./CreateArtefactM
     <NotebookWizardModal v-if="activeModal === 'notebookWizard'" />
     <AdminCreateUserModal v-if="activeModal === 'adminCreateUser'" />
     <CreateArtefactModal v-if="activeModal === 'createArtefact'" />
+    <SkillEditorModal v-if="activeModal === 'skillEditor'" />
     
   </div>
 </template>

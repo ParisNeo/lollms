@@ -616,6 +616,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
 
+        if 'skills_library_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN skills_library_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
+        if 'skills_building_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN skills_building_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
         if 'preferred_name' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN preferred_name VARCHAR"))
@@ -1220,6 +1232,11 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("notes"):
         Note.__table__.create(connection)
         connection.commit()    
+
+    if not inspector.has_table("skills"):
+        from backend.db.models.skill import Skill
+        Skill.__table__.create(connection)
+        connection.commit()
 
     if not inspector.has_table("notebooks"):
         try:

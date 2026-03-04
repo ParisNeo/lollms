@@ -64,9 +64,11 @@ class UserCreateAdmin(BaseModel):
     compress_images: bool = False
     image_compression_quality: int = 85
     
-    # Memory & Herd Mode
+    # Memory, Skills & Herd Mode
     memory_enabled: bool = False
     auto_memory_enabled: bool = False
+    skills_library_enabled: bool = False
+    skills_building_enabled: bool = False
     herd_mode_enabled: bool = False
     herd_rounds: int = 2
     
@@ -291,9 +293,11 @@ class UserAuthDetails(BaseModel):
     note_generation_enabled: bool = False
     activate_generated_images: bool = False
     
-    # Memory Settings
+    # Memory & Skill Settings
     memory_enabled: bool = False
     auto_memory_enabled: bool = False
+    skills_library_enabled: bool = False
+    skills_building_enabled: bool = False
 
     # Herd Mode Settings
     herd_mode_enabled: bool = False
@@ -408,9 +412,11 @@ class UserUpdate(BaseModel):
     activate_generated_images: Optional[bool] = None
     note_generation_enabled: Optional[bool] = None
     
-    # Memory Settings
+    # Memory & Skill Settings
     memory_enabled: Optional[bool] = None
     auto_memory_enabled: Optional[bool] = None
+    skills_library_enabled: Optional[bool] = None
+    skills_building_enabled: Optional[bool] = None
 
     # Herd Mode Settings
     herd_mode_enabled: Optional[bool] = None

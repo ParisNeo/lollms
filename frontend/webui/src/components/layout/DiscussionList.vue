@@ -13,6 +13,7 @@ import { storeToRefs } from 'pinia';
 import DiscussionItem from './DiscussionItem.vue';
 import DiscussionGroupItem from './DiscussionGroupItem.vue';
 import NoteList from '../notes/NoteList.vue';
+import SkillList from '../skills/SkillList.vue';
 import AlbumList from '../images/AlbumList.vue';
 import DataStoreItem from '../datastores/DataStoreItem.vue'; // Imported DataStoreItem
 
@@ -44,6 +45,7 @@ import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const store = useDiscussionsStore();
 const notesStore = useNotesStore();
@@ -67,7 +69,7 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const welcomeText = computed(() => authStore.welcomeText || 'LoLLMs');
 const welcomeSlogan = computed(() => authStore.welcomeSlogan || 'One tool to rule them all');
 
-const activeTab = ref('chat'); // 'chat', 'notes', 'notebooks', 'data', 'images', 'flows'
+const activeTab = ref('chat'); // 'chat', 'notes', 'skills', 'notebooks', 'data', 'images', 'flows'
 const searchTerm = ref('');
 const isSearchVisible = ref(false);
 const isSharedVisible = ref(false);
@@ -202,6 +204,9 @@ async function handleNewItem() {
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notes') {
         notesStore.createNote({ title: 'New Note', content: '', group_id: notesStore.activeGroupId });
+        if (window.innerWidth < 768) uiStore.closeSidebar();
+    } else if (activeTab.value === 'skills') {
+        uiStore.openModal('skillEditor');
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notebooks') {
         uiStore.openModal('notebookWizard');
@@ -350,6 +355,15 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>NOTE</span>
                 </button>
                 <button 
+                    @click="activeTab = 'skills'" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'skills' ? 'bg-white dark:bg-gray-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Skills"
+                >
+                    <IconSparkles class="w-3.5 h-3.5 mb-0.5" />
+                    <span>SKILL</span>
+                </button>
+                <button 
                     @click="activeTab = 'images'" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'images' ? 'bg-white dark:bg-gray-900/50 text-pink-600 dark:text-pink-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
@@ -406,7 +420,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         <IconAdjustmentsHorizontal class="h-4 w-4" />
                     </button>
                 </div>
-                <button @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook'))))">
+                <button @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'skills' ? 'New Skill' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook')))))">
                     <IconPlus class="h-4 w-4" stroke-width="2.5" />
                 </button>
             </div>
@@ -507,6 +521,11 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
             <!-- NOTES TAB -->
             <template v-else-if="activeTab === 'notes'">
                 <NoteList :search-term="searchTerm" />
+            </template>
+
+            <!-- SKILLS TAB -->
+            <template v-else-if="activeTab === 'skills'">
+                <SkillList :search-term="searchTerm" />
             </template>
 
             <!-- IMAGES TAB -->

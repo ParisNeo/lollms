@@ -72,6 +72,8 @@ class User(Base):
     note_generation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     memory_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     auto_memory_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    skills_library_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    skills_building_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
 
     reasoning_activation = Column(Boolean, default=False, nullable=True, server_default='0')
     reasoning_effort = Column(String, nullable=True)
@@ -122,6 +124,7 @@ class User(Base):
 
     notes = relationship("Note", back_populates="owner", cascade="all, delete-orphan")
     note_groups = relationship("NoteGroup", back_populates="owner", cascade="all, delete-orphan")
+    skills = relationship("Skill", back_populates="owner", cascade="all, delete-orphan")
 
     lollms_model_name = Column(String, nullable=True)
     tti_binding_model_name = Column(String, nullable=True)

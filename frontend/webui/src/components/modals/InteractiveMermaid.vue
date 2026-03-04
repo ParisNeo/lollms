@@ -3,13 +3,13 @@
   <Teleport to="body">
     <div
       v-if="isFullscreen"
-      class="fixed inset-0 z-[9999] bg-gray-900/95 flex flex-col"
+      class="fixed inset-0 z-[9999] bg-gray-950 flex flex-col"
       @keydown.esc="isFullscreen = false"
       tabindex="-1"
       ref="fullscreenOverlayRef"
     >
       <!-- Fullscreen toolbar -->
-      <div class="flex items-center justify-between px-4 py-2 bg-gray-800 border-b border-gray-700 flex-shrink-0">
+      <div class="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
         <span class="text-xs font-semibold text-gray-300">{{ detectedTypeLabel || 'Mermaid Diagram' }} — Fullscreen</span>
         <div class="flex items-center gap-2">
           <button @click="showSource = !showSource" class="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-colors">
@@ -29,8 +29,8 @@
         <div v-if="showSource" class="w-96 flex-shrink-0 bg-gray-950 border-r border-gray-700 overflow-auto">
           <pre class="text-xs text-green-300 p-4 leading-relaxed whitespace-pre-wrap">{{ mermaidCode }}</pre>
         </div>
-        <!-- Diagram pane -->
-        <div class="flex-1 relative min-w-0">
+        <!-- Diagram pane — solid dark background so SVG renders correctly -->
+        <div class="mermaid-fullscreen-pane flex-1 relative min-w-0 bg-gray-950">
           <div ref="fullscreenMountRef" class="w-full h-full mermaid-container"></div>
           <div v-if="fullscreenError" class="absolute inset-0 flex items-center justify-center">
             <div class="bg-red-900/80 text-red-200 text-xs p-4 rounded-lg max-w-lg">{{ fullscreenError }}</div>
@@ -371,17 +371,23 @@ async function renderDiagram() {
 
 async function openFullscreen() {
   isFullscreen.value = true
+  showSource.value = false
   fullscreenError.value = ''
   await nextTick()
   fullscreenOverlayRef.value?.focus()
   if (!fullscreenMountRef.value) return
   try {
     const processedCode = processMermaidCode(props.mermaidCode)
-    mermaid.initialize(getBaseMermaidConfig(uiStore.currentTheme === 'dark' ? 'dark' : 'default'))
+    // Fullscreen is always dark — always render with dark theme
+    mermaid.initialize(getBaseMermaidConfig('dark'))
     const { svg } = await mermaid.render(`mermaid-fs-${Date.now()}`, processedCode)
+    // Restore original theme for the inline diagram
+    mermaid.initialize(getBaseMermaidConfig(uiStore.currentTheme === 'dark' ? 'dark' : 'default'))
     await mountSvg(svg, fullscreenMountRef.value)
   } catch (e) {
     fullscreenError.value = e instanceof Error ? e.message : String(e)
+    // Restore theme on error too
+    mermaid.initialize(getBaseMermaidConfig(uiStore.currentTheme === 'dark' ? 'dark' : 'default'))
   }
 }
 
@@ -473,5 +479,13 @@ defineExpose({ exportPNG, exportSVG, resetView })
   height: 100%;
   display: block;
   margin: 0 auto;
+}
+
+/* In fullscreen the diagram pane is always dark — kill any baked-in light background */
+.mermaid-fullscreen-pane .mermaid-container svg {
+  background: transparent !important;
+}
+.mermaid-fullscreen-pane .mermaid-container svg > rect:first-child {
+  fill: transparent !important;
 }
 </style>

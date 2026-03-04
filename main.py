@@ -90,6 +90,8 @@ from backend.db.models.email_marketing import EmailProposal, EmailTopic
 from backend.tasks.email_tasks import _generate_email_proposal_task 
 
 from backend.routers.tasks import tasks_router
+from backend.routers.skills import skills_router
+
 from backend.task_manager import task_manager
 from backend.ws_manager import manager, listen_for_broadcasts
 from backend.com_hub import start_hub_server
@@ -686,7 +688,7 @@ app.include_router(notebooks_router)
 app.include_router(public_router)
 app.include_router(lollms_v1_router) 
 app.include_router(flow_studio_router)
-
+app.include_router(skills_router)
 # Add GZip Middleware to improve asset loading speed while keeping streaming functional
 # minimum_size=1000 ensures small streaming chunks aren't buffered
 # app.add_middleware(GZipMiddleware, minimum_size=1000)
