@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-04 00:24]
+
+- feat: add YouTube transcript import and update bot management
+
 ## [2026-03-03 07:22]
 
 - chore: rebuild frontend assets and update artefacts router

@@ -25,8 +25,7 @@ const isLoading = ref(false);
 const mode = ref('url');
 const youtubeUrl = ref('');
 const youtubeLanguage = ref('en');
-
-// Search Results state
+// Unified Search state (Wikipedia, DDG, Google, GitHub, SO)
 const searchResults = ref([]);
 const selectedIndices = ref(new Set());
 const isSearching = ref(false);
@@ -71,7 +70,7 @@ watch(() => uiStore.isModalOpen('scrapeUrl'), async (isOpen) => {
         searchQuery.value = '';
         youtubeUrl.value = '';
         youtubeLanguage.value = 'en';
-        searchResults.value = [];
+        searchResults.value =[];
         selectedIndices.value.clear();
         
         await nextTick();
@@ -94,6 +93,12 @@ async function handleSearch() {
                 provider: mode.value
             });
             searchResults.value = resp.data;
+        } else if (mode.value === 'github') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/github/search`, { query: searchQuery.value });
+            searchResults.value = resp.data;
+        } else if (mode.value === 'stackoverflow') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/stackoverflow/search`, { query: searchQuery.value });
+            searchResults.value = resp.data;
         } else if (mode.value === 'arxiv') {
             const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/arxiv/search`, { 
                 query: arxivQuery.value,
@@ -115,6 +120,10 @@ async function handleSearch() {
 function toggleSelection(idx) {
     if (selectedIndices.value.has(idx)) selectedIndices.value.delete(idx);
     else selectedIndices.value.add(idx);
+}
+
+function isUrl(str) {
+    return str.startsWith('http://') || str.startsWith('https://');
 }
 
 async function handleSubmit() {
@@ -198,6 +207,44 @@ async function handleSubmit() {
         } finally {
             isLoading.value = false;
         }
+    } else if (mode.value === 'github') {
+        let urlsToImport =[];
+        if (selectedIndices.value.size > 0) {
+            urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
+        } else if (isUrl(searchQuery.value)) {
+            urlsToImport = [searchQuery.value.trim()];
+        }
+        
+        if (urlsToImport.length === 0) return;
+        
+        isLoading.value = true;
+        try {
+            for (const url of urlsToImport) {
+                await discussionsStore.importGithubArtefact(discussionId.value, url);
+            }
+            uiStore.closeModal('scrapeUrl');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'stackoverflow') {
+        let urlsToImport =[];
+        if (selectedIndices.value.size > 0) {
+            urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
+        } else if (isUrl(searchQuery.value)) {
+            urlsToImport =[searchQuery.value.trim()];
+        }
+        
+        if (urlsToImport.length === 0) return;
+        
+        isLoading.value = true;
+        try {
+            for (const url of urlsToImport) {
+                await discussionsStore.importStackOverflowArtefact(discussionId.value, url);
+            }
+            uiStore.closeModal('scrapeUrl');
+        } finally {
+            isLoading.value = false;
+        }
     }
 }
 </script>
@@ -205,8 +252,8 @@ async function handleSubmit() {
 <template>
     <GenericModal
         modalName="scrapeUrl"
-        :title="mode === 'url' ? 'Scrape URL' : mode === 'wikipedia' ? 'Import Wikipedia' : mode === 'youtube' ? 'Import YouTube' : mode === 'arxiv' ? 'Import Arxiv' : 'Web Search'"
-        maxWidthClass="max-w-xl"
+        :title="mode === 'url' ? 'Scrape URL' : mode === 'wikipedia' ? 'Import Wikipedia' : mode === 'youtube' ? 'Import YouTube' : mode === 'arxiv' ? 'Import Arxiv' : mode === 'github' ? 'Import GitHub' : mode === 'stackoverflow' ? 'Import StackOverflow' : 'Web Search'"
+        maxWidthClass="max-w-2xl"
     >
         <template #body>
             <div class="space-y-4 p-1">
@@ -261,6 +308,22 @@ async function handleSubmit() {
                         <IconYoutube class="w-4 h-4 hidden sm:block" />
                         YouTube
                     </button>
+                    <button 
+                        @click="mode = 'github'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'github' ? 'border-gray-800 text-gray-900 dark:text-white border-b-gray-800 dark:border-b-gray-200' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconServer class="w-4 h-4 hidden sm:block" />
+                        GitHub
+                    </button>
+                    <button 
+                        @click="mode = 'stackoverflow'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'stackoverflow' ? 'border-orange-500 text-orange-600 dark:text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconServer class="w-4 h-4 hidden sm:block" />
+                        StackOverflow
+                    </button>
                 </div>
 
                 <!-- URL Mode Content -->
@@ -310,19 +373,20 @@ async function handleSubmit() {
                     </div>
                 </div>
 
-                <!-- Unified Search Mode Content (Wikipedia, DDG, Google) -->
-                <div v-if="mode === 'wikipedia' || mode === 'duckduckgo' || mode === 'google'" class="space-y-4">
+                <!-- Unified Search Mode Content (Wikipedia, DDG, Google, GitHub, SO) -->
+                <div v-if="['wikipedia', 'duckduckgo', 'google', 'github', 'stackoverflow'].includes(mode)" class="space-y-4">
                     <div class="flex gap-2">
                         <div class="relative flex-grow">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <IconWikipedia v-if="mode === 'wikipedia'" class="h-4 w-4 text-gray-400" />
+                                <IconServer v-else-if="['github', 'stackoverflow'].includes(mode)" class="h-4 w-4 text-gray-400" />
                                 <IconWeb v-else class="h-4 w-4 text-gray-400" />
                             </div>
                             <input
                                 v-model="searchQuery"
                                 type="text"
                                 class="input-field pl-10"
-                                :placeholder="mode === 'wikipedia' ? 'Article title or URL' : 'Search query...'"
+                                :placeholder="mode === 'wikipedia' ? 'Article title or URL' : (['github', 'stackoverflow'].includes(mode) ? 'Search query or URL...' : 'Search query...')"
                                 @keyup.enter="handleSearch"
                             />
                         </div>
@@ -445,6 +509,27 @@ async function handleSubmit() {
                         </p>
                     </div>
                 </div>
+
+                <!-- StackOverflow Mode Content -->
+                <div v-if="mode === 'stackoverflow'" class="space-y-4">
+                    <p class="text-sm text-gray-600 dark:text-gray-300">
+                        Import a question and its top answers directly.
+                    </p>
+                    <div>
+                        <label for="so-url" class="label">StackOverflow Question URL</label>
+                        <div class="relative mt-1">
+                            <input
+                                id="so-url"
+                                v-model="soUrl"
+                                type="url"
+                                class="input-field w-full"
+                                placeholder="https://stackoverflow.com/questions/12345/..."
+                                @keyup.enter="handleSubmit"
+                            />
+                        </div>
+                    </div>
+                </div>
+
             </div>
         </template>
         <template #footer>
@@ -452,7 +537,7 @@ async function handleSubmit() {
                 <button @click="uiStore.closeModal('scrapeUrl')" type="button" class="btn btn-secondary">Cancel</button>
                 
                 <!-- Conditionally show Select Count -->
-                <span v-if="['wikipedia', 'duckduckgo', 'google', 'arxiv'].includes(mode) && selectedIndices.size > 0" class="text-xs text-gray-500 self-center">
+                <span v-if="['wikipedia', 'duckduckgo', 'google', 'arxiv', 'github', 'stackoverflow'].includes(mode) && selectedIndices.size > 0" class="text-xs text-gray-500 self-center">
                     {{ selectedIndices.size }} selected
                 </span>
 
@@ -460,7 +545,8 @@ async function handleSubmit() {
                     :disabled="isLoading || 
                               (mode === 'url' && !url.trim()) || 
                               (['wikipedia', 'duckduckgo', 'google', 'arxiv'].includes(mode) && selectedIndices.size === 0) ||
-                              (mode === 'youtube' && !youtubeUrl.trim())">
+                              (mode === 'youtube' && !youtubeUrl.trim()) ||
+                              (['github', 'stackoverflow'].includes(mode) && selectedIndices.size === 0 && !isUrl(searchQuery))">
                     <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
                     {{ isLoading ? 'Importing...' : 'Import' }}
                 </button>

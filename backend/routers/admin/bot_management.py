@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict
 import json
 from ascii_colors import ASCIIColors
 
@@ -23,7 +23,6 @@ class AiBotSettingsUpdate(BaseModel):
     ai_bot_enabled: Optional[bool] = None
     ai_bot_system_prompt: Optional[str] = None
     ai_bot_auto_post: Optional[bool] = None
-    # Replaced interval with schedule
     ai_bot_post_schedule: Optional[List[str]] = None 
     
     ai_bot_content_mode: Optional[str] = None
@@ -35,6 +34,18 @@ class AiBotSettingsUpdate(BaseModel):
     # Moderation Support
     ai_bot_moderation_enabled: Optional[bool] = None
     ai_bot_moderation_criteria: Optional[str] = None
+
+    # Scheduled Tasks
+    ai_bot_scheduled_tasks: Optional[List[Dict]] = None
+
+    # External Platforms
+    ai_bot_telegram_enabled: Optional[bool] = None
+    ai_bot_telegram_token: Optional[str] = None
+    ai_bot_discord_enabled: Optional[bool] = None
+    ai_bot_discord_token: Optional[str] = None
+    ai_bot_slack_enabled: Optional[bool] = None
+    ai_bot_slack_app_token: Optional[str] = None
+    ai_bot_slack_bot_token: Optional[str] = None
     
     # Tools Support
     ai_bot_tool_ddg_enabled: Optional[bool] = None
@@ -52,17 +63,29 @@ class AiBotSettingsPublic(BaseModel):
     ai_bot_enabled: bool = False
     ai_bot_system_prompt: str = ""
     ai_bot_auto_post: bool = False
-    ai_bot_post_schedule: List[str] = []
+    ai_bot_post_schedule: List[str] =[]
     
     ai_bot_content_mode: str = "static_text"
     ai_bot_static_content: str = ""
     ai_bot_file_path: str = ""
     ai_bot_generation_prompt: str = ""
     # RAG Support
-    ai_bot_rag_datastore_ids: List[str] = []
+    ai_bot_rag_datastore_ids: List[str] =[]
     # Moderation Support
     ai_bot_moderation_enabled: bool = False
     ai_bot_moderation_criteria: str = ""
+
+    # Scheduled Tasks
+    ai_bot_scheduled_tasks: List[Dict] =[]
+
+    # External Platforms
+    ai_bot_telegram_enabled: bool = False
+    ai_bot_telegram_token: str = ""
+    ai_bot_discord_enabled: bool = False
+    ai_bot_discord_token: str = ""
+    ai_bot_slack_enabled: bool = False
+    ai_bot_slack_app_token: str = ""
+    ai_bot_slack_bot_token: str = ""
     
     # Tools Support
     ai_bot_tool_ddg_enabled: bool = False
@@ -104,6 +127,15 @@ async def get_ai_bot_settings(db: Session = Depends(get_db)):
         ai_bot_moderation_enabled=lollms_settings.get("ai_bot_moderation_enabled", False),
         ai_bot_moderation_criteria=lollms_settings.get("ai_bot_moderation_criteria", "Be polite and respectful."),
         
+        ai_bot_scheduled_tasks=lollms_settings.get("ai_bot_scheduled_tasks",[]),
+        ai_bot_telegram_enabled=lollms_settings.get("ai_bot_telegram_enabled", False),
+        ai_bot_telegram_token=lollms_settings.get("ai_bot_telegram_token", ""),
+        ai_bot_discord_enabled=lollms_settings.get("ai_bot_discord_enabled", False),
+        ai_bot_discord_token=lollms_settings.get("ai_bot_discord_token", ""),
+        ai_bot_slack_enabled=lollms_settings.get("ai_bot_slack_enabled", False),
+        ai_bot_slack_app_token=lollms_settings.get("ai_bot_slack_app_token", ""),
+        ai_bot_slack_bot_token=lollms_settings.get("ai_bot_slack_bot_token", ""),
+
         ai_bot_tool_ddg_enabled=lollms_settings.get("ai_bot_tool_ddg_enabled", False),
         ai_bot_tool_google_enabled=lollms_settings.get("ai_bot_tool_google_enabled", False),
         ai_bot_tool_google_api_key=lollms_settings.get("ai_bot_tool_google_api_key", ""),
@@ -145,6 +177,15 @@ async def update_ai_bot_settings(settings: AiBotSettingsUpdate, db: Session = De
         ("ai_bot_moderation_enabled", settings.ai_bot_moderation_enabled, "boolean"),
         ("ai_bot_moderation_criteria", settings.ai_bot_moderation_criteria, "text"),
         
+        ("ai_bot_scheduled_tasks", settings.ai_bot_scheduled_tasks, "json"),
+        ("ai_bot_telegram_enabled", settings.ai_bot_telegram_enabled, "boolean"),
+        ("ai_bot_telegram_token", settings.ai_bot_telegram_token, "string"),
+        ("ai_bot_discord_enabled", settings.ai_bot_discord_enabled, "boolean"),
+        ("ai_bot_discord_token", settings.ai_bot_discord_token, "string"),
+        ("ai_bot_slack_enabled", settings.ai_bot_slack_enabled, "boolean"),
+        ("ai_bot_slack_app_token", settings.ai_bot_slack_app_token, "string"),
+        ("ai_bot_slack_bot_token", settings.ai_bot_slack_bot_token, "string"),
+
         ("ai_bot_tool_ddg_enabled", settings.ai_bot_tool_ddg_enabled, "boolean"),
         ("ai_bot_tool_google_enabled", settings.ai_bot_tool_google_enabled, "boolean"),
         ("ai_bot_tool_google_api_key", settings.ai_bot_tool_google_api_key, "string"),

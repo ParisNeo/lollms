@@ -329,7 +329,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             throw error;
         }
     }
+    async function importGithubArtefact(discussionId, url) {
+        if (!discussionId) return;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/github`, { url, auto_load: true });
+            _handleArtefactAndDataZoneUpdate(response);
+            uiStore.addNotification('GitHub content imported and loaded.', 'success');
+        } catch (error) {
+            console.error(error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to import GitHub content.', 'error');
+            throw error;
+        }
+    }
 
+    async function importStackOverflowArtefact(discussionId, url) {
+        if (!discussionId) return;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/stackoverflow`, { url, auto_load: true });
+            _handleArtefactAndDataZoneUpdate(response);
+            uiStore.addNotification('StackOverflow content imported and loaded.', 'success');
+        } catch (error) {
+            console.error(error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to import StackOverflow content.', 'error');
+            throw error;
+        }
+    }
     async function importYoutubeTranscript(discussionId, videoUrl, language) {
         if (!discussionId) return;
         const payload = { video_url: videoUrl };
@@ -434,6 +458,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         triggerTagGeneration,
         importWikipediaArtefact,
         importYoutubeTranscript,
+        importGithubArtefact,
+        importStackOverflowArtefact,
         createManualArtefact,
         $reset,
     };

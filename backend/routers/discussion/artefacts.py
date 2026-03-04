@@ -91,6 +91,24 @@ class YoutubeTranscriptImportRequest(BaseModel):
     language: str = "en"
     auto_load: bool = True
 
+class GithubImportRequest(BaseModel):
+    url: str
+    auto_load: bool = True
+
+class GithubSearchRequest(BaseModel):
+    query: str
+
+class StackOverflowImportRequest(BaseModel):
+    url: str
+    auto_load: bool = True
+
+class StackOverflowSearchRequest(BaseModel):
+    query: str
+class StackOverflowImportRequest(BaseModel):
+    video_url: str
+    language: str = "en"
+    auto_load: bool = True
+
 def build_artefacts_router(router: APIRouter):
     # Ensure Arxiv is available
     try:
@@ -569,6 +587,223 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Arxiv import failed: {e}")
+
+    @router.post("/{discussion_id}/artefacts/github/search", response_model=List[Dict[str, str]])
+    async def search_github(
+        discussion_id: str,
+        request: GithubSearchRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        try:
+            query = request.query.strip()
+            if query.startswith("http://") or query.startswith("https://"):
+                return[{"title": "Direct GitHub URL", "url": query, "snippet": "Direct import."}]
+                
+            api_url = f"https://api.github.com/search/issues?q={query}&per_page=10"
+            r = requests.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
+            r.raise_for_status()
+            items = r.json().get('items', [])
+            return[{
+                "title": i.get('title', 'Unknown'), 
+                "url": i.get('html_url', ''), 
+                "snippet": f"[{i.get('state', 'unknown').upper()}] {i.get('repository_url', '').split('/')[-1]} | Comments: {i.get('comments', 0)}"
+            } for i in items]
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"GitHub search failed: {e}")
+
+    @router.post("/{discussion_id}/artefacts/github", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def import_github(
+        discussion_id: str,
+        request: GithubImportRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        url = request.url.strip()
+        content = ""
+        title = "Github_Import"
+        
+        try:
+            if "github.com" in url:
+                blob_match = re.match(r'https?://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.*)', url)
+                issue_match = re.match(r'https?://github\.com/([^/]+)/([^/]+)/(issues|pull)/(\d+)', url)
+                
+                if blob_match:
+                    user, repo, branch, filepath = blob_match.groups()
+                    raw_url = f"https://raw.githubusercontent.com/{user}/{repo}/{branch}/{filepath}"
+                    r = requests.get(raw_url)
+                    r.raise_for_status()
+                    
+                    # Guess language for markdown fence
+                    ext = filepath.split('.')[-1] if '.' in filepath else 'txt'
+                    content = f"# File: {filepath}\nSource: {url}\n\n```{ext}\n{r.text}\n```"
+                    title = f"GH_{filepath.split('/')[-1]}"
+                    
+                elif issue_match:
+                    user, repo, type_, num = issue_match.groups()
+                    api_url = f"https://api.github.com/repos/{user}/{repo}/issues/{num}"
+                    r = requests.get(api_url, headers={"Accept": "application/vnd.github.v3+json"})
+                    r.raise_for_status()
+                    data = r.json()
+                    
+                    title_str = data.get('title', f'{type_.capitalize()} #{num}')
+                    body = data.get('body', '')
+                    state = data.get('state', 'unknown')
+                    content = f"# [{state.upper()}] {title_str}\nSource: {url}\n\n{body}"
+                    
+                    comments_url = data.get('comments_url')
+                    if comments_url:
+                        rc = requests.get(comments_url, headers={"Accept": "application/vnd.github.v3+json"})
+                        if rc.status_code == 200:
+                            comments = rc.json()
+                            for c in comments:
+                                content += f"\n\n---\n**{c.get('user',{}).get('login','User')}** commented:\n{c.get('body','')}"
+                    title = f"GH_{type_}_{num}"
+                    
+                else:
+                    raise HTTPException(status_code=400, detail="Only GitHub file blobs, issues, or pull requests are currently supported.")
+                    
+            elif "raw.githubusercontent.com" in url:
+                r = requests.get(url)
+                r.raise_for_status()
+                filepath = url.split('/')[-1]
+                ext = filepath.split('.')[-1] if '.' in filepath else 'txt'
+                content = f"# File: {filepath}\nSource: {url}\n\n```{ext}\n{r.text}\n```"
+                title = f"GH_Raw_{filepath}"
+            else:
+                 raise HTTPException(status_code=400, detail="Not a valid GitHub URL.")
+
+            # Ensure safe filename
+            safe_title = re.sub(r'[^A-Za-z0-9_.-]', '_', title) + ".md"
+            
+            art_info = discussion.add_artefact(title=safe_title, content=content, author=current_user.username)
+            if request.auto_load:
+                discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+            
+            discussion.commit()
+            
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
+
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            all_images_info = discussion.get_discussion_images()
+
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
+            
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"GitHub import failed: {e}")
+
+    @router.post("/{discussion_id}/artefacts/stackoverflow/search", response_model=List[Dict[str, str]])
+    async def search_stackoverflow(
+        discussion_id: str,
+        request: StackOverflowSearchRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        try:
+            query = request.query.strip()
+            if query.startswith("http://") or query.startswith("https://"):
+                return[{"title": "Direct StackOverflow URL", "url": query, "snippet": "Direct import."}]
+
+            api_url = f"https://api.stackexchange.com/2.3/search/advanced?order=desc&sort=relevance&q={query}&site=stackoverflow&pagesize=10"
+            r = requests.get(api_url)
+            r.raise_for_status()
+            items = r.json().get('items', [])
+            return[{
+                "title": i.get('title', 'Unknown'), 
+                "url": i.get('link', ''), 
+                "snippet": f"Score: {i.get('score', 0)} | Answers: {i.get('answer_count', 0)} | Tags: {', '.join(i.get('tags', []))}"
+            } for i in items]
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"StackOverflow search failed: {e}")
+
+    @router.post("/{discussion_id}/artefacts/stackoverflow", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def import_stackoverflow(
+        discussion_id: str,
+        request: StackOverflowImportRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        pm.ensure_packages("markdownify")
+        from markdownify import markdownify as md
+        
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        url = request.url.strip()
+        
+        q_match = re.search(r'stackoverflow\.com/questions/(\d+)', url)
+        if not q_match:
+             raise HTTPException(status_code=400, detail="Invalid StackOverflow question URL. Must contain /questions/ID")
+        
+        q_id = q_match.group(1)
+        
+        try:
+            # Fetch question
+            api_q = f"https://api.stackexchange.com/2.3/questions/{q_id}?site=stackoverflow&filter=withbody"
+            r_q = requests.get(api_q)
+            r_q.raise_for_status()
+            q_data = r_q.json().get('items',[])
+            if not q_data:
+                raise HTTPException(status_code=404, detail="Question not found on StackOverflow.")
+            
+            question = q_data[0]
+            q_title = question.get('title', 'StackOverflow Question')
+            q_body_html = question.get('body', '')
+            q_body_md = md(q_body_html).strip()
+
+            content = f"# {q_title}\nSource: {url}\n\n**Question (Score: {question.get('score', 0)}):**\n\n{q_body_md}\n\n---\n"
+
+            # Fetch top 3 answers
+            api_a = f"https://api.stackexchange.com/2.3/questions/{q_id}/answers?site=stackoverflow&order=desc&sort=votes&filter=withbody"
+            r_a = requests.get(api_a)
+            if r_a.status_code == 200:
+                a_data = r_a.json().get('items',[])
+                for i, ans in enumerate(a_data[:3]):
+                    is_accepted = "✅ ACCEPTED " if ans.get('is_accepted') else ""
+                    a_body_md = md(ans.get('body', '')).strip()
+                    content += f"\n### {is_accepted}Answer {i+1} (Score: {ans.get('score', 0)})\n\n{a_body_md}\n\n---\n"
+                
+            title = f"SO_{q_id}.md"
+            
+            art_info = discussion.add_artefact(title=title, content=content, author=current_user.username)
+            if request.auto_load:
+                discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+            
+            discussion.commit()
+            
+            artefacts = discussion.list_artefacts()
+            for artefact in artefacts:
+                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
+                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
+
+            lc = get_user_lollms_client(current_user.username)
+            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            all_images_info = discussion.get_discussion_images()
+
+            return {
+                "discussion_data_zone": discussion.discussion_data_zone,
+                "artefacts": artefacts,
+                "discussion_data_zone_tokens": token_count,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
+
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"StackOverflow import failed: {e}")
 
     @router.post("/{discussion_id}/artefacts/youtube", response_model=ArtefactAndDataZoneUpdateResponse)
     async def import_youtube_transcript(

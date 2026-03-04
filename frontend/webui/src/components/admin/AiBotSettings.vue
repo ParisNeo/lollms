@@ -8,6 +8,8 @@ import apiClient from '../../services/api';
 import { storeToRefs } from 'pinia';
 import MultiSelectMenu from '../ui/MultiSelectMenu.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
 
 const adminStore = useAdminStore();
 const dataStore = useDataStore();
@@ -29,6 +31,15 @@ const form = ref({
     ai_bot_file_path: '',
     ai_bot_generation_prompt: 'Generate an interesting and engaging social media post based on the provided context. Keep it under 500 characters.',
     ai_bot_rag_datastore_ids: [],
+    // Scheduled Tasks & Platforms
+    ai_bot_scheduled_tasks:[],
+    ai_bot_telegram_enabled: false,
+    ai_bot_telegram_token: '',
+    ai_bot_discord_enabled: false,
+    ai_bot_discord_token: '',
+    ai_bot_slack_enabled: false,
+    ai_bot_slack_app_token: '',
+    ai_bot_slack_bot_token: '',
     // Moderation
     ai_bot_moderation_enabled: false,
     ai_bot_moderation_criteria: '',
@@ -125,6 +136,25 @@ function populateForm() {
         ai_bot_moderation_enabled: s.ai_bot_moderation_enabled ?? false,
         ai_bot_moderation_criteria: s.ai_bot_moderation_criteria || 'Be polite and respectful.',
         
+        // Scheduled Tasks & Platforms
+        ai_bot_scheduled_tasks: s.ai_bot_scheduled_tasks ? JSON.parse(JSON.stringify(s.ai_bot_scheduled_tasks)).map(t => ({
+            ...t,
+            ui_type: getTaskScheduleType(t.cron),
+            ui_time: getTaskTime(t.cron),
+            ui_minute: getTaskMinute(t.cron),
+            ui_day: getTaskDay(t.cron)
+        })) :[],
+        ai_bot_telegram_enabled: s.ai_bot_telegram_enabled ?? false,
+        ai_bot_telegram_token: s.ai_bot_telegram_token || '',
+        ai_bot_discord_enabled: s.ai_bot_discord_enabled ?? false,
+        ai_bot_discord_token: s.ai_bot_discord_token || '',
+        ai_bot_slack_enabled: s.ai_bot_slack_enabled ?? false,
+        ai_bot_slack_app_token: s.ai_bot_slack_app_token || '',
+        ai_bot_slack_bot_token: s.ai_bot_slack_bot_token || '',
+
+        ai_bot_moderation_enabled: s.ai_bot_moderation_enabled ?? false,
+        ai_bot_scheduled_tasks: s.ai_bot_scheduled_tasks ? JSON.parse(JSON.stringify(s.ai_bot_scheduled_tasks)) :[],
+
         // Tools
         ai_bot_tool_ddg_enabled: s.ai_bot_tool_ddg_enabled ?? false,
         ai_bot_tool_google_enabled: s.ai_bot_tool_google_enabled ?? false,
@@ -144,6 +174,13 @@ async function handleSave() {
     isLoading.value = true;
     try {
         const payload = { ...form.value };
+        
+        // Strip UI helper properties from tasks before saving
+        payload.ai_bot_scheduled_tasks = payload.ai_bot_scheduled_tasks.map(t => {
+            const { ui_type, ui_time, ui_minute, ui_day, ...rest } = t;
+            return rest;
+        });
+
         await adminStore.updateAiBotSettings(payload);
         uiStore.addNotification('Settings saved successfully', 'success');
     } catch (e) {
@@ -184,6 +221,67 @@ async function triggerModerationNow() {
     }
 }
 
+function getTaskScheduleType(cron) {
+    const parts = (cron || '').split(' ');
+    if (parts.length !== 5) return 'custom';
+    const[min, hour, dom, mon, dow] = parts;
+    if (dom === '*' && mon === '*') {
+        if (hour === '*' && dow === '*' && !isNaN(min)) return 'hourly';
+        if (dow === '*' && !isNaN(hour) && !isNaN(min)) return 'daily';
+        if (!isNaN(dow) && !isNaN(hour) && !isNaN(min)) return 'weekly';
+    }
+    return 'custom';
+}
+
+function getTaskTime(cron) {
+    const parts = (cron || '').split(' ');
+    if (parts.length === 5 && !isNaN(parts[0]) && !isNaN(parts[1])) {
+        return `${parts[1].padStart(2,'0')}:${parts[0].padStart(2,'0')}`;
+    }
+    return '09:00';
+}
+
+function getTaskMinute(cron) {
+    const parts = (cron || '').split(' ');
+    if (parts.length === 5 && !isNaN(parts[0])) return parts[0];
+    return '0';
+}
+
+function getTaskDay(cron) {
+    const parts = (cron || '').split(' ');
+    if (parts.length === 5 && !isNaN(parts[4])) return parts[4];
+    return '1';
+}
+
+function updateCron(task) {
+    if (task.ui_type === 'hourly') {
+        task.cron = `${parseInt(task.ui_minute) || 0} * * * *`;
+    } else if (task.ui_type === 'daily') {
+        const[h, m] = (task.ui_time || '09:00').split(':');
+        task.cron = `${parseInt(m) || 0} ${parseInt(h) || 0} * * *`;
+    } else if (task.ui_type === 'weekly') {
+        const [h, m] = (task.ui_time || '09:00').split(':');
+        task.cron = `${parseInt(m) || 0} ${parseInt(h) || 0} * * ${task.ui_day || 1}`;
+    }
+}
+
+function addScheduledTask() {
+    form.value.ai_bot_scheduled_tasks.push({
+        name: '',
+        cron: '0 9 * * *',
+        prompt: '',
+        active: true,
+        ui_type: 'daily',
+        ui_time: '09:00',
+        ui_minute: '0',
+        ui_day: '1'
+    });
+}
+
+function removeScheduledTask(index) {
+    form.value.ai_bot_scheduled_tasks.splice(index, 1);
+}
+
 async function triggerFullRemoderation() {
     if(!confirm("WARNING: This will re-evaluate ALL posts and comments in the system against the current criteria, potentially flagging previously safe content or vice versa. This may take a significant amount of time and LLM resources. Continue?")) return;
 
@@ -199,7 +297,14 @@ async function triggerFullRemoderation() {
     }
 }
 </script>
-
+<style scoped>
+.toggle-switch-sm { @apply relative inline-flex items-center cursor-pointer; }
+.toggle-switch-sm input { @apply sr-only; }
+.toggle-switch-sm .slider-sm { @apply w-8 h-4 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors; }
+.toggle-switch-sm input:checked + .slider-sm { @apply bg-blue-600; }
+.toggle-switch-sm .slider-sm:after { @apply content-[''] absolute top-[2px] left-[2px] bg-white rounded-full h-3 w-3 transition-all; }
+.toggle-switch-sm input:checked + .slider-sm:after { @apply translate-x-4; }
+</style>
 <template>
     <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
         <div class="p-6 border-b border-gray-200 dark:border-gray-700">
@@ -368,72 +473,129 @@ async function triggerFullRemoderation() {
                     </div>
                 </div>
 
-                <!-- Auto-Posting Settings -->
+                <!-- Scheduled Tasks -->
                 <div class="space-y-6 pt-6 border-t dark:border-gray-600">
                     <div class="flex items-center justify-between">
-                        <h4 class="text-lg font-medium text-gray-900 dark:text-white">Auto-Posting Feed</h4>
-                        
-                        <button 
-                            v-if="form.ai_bot_auto_post"
-                            type="button" 
-                            @click="triggerPostNow" 
-                            :disabled="isTriggering"
-                            class="btn btn-secondary btn-sm flex items-center gap-2"
-                        >
-                            <span v-if="isTriggering" class="animate-spin">⌛</span>
-                            {{ isTriggering ? 'Generating...' : 'Trigger Post Now' }}
+                        <div>
+                            <h4 class="text-lg font-medium text-gray-900 dark:text-white">Scheduled Tasks (CRON)</h4>
+                            <p class="text-sm text-gray-500 dark:text-gray-400">Set up tasks for the bot to run at specific times (e.g. RSS feed checking, log reports).</p>
+                        </div>
+                        <button type="button" @click="addScheduledTask" class="btn btn-secondary btn-sm flex items-center gap-2 flex-shrink-0">
+                            <IconPlus class="w-4 h-4" /> Add Task
                         </button>
                     </div>
+
+                    <div v-if="form.ai_bot_scheduled_tasks.length === 0" class="text-sm text-gray-500 italic p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-center border border-dashed dark:border-gray-700">
+                        No scheduled tasks configured.
+                    </div>
+
+                    <div v-for="(task, index) in form.ai_bot_scheduled_tasks" :key="index" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600 space-y-4 shadow-sm">
+                        <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+                            <div class="flex flex-col items-start gap-4 flex-1">
+                                <input v-model="task.name" type="text" class="input-field text-sm w-full font-semibold" placeholder="Task Name (e.g. Daily Security Report)">
+                                
+                                <div class="flex flex-wrap items-center gap-2 w-full bg-white dark:bg-gray-800 p-2 rounded border dark:border-gray-700">
+                                    <label class="text-xs font-bold text-gray-500 mr-2">Schedule:</label>
+                                    <select v-model="task.ui_type" @change="updateCron(task)" class="input-field text-sm py-1 h-8">
+                                        <option value="hourly">Hourly</option>
+                                        <option value="daily">Daily</option>
+                                        <option value="weekly">Weekly</option>
+                                        <option value="custom">Custom (CRON)</option>
+                                    </select>
+                                    
+                                    <template v-if="task.ui_type === 'hourly'">
+                                        <span class="text-xs text-gray-500">at minute</span>
+                                        <input type="number" v-model="task.ui_minute" @change="updateCron(task)" class="input-field text-sm py-1 h-8 w-16 text-center" min="0" max="59" placeholder="00">
+                                    </template>
+                                    
+                                    <template v-if="task.ui_type === 'daily'">
+                                        <span class="text-xs text-gray-500">at</span>
+                                        <input type="time" v-model="task.ui_time" @change="updateCron(task)" class="input-field text-sm py-1 h-8">
+                                    </template>
+                                    
+                                    <template v-if="task.ui_type === 'weekly'">
+                                        <span class="text-xs text-gray-500">on</span>
+                                        <select v-model="task.ui_day" @change="updateCron(task)" class="input-field text-sm py-1 h-8">
+                                            <option value="1">Mon</option>
+                                            <option value="2">Tue</option>
+                                            <option value="3">Wed</option>
+                                            <option value="4">Thu</option>
+                                            <option value="5">Fri</option>
+                                            <option value="6">Sat</option>
+                                            <option value="0">Sun</option>
+                                        </select>
+                                        <span class="text-xs text-gray-500">at</span>
+                                        <input type="time" v-model="task.ui_time" @change="updateCron(task)" class="input-field text-sm py-1 h-8">
+                                    </template>
+
+                                    <template v-if="task.ui_type === 'custom'">
+                                        <input v-model="task.cron" type="text" class="input-field text-sm w-32 py-1 h-8 font-mono text-center tracking-widest" placeholder="0 2 * * *">
+                                    </template>
+                                    
+                                    <div class="ml-auto text-[10px] text-gray-400 font-mono hidden sm:block bg-gray-100 dark:bg-gray-900 px-2 py-1 rounded" v-if="task.ui_type !== 'custom'">
+                                        {{ task.cron }}
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center justify-end gap-3 sm:pt-1">
+                                <label class="toggle-switch-sm" title="Toggle active status"><input type="checkbox" v-model="task.active"><span class="slider-sm"></span></label>
+                                <button type="button" @click="removeScheduledTask(index)" class="btn btn-danger-outline btn-sm !p-1.5" title="Remove Task"><IconTrash class="w-4 h-4" /></button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium mb-1">Instruction / Prompt</label>
+                            <textarea v-model="task.prompt" rows="2" class="input-field w-full text-sm" placeholder="e.g. Do a RSS feed search then make a post on the feeds..."></textarea>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- External Platforms -->
+                <div class="space-y-6 pt-6 border-t dark:border-gray-600">
+                    <h4 class="text-lg font-medium text-gray-900 dark:text-white">External Platforms Integration</h4>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">Summon the AI Agent from other platforms using these bot tokens.</p>
                     
-                    <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <span class="flex-grow flex flex-col">
-                            <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Auto-Posting</span>
-                            <span class="text-sm text-gray-500 dark:text-gray-400">The bot will post to the main feed periodically based on provided material.</span>
-                        </span>
-                        <button @click="form.ai_bot_auto_post = !form.ai_bot_auto_post" type="button" :class="[form.ai_bot_auto_post ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
-                            <span :class="[form.ai_bot_auto_post ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                        </button>
-                    </div>
-
-                    <div v-if="form.ai_bot_auto_post" class="space-y-4">
-                        <div>
-                            <label class="block text-sm font-medium">Posting Interval (Hours)</label>
-                            <input type="number" v-model="form.ai_bot_post_interval" min="1" step="0.5" class="input-field mt-1">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <!-- Telegram -->
+                        <div class="p-4 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-200 dark:border-blue-800 transition-all">
+                            <div class="flex items-center justify-between mb-3">
+                                <h5 class="text-sm font-bold text-blue-700 dark:text-blue-300">Telegram Bot</h5>
+                                <label class="toggle-switch-sm" title="Enable Telegram Bot"><input type="checkbox" v-model="form.ai_bot_telegram_enabled"><span class="slider-sm"></span></label>
+                            </div>
+                            <div v-if="form.ai_bot_telegram_enabled" class="animate-in fade-in slide-in-from-top-1">
+                                <label class="block text-xs font-medium mb-1">Bot Token</label>
+                                <input type="password" v-model="form.ai_bot_telegram_token" class="input-field w-full text-sm font-mono" placeholder="123456789:ABCDefghIJKLmnopQRSTuvwxYZ">
+                            </div>
                         </div>
 
-                        <div>
-                            <label class="block text-sm font-medium">Content Source</label>
-                            <select v-model="form.ai_bot_content_mode" class="input-field mt-1">
-                                <option value="static_text">Manual Text (Knowledge Base)</option>
-                                <option value="rag">RAG Datastores</option>
-                                <option value="file">File Path (Server Side)</option>
-                            </select>
+                        <!-- Discord -->
+                        <div class="p-4 bg-indigo-50 dark:bg-indigo-900/10 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-all">
+                            <div class="flex items-center justify-between mb-3">
+                                <h5 class="text-sm font-bold text-indigo-700 dark:text-indigo-300">Discord Bot</h5>
+                                <label class="toggle-switch-sm" title="Enable Discord Bot"><input type="checkbox" v-model="form.ai_bot_discord_enabled"><span class="slider-sm"></span></label>
+                            </div>
+                            <div v-if="form.ai_bot_discord_enabled" class="animate-in fade-in slide-in-from-top-1">
+                                <label class="block text-xs font-medium mb-1">Bot Token</label>
+                                <input type="password" v-model="form.ai_bot_discord_token" class="input-field w-full text-sm font-mono" placeholder="MTAxMjM0NTY3ODkw.Gq..._ABCDefgh">
+                            </div>
                         </div>
 
-                        <div v-if="form.ai_bot_content_mode === 'static_text'">
-                            <label class="block text-sm font-medium">Knowledge Base Material</label>
-                            <textarea v-model="form.ai_bot_static_content" rows="6" class="input-field mt-1" placeholder="Paste interesting facts, news, or context here..."></textarea>
-                        </div>
-
-                        <div v-if="form.ai_bot_content_mode === 'rag'">
-                            <label class="block text-sm font-medium mb-1">Select Datastores</label>
-                            <MultiSelectMenu 
-                                :options="(availableDataStores || []).map(ds => ({ label: ds.name, value: ds.id }))" 
-                                v-model="form.ai_bot_rag_datastore_ids" 
-                                placeholder="Choose datastores..." 
-                            />
-                            <p class="mt-1 text-xs text-gray-500">The bot will query these stores for content relevant to the generation prompt.</p>
-                        </div>
-
-                        <div v-if="form.ai_bot_content_mode === 'file'">
-                            <label class="block text-sm font-medium">Absolute File Path</label>
-                            <input type="text" v-model="form.ai_bot_file_path" class="input-field mt-1" placeholder="/path/to/interesting_content.txt">
-                        </div>
-
-                        <div>
-                            <label class="block text-sm font-medium">Generation Prompt</label>
-                            <textarea v-model="form.ai_bot_generation_prompt" rows="3" class="input-field mt-1"></textarea>
-                            <p class="mt-1 text-xs text-gray-500">Instructions for the AI on how to use the material to create a post.</p>
+                        <!-- Slack -->
+                        <div class="p-4 bg-green-50 dark:bg-green-900/10 rounded-lg border border-green-200 dark:border-green-800 md:col-span-2 transition-all">
+                            <div class="flex items-center justify-between mb-3">
+                                <h5 class="text-sm font-bold text-green-700 dark:text-green-300">Slack Bot</h5>
+                                <label class="toggle-switch-sm" title="Enable Slack Bot"><input type="checkbox" v-model="form.ai_bot_slack_enabled"><span class="slider-sm"></span></label>
+                            </div>
+                            <div v-if="form.ai_bot_slack_enabled" class="grid grid-cols-1 md:grid-cols-2 gap-4 animate-in fade-in slide-in-from-top-1">
+                                <div>
+                                    <label class="block text-xs font-medium mb-1">Bot User OAuth Token</label>
+                                    <input type="password" v-model="form.ai_bot_slack_bot_token" class="input-field w-full text-sm font-mono" placeholder="xoxb-...">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium mb-1">App-Level Token</label>
+                                    <input type="password" v-model="form.ai_bot_slack_app_token" class="input-field w-full text-sm font-mono" placeholder="xapp-...">
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
