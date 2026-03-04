@@ -409,7 +409,7 @@ const activeFeatures = computed(() => {
             title: 'Note Generation Enabled.',
             modalTitle: 'Note Generation',
             modalDescription: 'Allows the AI to create structured notes.',
-            systemPrompt: '## Notes: Use ```note ... ``` for structured data.'
+            systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
         });
     }
     if (user.value?.tts_binding_model_name || user.value?.stt_binding_model_name) {
@@ -557,13 +557,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 </script>
 
 <template>
-    <div class="flex-shrink-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur border-t dark:border-gray-700 shadow-lg relative"
-         @dragover.prevent="isDraggingOver = true" @dragleave="isDraggingOver = false" @drop.prevent="handleDrop">
-        
-        <!-- Drop Overlay -->
-        <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/10 border-4 border-dashed border-blue-500 rounded-lg z-50 flex items-center justify-center m-4 pointer-events-none transition-all">
-            <p class="text-2xl font-black text-blue-600 uppercase tracking-tighter">Drop files to chat</p>
-        </div>
+    <div class="flex-shrink-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur border-t dark:border-gray-700 shadow-lg relative">
 
         <!-- Vision Warning -->
         <div v-if="!currentModelVisionSupport && stagedImages.length > 0" class="px-4 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-[10px] text-yellow-700 dark:text-yellow-300 flex items-center gap-2">

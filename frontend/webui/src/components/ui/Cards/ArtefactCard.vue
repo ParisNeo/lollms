@@ -66,6 +66,17 @@ function handleUnloadFromPrompt() {
     discussionsStore.unloadArtefactFromPrompt(props.artefactGroup.title);
 }
 
+async function handleView() {
+    const artefact = await discussionsStore.fetchArtefactContent({
+        discussionId: discussionsStore.currentDiscussionId,
+        artefactTitle: props.artefactGroup.title,
+        version: selectedVersion.value,
+    });
+    if (artefact) {
+        uiStore.openModal('artefactViewer', { artefact });
+    }
+}
+
 async function handleEdit() {
     const artefact = await discussionsStore.fetchArtefactContent({
         discussionId: discussionsStore.currentDiscussionId,
@@ -95,7 +106,7 @@ async function handleDelete() {
 <template>
   <div class="artefact-card group" :class="cardClasses">
     <div class="artefact-header">
-      <div class="artefact-info">
+      <div class="artefact-info cursor-pointer hover:opacity-80 transition-opacity flex-grow" @click="handleView">
         <div class="artefact-icon" :class="{ 'loaded-data-zone': isLoadedToDataZone, 'loaded-prompt': isLoadedToPrompt }">
           <IconFileText class="w-4 h-4" />
         </div>

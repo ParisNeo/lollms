@@ -1313,7 +1313,7 @@ def build_llm_generation_router(router: APIRouter):
         if owner_db_user.google_calendar_enabled: preamble_parts.append("## Calendar: Use <calendar_list>today</calendar_list> or <calendar_add start=\"ISO\" end=\"ISO\">Title</calendar_add>.")
         if owner_db_user.google_gmail_enabled: preamble_parts.append("## Gmail: Use <gmail_send to=\"email\">Subject|Body</gmail_send> or <gmail_list>count</gmail_list>.")
 
-        if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use ```note ... ``` for structured data.")
+        if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use <note title=\"Title\">...</note> for structured data.")
         if memory_instructions: preamble_parts.append(memory_instructions)
 
         dynamic_preamble = "## Dynamic Context\n" + "\n".join(preamble_parts) + "\n\n" if preamble_parts else ""

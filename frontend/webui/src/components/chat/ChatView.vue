@@ -72,10 +72,10 @@ async function handlePaste(event) {
 </script>
 
 <template>
-    <div class="h-full flex flex-row overflow-hidden relative"
-        @dragover="handleDragOver"
+<div class="h-full flex flex-row overflow-hidden relative"
+        @dragover.prevent="handleDragOver"
         @dragleave="handleDragLeave"
-        @drop="handleDrop"
+        @drop.stop="handleDrop"
         @paste="handlePaste"
     >
         <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-30 flex items-center justify-center m-4 pointer-events-none">

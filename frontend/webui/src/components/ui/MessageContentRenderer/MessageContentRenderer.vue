@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../../services/markdownParser';
 
 import CodeBlock from './CodeBlock.vue';
+import MermaidViewer from '../../modals/InteractiveMermaid.vue';   // ← NEW
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 import IconFileText from '../../../assets/icons/IconFileText.vue';
 import AuthenticatedImage from '../AuthenticatedImage.vue';
@@ -16,9 +17,11 @@ import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import TaskProgressIndicator from '../TaskProgressIndicator.vue'; 
 import IconMap from '../../../assets/icons/IconMap.vue';
 import IconClock from '../../../assets/icons/IconClock.vue';
+import IconSave from '../../../assets/icons/IconSave.vue';
 
 import { useTasksStore } from '../../../stores/tasks';
 import { useDiscussionsStore } from '../../../stores/discussions';
+import { useUiStore } from '../../../stores/ui';
 import { storeToRefs } from 'pinia';
 
 const props = defineProps({
@@ -35,14 +38,13 @@ const emit = defineEmits(['regenerate', 'citation-click']);
 const messageContentRef = ref(null);
 const tasksStore = useTasksStore();
 const discussionsStore = useDiscussionsStore();
+const uiStore = useUiStore();
 const { tasks } = storeToRefs(tasksStore);
 const { activeAiTasks } = storeToRefs(discussionsStore);
 
-// State for prompt editing
 const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
 
-// ... (Math Rendering logic unchanged)
 function renderMath() {
   if (messageContentRef.value && messageContentRef.value.isConnected && window.renderMathInElement) {
     try {
@@ -93,7 +95,6 @@ const parsedStreamingContent = computed(() => {
     if (!props.content) return '';
     let content = props.content;
     
-    // Check for streaming annotation blocks
     const openAnnTagIndex = content.lastIndexOf('<annotate>');
     const closeAnnTagIndex = content.lastIndexOf('</annotate>');
     
@@ -106,7 +107,6 @@ const parsedStreamingContent = computed(() => {
         return parsedMarkdown(before) + spinnerHtml;
     }
     
-    // Check for streaming generation blocks
     const activeGenBlock = content.match(/<(generate_image|edit_image|generate_slides)[^>]*>(?!.*?<\/\1>)/s);
     if (activeGenBlock) {
          let tagType = 'Processing';
@@ -125,21 +125,19 @@ const parsedStreamingContent = computed(() => {
     return parsedMarkdown(content);
 });
 
-// Helper to parse a raw special block string into a structured object
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        // Fallback regex if match not provided
-         const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))/;
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))/;
          match = regex.exec(rawBlock);
     }
     
     if (!match) return { type: 'content', content: rawBlock };
 
-    if (match[1]) { // think
+    if (match[1]) {
         const content = match[1].replace(/<think>|<\/think>/g, '').trim();
         return { type: 'think', content };
     } 
-    else if (match[2]) { // annotate
+    else if (match[2]) {
         let annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
         const jsonMatch = annotateContent.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
         if (jsonMatch) annotateContent = jsonMatch[0];
@@ -149,17 +147,17 @@ const parseSpecialBlock = (rawBlock, match = null) => {
             return { type: 'content', content: `[Invalid annotation data]` };
         }
     } 
-    else if (match[3]) { // generate_image
+    else if (match[3]) {
         const fullTag = match[3];
         const promptContent = fullTag.replace(/<generate_image[^>]*>|<\/generate_image>/g, '').trim();
         return { type: 'image_tool', mode: 'generate', prompt: promptContent, raw: fullTag };
     } 
-    else if (match[4]) { // edit_image
+    else if (match[4]) {
         const fullTag = match[4];
         const promptContent = fullTag.replace(/<edit_image[^>]*>|<\/edit_image>/g, '').trim();
         return { type: 'image_tool', mode: 'edit', prompt: promptContent, raw: fullTag };
     } 
-    else if (match[5]) { // generate_slides
+    else if (match[5]) {
         const fullTag = match[5];
         const innerContent = fullTag.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
         const slideRegex = /<Slide>(.*?)<\/Slide>/gis;
@@ -168,20 +166,28 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         while ((sMatch = slideRegex.exec(innerContent)) !== null) {
             slides.push(sMatch[1].trim());
         }
-        return { type: 'image_tool', mode: 'slides', prompt: innerContent, slides: slides, raw: fullTag };
+        return { type: 'image_tool', mode: 'slides', prompt: innerContent, slides, raw: fullTag };
     }
-    else if (match[6]) { // street_view
+    else if (match[6]) {
         const fullTag = match[6];
         const location = fullTag.replace(/<street_view>|<\/street_view>/g, '').trim();
         return { type: 'image_tool', mode: 'street_view', prompt: location, raw: fullTag };
     }
-    else if (match[7]) { // schedule_task
+    else if (match[7]) {
         const fullTag = match[7];
         const promptContent = fullTag.replace(/<schedule_task[^>]*>|<\/schedule_task>/g, '').trim();
         let name = "Task";
         const nameMatch = fullTag.match(/name="([^"]*)"/);
         if (nameMatch) name = nameMatch[1];
-        return { type: 'scheduler', name: name, prompt: promptContent, raw: fullTag };
+        return { type: 'scheduler', name, prompt: promptContent, raw: fullTag };
+    }
+    else if (match[8]) {
+        const fullTag = match[8];
+        const noteContent = fullTag.replace(/<note[^>]*>|<\/note>/g, '').trim();
+        let title = "AI Note";
+        const titleMatch = fullTag.match(/title="([^"]*)"/);
+        if (titleMatch) title = titleMatch[1];
+        return { type: 'note', title, content: noteContent, raw: fullTag };
     }
 
     return { type: 'content', content: rawBlock };
@@ -193,8 +199,7 @@ const messageParts = computed(() => {
     const content = props.content;
     const parts = [];
 
-    // 1. Identify all Markdown Code Blocks first to respect their boundaries
-    // Regex matches: ```lang? [content] ```
+    // 1. Identify all Markdown Code Blocks
     const codeBlockRegex = /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm; 
     const codeBlocks = [];
     let cbMatch;
@@ -203,14 +208,14 @@ const messageParts = computed(() => {
         codeBlocks.push({
             start: cbMatch.index,
             end: cbMatch.index + cbMatch[0].length,
-            lang: cbMatch[2] || 'plaintext',
-            inner: cbMatch[3], // The content inside fences
+            lang: (cbMatch[2] || 'plaintext').toLowerCase().trim(),
+            inner: cbMatch[3],
             full: cbMatch[0]
         });
     }
 
     // 2. Identify all Tool Blocks
-    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))/g;
+    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))/g;
     const tools = [];
     let toolMatch;
 
@@ -224,67 +229,76 @@ const messageParts = computed(() => {
     }
 
     // 3. Reconcile Tools vs Code Blocks
-    // Logic: If a Tool is strictly inside a code block AND consumes the entire code block content, 
-    // we "unwrap" it (treat code block as the tool). Otherwise, code block takes precedence.
+    // Rule: if a tool CONTAINS one or more code blocks entirely, the tool wins (it's a wrapper).
+    // Only mark isValidTool=false if the code block CONTAINS the tool (tool is just a snippet inside code).
     const activeTools = [];
-
     for (const tool of tools) {
-        let isInsideCode = false;
         let isValidTool = true;
-
         for (const code of codeBlocks) {
-            // Check if tool is strictly inside the code block
-            if (tool.start >= code.start && tool.end <= code.end) {
-                isInsideCode = true;
-                
-                // Unwrapping Check: Does the tool text match the code block inner text (ignoring whitespace)?
-                // We use trim() on both sides.
+            const toolContainsCode = code.start >= tool.start && code.end <= tool.end;
+            const codeContainsTool = tool.start >= code.start && tool.end <= code.end;
+            const partialOverlap = tool.start < code.end && tool.end > code.start && !toolContainsCode && !codeContainsTool;
+
+            if (codeContainsTool) {
+                // The tool tag is inside a code block — check if it's the sole content (unwrap case)
                 const codeInnerTrimmed = code.inner.trim();
                 const toolRawTrimmed = tool.raw.trim();
-
                 if (codeInnerTrimmed === toolRawTrimmed) {
-                    // It's a match! The code block is just a wrapper for the tool.
-                    // Expand the tool's effective range to cover the whole code block.
+                    // Code block is just a fence around the tool — expand tool to cover the fence too
                     tool.start = code.start;
                     tool.end = code.end;
                     isValidTool = true;
                 } else {
-                    // Tool is just a snippet inside a larger code block. Treat as code.
+                    // Tool is a snippet inside a larger code block — treat as code, not a tool
                     isValidTool = false;
                 }
-                break; // Found the containing block
-            } 
-            // Check for partial overlap (should rarely happen in valid md, but possible)
-            else if (tool.start < code.end && tool.end > code.start) {
-                // Overlap exists. Priority to code block to prevent breaking code rendering.
+                break;
+            } else if (partialOverlap) {
+                // Malformed partial overlap — code block takes priority
                 isValidTool = false;
+                break;
             }
+            // toolContainsCode: the tool wraps the code block — tool wins, no action needed
         }
-
-        if (isValidTool) {
-            activeTools.push(tool);
-        }
+        if (isValidTool) activeTools.push(tool);
     }
 
-    // 4. Sort tools by start index
     activeTools.sort((a, b) => a.start - b.start);
 
-    // 5. Construct final parts list
+    // 4. Build parts. Merge codeBlocks and activeTools into one sorted event list,
+    //    but exclude any code block whose range is fully inside an active tool (it will
+    //    be rendered by the tool's own content handler, e.g. note → parsedMarkdown).
+    const toolRanges = activeTools.map(t => ({ start: t.start, end: t.end }));
+    const isInsideTool = (cb) => toolRanges.some(r => cb.start >= r.start && cb.end <= r.end);
+
+    const events = [
+        ...codeBlocks.filter(cb => !isInsideTool(cb)).map(cb => ({ ...cb, eventType: 'code' })),
+        ...activeTools.map(t => ({ ...t, eventType: 'tool' })),
+    ].sort((a, b) => a.start - b.start);
+
     let cursor = 0;
-    for (const tool of activeTools) {
-        // Push content before tool
-        if (tool.start > cursor) {
-            parts.push({ type: 'content', content: content.substring(cursor, tool.start) });
+    for (const ev of events) {
+        // Avoid double-processing (tools can expand to cover a code block)
+        if (ev.start < cursor) continue;
+
+        if (ev.start > cursor) {
+            parts.push({ type: 'content', content: content.substring(cursor, ev.start) });
         }
-        
-        // Push tool
-        parts.push(parseSpecialBlock(tool.raw, tool.match));
-        
-        // Advance cursor
-        cursor = tool.end;
+
+        if (ev.eventType === 'code') {
+            if (ev.lang === 'mermaid') {
+                // ← Route mermaid to MermaidViewer, stripping the fences
+                parts.push({ type: 'mermaid', code: ev.inner.trim() });
+            } else {
+                parts.push({ type: 'code', lang: ev.lang, code: ev.inner, full: ev.full });
+            }
+        } else {
+            parts.push(parseSpecialBlock(ev.raw, ev.match));
+        }
+
+        cursor = ev.end;
     }
 
-    // Push remaining content
     if (cursor < content.length) {
         parts.push({ type: 'content', content: content.substring(cursor) });
     }
@@ -292,6 +306,7 @@ const messageParts = computed(() => {
     return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
 });
 
+// ─── getTokens: unchanged ────────────────────────────────────────────────────
 const getTokens = (text) => {
     if (!text) return [];
     const allTokens = [];
@@ -305,13 +320,12 @@ const getTokens = (text) => {
             allTokens.push(...getContentTokensWithMathProtection(markdownPart));
         }
         const title = match[1].trim() + (match[2] || '');
-        allTokens.push({ type: 'document', title: title, content: match[3], raw: match[0] });
+        allTokens.push({ type: 'document', title, content: match[3], raw: match[0] });
         lastIndex = docRegex.lastIndex;
     }
 
     if (lastIndex < text.length) {
-        const markdownPart = text.substring(lastIndex);
-        allTokens.push(...getContentTokensWithMathProtection(markdownPart));
+        allTokens.push(...getContentTokensWithMathProtection(text.substring(lastIndex)));
     }
 
     return allTokens;
@@ -323,12 +337,12 @@ const activeTask = computed(() => {
     if (!discussionId) return null;
     const runningTasks = tasks.value.filter(t => t.status === 'running' || t.status === 'pending');
     const messageObj = discussionsStore.messages.find(m => m.id === props.messageId);
-    if (messageObj && messageObj.metadata && messageObj.metadata.active_task_id) {
+    if (messageObj?.metadata?.active_task_id) {
         const linkedTask = runningTasks.find(t => t.id === messageObj.metadata.active_task_id);
         if (linkedTask) return linkedTask;
     }
     const tracked = activeAiTasks.value[discussionId];
-    if (tracked && tracked.taskId) {
+    if (tracked?.taskId) {
         const task = runningTasks.find(t => t.id === tracked.taskId);
         if (task && !props.isUser) return task;
     }
@@ -337,7 +351,6 @@ const activeTask = computed(() => {
 
 function handleRegenerateClick(index, part) {
     if (editingPromptIdx.value === index) {
-        // [MODIFIED] Pass the custom prompt during regeneration
         emit('regenerate', { ...part, custom_prompt: editedPromptText.value });
         editingPromptIdx.value = -1;
     } else {
@@ -353,8 +366,7 @@ function cancelEdit() {
 const simpleHash = str => {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
+    hash = (hash << 5) - hash + str.charCodeAt(i);
     hash |= 0;
   }
   return hash;
@@ -367,7 +379,7 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
         const scaleFactor = displayWidth > 0 ? naturalWidth / displayWidth : 1;
         const color = display?.border_color || '#FF0000';
         const lineWidth = (display?.border_width || 2) * scaleFactor;
-        const fillOpacity = display?.fill_opacity !== undefined ? display?.fill_opacity : 0.1;
+        const fillOpacity = display?.fill_opacity !== undefined ? display.fill_opacity : 0.1;
         const showBorder = display?.show_border !== false;
 
         ctx.strokeStyle = color;
@@ -388,17 +400,15 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
             ctx.fillText(text, x + padding, y - padding);
         };
 
-        if (box && box.length === 4) {
+        if (box?.length === 4) {
             const [x1, y1, x2, y2] = box;
-            const absX = x1 * naturalWidth;
-            const absY = y1 * naturalHeight;
-            const absW = (x2 - x1) * naturalWidth;
-            const absH = (y2 - y1) * naturalHeight;
+            const absX = x1 * naturalWidth, absY = y1 * naturalHeight;
+            const absW = (x2 - x1) * naturalWidth, absH = (y2 - y1) * naturalHeight;
             if (showBorder) ctx.strokeRect(absX, absY, absW, absH);
             ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
             ctx.fillRect(absX, absY, absW, absH);
             drawLabel(absX, absY);
-        } else if (polygon && Array.isArray(polygon) && polygon.length > 1) {
+        } else if (polygon?.length > 1) {
             ctx.beginPath();
             polygon.forEach((p, i) => {
                 if (i === 0) ctx.moveTo(p[0] * naturalWidth, p[1] * naturalHeight);
@@ -409,10 +419,9 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
             ctx.fillStyle = `${color}${Math.round(fillOpacity * 255).toString(16).padStart(2, '0')}`;
             ctx.fill();
             drawLabel(polygon[0][0] * naturalWidth, polygon[0][1] * naturalHeight);
-        } else if (point && point.length === 2) {
+        } else if (point?.length === 2) {
             const [x, y] = point;
-            const absX = x * naturalWidth;
-            const absY = y * naturalHeight;
+            const absX = x * naturalWidth, absY = y * naturalHeight;
             const radius = Math.max(3, 5 * scaleFactor);
             ctx.fillStyle = color;
             ctx.beginPath();
@@ -433,7 +442,6 @@ async function downloadAnnotatedImage(annotations, event) {
     canvas.width = naturalWidth;
     canvas.height = naturalHeight;
     const ctx = canvas.getContext('2d');
-    
     ctx.drawImage(imgElement, 0, 0, naturalWidth, naturalHeight);
     drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, imgElement.clientWidth);
 
@@ -443,6 +451,10 @@ async function downloadAnnotatedImage(annotations, event) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+function saveNoteFromRenderer(title, content) {
+    uiStore.openModal('noteEditor', { title: title || 'New AI Note', content });
 }
 
 function onImageLoad(event, annotations) {
@@ -477,13 +489,10 @@ function onImageLoad(event, annotations) {
 }
 
 function handleContentClick(event) {
-    // Check if the clicked element is a citation button (injected via markdownParser extension)
     const btn = event.target.closest('.citation-btn');
     if (btn) {
         const index = btn.dataset.index;
-        if (index) {
-            emit('citation-click', parseInt(index));
-        }
+        if (index) emit('citation-click', parseInt(index));
     }
 }
 </script>
@@ -495,7 +504,13 @@ function handleContentClick(event) {
       <template v-else>
         <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
           
-          <template v-if="part.type === 'content'">
+          <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
+          <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm" style="height: 480px;">
+            <MermaidViewer :mermaid-code="part.code" />
+          </div>
+
+          <!-- ── Regular code / text tokens ────────────────────────────── -->
+          <template v-else-if="part.type === 'content'">
             <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
               <details v-else-if="token.type === 'document'" class="document-block my-4">
@@ -511,6 +526,11 @@ function handleContentClick(event) {
             </template>
           </template>
 
+          <!-- ── Explicit code block (non-mermaid) ──────────────────────── -->
+          <template v-else-if="part.type === 'code'">
+            <CodeBlock :language="part.lang" :code="part.code" :message-id="messageId" />
+          </template>
+
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
             <summary class="think-summary">
               <IconThinking class="h-5 w-5 flex-shrink-0" />
@@ -519,7 +539,6 @@ function handleContentClick(event) {
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
 
-          <!-- [UPDATE] Enhanced Image Tool Call Block -->
           <div v-else-if="part.type === 'image_tool'" class="my-4 p-4 rounded-xl border-2 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 shadow-sm">
              <div class="flex items-center justify-between mb-4">
                  <div class="flex items-center gap-2">
@@ -539,7 +558,6 @@ function handleContentClick(event) {
                         <span class="text-sm font-bold text-gray-800 dark:text-gray-200">AI Request Block</span>
                      </div>
                  </div>
-                 
                  <div class="flex items-center gap-1">
                     <button v-if="editingPromptIdx === index" @click="cancelEdit" class="btn-icon-sm" title="Cancel">
                         <IconRefresh class="w-4 h-4 transform rotate-45 text-red-500" />
@@ -551,12 +569,9 @@ function handleContentClick(event) {
                     </button>
                  </div>
              </div>
-             
              <div v-if="activeTask" class="mb-4">
                 <TaskProgressIndicator :task="activeTask" class="text-xs" />
              </div>
-
-             <!-- [NEW] Inline Prompt Editor -->
              <div v-if="editingPromptIdx === index" class="space-y-3 animate-in fade-in slide-in-from-top-2">
                 <p class="text-[10px] font-bold text-blue-500 uppercase tracking-wide">Customize Prompt:</p>
                 <textarea 
@@ -572,34 +587,65 @@ function handleContentClick(event) {
                  <div v-if="part.mode === 'street_view'" class="text-sm font-medium text-gray-800 dark:text-gray-200">
                     Fetching view for: <span class="font-bold">{{ part.prompt }}</span>
                  </div>
-                 <!-- Existing blocks for slides/other -->
                  <template v-else>
-                 <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-purple-200 dark:border-purple-800">
-                     <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-gray-600 dark:text-gray-300 mb-1">
-                         <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
-                     </div>
-                 </div>
-                 <div v-else class="text-sm font-medium text-gray-800 dark:text-gray-200 italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all">
-                     "{{ part.prompt }}"
-                 </div>
+                    <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-purple-200 dark:border-purple-800">
+                        <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-gray-600 dark:text-gray-300 mb-1">
+                            <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
+                        </div>
+                    </div>
+                    <div v-else class="text-sm font-medium text-gray-800 dark:text-gray-200 italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all">
+                        "{{ part.prompt }}"
+                    </div>
                  </template>
              </div>
           </div>
 
-          <!-- [NEW] Scheduler Block -->
           <div v-else-if="part.type === 'scheduler'" class="my-4 p-4 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/20 shadow-sm">
              <div class="flex items-center gap-3">
                  <div class="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
                      <IconClock class="w-6 h-6" />
                  </div>
                  <div class="flex flex-col">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-300 leading-none mb-1">
-                        Scheduled Task
-                    </span>
+                    <span class="text-[10px] font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-300 leading-none mb-1">Scheduled Task</span>
                     <span class="text-sm font-bold text-gray-800 dark:text-gray-200">{{ part.name }}</span>
                     <span class="text-xs text-gray-600 dark:text-gray-400 italic mt-1">"{{ part.prompt }}"</span>
                  </div>
              </div>
+          </div>
+
+          <!-- ── Note block ──────────────────────────────────────────────── -->
+          <div v-else-if="part.type === 'note'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60">
+            <!-- Header bar -->
+            <div class="note-header flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800/60">
+              <div class="flex items-center gap-2.5">
+                <!-- Notepad icon -->
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                </svg>
+                <div class="flex flex-col leading-tight">
+                  <span class="text-[9px] font-black uppercase tracking-widest text-amber-500 dark:text-amber-400">AI Note</span>
+                  <span class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ part.title }}</span>
+                </div>
+              </div>
+              <!-- Save button -->
+              <button
+                @click="saveNoteFromRenderer(part.title, part.content)"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-colors"
+                title="Save this note"
+              >
+                <IconSave class="w-3.5 h-3.5" />
+                Save Note
+              </button>
+            </div>
+            <!-- Note content — token-aware so code blocks get syntax highlighting -->
+            <div class="note-body px-5 py-4 bg-amber-50/40 dark:bg-amber-950/20">
+              <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
+                <template v-for="(token, ti) in getTokens(part.content)" :key="`note-token-${ti}`">
+                  <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
+                  <div v-else v-html="parsedMarkdown(token.raw)"></div>
+                </template>
+              </div>
+            </div>
           </div>
 
           <template v-else-if="part.type === 'annotate'">
@@ -639,4 +685,23 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .document-summary::-webkit-details-marker { display: none; }
 details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 .document-content { @apply p-3; }
+
+/* Note block */
+.note-block {
+  position: relative;
+}
+.note-content :deep(p) { @apply my-1.5 leading-relaxed; }
+.note-content :deep(h1),
+.note-content :deep(h2),
+.note-content :deep(h3) { @apply font-bold text-gray-900 dark:text-gray-100 mt-3 mb-1.5; }
+.note-content :deep(ul),
+.note-content :deep(ol) { @apply my-1.5 pl-5; }
+.note-content :deep(li) { @apply my-0.5; }
+.note-content :deep(code) { @apply bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 px-1 py-0.5 rounded text-xs; }
+.note-content :deep(pre) { @apply bg-amber-100/60 dark:bg-amber-900/30 rounded-lg p-3 my-2 overflow-auto; }
+.note-content :deep(blockquote) { @apply border-l-2 border-amber-400 pl-3 italic text-gray-600 dark:text-gray-400 my-2; }
+.note-content :deep(hr) { @apply border-amber-200 dark:border-amber-800 my-3; }
+.note-content :deep(table) { @apply w-full text-sm my-2; }
+.note-content :deep(th) { @apply bg-amber-100 dark:bg-amber-900/40 font-semibold px-2 py-1 text-left; }
+.note-content :deep(td) { @apply border-t border-amber-100 dark:border-amber-900/30 px-2 py-1; }
 </style>

@@ -3,7 +3,7 @@ import { ref, computed, watch, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from './GenericModal.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
-import InteractiveMermaid from './InteractiveMermaid.vue';
+import MermaidViewer from './InteractiveMermaid.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
@@ -143,7 +143,7 @@ function handleClose() {
 
                                 <!-- MERMAID RENDERING -->
                                 <div v-else-if="modalProps?.contentType === 'mermaid' && modalProps?.sourceCode" class="w-full h-[600px] border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative">
-                                    <InteractiveMermaid :mermaid-code="modalProps.sourceCode" />
+                                    <MermaidViewer :mermaid-code="modalProps.sourceCode" />
                                 </div>
 
                                 <!-- HTML / INTERACTIVE RENDERING -->
