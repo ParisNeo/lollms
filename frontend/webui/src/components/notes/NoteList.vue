@@ -78,15 +78,33 @@ async function handleDeleteNote(note) {
         notesStore.deleteNote(note.id);
     }
 }
-
+async function toggleNoteInContext(note) {
+    if (!discussionsStore.currentDiscussionId) {
+        uiStore.addNotification('Please select or start a discussion first.', 'warning');
+        return;
+    }
+    const isLoaded = discussionsStore.loadedContextItems.some(item => item.title === note.title && item.type === 'note');
+    if (isLoaded) {
+        await discussionsStore.removeContextItem(note.title, 'note');
+    } else {
+        const formattedContent = `\n--- Note: ${note.title} ---\n${note.content}\n--- End Note ---\n`;
+        await discussionsStore.appendToDataZone({
+            discussionId: discussionsStore.currentDiscussionId,
+            content: formattedContent
+        });
+    }
+}
 async function handleImportNote(note) {
     if (!discussionsStore.currentDiscussionId) {
         uiStore.addNotification('No active discussion to import to.', 'warning');
         return;
     }
+    // Wrap in standardized Note delimiters for easy removal
+    const formattedContent = `\n--- Note: ${note.title} ---\n${note.content}\n--- End Note ---\n`;
+    
     await discussionsStore.appendToDataZone({ 
         discussionId: discussionsStore.currentDiscussionId, 
-        content: note.content 
+        content: formattedContent 
     });
 }
 </script>

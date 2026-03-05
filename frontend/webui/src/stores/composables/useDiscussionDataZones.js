@@ -302,6 +302,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
     return {
         fetchContextStatus, fetchDataZones, updateDataZone, appendToDataZone,
         summarizeDiscussionDataZone, generateImageFromDataZone, memorizeLTM,
+        cleanDataZone,
         handleDataZoneUpdate, setDiscussionDataZoneContent, refreshDataZones,
         updateLiveTokenCount, handleDiscussionImagesUpdated,
         updateDiscussionRagStores,

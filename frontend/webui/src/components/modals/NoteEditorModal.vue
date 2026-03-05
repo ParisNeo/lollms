@@ -89,7 +89,7 @@ async function handleImportToDataZone() {
         return;
     }
 
-    // [FIX] Ensure clean newlines for robust delimiter detection across platforms
+    // Standardized delimiter format for notes
     const formattedContent = `\n--- Note: ${title.value} ---\n${content.value}\n--- End Note ---\n`;
 
     await discussionsStore.appendToDataZone({

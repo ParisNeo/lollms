@@ -132,8 +132,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const zone = activeDiscussion.value?.discussion_data_zone;
         if (!zone) return [];
         const items = [];
-        // [FIX] Unified robust regex for badge detection
-        const regex = /--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---/g;
+        // Support Document, Skill, and Note blocks
+        const regex = /--- (Document|Skill|Note): (.*?) ---[\s\r\n]*([\s\S]*?)[\s\r\n]*--- End \1(?:: .*?)? ---/g;
         let match;
         while ((match = regex.exec(zone)) !== null) {
             if (match[1] && match[2]) {
@@ -152,11 +152,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!activeDiscussion.value) return;
         
         const escapedTitle = itemTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Handle "document", "skill", or "note" types
         const typePattern = itemType.charAt(0).toUpperCase() + itemType.slice(1);
-        // [FIX] Flexible regex for clean removal of context blocks
-        const regex = new RegExp(`\\s*--- ${typePattern}: ${escapedTitle} ---\\s*\\r?\\n[\\s\\S]*?\\r?\\n--- End ${typePattern}(?:: ${escapedTitle})? ---`, 'g');
         
-        const newContent = activeDiscussion.value.discussion_data_zone.replace(regex, '').trim();
+        // Use a more aggressive regex for removal that ignores specific newline counts
+        const regex = new RegExp(`[\\s\\r\\n]*--- ${typePattern}: ${escapedTitle} ---[\\s\\S]*?--- End ${typePattern}(?:: ${escapedTitle})? ---[\\s\\r\\n]*`, 'g');
+        
+        const newContent = activeDiscussion.value.discussion_data_zone.replace(regex, '\n\n').trim();
         
         await getActions().updateDataZone({
             discussionId: activeDiscussion.value.id,

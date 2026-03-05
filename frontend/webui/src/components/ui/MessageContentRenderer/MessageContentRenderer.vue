@@ -323,51 +323,54 @@ const messageParts = computed(() => {
     return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
 });
 
-// ─── getTokens: unchanged ────────────────────────────────────────────────────
 const getTokens = (text) => {
     if (!text) return [];
     const allTokens = [];
     
-    // [FIX] Standardized regex to handle Windows/Unix newlines and varied delimiter titles
-    const combinedRegex = /--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---/g;
+    // Use \s* for more robust newline/whitespace handling
+    const combinedRegex = /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g;
     
     let lastIndex = 0;
     let match;
 
     while ((match = combinedRegex.exec(text)) !== null) {
-        // Add preceding markdown
+        // Add preceding segment
         if (match.index > lastIndex) {
             const markdownPart = text.substring(lastIndex, match.index);
-            if (markdownPart.trim()) {
-                allTokens.push(...getContentTokensWithMathProtection(markdownPart));
+            const tokens = getContentTokensWithMathProtection(markdownPart);
+            if (Array.isArray(tokens)) {
+                allTokens.push(...tokens);
             }
         }
         
         const blockType = match[1].toLowerCase();
-        const title = match[2].trim();
+        const title = (match[2] || 'Untitled').trim();
         const content = match[3]?.trim() || '';
         
         let finalType = 'document';
         if (blockType === 'skill') finalType = 'skill_block';
         if (blockType === 'note') finalType = 'note_block';
 
+        // Stable key: Use hash of content + title instead of unstable match.index
+        const contentHash = simpleHash(match[0]);
+
         allTokens.push({ 
             type: finalType, 
             title, 
             content, 
             raw: match[0],
-            // Stable unique ID for Vue :key
-            uid: `block-${blockType}-${title}-${match.index}`
+            uid: `block-${blockType}-${contentHash}`
         });
         
         lastIndex = combinedRegex.lastIndex;
     }
 
-    // Add remaining markdown
+    // Add remaining segment
     if (lastIndex < text.length) {
         const remaining = text.substring(lastIndex);
-        if (remaining.trim()) {
-            allTokens.push(...getContentTokensWithMathProtection(remaining));
+        const tokens = getContentTokensWithMathProtection(remaining);
+        if (Array.isArray(tokens)) {
+            allTokens.push(...tokens);
         }
     }
 
@@ -585,37 +588,52 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- ── Regular code / text tokens ────────────────────────────── -->
-          <template v-else-if="part.type === 'content'">
+          <div v-else-if="part.type === 'content'" class="content-token-container">
             <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="token.uid || `token-${tokenIndex}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
               
-              <details v-else-if="token.type === 'document'" class="document-block my-4">
-                  <summary class="document-summary">
-                      <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 flex-shrink-0" />
-                      <span class="font-mono">{{ token.title }}</span>
+              <details v-else-if="token.type === 'document'" class="document-block my-4 group/block">
+                  <summary class="document-summary flex items-center justify-between pr-2">
+                      <div class="flex items-center gap-2 overflow-hidden">
+                        <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 flex-shrink-0" />
+                        <span class="font-mono truncate">{{ token.title }}</span>
+                      </div>
+                      <button @click.stop="discussionsStore.removeContextItem(token.title, 'document')" class="opacity-0 group-hover/block:opacity-100 p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity" title="Remove from context">
+                        <IconTrash class="w-3.5 h-3.5" />
+                      </button>
                   </summary>
                   <div class="document-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
               </details>
               
-              <details v-else-if="token.type === 'skill_block'" class="skill-block my-4">
-                  <summary class="skill-summary">
-                      <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" />
-                      <span class="font-mono text-xs font-bold tracking-wider text-teal-700 dark:text-teal-300">Skill: {{ token.title }}</span>
+              <details v-else-if="token.type === 'skill_block'" class="skill-block my-4 group/block">
+                  <summary class="skill-summary flex items-center justify-between pr-2">
+                      <div class="flex items-center gap-2 overflow-hidden">
+                        <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" />
+                        <span class="font-mono text-xs font-bold tracking-wider text-teal-700 dark:text-teal-300 truncate">Skill: {{ token.title }}</span>
+                      </div>
+                      <button @click.stop="discussionsStore.removeContextItem(token.title, 'skill')" class="opacity-0 group-hover/block:opacity-100 p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity" title="Remove from context">
+                        <IconTrash class="w-3.5 h-3.5" />
+                      </button>
                   </summary>
                   <div class="skill-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
               </details>
               
-              <details v-else-if="token.type === 'note_block'" class="note-block-collapsible my-4">
-                  <summary class="note-summary">
-                      <IconFileText class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                      <span class="font-mono text-xs font-bold tracking-wider text-amber-700 dark:text-amber-300">Note: {{ token.title }}</span>
+              <details v-else-if="token.type === 'note_block'" class="note-block-collapsible my-4 group/block">
+                  <summary class="note-summary flex items-center justify-between pr-2">
+                      <div class="flex items-center gap-2 overflow-hidden">
+                        <IconFileText class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                        <span class="font-mono text-xs font-bold tracking-wider text-amber-700 dark:text-amber-300 truncate">Note: {{ token.title }}</span>
+                      </div>
+                      <button @click.stop="discussionsStore.removeContextItem(token.title, 'note')" class="opacity-0 group-hover/block:opacity-100 p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity" title="Remove from context">
+                        <IconTrash class="w-3.5 h-3.5" />
+                      </button>
                   </summary>
                   <div class="note-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
               </details>
               
               <div v-else-if="token.raw" v-html="parsedMarkdown(token.raw)"></div>
             </template>
-          </template>
+          </div>
 
           <!-- ── Explicit code block (non-mermaid) ──────────────────────── -->
           <template v-else-if="part.type === 'code'">
@@ -806,15 +824,20 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 .document-content { @apply p-3; }
 
-.skill-block { @apply bg-teal-50/30 dark:bg-teal-900/10 border border-teal-200 dark:border-teal-800/40 rounded-lg overflow-hidden shadow-sm; }
+.skill-block { @apply bg-teal-50/30 dark:bg-teal-900/10 border border-teal-200 dark:border-teal-800/40 rounded-lg overflow-hidden shadow-sm transition-all; }
 .skill-summary { @apply flex items-center gap-2 p-2 text-sm cursor-pointer list-none select-none hover:bg-teal-100/50 dark:hover:bg-teal-900/30 transition-colors; }
 .skill-summary::-webkit-details-marker { display: none; }
-details[open] > .skill-summary { @apply border-b border-teal-200 dark:border-teal-800/40; }
+details[open].skill-block > .skill-summary { @apply border-b border-teal-200 dark:border-teal-800/40; }
 
-.note-block-collapsible { @apply bg-amber-50/30 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg overflow-hidden shadow-sm; }
+.note-block-collapsible { @apply bg-amber-50/30 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg overflow-hidden shadow-sm transition-all; }
 .note-summary { @apply flex items-center gap-2 p-2 text-sm cursor-pointer list-none select-none hover:bg-amber-100/50 dark:hover:bg-amber-900/30 transition-colors; }
 .note-summary::-webkit-details-marker { display: none; }
-details[open] > .note-summary { @apply border-b border-amber-200 dark:border-amber-800/40; }
+details[open].note-block-collapsible > .note-summary { @apply border-b border-amber-200 dark:border-amber-800/40; }
+
+.document-block { @apply bg-gray-50/50 dark:bg-gray-900/30 border border-gray-200 dark:border-gray-700/50 rounded-lg overflow-hidden shadow-sm transition-all; }
+.document-summary { @apply flex items-center gap-2 p-2 text-sm cursor-pointer list-none select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors; }
+.document-summary::-webkit-details-marker { display: none; }
+details[open].document-block > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 
 /* Mermaid wrapper — starts at a sensible default, auto-sized by onMermaidReady */
 .mermaid-wrapper {

@@ -236,6 +236,7 @@ def _clean_discussion_data_zone_task(task: Task, username: str, discussion_id: s
         return {"discussion_id": discussion_id, "new_content": ""}
 
     # [FIX] Greedy-resistant regex for robust platform-independent block extraction
+    # Updated to include Note type
     block_pattern = re.compile(
         r"--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---",
         re.MULTILINE
