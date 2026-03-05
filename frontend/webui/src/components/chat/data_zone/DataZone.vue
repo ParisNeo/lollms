@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useUiStore } from '../../../stores/ui';
 import { useDiscussionsStore } from '../../../stores/discussions';
@@ -24,7 +24,7 @@ const isResizing = ref(false);
 const isDataZoneExpanded = computed(() => uiStore.isDataZoneExpanded);
 
 const collapsed = ref({
-    discussion: true, // Collapsed by default
+    discussion: false, 
     personality: true,
     memory: true
 });
@@ -63,7 +63,7 @@ onMounted(() => {
              class="absolute top-0 bottom-0 -left-1 w-2 cursor-col-resize z-20 hover:bg-blue-500/30 transition-colors" 
              v-if="!isDataZoneExpanded"></div>
 
-        <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div class="flex-1 flex flex-col min-0 overflow-hidden">
             <!-- Header -->
             <div class="flex-shrink-0 bg-gray-50 dark:bg-gray-800/80 backdrop-blur-sm border-b border-gray-200 dark:border-gray-700 flex justify-between items-center p-2 h-12">
                 <div class="flex items-center gap-2 px-2">

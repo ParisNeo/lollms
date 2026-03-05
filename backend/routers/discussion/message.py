@@ -180,6 +180,14 @@ def build_message_router(router: APIRouter):
                  if hasattr(target_message, 'add_image_pack'):
                      target_message.add_image_pack([img], group_type="upload", active_by_default=True, title="User Upload")
         
+        # Explicitly update the message in DB to ensure persistence
+        if hasattr(discussion_obj, 'db_manager') and discussion_obj.db_manager:
+            try:
+                discussion_obj.db_manager.update_message(target_message)
+            except Exception as e:
+                # Log but don't crash if update_message isn't available or fails
+                print(f"Warning: Failed to update message in DB: {e}")
+
         discussion_obj.commit()
 
         db_user = db.query(DBUser).filter(DBUser.username == username).one()

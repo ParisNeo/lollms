@@ -102,8 +102,17 @@ export function useDiscussionGeneration(state, stores, getActions) {
         }
         messages.value.push(tempAiMessage);
 
+        // [FIX] Defensive check for attachedSkills to prevent "reading 'value' of undefined"
+        let finalPrompt = payload.prompt;
+        if (state.attachedSkills && state.attachedSkills.value && state.attachedSkills.value.length > 0) {
+            const skillsContext = state.attachedSkills.value.map(s => `--- Skill: ${s.name} ---\n${s.content}\n--- End Skill ---`).join('\n\n');
+            finalPrompt = `${skillsContext}\n\nUser request: ${finalPrompt}`;
+            // Clear skills after they are added to the prompt
+            state.attachedSkills.value = [];
+        }
+
         const formData = new FormData();
-        formData.append('prompt', payload.prompt);
+        formData.append('prompt', finalPrompt);
         // Pass the array of server-side filenames to the chat endpoint
         formData.append('image_server_paths_json', JSON.stringify(imagesToSend));
         

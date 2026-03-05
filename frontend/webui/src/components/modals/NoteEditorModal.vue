@@ -85,13 +85,19 @@ async function handleSave() {
 
 async function handleImportToDataZone() {
     if (!discussionsStore.currentDiscussionId) {
-        uiStore.addNotification('No active discussion.', 'warning');
+        uiStore.addNotification('No active discussion to add note to.', 'warning');
         return;
     }
+
+    // [FIX] Ensure clean newlines for robust delimiter detection across platforms
+    const formattedContent = `\n--- Note: ${title.value} ---\n${content.value}\n--- End Note ---\n`;
+
     await discussionsStore.appendToDataZone({
         discussionId: discussionsStore.currentDiscussionId,
-        content: content.value
+        content: formattedContent
     });
+    
+    uiStore.addNotification('Note added to context.', 'success');
 }
 </script>
 

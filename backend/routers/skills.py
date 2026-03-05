@@ -139,7 +139,7 @@ def export_skill(skill_id: str, payload: ExportFormat, current_user: UserAuthDet
 @skills_router.post("/import", response_model=SkillPublic)
 async def import_skill(file: UploadFile = File(...), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
     content_bytes = await file.read()
-    text_content = content_bytes.decode('utf-8')
+    text_content = content_bytes.decode('utf-8', errors='replace')
     
     name = "Imported Skill"
     description = ""
@@ -148,7 +148,8 @@ async def import_skill(file: UploadFile = File(...), current_user: UserAuthDetai
     skill_content = ""
     
     try:
-        if text_content.strip().startswith("<skill"):
+        # Detect XML (Custom format)
+        if "<skill" in text_content[:100]:
             cdata_match = re.search(r'<!\[CDATA\[(.*?)\]\]>', text_content, re.DOTALL)
             cdata_content = cdata_match.group(1) if cdata_match else ""
             

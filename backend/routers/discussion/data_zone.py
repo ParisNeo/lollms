@@ -88,6 +88,24 @@ def build_datazone_router(router: APIRouter):
         )
         return db_task
 
+    @router.post("/{discussion_id}/clean", response_model=TaskInfo, status_code=202)
+    async def clean_discussion_data_zone(
+        discussion_id: str,
+        db: Session = Depends(get_db),
+        current_user: UserAuthDetails = Depends(get_current_active_user)    
+    ):
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+
+        from backend.tasks.discussion_tasks import _clean_discussion_data_zone_task
+        db_task = task_manager.submit_task(
+            name=f"Cleaning Data Zone",
+            target=_clean_discussion_data_zone_task,
+            args=(owner_username, discussion_id),
+            description="Re-formatting data zone to remove junk and verify block placement.",
+            owner_username=current_user.username
+        )
+        return db_task
+
     @router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
     async def memorize_ltm(
         discussion_id: str,

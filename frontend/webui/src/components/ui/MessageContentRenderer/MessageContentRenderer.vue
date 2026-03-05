@@ -127,7 +127,7 @@ const parsedStreamingContent = computed(() => {
 
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))/;
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))/;
          match = regex.exec(rawBlock);
     }
     
@@ -189,6 +189,23 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         if (titleMatch) title = titleMatch[1];
         return { type: 'note', title, content: noteContent, raw: fullTag };
     }
+    else if (match[9]) {
+        const fullTag = match[9];
+        const skillContent = fullTag.replace(/<skill[^>]*>|<\/skill>/g, '').trim();
+        let title = "AI Skill";
+        let description = "";
+        let category = "General";
+        
+        const titleMatch = fullTag.match(/title="([^"]*)"/);
+        const descMatch = fullTag.match(/description="([^"]*)"/);
+        const catMatch = fullTag.match(/category="([^"]*)"/);
+        
+        if (titleMatch) title = titleMatch[1];
+        if (descMatch) description = descMatch[1];
+        if (catMatch) category = catMatch[1];
+        
+        return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
+    }
 
     return { type: 'content', content: rawBlock };
 };
@@ -215,7 +232,7 @@ const messageParts = computed(() => {
     }
 
     // 2. Identify all Tool Blocks
-    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))/g;
+    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))/g;
     const tools = [];
     let toolMatch;
 
@@ -310,22 +327,48 @@ const messageParts = computed(() => {
 const getTokens = (text) => {
     if (!text) return [];
     const allTokens = [];
-    const docRegex = /(?:^|\n)--- Document: ([\w.\s-]+?)( v\d+)? ---\r?\n([\s\S]*?)\r?\n--- End Document: \1 ---/g;
+    
+    // [FIX] Standardized regex to handle Windows/Unix newlines and varied delimiter titles
+    const combinedRegex = /--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---/g;
+    
     let lastIndex = 0;
     let match;
 
-    while ((match = docRegex.exec(text)) !== null) {
+    while ((match = combinedRegex.exec(text)) !== null) {
+        // Add preceding markdown
         if (match.index > lastIndex) {
             const markdownPart = text.substring(lastIndex, match.index);
-            allTokens.push(...getContentTokensWithMathProtection(markdownPart));
+            if (markdownPart.trim()) {
+                allTokens.push(...getContentTokensWithMathProtection(markdownPart));
+            }
         }
-        const title = match[1].trim() + (match[2] || '');
-        allTokens.push({ type: 'document', title, content: match[3], raw: match[0] });
-        lastIndex = docRegex.lastIndex;
+        
+        const blockType = match[1].toLowerCase();
+        const title = match[2].trim();
+        const content = match[3]?.trim() || '';
+        
+        let finalType = 'document';
+        if (blockType === 'skill') finalType = 'skill_block';
+        if (blockType === 'note') finalType = 'note_block';
+
+        allTokens.push({ 
+            type: finalType, 
+            title, 
+            content, 
+            raw: match[0],
+            // Stable unique ID for Vue :key
+            uid: `block-${blockType}-${title}-${match.index}`
+        });
+        
+        lastIndex = combinedRegex.lastIndex;
     }
 
+    // Add remaining markdown
     if (lastIndex < text.length) {
-        allTokens.push(...getContentTokensWithMathProtection(text.substring(lastIndex)));
+        const remaining = text.substring(lastIndex);
+        if (remaining.trim()) {
+            allTokens.push(...getContentTokensWithMathProtection(remaining));
+        }
     }
 
     return allTokens;
@@ -457,6 +500,18 @@ function saveNoteFromRenderer(title, content) {
     uiStore.openModal('noteEditor', { title: title || 'New AI Note', content });
 }
 
+function saveSkillFromRenderer(part) {
+    uiStore.openModal('skillEditor', { 
+        skill: {
+            name: part.title,
+            description: part.description,
+            category: part.category,
+            content: part.content,
+            language: 'markdown'
+        }
+    });
+}
+
 function onImageLoad(event, annotations) {
     const img = event.target;
     if (!img || img.tagName !== 'IMG') return;
@@ -531,18 +586,34 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- ── Regular code / text tokens ────────────────────────────── -->
           <template v-else-if="part.type === 'content'">
-            <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="`token-${tokenIndex}-${token.type}-${simpleHash(token.raw)}`">
+            <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="token.uid || `token-${tokenIndex}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
+              
               <details v-else-if="token.type === 'document'" class="document-block my-4">
                   <summary class="document-summary">
                       <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 flex-shrink-0" />
                       <span class="font-mono">{{ token.title }}</span>
                   </summary>
-                  <div class="document-content">
-                      <MessageContentRenderer :content="token.content" />
-                  </div>
+                  <div class="document-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
               </details>
-              <div v-else v-html="parsedMarkdown(token.raw)"></div>
+              
+              <details v-else-if="token.type === 'skill_block'" class="skill-block my-4">
+                  <summary class="skill-summary">
+                      <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" />
+                      <span class="font-mono text-xs font-bold tracking-wider text-teal-700 dark:text-teal-300">Skill: {{ token.title }}</span>
+                  </summary>
+                  <div class="skill-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
+              </details>
+              
+              <details v-else-if="token.type === 'note_block'" class="note-block-collapsible my-4">
+                  <summary class="note-summary">
+                      <IconFileText class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                      <span class="font-mono text-xs font-bold tracking-wider text-amber-700 dark:text-amber-300">Note: {{ token.title }}</span>
+                  </summary>
+                  <div class="note-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
+              </details>
+              
+              <div v-else-if="token.raw" v-html="parsedMarkdown(token.raw)"></div>
             </template>
           </template>
 
@@ -668,6 +739,35 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </div>
 
+          <!-- ── Skill block ──────────────────────────────────────────────── -->
+          <div v-else-if="part.type === 'skill'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60">
+            <div class="note-header flex items-center justify-between px-4 py-2.5 bg-teal-50 dark:bg-teal-900/30 border-b border-teal-200 dark:border-teal-800/60">
+              <div class="flex items-center gap-2.5">
+                <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" />
+                <div class="flex flex-col leading-tight">
+                  <span class="text-[9px] font-black uppercase tracking-widest text-teal-500 dark:text-teal-400">AI Skill Proposal</span>
+                  <span class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ part.title }}</span>
+                </div>
+              </div>
+              <button
+                @click="saveSkillFromRenderer(part)"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-500 hover:bg-teal-600 text-white shadow-sm transition-colors"
+              >
+                <IconSave class="w-3.5 h-3.5" />
+                Validate Skill
+              </button>
+            </div>
+            <div class="note-body px-5 py-4 bg-teal-50/40 dark:bg-teal-950/20">
+               <div v-if="part.description" class="text-xs text-gray-500 dark:text-gray-400 italic mb-2">{{ part.description }}</div>
+              <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
+                <template v-for="(token, ti) in getTokens(part.content)" :key="`skill-token-${ti}`">
+                  <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
+                  <div v-else v-html="parsedMarkdown(token.raw)"></div>
+                </template>
+              </div>
+            </div>
+          </div>
+
           <template v-else-if="part.type === 'annotate'">
             <div class="annotated-image-container relative my-4 group">
                 <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" @load="onImageLoad($event, part.annotations)"/>
@@ -705,6 +805,16 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .document-summary::-webkit-details-marker { display: none; }
 details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 .document-content { @apply p-3; }
+
+.skill-block { @apply bg-teal-50/30 dark:bg-teal-900/10 border border-teal-200 dark:border-teal-800/40 rounded-lg overflow-hidden shadow-sm; }
+.skill-summary { @apply flex items-center gap-2 p-2 text-sm cursor-pointer list-none select-none hover:bg-teal-100/50 dark:hover:bg-teal-900/30 transition-colors; }
+.skill-summary::-webkit-details-marker { display: none; }
+details[open] > .skill-summary { @apply border-b border-teal-200 dark:border-teal-800/40; }
+
+.note-block-collapsible { @apply bg-amber-50/30 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800/40 rounded-lg overflow-hidden shadow-sm; }
+.note-summary { @apply flex items-center gap-2 p-2 text-sm cursor-pointer list-none select-none hover:bg-amber-100/50 dark:hover:bg-amber-900/30 transition-colors; }
+.note-summary::-webkit-details-marker { display: none; }
+details[open] > .note-summary { @apply border-b border-amber-200 dark:border-amber-800/40; }
 
 /* Mermaid wrapper — starts at a sensible default, auto-sized by onMermaidReady */
 .mermaid-wrapper {

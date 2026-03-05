@@ -85,6 +85,10 @@ export function useDiscussionDataZones(state, stores, getActions) {
         const newContent = currentContent + separator + content;
 
         await updateDataZone({ discussionId, content: newContent });
+        
+        // Refresh token counts immediately for UI feedback
+        await fetchContextStatus(discussionId);
+        
         uiStore.addNotification('Content appended to Data Zone.', 'success');
     }
     
@@ -135,6 +139,23 @@ export function useDiscussionDataZones(state, stores, getActions) {
             if (activeAiTasks.value[discussionId]) activeAiTasks.value[discussionId].taskId = task.id;
             tasksStore.addTask(task);
             uiStore.addNotification(`Image generation started.`, 'info');
+        } catch (error) {
+            _clearActiveAiTask(discussionId);
+        }
+    }
+
+    async function cleanDataZone(discussionId) {
+        if (activeAiTasks.value[discussionId]) {
+            uiStore.addNotification(`An AI task is already running.`, 'warning');
+            return;
+        }
+        activeAiTasks.value[discussionId] = { type: 'clean', taskId: null };
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/clean`);
+            const task = response.data;
+            if (activeAiTasks.value[discussionId]) activeAiTasks.value[discussionId].taskId = task.id;
+            tasksStore.addTask(task);
+            uiStore.addNotification('Cleaning data zone...', 'info');
         } catch (error) {
             _clearActiveAiTask(discussionId);
         }

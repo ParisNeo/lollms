@@ -61,6 +61,8 @@ const router = useRouter();
 
 const dStoreRefs = storeToRefs(discussionsStore);
 const activeDiscussionArtefacts = computed(() => dStoreRefs.activeDiscussionArtefacts?.value || []);
+const loadedContextItems = computed(() => discussionsStore.loadedContextItems || []);
+const attachedSkills = computed(() => dStoreRefs.attachedSkills?.value || []);
 const activeDiscussion = computed(() => dStoreRefs.activeDiscussion?.value || null);
 const generationInProgress = computed(() => dStoreRefs.generationInProgress?.value || false);
 const generationState = computed(() => dStoreRefs.generationState?.value || { status: 'idle', details: '' });
@@ -505,6 +507,27 @@ const visibleFeatures = computed(() => activeFeatures.value.slice(0, maxVisibleB
 const hiddenFeatures = computed(() => activeFeatures.value.slice(maxVisibleBadges));
 
 function openStagedImageViewer(startIndex) { uiStore.openImageViewer({ imageList: stagedImages.value.map((img) => ({ src: img.previewUrl, prompt: `Uploaded image: ${img.file.name}` })), startIndex }); }
+function viewAttachedSkill(skill) { uiStore.openModal('skillEditor', { skill }); }
+
+function viewLoadedContextItem(item) {
+    if (item.type === 'skill') {
+        uiStore.openModal('skillEditor', { skill: item });
+    } else {
+        uiStore.openModal('noteEditor', { note: item });
+    }
+}
+
+async function viewAttachedFile(file) {
+    if (!activeDiscussion.value) return;
+    const content = await discussionsStore.fetchArtefactContent({
+        discussionId: activeDiscussion.value.id,
+        artefactTitle: file.title,
+        version: file.version
+    });
+    if (content) {
+        uiStore.openModal('artefactViewer', { artefact: content });
+    }
+}
 async function toggleArtefactLoad(file) { if (!activeDiscussion.value) return; if (file.is_loaded) await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); else await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); }
 async function removeArtefact(file) { if (!activeDiscussion.value) return; const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' }); if (confirmed.confirmed) await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title }); }
 function removeStagedImage(index) { const removed = stagedImages.value.splice(index, 1)[0]; if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl); }
@@ -628,7 +651,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 
         <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
             <!-- SPECIAL SELECTION ZONE -->
-            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
+            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0 || attachedSkills.length > 0 || loadedContextItems.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
                 <div v-for="(img, index) in stagedImages" :key="`staged-img-${index}`" 
                      @click="openStagedImageViewer(index)"
                      class="relative w-16 h-16 group rounded-lg overflow-hidden border-2 transition-all shadow-sm cursor-pointer border-blue-500 hover:scale-105"
@@ -640,11 +663,34 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                 </div>
 
                 <div v-for="file in attachedFiles" :key="file.title" 
-                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-all duration-200 shadow-sm bg-white dark:bg-gray-800"
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-all duration-200 shadow-sm bg-white dark:bg-gray-800 group/file"
                      :class="file.is_loaded ? 'border-blue-200 text-blue-700 dark:border-blue-800' : 'border-gray-200 text-gray-400 opacity-60'">
-                    <button @click="toggleArtefactLoad(file)" :title="file.is_loaded ? 'Unload' : 'Load'"><IconCheckCircle v-if="file.is_loaded" class="w-4 h-4 text-blue-600"/><IconCircle v-else class="w-4 h-4" /></button>
-                    <span class="truncate max-w-[150px] font-medium" :title="file.title">{{ file.title }}</span>
-                    <button @click="removeArtefact(file)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Remove"><IconXMark class="w-3.5 h-3.5" /></button>
+                    <button @click.stop="toggleArtefactLoad(file)" :title="file.is_loaded ? 'Unload' : 'Load'"><IconCheckCircle v-if="file.is_loaded" class="w-4 h-4 text-blue-600"/><IconCircle v-else class="w-4 h-4" /></button>
+                    <span @click="viewAttachedFile(file)" class="truncate max-w-[150px] font-medium cursor-pointer hover:text-blue-600 transition-colors" :title="`Click to view: ${file.title}`">{{ file.title }}</span>
+                    <button @click.stop="removeArtefact(file)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Remove"><IconXMark class="w-3.5 h-3.5" /></button>
+                </div>
+
+                <!-- Attached Skills (Staged) -->
+                <div v-for="skill in attachedSkills" :key="skill.id" 
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border border-teal-200 bg-teal-50 text-teal-700 dark:bg-teal-900/30 dark:border-teal-800 dark:text-teal-300 transition-all duration-200 shadow-sm">
+                    <button @click="viewAttachedSkill(skill)" class="flex items-center gap-2 hover:opacity-80">
+                        <IconSparkles class="w-3.5 h-3.5" />
+                        <span class="truncate max-w-[150px] font-bold">{{ skill.name }}</span>
+                    </button>
+                    <button @click="discussionsStore.detachSkill(skill.id)" class="text-teal-400 hover:text-red-500 transition-colors ml-1" title="Remove Skill"><IconXMark class="w-3.5 h-3.5" /></button>
+                </div>
+
+                <!-- Loaded Context Items (Persistent in Data Zone) -->
+                <div v-for="(item, idx) in loadedContextItems" :key="`loaded-${idx}`" 
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter border transition-all duration-200 shadow-sm"
+                     :class="item.type === 'skill' ? 'border-teal-500 bg-teal-500/10 text-teal-600' : 'border-amber-500 bg-amber-500/10 text-amber-600'">
+                    <button @click="viewLoadedContextItem(item)" class="flex items-center gap-1.5 hover:opacity-70">
+                        <IconSparkles v-if="item.type === 'skill'" class="w-3 h-3" />
+                        <IconFileText v-else class="w-3 h-3" />
+                        <span class="truncate max-w-[120px]">{{ item.title }}</span>
+                        <span class="opacity-50 font-normal lowercase tracking-normal italic">(loaded)</span>
+                    </button>
+                    <button @click="discussionsStore.removeContextItem(item.title, item.type)" class="hover:text-red-500 transition-colors ml-1" title="Unload from context"><IconXMark class="w-3.5 h-3.5" /></button>
                 </div>
             </div>
 
@@ -696,15 +742,6 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     </span>
                                     <IconCheckCircle v-if="user?.skills_library_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-
-                                <!-- Skills Building Toggle -->
-                                <button v-if="user?.skills_library_enabled" @click.stop="toggleUserPref('skills_building_enabled', user.skills_building_enabled)" class="menu-item flex justify-between items-center group/item pl-8 text-xs">
-                                    <span class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                                        <span>↳ AI Skill Builder</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.skills_building_enabled" class="w-3.5 h-3.5 text-green-500" />
-                                    <IconCircle v-else class="w-3.5 h-3.5 text-gray-400" />
                                 </button>
 
                                 <!-- Street View Toggle -->

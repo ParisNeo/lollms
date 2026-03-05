@@ -1,6 +1,7 @@
 <template>
     <div :class="['markdown-editor-container flex flex-col h-full min-h-0 border border-gray-300 dark:border-gray-600 rounded-md', editorClass]">
         <Toolbar
+            v-if="currentMode === 'edit'"
             :toolbarClass="[toolbarClass, 'flex-shrink-0']"
             :buttonClass="buttonClass"
             :renderable="renderable"

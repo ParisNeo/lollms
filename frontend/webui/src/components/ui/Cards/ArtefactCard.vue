@@ -167,7 +167,7 @@ async function handleDelete() {
     @apply flex items-center justify-between p-1.5 pr-1;
 }
 .artefact-info {
-    @apply flex items-center gap-2 min-w-0;
+    @apply flex items-center gap-2 min-w-0 hover:bg-gray-50 dark:hover:bg-gray-700/50 p-1 -m-1 rounded-md transition-colors;
 }
 .artefact-icon {
     @apply w-6 h-6 rounded-md flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300;

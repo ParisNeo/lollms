@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useSkillsStore } from '../../stores/skills';
 import GenericModal from './GenericModal.vue';
@@ -18,28 +18,45 @@ const category = ref('');
 const language = ref('markdown');
 const content = ref('');
 const isLoading = ref(false);
+const editorMode = ref('edit');
 
 function initForm() {
-    if (skill.value && skill.value.id) {
-        name.value = skill.value.name || '';
-        description.value = skill.value.description || '';
-        category.value = skill.value.category || '';
-        language.value = skill.value.language || 'markdown';
-        content.value = skill.value.content || '';
+    const s = skill.value;
+    if (s && typeof s === 'object') {
+        // Map fields from either the DB object (name) or the Chat tag (title)
+        name.value = s.name || s.title || '';
+        description.value = s.description || '';
+        category.value = s.category || '';
+        language.value = s.language || 'markdown';
+        content.value = s.content || '';
+        // If it has an ID, it's an existing skill -> start in Render (view) mode
+        editorMode.value = (s && s.id) ? 'view' : 'edit';
+        
+        // Update the form object too so the footer template has valid state
+        form.value = {
+            ...getInitialFormState(),
+            ...s,
+            name: name.value,
+            content: content.value
+        };
     } else {
         name.value = '';
         description.value = '';
         category.value = '';
         language.value = 'markdown';
         content.value = '';
+        editorMode.value = 'edit';
     }
 }
 
-watch(() => uiStore.isModalOpen('skillEditor'), (isOpen) => {
+// Watch both the visibility AND the data itself to ensure it populates
+watch([() => uiStore.isModalOpen('skillEditor'), skill], ([isOpen, newSkill]) => {
     if (isOpen) {
-        initForm();
+        nextTick(() => {
+            initForm();
+        });
     }
-});
+}, { immediate: true });
 
 async function handleSave() {
     if (!name.value.trim()) {
@@ -102,24 +119,34 @@ async function exportFormat(format) {
                     </div>
                 </div>
                 <div class="flex-grow min-h-0 border rounded-md overflow-hidden dark:border-gray-700">
-                     <CodeMirrorEditor v-model="content" class="h-full" :language="language === 'markdown' ? 'markdown' : 'plaintext'" />
+                     <CodeMirrorEditor 
+                        v-model="content" 
+                        class="h-full" 
+                        :language="language === 'markdown' ? 'markdown' : 'plaintext'"
+                        :renderable="true"
+                        :initialMode="editorMode"
+                     />
                 </div>
             </div>
         </template>
         <template #footer>
             <div class="flex justify-between items-center w-full">
                 <div class="flex gap-2">
-                    <button v-if="skill && skill.id" @click="exportFormat('xml')" class="btn btn-secondary flex items-center gap-2" title="Export as XML">
-                        <IconArrowDownTray class="w-4 h-4" /> XML
-                    </button>
-                    <button v-if="skill && skill.id" @click="exportFormat('claude')" class="btn btn-secondary flex items-center gap-2" title="Export as Claude Markdown">
-                        <IconArrowDownTray class="w-4 h-4" /> Claude MD
-                    </button>
+                    <!-- Export buttons only visible if the skill is already saved (has an ID) -->
+                    <template v-if="form?.id || skill?.id">
+                        <button @click="exportFormat('xml')" class="btn btn-secondary btn-sm flex items-center gap-2">
+                            <IconArrowDownTray class="w-3.5 h-3.5" /> XML
+                        </button>
+                        <button @click="exportFormat('claude')" class="btn btn-secondary btn-sm flex items-center gap-2">
+                            <IconArrowDownTray class="w-3.5 h-3.5" /> Claude
+                        </button>
+                    </template>
                 </div>
                 <div class="flex gap-2">
                     <button @click="uiStore.closeModal('skillEditor')" class="btn btn-secondary">Cancel</button>
                     <button @click="handleSave" class="btn btn-primary" :disabled="isLoading">
-                        {{ isLoading ? 'Saving...' : 'Save' }}
+                        <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
+                        {{ skill && skill.id ? 'Update Skill' : 'Save Skill' }}
                     </button>
                 </div>
             </div>

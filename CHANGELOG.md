@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-05 03:44]
+
+- feat: enhance skill processing and discussion message handling
+
 ## [2026-03-04 20:27]
 
 - feat: add skill tag processing and user context settings

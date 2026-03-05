@@ -224,6 +224,46 @@ If no important information is found based on these strict criteria, return {"me
         raise e
 
 
+def _clean_discussion_data_zone_task(task: Task, username: str, discussion_id: str):
+    task.log("Cleaning Discussion Data Zone...")
+    discussion = get_user_discussion(username, discussion_id)
+    if not discussion:
+        raise ValueError("Discussion not found.")
+
+    content = discussion.discussion_data_zone or ""
+    if not content.strip():
+        task.log("Data zone is empty, nothing to clean.")
+        return {"discussion_id": discussion_id, "new_content": ""}
+
+    # [FIX] Greedy-resistant regex for robust platform-independent block extraction
+    block_pattern = re.compile(
+        r"--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---",
+        re.MULTILINE
+    )
+
+    matches = list(block_pattern.finditer(content))
+    task.log(f"Found {len(matches)} valid context blocks.")
+
+    cleaned_blocks = []
+    for match in matches:
+        # Re-construct the block exactly to ensure no extra whitespace or junk inside/outside
+        block_type = match.group(1)
+        title = match.group(2).strip() + (match.group(3) or '')
+        block_content = match.group(4).strip()
+        
+        cleaned_block = f"--- {block_type}: {title} ---\n{block_content}\n--- End {block_type} ---"
+        cleaned_blocks.append(cleaned_block)
+
+    # Join cleaned blocks with double newlines
+    final_content = "\n\n".join(cleaned_blocks)
+    
+    discussion.discussion_data_zone = final_content
+    discussion.commit()
+    
+    task.set_progress(100)
+    task.log("Data zone cleaned and re-formatted.")
+    return {"discussion_id": discussion_id, "new_content": final_content, "zone": "discussion"}
+
 def _prune_empty_discussions_task(task: Task, username: str):
     task.log("Starting prune of empty and single-message discussions.")
     dm = get_user_discussion_manager(username)

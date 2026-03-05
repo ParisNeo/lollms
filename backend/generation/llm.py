@@ -333,46 +333,10 @@ def build_image_dicts(images_b64):
 
 def process_skill_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool, List[str]]:
     """
-    Parses <skill> tags to save new skills to the user's library.
+    Passive version: Does not save to DB. 
+    The UI now handles rendering and saving via <skill> tags.
     """
-    pattern = re.compile(r'<skill\s+title="([^"]*)"\s+description="([^"]*)"\s+category="([^"]*)">(.*?)</skill>', re.DOTALL | re.IGNORECASE)
-    matches = list(pattern.finditer(text))
-    if not matches:
-        return text, False, []
-    
-    actions_performed = False
-    saved_titles =[]
-    from backend.db.models.skill import Skill as DBSkill
-    for match in matches:
-        title = match.group(1).strip()
-        desc = match.group(2).strip()
-        cat = match.group(3).strip()
-        content = match.group(4).strip()
-        
-        if title and content:
-            try:
-                existing = db.query(DBSkill).filter(DBSkill.owner_user_id == user_id, DBSkill.name == title).first()
-                if existing:
-                    existing.content = content
-                    existing.description = desc
-                    existing.category = cat
-                    existing.updated_at = func.now()
-                else:
-                    new_skill = DBSkill(owner_user_id=user_id, name=title, description=desc, category=cat, content=content, language="markdown")
-                    db.add(new_skill)
-                db.commit()
-                actions_performed = True
-                saved_titles.append(title)
-            except Exception as e:
-                db.rollback()
-                print(f"Error saving skill: {e}")
-    
-    cleaned_text = text
-    for match in matches:
-        title = match.group(1).strip()
-        cleaned_text = cleaned_text.replace(match.group(0), f"\n> 💡 **Skill saved/updated:** {title}\n")
-        
-    return cleaned_text, actions_performed, saved_titles
+    return text, False, []
 
 
 def process_memory_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool]:
@@ -1526,6 +1490,11 @@ def build_llm_generation_router(router: APIRouter):
 
                     # Final Prompt Assembly (Context only, not saved to DB user message)
                     final_prompt = prompt
+
+                    # If the prompt is empty but we have images, default to describing them
+                    if not final_prompt.strip() and images_for_message:
+                        final_prompt = "Analyze this image"
+
                     if search_context:
                         active_personality.system_prompt += f"\n\n{search_context}\nUse this context to answer. Cite using [1], [2] tags."
                     if herd_context:

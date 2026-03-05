@@ -1,17 +1,20 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { useSkillsStore } from '../../stores/skills';
+import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 
 const props = defineProps({
     searchTerm: { type: String, default: '' }
 });
 
 const skillsStore = useSkillsStore();
+const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
 const fileInput = ref(null);
@@ -43,6 +46,21 @@ async function deleteSkill(skill) {
     }
 }
 
+async function addToContext(skill) {
+    if (!discussionsStore.currentDiscussionId) {
+        uiStore.addNotification('Please select or start a discussion first.', 'warning');
+        return;
+    }
+
+    // [FIX] Ensure clean newlines for robust delimiter detection across platforms
+    const formattedContent = `\n--- Skill: ${skill.name} ---\n${skill.content}\n--- End Skill ---\n`;
+    
+    await discussionsStore.appendToDataZone({
+        discussionId: discussionsStore.currentDiscussionId,
+        content: formattedContent
+    });
+}
+
 function triggerImport() {
     fileInput.value?.click();
 }
@@ -62,8 +80,13 @@ async function handleFileImport(event) {
     <div class="h-full flex flex-col">
         <div class="flex justify-between items-center mb-2 px-2">
             <span class="text-xs font-bold text-gray-500 uppercase tracking-widest">My Skills</span>
-            <button @click="triggerImport" class="text-xs text-blue-500 hover:underline">Import File</button>
-            <input type="file" ref="fileInput" @change="handleFileImport" class="hidden" accept=".xml,.md,.txt">
+            <div class="flex gap-3">
+                <button @click="triggerImport" class="text-xs text-blue-500 hover:underline font-bold">Import</button>
+                <button @click="skillsStore.fetchSkills()" class="text-xs text-gray-400 hover:text-blue-500" title="Refresh">
+                    <IconSparkles class="w-3 h-3" :class="{'animate-spin': skillsStore.isLoading}" />
+                </button>
+            </div>
+            <input type="file" ref="fileInput" @change="handleFileImport" class="hidden" accept=".xml,.md">
         </div>
 
         <div v-if="skillsStore.isLoading" class="text-center p-4 text-gray-500">Loading skills...</div>
@@ -80,6 +103,13 @@ async function handleFileImport(event) {
                  class="group flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors"
                  @click="editSkill(skill)">
                 <div class="flex items-center gap-3 min-w-0">
+                    <button 
+                        @click.stop="addToContext(skill)"
+                        class="p-1.5 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all border dark:border-gray-600 shadow-sm"
+                        title="Add to Context"
+                    >
+                        <IconArrowUpTray class="w-3.5 h-3.5" />
+                    </button>
                     <IconSparkles class="w-4 h-4 flex-shrink-0 text-teal-500" />
                     <div class="flex flex-col min-w-0">
                         <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ skill.name }}</span>

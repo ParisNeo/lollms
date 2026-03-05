@@ -789,6 +789,14 @@ async def chat_completions(
                         )
                     )
 
+                    # [FIX] Handle error dictionaries from the binding to prevent Pydantic crash
+                    if isinstance(result_content, dict) and ("error" in result_content or result_content.get("status") is False):
+                        error_msg = result_content.get("error", "Internal Server Error from LLM Binding.")
+                        error_obj = {"error": {"message": error_msg, "type": "server_error", "code": result_content.get("status_code", 500)}}
+                        yield f"data: {json.dumps(error_obj)}\n\n"
+                        yield "data: [DONE]\n\n"
+                        return
+
                     content, tool_calls = parse_tool_calls_from_text(result_content)
 
                     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
@@ -925,6 +933,13 @@ async def chat_completions(
                 )
             )
             
+            # [FIX] Handle error dictionaries from the binding to prevent Pydantic crash
+            if isinstance(result_content, dict) and ("error" in result_content or result_content.get("status") is False):
+                error_msg = result_content.get("error", "Internal Server Error from LLM Binding.")
+                status_code = result_content.get("status_code", 500)
+                ASCIIColors.error(f"LLM Binding Error: {error_msg}")
+                raise HTTPException(status_code=status_code, detail=error_msg)
+
             content = result_content
             finish_reason = "stop"
             tool_calls = None

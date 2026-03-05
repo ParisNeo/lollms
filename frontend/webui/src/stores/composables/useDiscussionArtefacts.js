@@ -136,10 +136,16 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
     
     async function unloadArtefactFromContext({ discussionId, artefactTitle, version }) {
+        // 1. Call backend to update metadata
         const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/unload-from-context`, {
             title: artefactTitle,
             version: version
         });
+        
+        // 2. Local cleanup: Remove the text block from the Data Zone string
+        // We call the improved removal action we just added to the main store
+        await getActions().removeContextItem(artefactTitle, 'document');
+        
         _handleArtefactAndDataZoneUpdate(response);
     }
 

@@ -48,6 +48,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const liveDataZoneTokens = ref({ discussion: 0, user: 0, personality: 0, memory: 0 });
     const promptInsertionText = ref('');
     const promptLoadedArtefacts = ref(new Set());
+    const attachedSkills = ref([]); // Staged skills for the next message
     const activeDiscussionParticipants = ref({});
     const ttsState = ref({});
     const currentPlayingAudio = ref({ messageId: null, audio: null });
@@ -127,6 +128,45 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelId);
         return modelInfo?.alias?.has_vision ?? true;
     });
+    const loadedContextItems = computed(() => {
+        const zone = activeDiscussion.value?.discussion_data_zone;
+        if (!zone) return [];
+        const items = [];
+        // [FIX] Unified robust regex for badge detection
+        const regex = /--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---/g;
+        let match;
+        while ((match = regex.exec(zone)) !== null) {
+            if (match[1] && match[2]) {
+                items.push({
+                    type: match[1].toLowerCase(),
+                    title: match[2].trim(),
+                    content: match[3] || '',
+                    raw: match[0]
+                });
+            }
+        }
+        return items;
+    });
+
+    async function removeContextItem(itemTitle, itemType) {
+        if (!activeDiscussion.value) return;
+        
+        const escapedTitle = itemTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const typePattern = itemType.charAt(0).toUpperCase() + itemType.slice(1);
+        // [FIX] Flexible regex for clean removal of context blocks
+        const regex = new RegExp(`\\s*--- ${typePattern}: ${escapedTitle} ---\\s*\\r?\\n[\\s\\S]*?\\r?\\n--- End ${typePattern}(?:: ${escapedTitle})? ---`, 'g');
+        
+        const newContent = activeDiscussion.value.discussion_data_zone.replace(regex, '').trim();
+        
+        await getActions().updateDataZone({
+            discussionId: activeDiscussion.value.id,
+            content: newContent
+        });
+        
+        await getActions().fetchContextStatus(activeDiscussion.value.id);
+        uiStore.addNotification(`${typePattern} removed from context.`, 'success');
+    }
+
     const discussionGroupsTree = computed(() => {
         const groups = JSON.parse(JSON.stringify(discussionGroups.value));
         const allDiscussions = sortedDiscussions.value;
@@ -176,7 +216,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         isLoadingMessages, 
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
-        promptLoadedArtefacts, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
+        promptLoadedArtefacts, attachedSkills, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
         activeDiscussionParticipants, generationState, imageGenerationSystemPrompt,
         currentModelVisionSupport
     };
@@ -407,6 +447,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
     
+    function attachSkill(skill) {
+        if (!attachedSkills.value.find(s => s.id === skill.id)) {
+            attachedSkills.value.push(skill);
+        }
+    }
+
+    function detachSkill(skillId) {
+        attachedSkills.value = attachedSkills.value.filter(s => s.id !== skillId);
+    }
+
     function $reset() {
         discussions.value = {};
         discussionGroups.value = [];
@@ -441,6 +491,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         titleGenerationInProgressId, activeDiscussionContextStatus,
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
+        attachedSkills,
         ttsState,
         generationState,
         currentPlayingAudio,
@@ -448,6 +499,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
         ..._actions,
+        attachSkill,
+        detachSkill,
+        removeContextItem,
+        loadedContextItems,
         generateTTSForMessage,
         transcribeAudio,
         playAudio,
