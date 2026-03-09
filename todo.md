@@ -208,7 +208,7 @@ When adding a folder to a datasource, show a spinner while the files are being l
 Let the admin select maximal file size that can be uploaded.
 Fix mermaid view
 I see pending approval user in the main admin ui, but when I press it I get No pending users found.
-
+Add skill sharing
 
 Filter out non text files (mp4 etc).
 Add image rag
