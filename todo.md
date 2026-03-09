@@ -213,3 +213,4 @@ I see pending approval user in the main admin ui, but when I press it I get No p
 Filter out non text files (mp4 etc).
 Add image rag
 Add pdf convertion to images
+By default add metadata to the chunks
