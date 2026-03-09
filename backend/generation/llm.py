@@ -1557,12 +1557,39 @@ def build_llm_generation_router(router: APIRouter):
                         ttft = (first_chunk_time - start_time) * 1000
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "ttft", "content": round(ttft, 2)}) + "\n")
 
+                    # Mapping based on the provided MSG_TYPE Enum
                     payload_map = {
+                        # Standard Content - Map both to 'chunk' for reliable streaming
                         MSG_TYPE.MSG_TYPE_CHUNK: {"type": "chunk", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": (params or {}).get("id")},
-                        MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": (params or {}).get("id"), "status": "done"},
-                        MSG_TYPE.MSG_TYPE_INFO: {"type": "info", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_CONTENT: {"type": "chunk", "content": chunk}, 
+                        
+                        # Thoughts
+                        MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK: {"type": "thought", "content": chunk},
                         MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: {"type": "thought", "content": chunk},
+                        
+                        # Status & Steps
+                        MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": (params or {}).get("id")},
+                        MSG_TYPE.MSG_TYPE_STEP_PROGRESS: {"type": "step_progress", "content": chunk, "id": (params or {}).get("id")},
+                        MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": (params or {}).get("id"), "status": "done"},
+                        
+                        # Tooling - Injected into the bubble timeline with clear status
+                        MSG_TYPE.MSG_TYPE_TOOL_CALL: {"type": "step_start", "content": f"🛠️ **Calling Tool:** `{chunk}`", "id": (params or {}).get("id")},
+                        MSG_TYPE.MSG_TYPE_TOOL_OUTPUT: {"type": "step_end", "content": f"✅ **Tool Output received**", "id": (params or {}).get("id"), "status": "done"},
+                        
+                        # Logic Layers
+                        MSG_TYPE.MSG_TYPE_REASONING: {"type": "thought", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_SCRATCHPAD: {"type": "info", "content": f"📝 Scratchpad: {chunk}"},
+                        
+                        # State Changes
+                        MSG_TYPE.MSG_TYPE_ARTEFACTS_STATE_CHANGED: {"type": "artefact_update", "content": chunk},
+                        
+                        # Meta & Errors
+                        MSG_TYPE.MSG_TYPE_GENERATING_TITLE_START: {"type": "new_title_start", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_GENERATING_TITLE_END: {"type": "new_title_end", "new_title": chunk},
+                        MSG_TYPE.MSG_TYPE_INFO: {"type": "info", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_WARNING: {"type": "warning", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_EXCEPTION: {"type": "error", "content": chunk},
                         MSG_TYPE.MSG_TYPE_SOURCES_LIST: {"type": "sources", "content": chunk}
                     }
                     payload = payload_map.get(msg_type)

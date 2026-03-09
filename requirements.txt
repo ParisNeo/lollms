@@ -15,7 +15,7 @@ python-multipart==0.0.20
 bcrypt==4.0.1
 
 # --- LoLLMs Client Library and Common Backends ---
-lollms-client==1.11.13
+lollms-client==1.11.16
 ascii_colors==0.11.20
 pipmaster==1.1.1
 

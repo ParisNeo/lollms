@@ -96,7 +96,8 @@ const tasksStore = useTasksStore();
 const { currentModelVisionSupport, ttsState } = storeToRefs(discussionsStore);
 const { imageGenerationTasks } = storeToRefs(tasksStore);
 
-const isEventsCollapsed = ref(true);
+// Auto-expand timeline if the message is currently streaming/generating
+const isEventsCollapsed = ref(!props.message.isStreaming);
 const isEditing = ref(false);
 const editedContent = ref('');
 const codeMirrorView = ref(null);
@@ -409,6 +410,20 @@ function selectView(groupId, index) {
     selectedViewIndices.value[groupId] = index;
 }
 
+// Ensure events are visible during live generation
+watch(() => props.message.isStreaming, (isStreaming) => {
+    if (isStreaming && hasEvents.value) {
+        isEventsCollapsed.value = false;
+    }
+});
+
+// Ensure events are visible during live generation
+watch(() => props.message.isStreaming, (isStreaming) => {
+    if (isStreaming && hasEvents.value) {
+        isEventsCollapsed.value = false;
+    }
+});
+
 watch(() => props.message.image_references, (newRefs, oldRefs) => {
     if (newRefs && oldRefs && newRefs.length > oldRefs.length) {
         imageGroups.value.forEach(group => {
@@ -453,7 +468,8 @@ const lastEventSummary = computed(() => {
 });
 const eventIconMap = {
   'thought': IconThinking,
-  'tool_call': IconWrenchScrewdriver, // Changed from IconTool for better clarity
+  'tool_call': IconWrenchScrewdriver,
+  'tool_output': IconCheckCircle,
   'observation': IconObservation,
   'info': IconInfo,
   'exception': IconError,

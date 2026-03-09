@@ -517,16 +517,16 @@ function viewLoadedContextItem(item) {
     }
 }
 
-async function viewAttachedFile(file) {
+function viewAttachedFile(file) {
     if (!activeDiscussion.value) return;
-    const content = await discussionsStore.fetchArtefactContent({
-        discussionId: activeDiscussion.value.id,
-        artefactTitle: file.title,
-        version: file.version
-    });
-    if (content) {
-        uiStore.openModal('artefactViewer', { artefact: content });
-    }
+    
+    // 1. Set the document to display in Split View
+    uiStore.activeSplitArtefactTitle = file.title;
+    
+    // 2. Ensure Data Zone is visible for Split View logic
+    uiStore.isDataZoneVisible = true; 
+    
+    uiStore.addNotification(`Opening workspace: ${file.title}`, 'info', 1500);
 }
 async function toggleArtefactLoad(file) { if (!activeDiscussion.value) return; if (file.is_loaded) await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); else await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); }
 async function removeArtefact(file) { if (!activeDiscussion.value) return; const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' }); if (confirmed.confirmed) await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title }); }
@@ -662,12 +662,37 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     </div>
                 </div>
 
-                <div v-for="file in attachedFiles" :key="file.title" 
-                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs border transition-all duration-200 shadow-sm bg-white dark:bg-gray-800 group/file"
-                     :class="file.is_loaded ? 'border-blue-200 text-blue-700 dark:border-blue-800' : 'border-gray-200 text-gray-400 opacity-60'">
-                    <button @click.stop="toggleArtefactLoad(file)" :title="file.is_loaded ? 'Unload' : 'Load'"><IconCheckCircle v-if="file.is_loaded" class="w-4 h-4 text-blue-600"/><IconCircle v-else class="w-4 h-4" /></button>
-                    <span @click="viewAttachedFile(file)" class="truncate max-w-[150px] font-medium cursor-pointer hover:text-blue-600 transition-colors" :title="`Click to view: ${file.title}`">{{ file.title }}</span>
-                    <button @click.stop="removeArtefact(file)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Remove"><IconXMark class="w-3.5 h-3.5" /></button>
+                <!-- Unified Artefact Chips (User Uploads + AI Created) -->
+                <div v-for="file in attachedFiles" :key="`${file.title}-v${file.version}`" 
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all duration-200 shadow-sm group/file"
+                     :class="[
+                        file.is_loaded 
+                            ? (file.author === user.username ? 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-900/20' : 'border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-900/30')
+                            : 'border-gray-300 bg-gray-50 dark:bg-gray-800 text-gray-400 opacity-50'
+                     ]">
+                    
+                    <!-- Icon: Distinguish AI from User -->
+                    <IconSparkles v-if="file.author !== user.username" class="w-3.5 h-3.5 text-purple-500" />
+                    <IconFileText v-else class="w-3.5 h-3.5 text-blue-500" />
+
+                    <!-- Title (Opens Split View Workspace) -->
+                    <span @click.stop="viewAttachedFile(file)" class="truncate max-w-[200px] cursor-pointer hover:underline decoration-2" :title="`Open Workspace: ${file.title} (v${file.version})` ">
+                        {{ file.title }}
+                        <span class="opacity-60 text-[9px] ml-1">v{{ file.version }}</span>
+                    </span>
+
+                    <div class="h-3 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
+
+                    <!-- Load/Unload Toggle -->
+                    <button @click.stop="toggleArtefactLoad(file)" :title="file.is_loaded ? 'Exclude from context' : 'Include in context'" class="hover:scale-110 transition-transform">
+                        <IconCheckCircle v-if="file.is_loaded" class="w-4 h-4 text-green-500"/>
+                        <IconCircle v-else class="w-4 h-4" />
+                    </button>
+
+                    <!-- Remove Button -->
+                    <button @click.stop="removeArtefact(file)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Permanently delete">
+                        <IconXMark class="w-3.5 h-3.5" />
+                    </button>
                 </div>
 
                 <!-- Attached Skills (Staged) -->

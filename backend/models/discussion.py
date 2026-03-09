@@ -243,8 +243,9 @@ class UrlImportRequest(BaseModel):
     process_with_ai: bool = False
 
 class ArtefactAndDataZoneUpdateResponse(BaseModel):
-    discussion_data_zone: str
     artefacts: List[ArtefactInfo]
-    discussion_data_zone_tokens: int
     discussion_images: List[str]
     active_discussion_images: List[bool]
+    # Made optional to support Pure Artefact architecture
+    discussion_data_zone: Optional[str] = None
+    discussion_data_zone_tokens: Optional[int] = None

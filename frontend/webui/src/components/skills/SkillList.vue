@@ -32,6 +32,8 @@ const filteredSkills = computed(() => {
 });
 
 function editSkill(skill) {
+    // Clear any active artefact split to avoid confusion
+    uiStore.activeSplitArtefactTitle = null;
     uiStore.openModal('skillEditor', { skill });
 }
 
@@ -47,18 +49,22 @@ async function deleteSkill(skill) {
 }
 
 async function addToContext(skill) {
-    if (!discussionsStore.currentDiscussionId) {
-        uiStore.addNotification('Please select or start a discussion first.', 'warning');
-        return;
+    // CRITICAL FIX: Stop using the old string injection logic.
+    // Use the versioned artefact system instead.
+    try {
+        await discussionsStore.addSkillAsArtefact(skill);
+        
+        // Auto-open the Side Panel container if it's hidden
+        if (!uiStore.isDataZoneVisible) {
+            uiStore.isDataZoneVisible = true;
+        }
+        
+        // Split view priority logic in ChatView.vue will now automatically
+        // show the ArtefactSplitView because addSkillAsArtefact sets 
+        // uiStore.activeSplitArtefactTitle.
+    } catch (e) {
+        console.error("Failed to add skill as artefact:", e);
     }
-
-    // [FIX] Ensure clean newlines for robust delimiter detection across platforms
-    const formattedContent = `\n--- Skill: ${skill.name} ---\n${skill.content}\n--- End Skill ---\n`;
-    
-    await discussionsStore.appendToDataZone({
-        discussionId: discussionsStore.currentDiscussionId,
-        content: formattedContent
-    });
 }
 
 function triggerImport() {

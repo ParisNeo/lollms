@@ -36,12 +36,16 @@ const isDraggingFile = ref(false);
 const idToUse = computed(() => props.notebookId || discussionsStore.activeDiscussion?.id);
 
 const groupedArtefacts = computed(() => {
-    if (!activeDiscussionArtefacts.value || !Array.isArray(activeDiscussionArtefacts.value)) return [];
+    const allArtefacts = discussionsStore.activeDiscussionArtefacts;
+    if (!allArtefacts || !Array.isArray(allArtefacts)) return [];
     
-    // Filter by relevant ID if we are in Notebook context to prevent cross-contamination
-    const filtered = props.notebookId 
-        ? activeDiscussionArtefacts.value.filter(a => a.discussion_id === props.notebookId)
-        : activeDiscussionArtefacts.value;
+    const currentId = String(idToUse.value); // Coerce to string for comparison
+    
+    // Filter artefacts for the current project context
+    const filtered = allArtefacts.filter(a => {
+        const artDiscId = String(a.discussion_id || '');
+        return !a.discussion_id || artDiscId === currentId;
+    });
 
     const groups = filtered.reduce((acc, artefact) => {
         if (artefact && artefact.title) {
@@ -92,16 +96,23 @@ async function handleArtefactFileUpload(event) {
     }
 }
 
-// Watch for notebook ID change to refresh list
-watch(() => props.notebookId, (newId) => {
-    if (newId) handleRefreshArtefacts();
+// Watch for notebook ID or active discussion change to refresh list
+watch(() => [props.notebookId, discussionsStore.currentDiscussionId], () => {
+    handleRefreshArtefacts();
 }, { immediate: true });
+
+// Listen for global state change event from library to refresh sidebar list
+onMounted(() => {
+    handleRefreshArtefacts();
+});
 
 async function handleDrop(event) {
     isDraggingFile.value = false;
     const files = Array.from(event.dataTransfer.files);
     if (files.length > 0 && idToUse.value) {
         uiStore.addNotification('Adding files to workspace...', 'info');
+        // CRITICAL: Set the active split title to switch the workspace focus
+        uiStore.activeSplitArtefactTitle = files[0].name; 
         await Promise.all(files.map(file => discussionsStore.addArtefact({ 
             discussionId: idToUse.value, 
             file, 

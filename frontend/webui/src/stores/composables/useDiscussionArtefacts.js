@@ -17,13 +17,17 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     const { uiStore, tasksStore } = stores;
 
     function _handleArtefactAndDataZoneUpdate(response) {
+        // Sync the versioned artefacts list
         activeDiscussionArtefacts.value = response.data.artefacts;
+        
         if (activeDiscussion.value) {
-            activeDiscussion.value.discussion_data_zone = response.data.discussion_data_zone;
+            // CRITICAL: We stop syncing 'discussion_data_zone' text here. 
+            // This zone is now purely for manual User instructions.
             activeDiscussion.value.discussion_images = response.data.discussion_images || [];
             activeDiscussion.value.active_discussion_images = response.data.active_discussion_images || [];
         }
-        liveDataZoneTokens.value.discussion = response.data.discussion_data_zone_tokens;
+        
+        // Update tokens for status bar (library still counts artefacts tokens internally)
         if (currentDiscussionId.value) {
             getActions().fetchContextStatus(currentDiscussionId.value);
         }
@@ -44,17 +48,16 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
 
     async function addArtefact({ discussionId, file, extractImages }) {
-        if (!discussionId) {
-            console.error("No discussionId provided for addArtefact");
-            return;
-        }
+        if (!discussionId) return;
         const formData = new FormData();
         formData.append('file', file);
         formData.append('extract_images', extractImages ? 'true' : 'false');
 
         try {
+            // CRITICAL: Explicitly set artefact_type to 'file' for uploads
             const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
+                params: { artefact_type: 'file' }
             });
             
             // If the upload was for the currently active discussion/notebook, update the list
@@ -84,10 +87,22 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
     
     async function deleteArtefact({ discussionId, artefactTitle }) {
-        await apiClient.delete(`/api/discussions/${discussionId}/artefact?artefact_title=${encodeURIComponent(artefactTitle)}`);
-        await fetchArtefacts(discussionId);
-        if (promptLoadedArtefacts.value.has(artefactTitle)) {
-            unloadArtefactFromPrompt(artefactTitle);
+        try {
+            await apiClient.delete(`/api/discussions/${discussionId}/artefact?artefact_title=${encodeURIComponent(artefactTitle)}`);
+            
+            // 1. Force refresh of the local list
+            await fetchArtefacts(discussionId);
+            
+            // 2. Clean up UI states
+            if (state.activeSplitArtefactTitle?.value === artefactTitle) {
+                uiStore.activeSplitArtefactTitle = null;
+            }
+            if (promptLoadedArtefacts.value.has(artefactTitle)) {
+                unloadArtefactFromPrompt(artefactTitle);
+            }
+            uiStore.addNotification('Artefact deleted.', 'success');
+        } catch (e) {
+            uiStore.addNotification('Failed to delete artefact.', 'error');
         }
     }
 
@@ -164,7 +179,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    function unloadArtefactFromPrompt(artefactTitle) {
+    async function unloadArtefactFromPrompt(artefactTitle) {
         if (promptLoadedArtefacts.value.has(artefactTitle)) {
             promptLoadedArtefacts.value.delete(artefactTitle);
             emit('artefact:unload-from-prompt');
@@ -172,7 +187,58 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
+    async function revertArtefact({ discussionId, artefactTitle, version }) {
+        try {
+            await apiClient.post(`/api/discussions/${discussionId}/artefacts/revert`, {
+                title: artefactTitle,
+                version: version
+            });
+            await fetchArtefacts(discussionId);
+            uiStore.addNotification(`Reverted to version ${version}`, 'success');
+        } catch (e) {
+            uiStore.addNotification('Revert failed.', 'error');
+        }
+    }
+
+    // NEW: Functions to bridge global notes/skills to the versioned artefact system
+    async function addNoteAsArtefact(note) {
+        if (!currentDiscussionId.value) return;
+        try {
+            // Check for existing version to prevent duplicate chips
+            const existing = activeDiscussionArtefacts.value.find(a => a.title === note.title);
+            
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
+                { title: note.title, content: note.content, images_b64: [] },
+                { params: { artefact_type: 'note', auto_load: true } }
+            );
+            _handleArtefactAndDataZoneUpdate(response);
+            
+            uiStore.activeSplitArtefactTitle = note.title;
+            const msg = existing ? `Updated '${note.title}' to v${existing.version + 1}` : `Added '${note.title}' to workspace.`;
+            uiStore.addNotification(msg, 'success');
+        } catch (e) { console.error(e); }
+    }
+
+    async function addSkillAsArtefact(skill) {
+        if (!currentDiscussionId.value) return;
+        try {
+            // Check for existing version to prevent duplicate chips
+            const existing = activeDiscussionArtefacts.value.find(a => a.title === skill.name);
+
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
+                { title: skill.name, content: skill.content, images_b64: [] },
+                { params: { artefact_type: 'skill', auto_load: true } }
+            );
+            _handleArtefactAndDataZoneUpdate(response);
+            
+            uiStore.activeSplitArtefactTitle = skill.name;
+            const msg = existing ? `Updated skill '${skill.name}' to v${existing.version + 1}` : `Skill added to workspace.`;
+            uiStore.addNotification(msg, 'success');
+        } catch (e) { console.error(e); }
+    }
+
     return {
+        revertArtefact,
         fetchArtefacts,
         addArtefact,
         createManualArtefact,
@@ -185,6 +251,8 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         loadArtefactToContext,
         unloadArtefactFromContext,
         loadArtefactToPrompt,
-        unloadArtefactFromPrompt
+        unloadArtefactFromPrompt,
+        addNoteAsArtefact,
+        addSkillAsArtefact
     };
 }

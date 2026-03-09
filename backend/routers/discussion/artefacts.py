@@ -21,7 +21,7 @@ try:
 except ImportError:
     pd = None
     docx2python = None
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Form, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Form, status, Body
 from sqlalchemy.orm import Session
 from ascii_colors import trace_exception
 
@@ -360,18 +360,29 @@ def build_artefacts_router(router: APIRouter):
                     except UnicodeDecodeError:
                         content = content_bytes.decode('latin-1', errors='replace')
 
-            artefact_info = discussion.add_artefact(
-                title=title,
-                content=content,
-                images=images,
-                author=current_user.username
-            )
+            # Refactored to use the LollmsDiscussion versioned Artefact system
+            # Check if artefact already exists to avoid duplicate entries with same name
+            existing = discussion.get_artefact(title=title)
             
-            # --- Auto Load Logic ---
-            if auto_load:
-                discussion.load_artefact_into_data_zone(title=title, version=artefact_info['version'])
-            # -----------------------
-
+            if existing:
+                # Creates v2, v3, etc. instead of a new file with same name
+                artefact_info = discussion.update_artefact(
+                    title=title,
+                    new_content=content,
+                    new_images=images,
+                    author=current_user.username,
+                    artefact_type="code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "document"
+                )
+            else:
+                # Standard new creation
+                artefact_info = discussion.add_artefact(
+                    title=title,
+                    content=content,
+                    images=images,
+                    author=current_user.username,
+                    artefact_type="code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "document"
+                )
+            
             discussion.commit()
 
             all_images_info = discussion.get_discussion_images()
@@ -479,10 +490,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             all_images_info = discussion.get_discussion_images()
 
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -577,10 +587,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             all_images_info = discussion.get_discussion_images()
 
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -694,10 +703,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             all_images_info = discussion.get_discussion_images()
 
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -793,10 +801,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             all_images_info = discussion.get_discussion_images()
 
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -925,10 +932,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             all_images_info = discussion.get_discussion_images()
 
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -943,17 +949,37 @@ def build_artefacts_router(router: APIRouter):
     async def create_manual_artefact(
         discussion_id: str,
         payload: ArtefactCreateManual,
+        artefact_type: str = Query("document"),
         auto_load: bool = Query(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        if discussion.get_artefact(title=payload.title):
-            raise HTTPException(status_code=409, detail="An artefact with this title already exists.")
+        
+        existing = discussion.get_artefact(title=payload.title)
+        
         try:
-            artefact_info = discussion.add_artefact(
-                title=payload.title, content=payload.content, images=payload.images_b64, author=current_user.username
-            )
+            if existing:
+                # CRITICAL: Library uses 'name' and 'type'
+                artefact_info = discussion.update_artefact(
+                    title=payload.title, 
+                    content=payload.content, 
+                    images=payload.images_b64, 
+                    author=current_user.username,
+                    type=artefact_type
+                )
+            else:
+                # CRITICAL: Library uses 'name' and 'type'
+                artefact_info = discussion.add_artefact(
+                    title=payload.title, 
+                    content=payload.content, 
+                    images=payload.images_b64, 
+                    author=current_user.username,
+                    type=artefact_type
+                )
+            
+            # NOTE: We do NOT modify discussion.discussion_data_zone string here.
+            # Artefacts are managed by the library's internal list.
             
             if auto_load:
                 discussion.load_artefact_into_data_zone(title=payload.title, version=artefact_info['version'])
@@ -975,10 +1001,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             all_images_info = discussion.get_discussion_images()
 
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -1064,19 +1089,44 @@ def build_artefacts_router(router: APIRouter):
             artefact['updated_at'] = artefact['updated_at'].isoformat()
         return artefact
 
-    @router.delete("/{discussion_id}/artefact", status_code=status.HTTP_204_NO_CONTENT)
+    @router.delete("/{discussion_id}/artefact", status_code=status.HTTP_200_OK)
     async def delete_discussion_artefact(
         discussion_id: str,
         artefact_title: str = Query(...),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
+        from urllib.parse import unquote
+        title = unquote(artefact_title) # Ensure URL encoded titles match correctly
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.remove_artefact(title=artefact_title)
+            # Check if it exists first
+            if not discussion.get_artefact(title=title):
+                raise HTTPException(status_code=404, detail="Artefact not found.")
+                
+            discussion.remove_artefact(title=title)
             discussion.commit()
+            return {"message": f"Artefact '{title}' deleted."}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to delete artefact: {e}")
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post("/{discussion_id}/artefacts/revert", status_code=status.HTTP_200_OK)
+    async def revert_discussion_artefact(
+        discussion_id: str,
+        title: str = Body(..., embed=True),
+        version: int = Body(..., embed=True),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            discussion.artefacts.revert(title, target_version=version)
+            discussion.commit()
+            return {"message": f"Reverted to version {version}"}
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Revert failed: {e}")
 
     @router.post("/{discussion_id}/artefacts/load-all-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
     async def load_all_artefacts_to_data_zone(
@@ -1112,10 +1162,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
             
             all_images_info = discussion.get_discussion_images()
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -1147,10 +1196,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
 
             all_images_info = discussion.get_discussion_images()
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -1183,10 +1231,9 @@ def build_artefacts_router(router: APIRouter):
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
 
             all_images_info = discussion.get_discussion_images()
+            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "discussion_data_zone": discussion.discussion_data_zone,
                 "artefacts": artefacts,
-                "discussion_data_zone_tokens": token_count,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }

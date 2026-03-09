@@ -81,17 +81,41 @@ async function handlePaste(event) {
         <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-30 flex items-center justify-center m-4 pointer-events-none">
             <p class="text-2xl font-bold text-blue-600">Drop files to attach</p>
         </div>
-        <div class="flex-1 flex flex-col h-full overflow-hidden relative">
-            <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-800/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
-                <IconAnimateSpin class="w-16 h-16 text-blue-500 animate-spin" />
-                <p class="mt-4 text-lg font-semibold text-gray-600 dark:text-gray-300">Loading Discussion...</p>
+        <div class="flex-1 flex flex-row h-full overflow-hidden relative">
+            <!-- Main Chat Area (Shrinks when split view is active) -->
+        <div class="flex-1 flex flex-row h-full overflow-hidden relative">
+            <!-- Main Chat Area -->
+            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r dark:border-gray-700">
+                <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-800/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
+                    <IconAnimateSpin class="w-16 h-16 text-blue-500 animate-spin" />
+                    <p class="mt-4 text-lg font-semibold text-gray-600 dark:text-gray-300">Loading Discussion...</p>
+                </div>
+                
+                <div v-show="!isLoadingMessages" class="flex-1 flex flex-col min-h-0 h-full">
+                    <MessageArea class="flex-1 overflow-y-auto" />
+                    <ChatInput />
+                </div>
             </div>
+
+            <!-- Side Panel Slots -->
+            <template v-if="uiStore.activeSplitArtefactTitle">
+                <!-- 1. Workspace (Side-by-side Editor) -->
+                <ArtefactSplitView />
+            </template>
             
-            <div v-show="!isLoadingMessages" class="flex-1 flex flex-col min-h-0 h-full">
-                <MessageArea class="flex-1 overflow-y-auto" />
-                <ChatInput />
-            </div>
+            <template v-else-if="isDataZoneVisible">
+                <!-- 2. Explorer (Manual Instructions / Memory) -->
+                <DataZone />
+            </template>
         </div>
-        <DataZone v-if="isDataZoneVisible" />
+
+            <!-- Workspace Split View (Versioned Editor/Viewer) -->
+            <!-- We show this IF a title is active. It sits to the right of the chat. -->
+            <ArtefactSplitView v-if="uiStore.activeSplitArtefactTitle" />
+            
+            <!-- Context Explorer (Sidebar) -->
+            <!-- If both are open, DataZone appears to the right of the Workspace -->
+            <DataZone v-if="isDataZoneVisible" />
+        </div>
     </div>
 </template>

@@ -46,7 +46,8 @@ const filteredTree = computed(() => {
 });
 
 function handleNoteClick(note) {
-    // Open Note Editor Modal
+    // Clear any active artefact split to avoid confusion
+    uiStore.activeSplitArtefactTitle = null;
     uiStore.openModal('noteEditor', { note });
 }
 

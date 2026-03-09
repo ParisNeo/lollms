@@ -76,6 +76,10 @@ export function useDiscussionGeneration(state, stores, getActions) {
         // Granular state updates for better UI feedback
         generationState.value = { status: 'starting', details: 'Waiting for first token...' };
         
+        // Reset tracking states for the new turn
+        if (state.activeUpdatingArtefacts?.value) state.activeUpdatingArtefacts.value.clear();
+        if (state.liveArtefactBuffers?.value) state.liveArtefactBuffers.value = {};
+        
         promptLoadedArtefacts.value.clear();
         activeGenerationAbortController = new AbortController();
         
@@ -153,16 +157,48 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     };
                     break;
                 case 'chunk':
-                    if (generationState.value.status !== 'streaming' && !generationState.value.details.includes('ttft')) {
+                    if (generationState.value.status !== 'streaming') {
                          generationState.value = { status: 'streaming', details: 'generating...' };
                     }
-                    
-                    // Buffer content instead of direct update
                     contentBuffer += data.content;
                     
-                    const now = Date.now();
-                    if (now - lastUpdateTimestamp > UPDATE_INTERVAL) {
-                        flushBuffer();
+                    // CRITICAL FIX: Defensive check for state properties to prevent "undefined" reading "value"
+                    const updatingArtefacts = state.activeUpdatingArtefacts?.value;
+                    const artefactBuffers = state.liveArtefactBuffers?.value;
+
+                    if (updatingArtefacts && updatingArtefacts.size > 0 && artefactBuffers) {
+                        updatingArtefacts.forEach(title => {
+                            if (artefactBuffers[title] === undefined) {
+                                artefactBuffers[title] = "";
+                            }
+                            artefactBuffers[title] += data.content;
+                        });
+                    }
+
+                    if (Date.now() - lastUpdateTimestamp > UPDATE_INTERVAL) flushBuffer();
+                    break;
+                case 'thought':
+                    if (!messageToUpdate.thoughts) messageToUpdate.thoughts = "";
+                    messageToUpdate.thoughts += data.content;
+                    break;
+                case 'artefact_update':
+                    if (data.content && data.content.title) {
+                        const title = data.content.title;
+                        
+                        // 1. OPEN WORKSPACE: Switch focus to the new document
+                        uiStore.activeSplitArtefactTitle = title;
+                        
+                        // 2. ENSURE SIDE PANEL: Workspace requires the panel container to be open
+                        uiStore.isDataZoneVisible = true; 
+
+                        // 3. Mark as live for the typing buffer
+                        if (state.activeUpdatingArtefacts?.value) {
+                            state.activeUpdatingArtefacts.value.add(title);
+                        }
+
+                        // 4. Refresh metadata so the chip appears as "Active" (Loaded)
+                        getActions().fetchArtefacts(currentDiscussionId.value);
+                        getActions().fetchContextStatus(currentDiscussionId.value);
                     }
                     break;
                 case 'step_start':
@@ -201,15 +237,21 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     break;
                 case 'step_end':
-                    // Revert to streaming status
                     if (generationInProgress.value) {
                          const oldDetails = generationState.value.details;
                          const newDetails = oldDetails.includes('ttft') ? oldDetails : 'generating...';
                          generationState.value = { status: 'streaming', details: newDetails };
                     }
-                    // Push to events so it renders in the chat bubble
                     if (!messageToUpdate.events) messageToUpdate.events = [];
                     messageToUpdate.events.push(data);
+                    break;
+                case 'artefact_update':
+                    // Auto-open split view if AI is patching an artefact
+                    if (data.content && data.content.title) {
+                        uiStore.activeSplitArtefactTitle = data.content.title;
+                        // Refresh the artefact list to get the new version count
+                        getActions().fetchArtefacts(currentDiscussionId.value);
+                    }
                     break;
                 case 'sources':
                     if (!messageToUpdate.sources) messageToUpdate.sources = [];

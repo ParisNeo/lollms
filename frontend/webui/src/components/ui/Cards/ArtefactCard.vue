@@ -66,26 +66,15 @@ function handleUnloadFromPrompt() {
     discussionsStore.unloadArtefactFromPrompt(props.artefactGroup.title);
 }
 
-async function handleView() {
-    const artefact = await discussionsStore.fetchArtefactContent({
-        discussionId: discussionsStore.currentDiscussionId,
-        artefactTitle: props.artefactGroup.title,
-        version: selectedVersion.value,
-    });
-    if (artefact) {
-        uiStore.openModal('artefactViewer', { artefact });
-    }
+function handleView() {
+    // Set the workspace focus
+    uiStore.activeSplitArtefactTitle = props.artefactGroup.title;
+    if (!uiStore.isDataZoneVisible) uiStore.isDataZoneVisible = true;
 }
 
-async function handleEdit() {
-    const artefact = await discussionsStore.fetchArtefactContent({
-        discussionId: discussionsStore.currentDiscussionId,
-        artefactTitle: props.artefactGroup.title,
-        version: selectedVersion.value,
-    });
-    if (artefact) {
-        uiStore.openModal('artefactEditor', { artefact, discussionId: discussionsStore.currentDiscussionId });
-    }
+function handleEdit() {
+    // Both View and Edit now use the Split View Workspace for consistent experience
+    handleView();
 }
 
 async function handleDelete() {

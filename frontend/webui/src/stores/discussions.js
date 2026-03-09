@@ -49,6 +49,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const promptInsertionText = ref('');
     const promptLoadedArtefacts = ref(new Set());
     const attachedSkills = ref([]); // Staged skills for the next message
+    const activeUpdatingArtefacts = ref(new Set()); // Files AI is currently writing to
+    const liveArtefactBuffers = ref({}); // Temporary storage for streaming content
     const activeDiscussionParticipants = ref({});
     const ttsState = ref({});
     const currentPlayingAudio = ref({ messageId: null, audio: null });
@@ -60,6 +62,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             delete newActiveTasks[discussionId];
             activeAiTasks.value = newActiveTasks;
         }
+    }
+
+    async function removeContextItem(itemTitle, itemType) {
+        if (!activeDiscussion.value) return;
+        const escapedTitle = itemTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const typePattern = itemType.charAt(0).toUpperCase() + itemType.slice(1);
+        const regex = new RegExp(`[\\s\\r\\n]*--- ${typePattern}: ${escapedTitle} ---[\\s\\S]*?--- End ${typePattern}(?:: ${escapedTitle})? ---[\\s\\r\\n]*`, 'g');
+        const newContent = (activeDiscussion.value.discussion_data_zone || '').replace(regex, '\n\n').trim();
+        await getActions().updateDataZone({ discussionId: activeDiscussion.value.id, content: newContent });
+        await getActions().fetchContextStatus(activeDiscussion.value.id);
+        uiStore.addNotification(`${typePattern} removed from context.`, 'success');
     }
 
     // --- WATCHER for task updates ---
@@ -122,6 +135,27 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeMessages = computed(() => messages.value);
     const dataZonesTokensFromContext = computed(() => activeDiscussionContextStatus.value?.zones?.system_context?.breakdown?.discussion_data_zone?.tokens || 0);
     const activeDiscussionContainsCode = computed(() => activeMessages.value.some(msg => msg.content && msg.content.includes('```')));
+    
+    // CRITICAL FIX: Ensure reactivity and proper deduplication of versions
+    const uniqueAttachedArtefacts = computed(() => {
+        const list = activeDiscussionArtefacts.value;
+        if (!list || !Array.isArray(list)) return [];
+        
+        const map = new Map();
+        list.forEach(art => {
+            const existing = map.get(art.title);
+            // If new version found, update the entry in the map
+            if (!existing || art.version > existing.version) {
+                map.set(art.title, {
+                    ...art,
+                    // Ensure author is present for visual coding (AI vs User)
+                    author: art.author || 'assistant'
+                });
+            }
+        });
+        return Array.from(map.values());
+    });
+
     const currentModelVisionSupport = computed(() => {
         const modelId = authStore.user?.lollms_model_name;
         if (!modelId) return true;
@@ -218,7 +252,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         isLoadingMessages, 
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
-        promptLoadedArtefacts, attachedSkills, _clearActiveAiTask, activeDiscussion, activePersonality, emit,
+        promptLoadedArtefacts, attachedSkills, activeUpdatingArtefacts, liveArtefactBuffers, // Added missing refs
+        _clearActiveAiTask, activeDiscussion, activePersonality, emit,
         activeDiscussionParticipants, generationState, imageGenerationSystemPrompt,
         currentModelVisionSupport
     };
@@ -232,6 +267,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     Object.assign(_actions, useDiscussionGroups(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionMessages(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionSharing(composableState, composableStores, getActions));
+    
+    // Register the missing function in the actions registry
+    _actions.removeContextItem = removeContextItem;
 
     async function generateTTSForMessage(messageId, text) {
         if (ttsState.value[messageId]?.isLoading) return;
@@ -422,32 +460,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function createManualArtefact(discussionId, title, content) {
-        if (!discussionId) return;
-        try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/manual?auto_load=true`, {
-                title,
-                content,
-                images_b64: []
-            });
-            const data = response.data;
+    // Removed duplicate internal functions now handled by useDiscussionArtefacts.js
             
-            getActions().handleDataZoneUpdate({
-                discussion_id: discussionId,
-                zone: 'discussion',
-                new_content: data.discussion_data_zone,
-                discussion_images: data.discussion_images,
-                active_discussion_images: data.active_discussion_images
-            });
-            
-            activeDiscussionArtefacts.value = data.artefacts;
-            uiStore.addNotification('Document created and loaded.', 'success');
-        } catch (error) {
-            console.error(error);
-            uiStore.addNotification('Failed to create manual artefact.', 'error');
-            throw error;
-        }
-    }
     
     function attachSkill(skill) {
         if (!attachedSkills.value.find(s => s.id === skill.id)) {
@@ -479,8 +493,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         promptInsertionText.value = '';
         promptLoadedArtefacts.value = new Set();
         activeDiscussionParticipants.value = {};
-        if (currentPlayingAudio.value.audio) {
-            currentPlayingAudio.value.audio.pause();
+        
+        // Defensive check for audio reset
+        if (currentPlayingAudio.value?.audio) {
+            try {
+                currentPlayingAudio.value.audio.pause();
+            } catch (e) { /* ignore cleanup errors */ }
         }
         currentPlayingAudio.value = { messageId: null, audio: null };
         ttsState.value = {};
@@ -488,23 +506,25 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     return {
+        // State
         discussions, currentDiscussionId, currentGroupId, messages, generationInProgress, discussionGroups,
         isLoadingDiscussions, isLoadingMessages, 
         titleGenerationInProgressId, activeDiscussionContextStatus,
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
-        attachedSkills,
-        ttsState,
-        generationState,
-        currentPlayingAudio,
-        imageGenerationSystemPrompt,
+        attachedSkills, ttsState, generationState, currentPlayingAudio, imageGenerationSystemPrompt,
+
+        // Computeds
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
+        loadedContextItems,
+
+        // Actions (Spread from composables)
         ..._actions,
+
+        // Store-level methods
         attachSkill,
         detachSkill,
-        removeContextItem,
-        loadedContextItems,
         generateTTSForMessage,
         transcribeAudio,
         playAudio,
@@ -513,11 +533,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         handleDiscussionImagesUpdated,
         toggleDiscussionImage,
         triggerTagGeneration,
-        importWikipediaArtefact,
-        importYoutubeTranscript,
-        importGithubArtefact,
-        importStackOverflowArtefact,
-        createManualArtefact,
         $reset,
     };
 });

@@ -316,9 +316,10 @@ def build_message_router(router: APIRouter):
                 
                 b64 = base64.b64encode(img_bytes).decode('utf-8')
                 
-                # Update message using the new method for adding packs
-                if hasattr(msg_obj, 'add_image_pack'):
-                    msg_obj.add_image_pack([b64], group_type="generated", active_by_default=True, title=prompt)
+                # Ensure the library generates a base entry for the new artefact 
+                # so it appears in the sidebar even if content is still being streamed
+                if not discussion.get_artefact(title=prompt):
+                     discussion.add_artefact(title=prompt, content="", author=username)
                 
                 new_index = len(msg_obj.images) - 1
                 meta = msg_obj.metadata or {}
