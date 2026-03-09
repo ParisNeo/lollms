@@ -14,8 +14,11 @@ const discussionsStore = useDiscussionsStore();
 
 const title = computed(() => uiStore.activeSplitArtefactTitle);
 
-// Track if this file is currently being modified by AI
-const isLiveUpdating = computed(() => discussionsStore.activeUpdatingArtefacts.has(title.value));
+// Track if this file is currently being modified by AI - Added defensive checks
+const isLiveUpdating = computed(() => {
+    if (!title.value || !discussionsStore.activeUpdatingArtefacts) return false;
+    return discussionsStore.activeUpdatingArtefacts.has(title.value);
+});
 
 const artefactGroup = computed(() => {
     if (!title.value) return null;
@@ -28,11 +31,12 @@ const artefactGroup = computed(() => {
 const selectedVersion = ref(null);
 const dbContent = ref('');
 const isSaving = ref(false);
+const isFetching = ref(false);
 
 // Combined logic: Show the live stream if AI is writing, otherwise show DB content
-const displayContent = computed({
+const content = computed({
     get: () => {
-        if (isLiveUpdating.value && discussionsStore.liveArtefactBuffers[title.value]) {
+        if (isLiveUpdating.value && discussionsStore.liveArtefactBuffers && discussionsStore.liveArtefactBuffers[title.value]) {
             return discussionsStore.liveArtefactBuffers[title.value];
         }
         return dbContent.value;
@@ -44,58 +48,77 @@ const displayContent = computed({
 
 async function loadVersion(v) {
     if (!title.value || v === null) return;
-    const data = await discussionsStore.fetchArtefactContent({
-        discussionId: discussionsStore.currentDiscussionId,
-        artefactTitle: title.value,
-        version: v
-    });
-    
-    if (data && data.content) {
-        // [FIX] Strip out legacy redundant headers (--- Document: ... ---) 
-        // to keep the Workspace view clean and pure.
-        let cleaned = data.content.trim();
-        const headerPattern = /^(--- (Document|Skill|Note): .*? ---)/i;
-        const footerPattern = /(--- End \2(?:: .*?)? ---)$/i;
+    isFetching.value = true;
+    try {
+        const data = await discussionsStore.fetchArtefactContent({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: title.value,
+            version: v
+        });
         
-        cleaned = cleaned.replace(headerPattern, '').replace(footerPattern, '').trim();
-        dbContent.value = cleaned;
+        if (data && data.content !== undefined) {
+            // [FIX] Strip out legacy redundant headers (--- Document: ... ---) 
+            // to keep the Workspace view clean and pure.
+            let cleaned = data.content.trim();
+            const headerPattern = /^--- (Document|Skill|Note|Artefact): .*? ---/i;
+            const footerPattern = /--- End (Document|Skill|Note|Artefact)(?:: .*?)? ---$/i;
+            
+            cleaned = cleaned.replace(headerPattern, '').replace(footerPattern, '').trim();
+            dbContent.value = cleaned;
+        }
+    } finally {
+        isFetching.value = false;
     }
 }
 
-// Watch for group changes (e.g. AI adds a new version)
-watch(artefactGroup, (newGroup, oldGroup) => {
-    if (!newGroup) return;
-    
-    // If AI just finished a new version or it's first load
-    const latestVersion = newGroup.versions[0].version;
-    if (!selectedVersion.value || (oldGroup && newGroup.versions.length > oldGroup.versions.length)) {
-        selectedVersion.value = latestVersion;
-        loadVersion(latestVersion);
+// Watch both title AND group availability to trigger initial load
+watch([title, () => !!artefactGroup.value], ([newTitle, hasGroup]) => {
+    if (newTitle && hasGroup) {
+        const latest = artefactGroup.value.versions[0].version;
+        if (selectedVersion.value !== latest) {
+            selectedVersion.value = latest;
+            loadVersion(latest);
+        }
     }
-}, { immediate: true, deep: true });
+}, { immediate: true });
+
+// Watch for AI updates adding new versions to the current file
+watch(() => artefactGroup.value?.versions.length, (newLen, oldLen) => {
+    if (newLen > oldLen && artefactGroup.value) {
+        const latest = artefactGroup.value.versions[0].version;
+        selectedVersion.value = latest;
+        loadVersion(latest);
+    }
+});
 
 async function handleSave() {
+    if (isLiveUpdating.value) return;
     isSaving.value = true;
-    await discussionsStore.updateArtefact({
-        discussionId: discussionsStore.currentDiscussionId,
-        artefactTitle: title.value,
-        newContent: content.value,
-        updateInPlace: false // Creates new version
-    });
-    isSaving.value = false;
-    uiStore.addNotification("New version saved.", "success");
+    try {
+        await discussionsStore.updateArtefact({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: title.value,
+            newContent: dbContent.value, // Use the local editable ref
+            updateInPlace: false // Creates new version
+        });
+        uiStore.addNotification("New version saved.", "success");
+    } finally {
+        isSaving.value = false;
+    }
 }
 
 async function handleUndo() {
-    if (artefactGroup.value.versions.length < 2) return;
+    if (!artefactGroup.value || artefactGroup.value.versions.length < 2) return;
     const prevVersion = artefactGroup.value.versions[1].version;
-    await apiClient.post(`/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/revert`, {
-        title: title.value,
+    
+    await discussionsStore.revertArtefact({
+        discussionId: discussionsStore.currentDiscussionId,
+        artefactTitle: title.value,
         version: prevVersion
     });
+    
     selectedVersion.value = prevVersion;
     await loadVersion(prevVersion);
-    discussionsStore.fetchArtefacts(discussionsStore.currentDiscussionId);
 }
 
 function download() {
@@ -136,10 +159,10 @@ function download() {
             </button>
         </div>
         <div class="p-2 border-b border-gray-200 dark:border-gray-700 flex gap-2 items-center bg-white dark:bg-gray-850 shadow-sm relative z-10">
-            <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg px-2 py-1 gap-2">
+            <div v-if="artefactGroup" class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg px-2 py-1 gap-2">
                 <span class="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Version</span>
                 <select v-model="selectedVersion" @change="loadVersion(selectedVersion)" class="bg-transparent border-none text-xs font-bold text-blue-600 dark:text-blue-400 focus:ring-0 p-0 pr-6">
-                    <option v-for="v in artefactGroup?.versions" :key="v.version" :value="v.version">
+                    <option v-for="v in artefactGroup.versions" :key="v.version" :value="v.version">
                         v{{ v.version }} {{ v.version === artefactGroup.versions[0].version ? '(Latest)' : '' }}
                     </option>
                 </select>
@@ -163,7 +186,10 @@ function download() {
                 <span>Save v{{ artefactGroup?.versions[0].version + 1 }}</span>
             </button>
         </div>
-        <div class="flex-1 relative">
+        <div class="flex-1 relative bg-white dark:bg-gray-950">
+            <div v-if="isFetching" class="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm flex items-center justify-center">
+                <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
+            </div>
             <CodeMirrorEditor v-model="content" class="absolute inset-0 h-full" initialMode="edit" :renderable="true" />
         </div>
     </div>

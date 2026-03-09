@@ -162,16 +162,16 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     contentBuffer += data.content;
                     
-                    // CRITICAL FIX: Defensive check for state properties to prevent "undefined" reading "value"
+                    // Ensure the state properties exist before iterating
                     const updatingArtefacts = state.activeUpdatingArtefacts?.value;
-                    const artefactBuffers = state.liveArtefactBuffers?.value;
+                    const artefactBuffers = state.liveArtefactBuffers; // Pinia unwraps refs in state object
 
-                    if (updatingArtefacts && updatingArtefacts.size > 0 && artefactBuffers) {
+                    if (updatingArtefacts && updatingArtefacts.size > 0 && artefactBuffers?.value) {
                         updatingArtefacts.forEach(title => {
-                            if (artefactBuffers[title] === undefined) {
-                                artefactBuffers[title] = "";
+                            if (artefactBuffers.value[title] === undefined) {
+                                artefactBuffers.value[title] = "";
                             }
-                            artefactBuffers[title] += data.content;
+                            artefactBuffers.value[title] += data.content;
                         });
                     }
 

@@ -387,80 +387,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function importWikipediaArtefact(discussionId, query) {
-        if (!discussionId) return;
-        try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/wikipedia`, { query });
-            const data = response.data;
-            
-            getActions().handleDataZoneUpdate({
-                discussion_id: discussionId,
-                zone: 'discussion',
-                new_content: data.discussion_data_zone,
-                discussion_images: data.discussion_images,
-                active_discussion_images: data.active_discussion_images
-            });
-            
-            activeDiscussionArtefacts.value = data.artefacts;
-            uiStore.addNotification('Wikipedia article imported and loaded.', 'success');
-        } catch (error) {
-            console.error(error);
-            uiStore.addNotification(error.response?.data?.detail || 'Failed to import Wikipedia article.', 'error');
-            throw error;
-        }
-    }
-    async function importGithubArtefact(discussionId, url) {
-        if (!discussionId) return;
-        try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/github`, { url, auto_load: true });
-            _handleArtefactAndDataZoneUpdate(response);
-            uiStore.addNotification('GitHub content imported and loaded.', 'success');
-        } catch (error) {
-            console.error(error);
-            uiStore.addNotification(error.response?.data?.detail || 'Failed to import GitHub content.', 'error');
-            throw error;
-        }
-    }
-
-    async function importStackOverflowArtefact(discussionId, url) {
-        if (!discussionId) return;
-        try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/stackoverflow`, { url, auto_load: true });
-            _handleArtefactAndDataZoneUpdate(response);
-            uiStore.addNotification('StackOverflow content imported and loaded.', 'success');
-        } catch (error) {
-            console.error(error);
-            uiStore.addNotification(error.response?.data?.detail || 'Failed to import StackOverflow content.', 'error');
-            throw error;
-        }
-    }
-    async function importYoutubeTranscript(discussionId, videoUrl, language) {
-        if (!discussionId) return;
-        const payload = { video_url: videoUrl };
-        if (language) payload.language = language;
-
-        try {
-            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/youtube`, payload);
-            const data = response.data;
-            
-            getActions().handleDataZoneUpdate({
-                discussion_id: discussionId,
-                zone: 'discussion',
-                new_content: data.discussion_data_zone,
-                discussion_images: data.discussion_images,
-                active_discussion_images: data.active_discussion_images
-            });
-            
-            activeDiscussionArtefacts.value = data.artefacts;
-            uiStore.addNotification('YouTube transcript imported and loaded.', 'success');
-        } catch (error) {
-            console.error(error);
-            uiStore.addNotification(error.response?.data?.detail || 'Failed to import YouTube transcript.', 'error');
-            throw error;
-        }
-    }
-
-    // Removed duplicate internal functions now handled by useDiscussionArtefacts.js
+    // Consolidation: Wikipedia, Github, StackOverflow, and Youtube imports are now handled in useDiscussionArtefacts.js
             
     
     function attachSkill(skill) {
@@ -493,6 +420,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         promptInsertionText.value = '';
         promptLoadedArtefacts.value = new Set();
         activeDiscussionParticipants.value = {};
+        
+        // Reset Workspace/Live Tracking
+        activeUpdatingArtefacts.value = new Set();
+        liveArtefactBuffers.value = {};
         
         // Defensive check for audio reset
         if (currentPlayingAudio.value?.audio) {
