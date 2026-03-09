@@ -1201,18 +1201,182 @@ def build_llm_generation_router(router: APIRouter):
                 yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client. Check your binding settings."}) + "\n"
             return StreamingResponse(error_stream(), media_type="application/x-ndjson")
 
-        # 3. Setup RAG Callback
-        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
-        rag_tools = {}
+        # 3. Setup Tools (RAG, Web Search, Memory, etc.)
+        agentic_tools = {}
+        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids',[])
         for ds_id in rag_datastore_ids:
             ss = get_safe_store_instance(owner_username, ds_id, db)
             if not ss:
                 continue
-            rag_tools[ss.name]=build_rag_tool(
-                                    safe_store_instance=ss,  # Your SS (semantic search) instance
-                                    owner_db_user=owner_db_user,             # User with RAG settings
-                                    current_user=current_user               # Fallback user for default settings
-                                )
+            agentic_tools[ss.name] = build_rag_tool(
+                safe_store_instance=ss,
+                owner_db_user=owner_db_user,
+                current_user=current_user
+            )
+            
+        search_sources_list =[]
+        if owner_db_user.web_search_enabled:
+            active_providers = owner_db_user.web_search_providers or ["google"]
+            def tool_internet_search(query: str):
+                search_sources_list.clear() # Reset for this turn
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": f"Web Agent: Searching {', '.join(active_providers)}..."}) + "\n")
+                results = perform_multi_search(query, active_providers, owner_db_user)
+                if results:
+                    scraped =[]
+                    scraper = ScrapeMaster()
+                    for res in results[:3]:
+                        try:
+                            c = scraper.scrape(res['link'])
+                            if c and len(c.strip()) > 500:
+                                scraped.append(f"### {res['title']}\nURL: {res['link']}\n{c.strip()[:3500]}")
+                        except Exception: pass
+                    
+                    tool_sources =[]
+                    for i, res in enumerate(results):
+                        src = {"title": res['title'], "content": res['snippet'], "source": res['link'], "index": i+1}
+                        search_sources_list.append(src)
+                        tool_sources.append({
+                            "source": res['link'],
+                            "content": res['snippet'],
+                            "score": 100.0,
+                            "metadata": {"title": res['title']}
+                        })
+                    
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "content": search_sources_list}) + "\n")
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Found and read {len(scraped)} pages."}) + "\n")
+                    return {"success": True, "results": results, "scraped_text": "\n".join(scraped), "sources": tool_sources}
+                
+                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": "No results found."}) + "\n")
+                return {"success": False, "results": [], "sources": []}
+
+            agentic_tools["internet_search"] = {
+                "name": "internet_search",
+                "description": "Search the internet for up-to-date information.",
+                "parameters": [{"name": "query", "type": "str", "optional": False}],
+                "output":[{"name": "success", "type": "bool"}, {"name": "results", "type": "list"}, {"name": "scraped_text", "type": "str"}, {"name": "sources", "type": "list"}],
+                "callable": tool_internet_search
+            }
+
+        if owner_db_user.memory_enabled:
+            def tool_memory_add(title: str, content: str):
+                db_mem = next(get_db())
+                try:
+                    new_memory = UserMemory(owner_user_id=owner_db_user.id, title=title, content=content)
+                    db_mem.add(new_memory)
+                    db_mem.commit()
+                    manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory"}}, current_user.id)
+                    return {"success": True, "message": "Memory added."}
+                finally:
+                    db_mem.close()
+            
+            def tool_memory_delete(index: int):
+                db_mem = next(get_db())
+                try:
+                    memories = db_mem.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.created_at.asc()).all()
+                    if 1 <= index <= len(memories):
+                        db_mem.delete(memories[index-1])
+                        db_mem.commit()
+                        manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory"}}, current_user.id)
+                        return {"success": True, "message": "Memory deleted."}
+                    return {"success": False, "error": "Invalid index."}
+                finally:
+                    db_mem.close()
+
+            agentic_tools["memory_add"] = {
+                "name": "memory_add",
+                "description": "Add a new fact to the user's long-term memory.",
+                "parameters":[{"name": "title", "type": "str", "optional": False}, {"name": "content", "type": "str", "optional": False}],
+                "output":[{"name": "success", "type": "bool"}, {"name": "message", "type": "str"}],
+                "callable": tool_memory_add
+            }
+            agentic_tools["memory_delete"] = {
+                "name": "memory_delete",
+                "description": "Delete a memory by its 1-based index.",
+                "parameters":[{"name": "index", "type": "int", "optional": False}],
+                "output":[{"name": "success", "type": "bool"}, {"name": "message", "type": "str"}],
+                "callable": tool_memory_delete
+            }
+
+        if owner_db_user.slide_maker_enabled:
+            def tool_generate_slides(topic: str, width: int = 1024, height: int = 768):
+                try:
+                    task_description = f"Creating slides for topic: {topic[:30]}..."
+                    new_task = task_manager.submit_task(
+                        name=f"Generating Slides",
+                        target=_generate_slides_task,
+                        args=(owner_username, discussion_obj.id, None, topic, width, height),
+                        description=task_description,
+                        owner_username=owner_username
+                    )
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": "Started slide generation task."})) + "\n")
+                    return {"success": True, "task_id": new_task.id}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            agentic_tools["generate_slides"] = {
+                "name": "generate_slides",
+                "description": "Generate a presentation slide deck based on a topic.",
+                "parameters":[
+                    {"name": "topic", "type": "str", "optional": False},
+                    {"name": "width", "type": "int", "optional": True, "default": 1024},
+                    {"name": "height", "type": "int", "optional": True, "default": 768}
+                ],
+                "output":[{"name": "success", "type": "bool"}, {"name": "task_id", "type": "str"}],
+                "callable": tool_generate_slides
+            }
+
+        if owner_db_user.street_view_enabled and owner_db_user.google_api_key:
+            def tool_get_street_view(location: str):
+                try:
+                    url = f"https://maps.googleapis.com/maps/api/streetview?size=600x400&location={location}&key={owner_db_user.google_api_key}"
+                    resp = requests.get(url)
+                    if resp.status_code == 200:
+                        b64 = base64.b64encode(resp.content).decode('utf-8')
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": f"Fetched street view for {location}"})) + "\n")
+                        discussion_obj.artefacts.add(
+                            title=f"Street View - {location}",
+                            artefact_type="image",
+                            images=[b64],
+                            active=True
+                        )
+                        return {"success": True, "message": "Image saved as an active artefact."}
+                    return {"success": False, "error": "API returned non-200 status"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+            
+            agentic_tools["get_street_view"] = {
+                "name": "get_street_view",
+                "description": "Get a Google Street View image for a location.",
+                "parameters":[{"name": "location", "type": "str", "optional": False}],
+                "output":[{"name": "success", "type": "bool"}, {"name": "message", "type": "str"}],
+                "callable": tool_get_street_view
+            }
+
+        if owner_db_user.scheduler_enabled:
+            def tool_schedule_task(name: str, cron: str, prompt_text: str):
+                db_sched = next(get_db())
+                try:
+                    new_task = ScheduledTask(owner_user_id=owner_db_user.id, name=name, cron_expression=cron, prompt=prompt_text, is_active=True)
+                    db_sched.add(new_task)
+                    db_sched.commit()
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": f"Scheduled task '{name}'"})) + "\n")
+                    return {"success": True, "message": f"Task scheduled with cron {cron}"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+                finally:
+                    db_sched.close()
+                    
+            agentic_tools["schedule_task"] = {
+                "name": "schedule_task",
+                "description": "Schedule a task to run periodically using cron format.",
+                "parameters":[
+                    {"name": "name", "type": "str", "optional": False},
+                    {"name": "cron", "type": "str", "optional": False, "description": "min hour day month dow"},
+                    {"name": "prompt_text", "type": "str", "optional": False}
+                ],
+                "output":[{"name": "success", "type": "bool"}, {"name": "message", "type": "str"}],
+                "callable": tool_schedule_task
+            }
         # 4. Construct Context (Memory + Dynamic Preamble)
         memory_content = ""
         memory_instructions = ""
@@ -1312,18 +1476,7 @@ def build_llm_generation_router(router: APIRouter):
 
         # Feature Specific Instructions
         if owner_db_user.image_annotation_enabled: preamble_parts.append("## Image Annotation: Use <annotate>[JSON]</annotate> for bounding boxes/points.")
-        if owner_db_user.image_generation_enabled: preamble_parts.append("## Image Gen: Use <generate_image width=\"W\" height=\"H\" n=\"N\">prompt</generate_image>.")
-        if owner_db_user.slide_maker_enabled: preamble_parts.append("## Slides: Use <generate_slides><Slide>desc</Slide></generate_slides>.")
-        if owner_db_user.image_editing_enabled: preamble_parts.append("## Image Edit: Use <edit_image source_index=\"-1\" strength=\"0.8\">prompt</edit_image>.")
-        if owner_db_user.street_view_enabled and owner_db_user.google_api_key: preamble_parts.append("## Street View: Use <street_view>location</street_view>.")
-        if owner_db_user.scheduler_enabled: preamble_parts.append("## Scheduler: Use <schedule_task name=\"Title\" cron=\"* * * * *\">Prompt to run</schedule_task>. Cron format: min hour day month dow.")
-        if owner_db_user.google_drive_enabled: preamble_parts.append("## Google Drive: Use <google_drive_list>folder_id</google_drive_list> to list files. Use <google_drive_read>file_id</google_drive_read> to read.")
-        if owner_db_user.google_calendar_enabled: preamble_parts.append("## Calendar: Use <calendar_list>today</calendar_list> or <calendar_add start=\"ISO\" end=\"ISO\">Title</calendar_add>.")
-        if owner_db_user.google_gmail_enabled: preamble_parts.append("## Gmail: Use <gmail_send to=\"email\">Subject|Body</gmail_send> or <gmail_list>count</gmail_list>.")
-
         if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use <note title=\"Title\">...</note> for structured data.")
-        if memory_instructions: preamble_parts.append(memory_instructions)
-
         if getattr(owner_db_user, 'skills_building_enabled', False):
             preamble_parts.append("## Skill Building: If the user asks to save this as a skill, learn a new trick, or remember a pattern, wrap the detailed documentation or code pattern in `<skill title=\"Clear Name\" description=\"What this teaches/provides\" category=\"programming/language/feature\">content</skill>`. Make sure the category uses forward slashes.")
 
@@ -1434,53 +1587,6 @@ def build_llm_generation_router(router: APIRouter):
                                 b64 = base64.b64encode((assets_path / persistent_filename).read_bytes()).decode('utf-8')
                                 images_for_message.append(resize_base64_image(b64, owner_db_user.max_image_width, owner_db_user.max_image_height))
 
-                    # --- WEB SEARCH AGENT (Persistent Source of Truth) ---
-                    search_context = ""
-                    search_sources_list = []
-                    
-                    if owner_db_user.web_search_enabled:
-                        active_providers = owner_db_user.web_search_providers or ["google"]
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": "Web Agent: Analyzing need for search..."}) + "\n")
-                        
-                        pre_flight = f"User: \"{prompt}\". Do you need to search the internet? Respond JSON: {{ \"search\": true/false, \"query\": \"terms\" }}"
-                        try:
-                            decision_text = lc.generate_text(pre_flight, max_new_tokens=100, temperature=0.0)
-                            json_match = re.search(r'\{.*\}', decision_text, re.DOTALL)
-                            if json_match:
-                                decision = json.loads(json_match.group(0))
-                                if decision.get("search"):
-                                    search_query = decision.get("query", prompt)
-                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent: Decided to search for '{search_query}'"}) + "\n")
-                                    
-                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": f"Web Agent: Searching {', '.join(active_providers)}..."}) + "\n")
-                                    results = perform_multi_search(search_query, active_providers, owner_db_user)
-                                    
-                                    if results:
-                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent: Found {len(results)} results."}) + "\n")
-                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": "Web Agent: Reading page contents..."}) + "\n")
-                                        
-                                        scraped = []
-                                        scraper = ScrapeMaster()
-                                        for res in results[:3]:
-                                            try:
-                                                c = scraper.scrape(res['link'])
-                                                if c and len(c.strip()) > 500:
-                                                    scraped.append(f"### {res['title']}\nURL: {res['link']}\n{c.strip()[:3500]}")
-                                            except Exception: pass
-                                        
-                                        search_context = "### Web Search Context:\n" + "\n".join(scraped) + "\n"
-                                        for i, res in enumerate(results):
-                                            search_sources_list.append({"title": res['title'], "content": res['snippet'], "source": res['link'], "index": i+1})
-                                        
-                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent: Digested {len(scraped)} pages."}) + "\n")
-                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "sources", "content": search_sources_list}) + "\n")
-                                    else:
-                                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": "Web Agent: No results found.", "status": "failed"}) + "\n")
-                                else:
-                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": "Web Agent: Decided search is unnecessary."}) + "\n")
-                        except Exception as e:
-                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_end", "content": f"Web Agent Error: {e}", "status": "failed"}) + "\n")
-
                     # --- HERD MODE ---
                     herd_context = ""
                     if owner_db_user.herd_mode_enabled:
@@ -1495,8 +1601,6 @@ def build_llm_generation_router(router: APIRouter):
                     if not final_prompt.strip() and images_for_message:
                         final_prompt = "Analyze this image"
 
-                    if search_context:
-                        active_personality.system_prompt += f"\n\n{search_context}\nUse this context to answer. Cite using [1], [2] tags."
                     if herd_context:
                         final_prompt += f"\n\n[Debate History]:\n{herd_context}\n\n[Final Instruction]: Synthesize the definitive answer."
 
@@ -1523,79 +1627,20 @@ def build_llm_generation_router(router: APIRouter):
                         think=owner_db_user.reasoning_activation,
                         reasoning_effort=owner_db_user.reasoning_effort, 
                         add_user_message=False, # We added it ourselves or it's a resend
-                        tools=rag_tools
+                        tools=agentic_tools,
+                        enable_image_generation=owner_db_user.image_generation_enabled,
+                        enable_image_editing=owner_db_user.image_editing_enabled,
+                        auto_activate_artefacts=True
                     )
                     
                     ai_msg = result.get('ai_message')
                     if ai_msg:
                         # Update Metadata
-                        # Fuse sources (RAG + Web Search)
-                        current_sources = ai_msg.metadata.get('sources', [])
-                        if search_sources_list:
-                            # Re-index web sources to continue after RAG sources
-                            start_index = len(current_sources) + 1
-                            for i, src in enumerate(search_sources_list):
-                                src['index'] = start_index + i
-                            all_sources = current_sources + search_sources_list
-                            ai_msg.set_metadata_item('sources', all_sources, discussion_obj)
+                        # LollmsDiscussion handles injecting sources from tool results into metadata natively!
 
-                        # Process Internal Tags (Memory, Image Gen, Image Edit)
-                        if owner_db_user.memory_enabled:
-                            db_mem = next(get_db())
-                            try:
-                                cleaned, action = process_memory_tags(ai_msg.content, owner_db_user.id, db_mem)
-                                if action: 
-                                    ai_msg.content = cleaned
-                                    manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory"}}, current_user.id)
-                            finally: db_mem.close()
-
-                        if getattr(owner_db_user, 'skills_building_enabled', False):
-                            db_skill = next(get_db())
-                            try:
-                                cleaned, action, saved_titles = process_skill_tags(ai_msg.content, owner_db_user.id, db_skill)
-                                if action:
-                                    ai_msg.content = cleaned
-                                    for t in saved_titles:
-                                        manager.send_personal_message_sync({"type": "skill_saved", "data": {"title": t}}, current_user.id)
-                            finally: db_skill.close()
-
-                        if owner_db_user.image_generation_enabled:
-                            db_img = next(get_db())
-                            try:
-                                _, imgs, meta, groups = process_image_generation_tags(ai_msg.content, owner_db_user, db_img, discussion_obj, main_loop, stream_queue)
-                                _, slide_tid = process_slide_generation_tags(ai_msg.content, owner_db_user, db_img, discussion_obj, ai_msg.id, main_loop, stream_queue)
-                                if imgs:
-                                    ai_msg.add_image_pack(imgs, group_type="generated", active_by_default=owner_db_user.activate_generated_images, title=meta[0]['prompt'])
-                                    ai_msg.set_metadata_item("generated_image_infos", (ai_msg.metadata.get("generated_image_infos", []) + meta), discussion_obj)
-                                    ai_msg.set_metadata_item("generated_groups", (ai_msg.metadata.get("generated_groups", []) + groups), discussion_obj)
-                                if slide_tid: ai_msg.set_metadata_item('active_task_id', slide_tid, discussion_obj)
-                                discussion_obj.commit()
-                            finally: db_img.close()
-                        
-                        # Google Street View
-                        if owner_db_user.street_view_enabled:
-                            db_sv = next(get_db())
-                            try:
-                                _, imgs, meta, groups = process_street_view_tags(ai_msg.content, owner_db_user, db_sv, discussion_obj, main_loop, stream_queue)
-                                if imgs:
-                                    ai_msg.add_image_pack(imgs, group_type="street_view", active_by_default=True, title=groups[0]['title'])
-                                    discussion_obj.commit()
-                            finally: db_sv.close()
-
-                        # Scheduler
-                        if owner_db_user.scheduler_enabled:
-                            db_sched = next(get_db())
-                            try:
-                                _, msgs = process_scheduler_tags(ai_msg.content, owner_db_user, db_sched)
-                                if msgs:
-                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": " | ".join(msgs)})) + "\n")
-                            finally: db_sched.close()
-
-                        # Google Workspace (Drive, Calendar, Gmail)
-                        if any([owner_db_user.google_drive_enabled, owner_db_user.google_calendar_enabled, owner_db_user.google_gmail_enabled]):
-                            _, msgs = process_google_workspace_tags(ai_msg.content, owner_db_user, main_loop, stream_queue)
-                            if msgs:
-                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder({"type": "info", "content": " | ".join(msgs)})) + "\n")
+                        # Skill tags are natively handled by LollmsDiscussion artefacts system if it emits `<artefact type="skill">` 
+                        # or by the frontend directly finding the `<skill>` tags in the markdown.
+                        pass
 
                         # Post-generation Stats
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
