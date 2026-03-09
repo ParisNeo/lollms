@@ -14,7 +14,6 @@ dm_ws_router = APIRouter(
 
 @dm_ws_router.websocket("/{token}")
 async def websocket_endpoint(websocket: WebSocket, token: str):
-    ASCIIColors.info(f"[WebSocket] New connection attempt received for token: ...{token[-6:]}")
     db_gen = get_db()
     db: Session = next(db_gen)
     
@@ -25,7 +24,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     try:
         user = await get_current_db_user_from_token(token=token, db=db)
         if not user or not user.is_active:
-            ASCIIColors.warning(f"[WebSocket] Authentication failed or user inactive for token: ...{token[-6:]}")
+            ASCIIColors.panel(f"[orange][WebSocket] Authentication failed or user inactive for token: ...{token[-6:]}[/orange]")
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
@@ -35,7 +34,7 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         ASCIIColors.panel(f"[WebSocket] User '{username}' (ID: {user_id}) authenticated for WebSocket.")
 
     except HTTPException:
-        ASCIIColors.error(f"[WebSocket] Authentication raised HTTPException for token: ...{token[-6:]}")
+        ASCIIColors.panel(f"[red][WebSocket] Authentication raised HTTPException for token: ...{token[-6:]}[/red]")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     finally:
