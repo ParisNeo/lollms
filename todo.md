@@ -214,3 +214,4 @@ Filter out non text files (mp4 etc).
 Add image rag
 Add pdf convertion to images
 By default add metadata to the chunks
+Import folder instead of just import file
