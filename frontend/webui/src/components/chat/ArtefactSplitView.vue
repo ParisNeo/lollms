@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
@@ -8,11 +8,34 @@ import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
+import IconMaximize from '../../assets/icons/IconMaximize.vue';
+import IconMinimize from '../../assets/icons/IconMinimize.vue';
+import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
+import { useAuthStore } from '../../stores/auth';
 
 const uiStore = useUiStore();
+const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 
 const title = computed(() => uiStore.activeSplitArtefactTitle);
+const isFullscreen = ref(false);
+
+const exportFormats = computed(() => {
+    const formats = [];
+    if (authStore.export_to_txt_enabled) formats.push({ label: 'Text (.txt)', value: 'txt' });
+    if (authStore.export_to_markdown_enabled) formats.push({ label: 'Markdown (.md)', value: 'md' });
+    if (authStore.export_to_html_enabled) formats.push({ label: 'HTML (.html)', value: 'html' });
+    if (authStore.export_to_pdf_enabled) formats.push({ label: 'PDF (.pdf)', value: 'pdf' });
+    if (authStore.export_to_docx_enabled) formats.push({ label: 'Word (.docx)', value: 'docx' });
+    return formats;
+});
+
+function handleExport(format) {
+    discussionsStore.exportRawContent({ 
+        content: content.value, 
+        format: format 
+    });
+}
 
 // Track if this file is currently being modified by AI - Added defensive checks
 const isLiveUpdating = computed(() => {
@@ -26,6 +49,36 @@ const artefactGroup = computed(() => {
     // Sort versions DESC (newest first)
     const versions = all.filter(a => a.title === title.value).sort((a,b) => b.version - a.version);
     return versions.length > 0 ? { title: title.value, versions } : null;
+});
+
+const dataZoneWidth = ref(600);
+const isResizing = ref(false);
+
+function startResize(event) {
+    isResizing.value = true;
+    const startX = event.clientX;
+    const startWidth = dataZoneWidth.value;
+    
+    const onMouseMove = (e) => {
+        if (!isResizing.value) return;
+        const delta = startX - e.clientX;
+        dataZoneWidth.value = Math.max(350, Math.min(window.innerWidth * 0.8, startWidth + delta));
+    };
+    
+    const onMouseUp = () => {
+        isResizing.value = false;
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        localStorage.setItem('lollms_artefactWidth', dataZoneWidth.value);
+    };
+    
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+}
+
+onMounted(() => {
+    const saved = localStorage.getItem('lollms_artefactWidth');
+    if (saved) dataZoneWidth.value = parseInt(saved, 10);
 });
 
 const selectedVersion = ref(null);
@@ -131,7 +184,19 @@ function download() {
 </script>
 
 <template>
-    <div class="h-full flex flex-col bg-white dark:bg-gray-900 border-l dark:border-gray-700 w-full lg:w-[600px] shadow-2xl z-20">
+    <div 
+        class="h-full flex flex-row bg-white dark:bg-gray-900 border-l dark:border-gray-700 shadow-2xl z-20 transition-[width] duration-75"
+        :class="{'fixed inset-0 !w-full z-[100]': isFullscreen}"
+        :style="isFullscreen ? {} : { width: `${dataZoneWidth}px` }"
+    >
+        <!-- Resize Handle -->
+        <div 
+            v-if="!isFullscreen"
+            @mousedown.prevent="startResize"
+            class="w-1.5 h-full cursor-col-resize hover:bg-blue-500/30 transition-colors flex-shrink-0"
+        ></div>
+
+        <div class="flex-1 flex flex-col min-w-0">
         <div class="p-3 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-800 shadow-sm">
             <div class="flex items-center gap-3 min-w-0">
                 <!-- Dynamic Icon based on Type -->
@@ -154,9 +219,15 @@ function download() {
                     <span class="font-bold text-sm truncate dark:text-gray-100">{{ title }}</span>
                 </div>
             </div>
-            <button @click="uiStore.activeSplitArtefactTitle = null" class="p-2 hover:bg-red-500 hover:text-white rounded-full transition-all">
-                <IconXMark class="w-5 h-5"/>
-            </button>
+            <div class="flex items-center gap-1">
+                <button @click="isFullscreen = !isFullscreen" class="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-500 transition-colors" :title="isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'">
+                    <IconMinimize v-if="isFullscreen" class="w-4 h-4" />
+                    <IconMaximize v-else class="w-4 h-4" />
+                </button>
+                <button @click="uiStore.activeSplitArtefactTitle = null" class="p-2 hover:bg-red-500 hover:text-white rounded-full transition-all">
+                    <IconXMark class="w-5 h-5"/>
+                </button>
+            </div>
         </div>
         <div class="p-2 border-b border-gray-200 dark:border-gray-700 flex gap-2 items-center bg-white dark:bg-gray-850 shadow-sm relative z-10">
             <div v-if="artefactGroup" class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg px-2 py-1 gap-2">
@@ -176,7 +247,14 @@ function download() {
             
             <div class="flex-grow"></div>
             
-            <button @click="download" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" title="Download File">
+            <!-- Export Dropdown -->
+            <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" collection="ui">
+                <button v-for="format in exportFormats" :key="format.value" @click="handleExport(format.value)" class="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
+                    {{ format.label }}
+                </button>
+            </DropdownMenu>
+
+            <button @click="download" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" title="Download Source">
                 <IconArrowDownTray class="w-4 h-4" />
             </button>
 
@@ -190,7 +268,8 @@ function download() {
             <div v-if="isFetching" class="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm flex items-center justify-center">
                 <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
             </div>
-            <CodeMirrorEditor v-model="content" class="absolute inset-0 h-full" initialMode="edit" :renderable="true" />
+            <CodeMirrorEditor v-model="content" class="absolute inset-0 h-full" initialMode="view" :renderable="true" />
+        </div>
         </div>
     </div>
 </template>

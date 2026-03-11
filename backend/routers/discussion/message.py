@@ -432,11 +432,17 @@ def build_message_router(router: APIRouter):
             discussion_obj.delete_branch(message_id)
             
             # After deleting, set the active branch to the parent of the deleted branch
-            discussion_obj.switch_to_branch(parent_id)
+            if parent_id:
+                discussion_obj.switch_to_branch(parent_id)
+            else:
+                discussion_obj.active_branch_id = None
 
             discussion_obj.commit()
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
         
         db_user = db.query(DBUser).filter(DBUser.username == username).one()
         db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).delete(synchronize_session=False)

@@ -64,7 +64,7 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
             'author': legacy_data.get('author'), 'category': legacy_data.get('category'),
             'description': legacy_data.get('personality_description'),
             'prompt_text': legacy_data.get('personality_conditioning'),
-            'disclaimer': legacy_data.get('disclaimer'), 'active_mcps': legacy_data.get('dependencies', [])
+            'disclaimer': legacy_data.get('disclaimer'), 'tools': legacy_data.get('dependencies', [])
         }
 
     with task.db_session_factory() as db:
@@ -81,7 +81,7 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
         new_personality = DBPersonality(
             name=config.get('name'), author=config.get('author'), category=config.get('category'),
             description=config.get('description'), prompt_text=config.get('prompt_text', ''),
-            disclaimer=config.get('disclaimer'), icon_base64=icon_b64, active_mcps=config.get('active_mcps'),
+            disclaimer=config.get('disclaimer'), icon_base64=icon_b64, tools=config.get('tools'),
             owner_user_id=None, is_public=True, version=str(config.get('version', 'N/A')),
             repository=repo_name, folder_name=folder_name
         )

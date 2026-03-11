@@ -25,7 +25,7 @@ const personality = computed(() => modalProps.value?.personality);
 const getInitialFormState = () => ({
     id: null, name: '', category: '', author: '', description: '',
     prompt_text: '', disclaimer: '', script_code: '', icon_base64: null,
-    is_public: false, data_source_type: 'none', data_source: null, active_mcps: [],
+    is_public: false, data_source_type: 'none', data_source: null, tools: [],
     required_context_options: [], // NEW
     owner_type: 'user'
 });
@@ -346,7 +346,7 @@ async function handleExport() {
             <div>
                 <label class="block text-sm font-medium">Active MCPs</label>
                  <MultiSelectMenu 
-                    v-model="form.active_mcps" 
+                    v-model="form.tools" 
                     :items="availableMcpToolsForSelector"
                     placeholder="Select tools"
                     class="mt-1"

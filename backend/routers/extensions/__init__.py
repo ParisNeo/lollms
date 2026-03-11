@@ -412,11 +412,11 @@ def list_all_available_tools(
     print(f"INFO: Building tools cache for user: {username}")
     try:
         lc = get_user_lollms_client(username)
-        if not hasattr(lc, 'mcp') or not lc.mcp:
+        if not lc.tools:
             user_sessions[username]['tools_cache'] = []
             return []
         
-        tools = lc.mcp.discover_tools(force_refresh=True)
+        tools = lc.tools.discover_tools(force_refresh=True)
         all_tools = [ToolInfo(name=item["name"], description=item.get('description', '')) for item in tools]
         sorted_tools = sorted(all_tools, key=lambda x: x.name)
         

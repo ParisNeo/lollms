@@ -3,7 +3,8 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../../services/markdownParser';
 
 import CodeBlock from './CodeBlock.vue';
-import MermaidViewer from '../../modals/InteractiveMermaid.vue';   // ← NEW
+import MermaidViewer from '../../modals/InteractiveMermaid.vue';
+import StepDetail from '../../chat/StepDetail.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 import IconFileText from '../../../assets/icons/IconFileText.vue';
 import AuthenticatedImage from '../AuthenticatedImage.vue';
@@ -18,6 +19,11 @@ import TaskProgressIndicator from '../TaskProgressIndicator.vue';
 import IconMap from '../../../assets/icons/IconMap.vue';
 import IconClock from '../../../assets/icons/IconClock.vue';
 import IconSave from '../../../assets/icons/IconSave.vue';
+import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
+import IconCog from '../../../assets/icons/IconCog.vue';
+import IconInfo from '../../../assets/icons/IconInfo.vue';
+import IconError from '../../../assets/icons/IconError.vue';
+import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
 
 import { useTasksStore } from '../../../stores/tasks';
 import { useDiscussionsStore } from '../../../stores/discussions';
@@ -26,6 +32,7 @@ import { storeToRefs } from 'pinia';
 
 const props = defineProps({
   content: { type: String, default: '' },
+  events: { type: Array, default: () => [] }, // NEW
   isStreaming: { type: Boolean, default: false },
   isUser: { type: Boolean, default: false },
   hasImages: { type: Boolean, default: false },
@@ -46,20 +53,28 @@ const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
 
 function renderMath() {
+  // Critical Fix: Do not mutate DOM with KaTeX while Vue is actively streaming tokens, 
+  // otherwise Vue loses track of its virtual nodes and crashes.
+  if (props.isStreaming) return; 
+
   if (messageContentRef.value && messageContentRef.value.isConnected && window.renderMathInElement) {
-    try {
-      window.renderMathInElement(messageContentRef.value, {
-        delimiters: [
-          { left: '$$', right: '$$', display: true },
-          { left: '\\[', right: '\\]', display: true },
-          { left: '\\(', right: '\\)', display: false },
-          { left: '$', right: '$', display: false }
-        ],
-        throwOnError: false
-      });
-    } catch (e) {
-      console.warn("Math rendering failed or was interrupted:", e);
-    }
+    // Only target specific text blocks to prevent breaking Vue child components (like CodeBlocks or StepDetails)
+    const targets = messageContentRef.value.querySelectorAll('.markdown-text');
+    targets.forEach(target => {
+        try {
+          window.renderMathInElement(target, {
+            delimiters:[
+              { left: '$$', right: '$$', display: true },
+              { left: '\\[', right: '\\]', display: true },
+              { left: '\\(', right: '\\)', display: false },
+              { left: '$', right: '$', display: false }
+            ],
+            throwOnError: false
+          });
+        } catch (e) {
+          console.warn("Math rendering failed or was interrupted:", e);
+        }
+    });
   }
 }
 
@@ -94,6 +109,9 @@ const parsedMarkdown = (content) => {
 const parsedStreamingContent = computed(() => {
     if (!props.content) return '';
     let content = props.content;
+
+    // Sanitize: remove leaked internal/hallucinated tags like <tol or <tool_call> from visible text
+    content = content.replace(/<(?:tol|tool_call|tool_result|thought|think)[^>]*>|<\/(?:tol|tool_call|tool_result|thought|think)>/gi, '');
     
     const openAnnTagIndex = content.lastIndexOf('<annotate>');
     const closeAnnTagIndex = content.lastIndexOf('</annotate>');
@@ -136,8 +154,8 @@ const parsedStreamingContent = computed(() => {
 
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))/;
-         match = regex.exec(rawBlock);
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_event\b([^>]*)\/>)/;
+        match = regex.exec(rawBlock);
     }
     
     if (!match) return { type: 'content', content: rawBlock };
@@ -215,121 +233,119 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         
         return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
     }
+    else if (match[10]) {
+        // [NEW] Inline Event Marker
+        const attrStr = match[11];
+        const idMatch = attrStr.match(/id="([^"]*)"/);
+        const eventId = idMatch ? idMatch[1] : null;
+        
+        // Find the event in the message's event list
+        const eventData = props.events?.find(e => e.id === eventId);
+        return { type: 'inline_event', event: eventData, raw: match[10] };
+    }
 
     return { type: 'content', content: rawBlock };
 };
 
+// Helper to create a stable hash for a string to use as a key
+const hashString = (str) => {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+        hash = (hash << 5) - hash + str.charCodeAt(i);
+        hash |= 0;
+    }
+    return hash.toString(36);
+};
+
+const initEvents = computed(() => {
+    // Only show events that happened before or at the start of text (offset <= 0 or missing)
+    return (props.events || []).filter(e => !e.offset || e.offset <= 0);
+});
+
 const messageParts = computed(() => {
-    if (!props.content || props.isStreaming) return [];
+    if (!props.content) return [];
     
     const content = props.content;
     const parts = [];
 
-    // 1. Identify all Markdown Code Blocks
-    const codeBlockRegex = /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm; 
-    const codeBlocks = [];
-    let cbMatch;
+    // 1. Define all detectable patterns
+    const patterns = [
+        { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
+        { type: 'tool', regex: /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))/g },
+        { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g }
+    ];
+
+    const allElements = [];
+
+    // 2. Extract all elements from text patterns
+    patterns.forEach(p => {
+        let m;
+        // Reset regex state for global searches
+        p.regex.lastIndex = 0;
+        while ((m = p.regex.exec(content)) !== null) {
+            allElements.push({ start: m.index, end: m.index + m[0].length, raw: m[0], match: m, type: p.type });
+        }
+    });
+
+    // 3. Extract elements from out-of-band Events (Tool calls, System steps)
+    // REMOVED: System events are now rendered exclusively in the top timeline block,
+    // not interleaved in the messageParts loop. This prevents redundancy.
+
+    // 4. Sort and Resolve overlaps
+    allElements.sort((a, b) => (a.start - b.start) || (b.end - a.end));
     
-    while ((cbMatch = codeBlockRegex.exec(content)) !== null) {
-        codeBlocks.push({
-            start: cbMatch.index,
-            end: cbMatch.index + cbMatch[0].length,
-            lang: (cbMatch[2] || 'plaintext').toLowerCase().trim(),
-            inner: cbMatch[3],
-            full: cbMatch[0]
-        });
-    }
+    const activeElements = [];
+    let lastEnd = 0;
 
-    // 2. Identify all Tool Blocks
-    const toolRegex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))/g;
-    const tools = [];
-    let toolMatch;
-
-    while ((toolMatch = toolRegex.exec(content)) !== null) {
-        tools.push({
-            start: toolMatch.index,
-            end: toolMatch.index + toolMatch[0].length,
-            raw: toolMatch[0],
-            match: toolMatch
-        });
-    }
-
-    // 3. Reconcile Tools vs Code Blocks
-    // Rule: if a tool CONTAINS one or more code blocks entirely, the tool wins (it's a wrapper).
-    // Only mark isValidTool=false if the code block CONTAINS the tool (tool is just a snippet inside code).
-    const activeTools = [];
-    for (const tool of tools) {
-        let isValidTool = true;
-        for (const code of codeBlocks) {
-            const toolContainsCode = code.start >= tool.start && code.end <= tool.end;
-            const codeContainsTool = tool.start >= code.start && tool.end <= code.end;
-            const partialOverlap = tool.start < code.end && tool.end > code.start && !toolContainsCode && !codeContainsTool;
-
-            if (codeContainsTool) {
-                // The tool tag is inside a code block — check if it's the sole content (unwrap case)
-                const codeInnerTrimmed = code.inner.trim();
-                const toolRawTrimmed = tool.raw.trim();
-                if (codeInnerTrimmed === toolRawTrimmed) {
-                    // Code block is just a fence around the tool — expand tool to cover the fence too
-                    tool.start = code.start;
-                    tool.end = code.end;
-                    isValidTool = true;
-                } else {
-                    // Tool is a snippet inside a larger code block — treat as code, not a tool
-                    isValidTool = false;
-                }
-                break;
-            } else if (partialOverlap) {
-                // Malformed partial overlap — code block takes priority
-                isValidTool = false;
-                break;
-            }
-            // toolContainsCode: the tool wraps the code block — tool wins, no action needed
+    for (const el of allElements) {
+        if (el.start >= lastEnd || el.type === 'system_event') {
+            activeElements.push(el);
+            lastEnd = el.end;
         }
-        if (isValidTool) activeTools.push(tool);
     }
 
-    activeTools.sort((a, b) => a.start - b.start);
-
-    // 4. Build parts. Merge codeBlocks and activeTools into one sorted event list,
-    //    but exclude any code block whose range is fully inside an active tool (it will
-    //    be rendered by the tool's own content handler, e.g. note → parsedMarkdown).
-    const toolRanges = activeTools.map(t => ({ start: t.start, end: t.end }));
-    const isInsideTool = (cb) => toolRanges.some(r => cb.start >= r.start && cb.end <= r.end);
-
-    const events = [
-        ...codeBlocks.filter(cb => !isInsideTool(cb)).map(cb => ({ ...cb, eventType: 'code' })),
-        ...activeTools.map(t => ({ ...t, eventType: 'tool' })),
-    ].sort((a, b) => a.start - b.start);
-
+    // 4. Assemble final parts with strictly stable start-index IDs
     let cursor = 0;
-    for (const ev of events) {
-        // Avoid double-processing (tools can expand to cover a code block)
-        if (ev.start < cursor) continue;
-
-        if (ev.start > cursor) {
-            parts.push({ type: 'content', content: content.substring(cursor, ev.start) });
+    activeElements.forEach(el => {
+        // Add preceding text
+        if (el.start > cursor) {
+            const text = content.substring(cursor, el.start);
+            parts.push({ type: 'content', content: text, id: `text-${cursor}` });
         }
 
-        if (ev.eventType === 'code') {
-            if (ev.lang === 'mermaid') {
-                // ← Route mermaid to MermaidViewer, stripping the fences
-                parts.push({ type: 'mermaid', code: ev.inner.trim() });
+        if (el.type === 'system_event') {
+            parts.push({ type: 'system_event', event: el.event, id: `event-${el.event.id || el.start}` });
+        } else if (el.type === 'code') {
+            const lang = (el.match[2] || 'plaintext').trim();
+            const inner = el.match[3];
+            if (lang.toLowerCase() === 'mermaid') {
+                parts.push({ type: 'mermaid', code: inner.trim(), id: `mermaid-${el.start}` });
             } else {
-                parts.push({ type: 'code', lang: ev.lang, code: ev.inner, full: ev.full });
+                parts.push({ type: 'code', lang, code: inner, id: `code-${el.start}` });
             }
-        } else {
-            parts.push(parseSpecialBlock(ev.raw, ev.match));
+        } else if (el.type === 'tool') {
+            const parsed = parseSpecialBlock(el.raw, el.match);
+            parts.push({ ...parsed, id: `${parsed.type}-${el.start}` });
+        } else if (el.type === 'block_doc') {
+            const subType = el.match[1].toLowerCase();
+            const finalType = subType === 'skill' ? 'skill_block' : (subType === 'note' ? 'note_block' : 'document');
+            parts.push({ 
+                type: finalType, 
+                title: (el.match[2] || 'Untitled').trim(), 
+                content: el.match[3]?.trim() || '', 
+                raw: el.raw,
+                id: `block-${subType}-${el.start}`
+            });
         }
+        cursor =  Math.max(cursor,el.end);
+    });
 
-        cursor = ev.end;
-    }
-
+    // Add remaining text
     if (cursor < content.length) {
-        parts.push({ type: 'content', content: content.substring(cursor) });
+        parts.push({ type: 'content', content: content.substring(cursor), id: `text-${cursor}` });
     }
 
-    return parts.length > 0 ? parts : [{ type: 'content', content: '' }];
+    return parts;
 });
 
 const getTokens = (text) => {
@@ -558,9 +574,33 @@ function onImageLoad(event, annotations) {
 function handleContentClick(event) {
     const btn = event.target.closest('.citation-btn');
     if (btn) {
-        const index = btn.dataset.index;
-        if (index) emit('citation-click', parseInt(index));
+        const index = parseInt(btn.dataset.index);
+        if (index) {
+            // Find the source object for this index
+            const source = props.sources?.find(s => s.index === index) || props.sources?.[index - 1];
+            if (source) {
+                // Open the modal directly for better accessibility from the text
+                uiStore.openModal('sourceViewer', {
+                    title: source.title || source.name || `Source [${index}]`,
+                    content: source.content || source.chunk_text || source.text || '',
+                    source: source.source || source.url || '',
+                    score: source.relevance_score || source.score || 0,
+                    metadata: source.metadata || {}
+                });
+            }
+        }
     }
+}
+
+function handleSourceClick(source, idx) {
+    // Open modal directly when clicking items in the bottom list
+    uiStore.openModal('sourceViewer', {
+        title: source.title || source.name || `Source [${source.index || idx + 1}]`,
+        content: source.content || source.chunk_text || source.text || '',
+        source: source.source || source.url || '',
+        score: source.relevance_score || source.score || 0,
+        metadata: source.metadata || {}
+    });
 }
 
 // Auto-size mermaid containers based on rendered SVG natural height
@@ -585,20 +625,85 @@ function onMermaidReady({ svg }, partIndex) {
 </script>
 
 <template>
-  <div :key="isStreaming ? 'streaming' : 'settled'" ref="messageContentRef" @click="handleContentClick">
+  <div ref="messageContentRef" @click="handleContentClick">
     <div v-if="content || (isUser && !hasImages)" class="message-prose">
-      <div v-if="isStreaming" v-html="parsedStreamingContent"></div>
-      <template v-else>
-        <template v-for="(part, index) in messageParts" :key="`part-${index}-${part.type}`">
+      <template v-if="messageParts.length > 0">
+        <template v-for="part in messageParts" :key="part.id">
           
+          <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
+
+          <!-- ── Initialization Logs (Only events with offset 0) ──────────────── -->
+          <div v-if="initEvents.length > 0" class="mb-4">
+              <details class="group timeline-details overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/20 dark:bg-gray-900/10">
+                  <summary class="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors list-none select-none">
+                      <div class="flex items-center gap-2">
+                          <IconCog class="w-3.5 h-3.5 text-gray-400" />
+                          <span class="text-[10px] font-black uppercase tracking-widest text-gray-500">System Initialization</span>
+                      </div>
+                      <IconChevronRight class="w-3 h-3 text-gray-400 group-open:rotate-90 transition-transform" />
+                  </summary>
+                  <div class="p-3 border-t dark:border-gray-700 bg-white dark:bg-gray-950/20 space-y-3">
+                      <div v-for="event in initEvents" :key="event.id" class="flex flex-col gap-1">
+                          <div class="text-[10px] font-bold text-gray-600 dark:text-gray-400">{{ event.content?.name || event.content }}</div>
+                          <StepDetail :data="event.content" :level="0" />
+                      </div>
+                  </div>
+              </details>
+          </div>
+
+          <div v-if="part.type === 'system_event'" class="my-3 ml-2">
+              <details class="group/event overflow-hidden rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/10 dark:bg-gray-900/10 transition-all hover:border-blue-500/20 shadow-sm">
+                  <summary class="flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors list-none select-none">
+                      <div class="flex items-center gap-2.5">
+                          <component :is="getEventIcon(part.event.type)" class="w-3.5 h-3.5 text-gray-400 group-open/event:text-blue-500 transition-colors" />
+                          <span class="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                              {{ part.event.tool ? part.event.tool.replace('_', ' ') : part.event.content }}
+                          </span>
+                      </div>
+                      <IconChevronRight class="w-3 h-3 text-gray-300 group-open/event:rotate-90 transition-transform" />
+                  </summary>
+                  <div class="p-3 border-t dark:border-gray-800 bg-white dark:bg-gray-950/20">
+                      <StepDetail :data="part.event.content" :level="0" />
+                  </div>
+              </details>
+          </div>
+
           <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
           <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm mermaid-wrapper">
             <MermaidViewer :mermaid-code="part.code" @ready="onMermaidReady($event, index)" />
           </div>
 
-          <!-- ── Regular code / text tokens ────────────────────────────── -->
-          <div v-else-if="part.type === 'content'" class="content-token-container">
-            <template v-for="(token, tokenIndex) in getTokens(part.content)" :key="token.uid || `token-${tokenIndex}`">
+          <!-- ── Inline Event Marker (Expandable Tool Block) ────────────── -->
+          <div v-if="part.type === 'inline_event' && part.event" class="my-6 animate-in fade-in slide-in-from-left-2">
+              <details class="group/inline w-full border dark:border-gray-700 rounded-2xl bg-gray-50/30 dark:bg-gray-900/20 overflow-hidden transition-all hover:border-blue-500/30">
+                  <summary class="flex items-center justify-between p-3.5 cursor-pointer list-none select-none">
+                      <div class="flex items-center gap-4">
+                          <div class="p-2.5 rounded-xl bg-white dark:bg-gray-900 shadow-sm text-blue-500 group-open/inline:text-emerald-500 transition-colors">
+                              <IconWrenchScrewdriver v-if="part.event.type === 'tool_call'" class="w-5 h-5" />
+                              <IconCheckCircle v-else class="w-5 h-5" />
+                          </div>
+                          <div class="flex flex-col">
+                              <span class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Action performed</span>
+                              <span class="text-sm font-bold text-gray-800 dark:text-gray-200">
+                                  {{ part.event.tool ? part.event.tool.replace('_', ' ') : 'System Step' }}
+                              </span>
+                          </div>
+                      </div>
+                      <div class="flex items-center gap-3">
+                          <span class="text-[10px] font-black text-gray-400 group-open/inline:hidden uppercase tracking-widest">Show Result</span>
+                          <IconChevronRight class="w-4 h-4 text-gray-400 group-open/inline:rotate-90 transition-transform" />
+                      </div>
+                  </summary>
+                  
+                  <div class="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-950/40">
+                      <!-- Render the tool parameters and output beautifully -->
+                      <StepDetail :data="part.event.content" :level="0" />
+                  </div>
+              </details>
+          </div>
+
+          <div v-if="part.type === 'content'" class="content-token-container">
+            <template v-for="(token, tokenIndex) in (getTokens(part.content) || [])" :key="token.uid || `token-${tokenIndex}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
               
               <details v-else-if="token.type === 'document'" class="document-block my-4 group/block">
@@ -640,7 +745,7 @@ function onMermaidReady({ svg }, partIndex) {
                   <div class="note-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
               </details>
               
-              <div v-else-if="token.raw" v-html="parsedMarkdown(token.raw)"></div>
+              <div v-else-if="token.raw" class="markdown-text" v-html="parsedMarkdown(token.raw)"></div>
             </template>
           </div>
 
@@ -811,6 +916,53 @@ function onMermaidReady({ svg }, partIndex) {
         </template>
       </template>
     </div>
+
+    <!-- ── Dedicated Sources Area (At the absolute end) ────────────────── -->
+    <div v-if="sources && sources.length > 0" 
+         class="mt-10 border-t-2 border-gray-100 dark:border-gray-800 pt-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <details class="group/sources-list">
+            <summary class="flex items-center justify-between cursor-pointer list-none select-none mb-4">
+                <div class="flex items-center gap-3">
+                    <div class="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 group-hover:bg-blue-100 transition-colors">
+                        <IconGather class="w-5 h-5 text-blue-500" />
+                    </div>
+                    <h3 class="text-xs font-black uppercase tracking-[0.25em] text-gray-400 dark:text-gray-500">Sources & References ({{ sources.length }})</h3>
+                </div>
+                <IconChevronRight class="w-4 h-4 text-gray-300 group-open/sources-list:rotate-90 transition-transform" />
+            </summary>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-4">
+                <div v-for="(source, sIdx) in sources" :key="sIdx" 
+                     @click="handleSourceClick(source, sIdx)"
+                     class="p-3.5 bg-white dark:bg-gray-800/40 border border-gray-100 dark:border-gray-700/50 rounded-2xl hover:border-blue-500 hover:shadow-md transition-all cursor-pointer group/src shadow-sm relative overflow-hidden">
+                
+                <div class="flex items-start justify-between gap-3 relative z-10">
+                    <div class="flex items-center gap-2.5 min-w-0">
+                        <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-black font-mono">
+                            {{ source.index || sIdx + 1 }}
+                        </span>
+                        <span class="font-bold text-sm truncate text-gray-800 dark:text-gray-100 group-hover/src:text-blue-600 transition-colors">{{ source.title || 'Untitled Source' }}</span>
+                    </div>
+                    <div v-if="source.relevance_score" class="flex-shrink-0 text-[10px] font-mono font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800/50">
+                        {{ Math.round(source.relevance_score > 1 ? source.relevance_score : source.relevance_score * 100) }}%
+                    </div>
+                </div>
+
+                <p v-if="source.content" class="mt-2.5 text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">
+                    {{ source.content }}
+                </p>
+
+                <div class="mt-3 flex items-center justify-between">
+                    <span class="text-[8px] font-mono text-gray-400 truncate max-w-[70%] opacity-60">{{ source.source }}</span>
+                    <span class="text-[9px] font-black text-blue-500 uppercase tracking-widest opacity-0 group-hover/src:opacity-100 transform translate-x-2 group-hover/src:translate-x-0 transition-all">Details &rarr;</span>
+                </div>
+
+                <!-- Subtle hover background decoration -->
+                <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-blue-500/5 rounded-full blur-2xl group-hover/src:bg-blue-500/10 transition-colors"></div>
+            </div>
+        </div>
+    </details>
+    </div>
   </div>
 </template>
 
@@ -847,6 +999,10 @@ details[open].note-block-collapsible > .note-summary { @apply border-b border-am
 .document-summary { @apply flex items-center gap-2 p-2 text-sm cursor-pointer list-none select-none hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors; }
 .document-summary::-webkit-details-marker { display: none; }
 details[open].document-block > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
+
+.timeline-details summary::-webkit-details-marker { display: none; }
+.timeline-details[open] { @apply shadow-xl ring-2 ring-blue-500/5 bg-white dark:bg-gray-900/40 border-blue-500/20; }
+.timeline-details summary:focus { @apply outline-none; }
 
 /* Mermaid wrapper — starts at a sensible default, auto-sized by onMermaidReady */
 .mermaid-wrapper {

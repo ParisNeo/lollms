@@ -749,8 +749,8 @@ def build_lollms_client_from_params(
         # Always inject MCP if we are loading LLM, as tools might be needed.
         # Even if empty, it initializes the manager in lollms_client.
         if load_llm and load_mcp:
-            client_init_params["mcp_binding_name"] = "remote_mcp"
-            client_init_params["mcp_binding_config"] = {"servers_infos": servers_infos}
+            client_init_params["tools_binding_name"] = "remote_mcp"
+            client_init_params["tools_binding_config"] = {"servers_infos": servers_infos}
 
         try:
             ASCIIColors.panel(f"Initializing LollmsClient for user '{username}'.")

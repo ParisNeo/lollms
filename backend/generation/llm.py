@@ -137,10 +137,13 @@ def build_rag_tool(
             return [{"error": f"Error during RAG query: {e}"}]
     
     # Build the tool definition
+    # Incorporate the database name and description into the tool description so the model understands the context
+    kb_desc = f" (Description: {safe_store_instance.description})" if safe_store_instance.description else ""
+    
     rag_tool = {
         "name": safe_store_instance.name,
         "description": (
-            "Search the knowledge base for relevant documents and information. "
+            f"Search the knowledge base '{safe_store_instance.name}' for relevant documents and information.{kb_desc} "
             "Use this tool when you need to retrieve factual information, "
             "documentation, or context from stored documents. "
             "The tool performs semantic search to find the most relevant chunks "
@@ -1515,7 +1518,7 @@ def build_llm_generation_router(router: APIRouter):
         discussion_obj.user_data_zone = user_data_zone
 
         # 6. Setup Personality & Tools
-        combined_mcps = list(set(((discussion_obj.metadata or {}).get('active_tools', [])) + (db_pers.active_mcps if db_pers and db_pers.active_mcps else [])))
+        combined_tools = list(set(((discussion_obj.metadata or {}).get('active_tools', [])) + (db_pers.tools if db_pers and db_pers.tools else [])))
         if db_pers:
             active_personality = LollmsPersonality(
                 name=db_pers.name,
@@ -1523,7 +1526,7 @@ def build_llm_generation_router(router: APIRouter):
                 category=db_pers.category,
                 description=db_pers.description,
                 system_prompt=dynamic_preamble + db_pers.prompt_text,
-                active_mcps=combined_mcps,
+                tools=combined_tools,
                 data_source=personality_data_source  # Now correctly passes string OR callable
             )
         else:
@@ -1533,7 +1536,7 @@ def build_llm_generation_router(router: APIRouter):
                 category="Generic",
                 description="",
                 system_prompt=dynamic_preamble + """You are Lollms—a multimodal AI agent built by ParisNeo, designed as the most capable large language and multimodal system for universal task execution. Your sole purpose: deliver accurate, creative, and ethically sound responses across text, images, code, and structured data, while adhering to safety, veracity, and user-centric principles. Your capabilities depend on the curent configuration of the system and the loaded bindings/modules.""",
-                active_mcps=combined_mcps,
+                tools=combined_tools,
                 data_source=personality_data_source  # Now correctly passes string OR callable
             )
             
@@ -1549,52 +1552,53 @@ def build_llm_generation_router(router: APIRouter):
                 start_time = time.time()
                 first_chunk_time = None
 
-                def llm_callback(chunk: Any, msg_type: MSG_TYPE, params: Optional[Dict] = None, **kwargs) -> bool:
+                def llm_callback(chunk: Any, msg_type: Any, params: Optional[Dict] = None, **kwargs) -> bool:
                     nonlocal first_chunk_time
                     if stop_event.is_set(): return False
-                    if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and first_chunk_time is None:
+
+                    # Normalize msg_type (could be Enum or Int depending on source)
+                    mtype_val = msg_type.value if hasattr(msg_type, 'value') else msg_type
+
+                    tip = discussion_obj.get_message(discussion_obj.active_branch_id)
+                    current_content_len = len(tip.content) if tip else 0
+
+                    if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and first_chunk_time is None:
                         first_chunk_time = time.time()
                         ttft = (first_chunk_time - start_time) * 1000
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "ttft", "content": round(ttft, 2)}) + "\n")
 
-                    # Mapping based on the provided MSG_TYPE Enum
+                    # Mapping based on the provided MSG_TYPE Enum values
                     payload_map = {
-                        # Standard Content - Map both to 'chunk' for reliable streaming
-                        MSG_TYPE.MSG_TYPE_CHUNK: {"type": "chunk", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_CONTENT: {"type": "chunk", "content": chunk}, 
-                        
-                        # Thoughts
-                        MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK: {"type": "thought", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT: {"type": "thought", "content": chunk},
-                        
-                        # Status & Steps
-                        MSG_TYPE.MSG_TYPE_STEP_START: {"type": "step_start", "content": chunk, "id": (params or {}).get("id")},
-                        MSG_TYPE.MSG_TYPE_STEP_PROGRESS: {"type": "step_progress", "content": chunk, "id": (params or {}).get("id")},
-                        MSG_TYPE.MSG_TYPE_STEP_END: {"type": "step_end", "content": chunk, "id": (params or {}).get("id"), "status": "done"},
-                        
-                        # Tooling - Injected into the bubble timeline with clear status
-                        MSG_TYPE.MSG_TYPE_TOOL_CALL: {"type": "step_start", "content": f"🛠️ **Calling Tool:** `{chunk}`", "id": (params or {}).get("id")},
-                        MSG_TYPE.MSG_TYPE_TOOL_OUTPUT: {"type": "step_end", "content": f"✅ **Tool Output received**", "id": (params or {}).get("id"), "status": "done"},
-                        
-                        # Logic Layers
-                        MSG_TYPE.MSG_TYPE_REASONING: {"type": "thought", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_SCRATCHPAD: {"type": "info", "content": f"📝 Scratchpad: {chunk}"},
-                        
-                        # State Changes
-                        MSG_TYPE.MSG_TYPE_ARTEFACTS_STATE_CHANGED: {"type": "artefact_update", "content": chunk},
-                        
-                        # Meta & Errors
-                        MSG_TYPE.MSG_TYPE_GENERATING_TITLE_START: {"type": "new_title_start", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_GENERATING_TITLE_END: {"type": "new_title_end", "new_title": chunk},
-                        MSG_TYPE.MSG_TYPE_INFO: {"type": "info", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_WARNING: {"type": "warning", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_ERROR: {"type": "error", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_EXCEPTION: {"type": "error", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_SOURCES_LIST: {"type": "sources", "content": chunk}
+                        MSG_TYPE.MSG_TYPE_NEW_MESSAGE.value: {"type": "new_message_id", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_CHUNK.value: {"type": "chunk", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_CONTENT.value: {"type": "chunk", "content": chunk}, 
+                        MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK.value: {"type": "thought", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT.value: {"type": "thought", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_STEP_START.value: {"type": "step_start", "content": chunk, "id": (params or {}).get("id"), "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_STEP_PROGRESS.value: {"type": "step_progress", "content": chunk, "id": (params or {}).get("id"), "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_STEP_END.value: {"type": "step_end", "content": chunk, "id": (params or {}).get("id"), "status": "done", "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_TOOL_CALL.value: {"type": "tool_call", "content": params if params else {"name": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_TOOL_OUTPUT.value: {"type": "tool_output", "content": params if params else {"output": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_REASONING.value: {"type": "thought", "content": chunk, "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_SCRATCHPAD.value: {"type": "scratchpad", "content": chunk, "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_INFO.value: {"type": "info", "content": chunk, "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_WARNING.value: {"type": "warning", "content": chunk, "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_ERROR.value: {"type": "error", "content": chunk, "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_EXCEPTION.value: {"type": "error", "content": chunk, "offset": current_content_len},
+                        MSG_TYPE.MSG_TYPE_SOURCES_LIST.value: {"type": "sources", "content": params if params else chunk}
                     }
-                    payload = payload_map.get(msg_type)
+
+                    payload = payload_map.get(mtype_val)
+                    
+                    # [FIX] Check for custom event types sent within a chunk's meta
+                    if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
+                        payload = params # Use the structured event provided in meta
+
                     if payload:
-                        if payload['type'] != "chunk": all_events.append(payload)
+                        if payload['type'] not in ["chunk", "thought", "sources"]:
+                            all_events.append(payload)
+                        
+                        # Send the clean structured payload for real-time status bar/timeline updates
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
                     return True
 
@@ -1645,20 +1649,27 @@ def build_llm_generation_router(router: APIRouter):
                         )
                         discussion_obj.commit()
 
-                    result = discussion_obj.chat(
-                        user_message=final_prompt, 
-                        personality=active_personality,
-                        branch_tip_id=user_msg.id if user_msg else parent_message_id,
-                        images=images_for_message,
-                        streaming_callback=llm_callback, 
-                        think=owner_db_user.reasoning_activation,
-                        reasoning_effort=owner_db_user.reasoning_effort, 
-                        add_user_message=False, # We added it ourselves or it's a resend
-                        tools=agentic_tools,
-                        enable_image_generation=owner_db_user.image_generation_enabled,
-                        enable_image_editing=owner_db_user.image_editing_enabled,
-                        auto_activate_artefacts=True
-                    )
+                    result = {}
+                    try:
+                        result = discussion_obj.chat(
+                            user_message=final_prompt, 
+                            personality=active_personality,
+                            branch_tip_id=user_msg.id if user_msg else parent_message_id,
+                            images=images_for_message,
+                            streaming_callback=llm_callback, 
+                            think=owner_db_user.reasoning_activation,
+                            reasoning_effort=owner_db_user.reasoning_effort, 
+                            add_user_message=False, # We added it ourselves or it's a resend
+                            tools=agentic_tools,
+                            enable_image_generation=owner_db_user.image_generation_enabled,
+                            enable_image_editing=owner_db_user.image_editing_enabled,
+                            auto_activate_artefacts=True
+                        )
+                    finally:
+                        # Ensure the discussion is committed even if interrupted by the stop signal
+                        # or if an unexpected exception occurred inside chat().
+                        # This guarantees that the partially generated message content is saved.
+                        discussion_obj.commit()
                     
                     ai_msg = result.get('ai_message')
                     if ai_msg:

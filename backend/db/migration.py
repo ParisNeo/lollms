@@ -537,7 +537,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
     if inspector.has_table("personalities"):
         personality_columns_db = [col['name'] for col in inspector.get_columns('personalities')]
-        new_personality_cols_defs = { "active_mcps": "JSON", "data_source_type": "VARCHAR DEFAULT 'none' NOT NULL", "data_source": "TEXT", "version": "VARCHAR", "repository": "VARCHAR", "folder_name": "VARCHAR", "required_context_options": "JSON" }
+        new_personality_cols_defs = { "tools": "JSON", "data_source_type": "VARCHAR DEFAULT 'none' NOT NULL", "data_source": "TEXT", "version": "VARCHAR", "repository": "VARCHAR", "folder_name": "VARCHAR", "required_context_options": "JSON" }
         for col_name, col_sql_def in new_personality_cols_defs.items():
             if col_name not in personality_columns_db:
                 connection.execute(text(f"ALTER TABLE personalities ADD COLUMN {col_name} {col_sql_def}"))

@@ -13,7 +13,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
             uiStore.addNotification('A generation is already in progress.', 'warning');
             return;
         }
-        
+
         // Ensure user info is loaded
         if (!authStore.user) {
             console.error("No authenticated user found in store.");
@@ -73,6 +73,12 @@ export function useDiscussionGeneration(state, stores, getActions) {
         }
 
         generationInProgress.value = true;
+        
+        // [FIX] Reset scratchpad for the new turn
+        if (state.activeDiscussion.value) {
+            state.activeDiscussion.value.scratchpad = "";
+        }
+        
         // Granular state updates for better UI feedback
         generationState.value = { status: 'starting', details: 'Waiting for first token...' };
         
@@ -147,7 +153,27 @@ export function useDiscussionGeneration(state, stores, getActions) {
         };
 
         const processStreamData = (data) => {
+            // [FIX] ID Swapping Logic: Essential to link background events to the UI bubble
+            if (data.type === 'new_message_id') {
+                const tempId = tempAiMessage.id;
+                const realId = data.content;
+                const msgIndex = messages.value.findIndex(m => m.id === tempId);
+                if (msgIndex !== -1) {
+                    console.log(`[ID Swap] Successfully linked ${tempId} to DB ID ${realId}`);
+                    messages.value[msgIndex].id = realId;
+                }
+                return; 
+            }
+
             if (!messageToUpdate) return;
+
+            // [FIX] Clear "Starting" status on ANY activity (Thoughts, Steps, Tool Calls)
+            if (generationState.value.status === 'starting') {
+                generationState.value = { 
+                    status: data.type === 'chunk' ? 'streaming' : 'thinking', 
+                    details: 'Processing...' 
+                };
+            }
             
             switch (data.type) {
                 case 'ttft':
@@ -157,21 +183,19 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     };
                     break;
                 case 'chunk':
-                    if (generationState.value.status !== 'streaming') {
-                         generationState.value = { status: 'streaming', details: 'generating...' };
-                    }
-                    contentBuffer += data.content;
+                    const chunk = data.content;
+                    contentBuffer += chunk;
                     
-                    // Ensure the state properties exist before iterating
+                    // Ensure the state properties exist before iterating for Workspace updates
                     const updatingArtefacts = state.activeUpdatingArtefacts?.value;
-                    const artefactBuffers = state.liveArtefactBuffers; // Pinia unwraps refs in state object
+                    const artefactBuffers = state.liveArtefactBuffers;
 
                     if (updatingArtefacts && updatingArtefacts.size > 0 && artefactBuffers?.value) {
                         updatingArtefacts.forEach(title => {
                             if (artefactBuffers.value[title] === undefined) {
                                 artefactBuffers.value[title] = "";
                             }
-                            artefactBuffers.value[title] += data.content;
+                            artefactBuffers.value[title] += chunk;
                         });
                     }
 
@@ -194,6 +218,10 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         // 3. Mark as live for the typing buffer
                         if (state.activeUpdatingArtefacts?.value) {
                             state.activeUpdatingArtefacts.value.add(title);
+                            // Initialize buffer for this title if new
+                            if (state.liveArtefactBuffers.value[title] === undefined) {
+                                state.liveArtefactBuffers.value[title] = "";
+                            }
                         }
 
                         // 4. Refresh metadata so the chip appears as "Active" (Loaded)
@@ -201,23 +229,68 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         getActions().fetchContextStatus(currentDiscussionId.value);
                     }
                     break;
+                case 'artefact_update_done':
+                    if (data.content && data.content.title) {
+                        const title = data.content.title;
+                        // Stop live tracking so the workspace reverts to DB-backed content
+                        if (state.activeUpdatingArtefacts?.value) {
+                            state.activeUpdatingArtefacts.value.delete(title);
+                        }
+                        delete state.liveArtefactBuffers.value[title];
+                        
+                        // Refresh to ensure we have the final persistent version
+                        getActions().fetchArtefacts(currentDiscussionId.value);
+                    }
+                    break;
                 case 'step_start':
                     generationState.value = { status: 'thinking', details: data.content || 'Thinking...' };
-                    // Push to events so it renders in the chat bubble
                     if (!messageToUpdate.events) messageToUpdate.events = [];
+                    if (!data.id) data.id = `step_start_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                    // Use backend offset if provided, otherwise fallback to local cursor
+                    if (data.offset === undefined) data.offset = messageToUpdate.content.length;
                     messageToUpdate.events.push(data);
                     break;
                 case 'info':
-                    // Handle general info messages in status bar
                     generationState.value = { status: 'info', details: data.content };
+                    if (!messageToUpdate.events) messageToUpdate.events = [];
+                    if (!data.id) data.id = `info_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                    if (data.offset === undefined) data.offset = messageToUpdate.content.length;
+                    messageToUpdate.events.push(data);
                     break;
                 case 'tool_call':
-                    let details = 'Using tool...';
+                    let callDetails = 'Using tool...';
                     try {
-                        const toolData = JSON.parse(data.content);
-                        details = `Using tool: ${toolData.function || toolData.tool_name || '...'}`;
+                        const toolData = typeof data.content === 'string' ? JSON.parse(data.content) : data.content;
+                        callDetails = `Using tool: ${toolData?.tool || toolData?.function?.name || toolData?.name || '...'}`;
                     } catch(e) {}
-                    generationState.value = { status: 'thinking', details };
+                    generationState.value = { status: 'thinking', details: callDetails };
+                    if (!messageToUpdate.events) messageToUpdate.events = [];
+                    if (!data.id) data.id = `tool_call_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                    if (data.offset === undefined) data.offset = messageToUpdate.content.length;
+                    messageToUpdate.events.push(data);
+                    break;
+                case 'tool_output':
+                    generationState.value = { status: 'thinking', details: 'Tool execution complete.' };
+                    
+                    if (!uiStore.isDataZoneVisible) {
+                        uiStore.isDataZoneVisible = true;
+                    }
+
+                    if (!messageToUpdate.events) messageToUpdate.events = [];
+                    
+                    // [FIX] Avoid duplication by updating existing event if ID matches
+                    if (data.id) {
+                        const existingIdx = messageToUpdate.events.findIndex(e => e.id === data.id);
+                        if (existingIdx !== -1) {
+                            messageToUpdate.events[existingIdx] = { ...messageToUpdate.events[existingIdx], ...data };
+                            break;
+                        }
+                    } else {
+                        data.id = `tool_output_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                    }
+
+                    if (data.offset === undefined) data.offset = messageToUpdate.content.length;
+                    messageToUpdate.events.push(data);
                     break;
                 case 'new_title_start':
                     state.titleGenerationInProgressId.value = currentDiscussionId.value;
@@ -243,6 +316,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
                          generationState.value = { status: 'streaming', details: newDetails };
                     }
                     if (!messageToUpdate.events) messageToUpdate.events = [];
+                    // Ensure stable ID for Vue transition rendering
+                    if (!data.id) data.id = `step_end_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
                     messageToUpdate.events.push(data);
                     break;
                 case 'artefact_update':
@@ -268,13 +343,24 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     const finalData = data.data;
                     const userMsgIndex = messages.value.findIndex(m => m.id === tempUserMessage.id);
                     if (userMsgIndex !== -1 && finalData.user_message) {
-                        messages.value.splice(userMsgIndex, 1, processSingleMessage(finalData.user_message));
+                        const processedUserMsg = processSingleMessage(finalData.user_message);
+                        messages.value.splice(userMsgIndex, 1, processedUserMsg);
+                        
+                        // Update the active discussion's active_branch_id to the new leaf
+                        if (state.activeDiscussion.value) {
+                            state.activeDiscussion.value.active_branch_id = processedUserMsg.id;
+                        }
                     }
 
                     const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
                     if (aiMsgIndex !== -1 && finalData.ai_message) {
                         const processedAiMsg = processSingleMessage(finalData.ai_message);
                         messages.value.splice(aiMsgIndex, 1, processedAiMsg);
+                        
+                        // Ensure active branch points to the AI message (the new leaf)
+                        if (state.activeDiscussion.value) {
+                            state.activeDiscussion.value.active_branch_id = processedAiMsg.id;
+                        }
 
                         // NEW: Check if the AI message has triggered a background task (like slides)
                         // and register it as active for UI blocking logic
@@ -309,7 +395,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 }
                 default:
                     if (['thought', 'reasoning', 'scratchpad', 'info', 'observation', 'exception', 'error'].includes(data.type)) {
-                        if (!messageToUpdate.events) messageToUpdate.events = [];
+                        if (!messageToUpdate.events) messageToUpdate.events =[];
+                        // Ensure stable ID for Vue transition rendering
+                        if (!data.id) data.id = `${data.type}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
                         messageToUpdate.events.push(data);
                     }
             }
@@ -369,6 +457,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
             
             if (currentDiscussionId.value) {
                 await getActions().refreshDataZones(currentDiscussionId.value);
+                // CRITICAL FIX: Synchronize the new branch structure after generation finishes
+                await getActions().refreshActiveDiscussionMessages();
             }
             await getActions().loadDiscussions();
         }

@@ -33,11 +33,11 @@ function handleImageError() {
 }
 
 function handleEdit() {
-    emit('edit', props.mcp);
+    emit('edit', props.tools);
 }
 
 function handleDelete() {
-    emit('delete', props.mcp);
+    emit('delete', props.tools);
 }
 </script>
 

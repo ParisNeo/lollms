@@ -128,7 +128,7 @@ const itemsWithTaskStatus = computed(() => {
     return (zooMcps.value.items || []).map(item => ({...item, task: taskMap.get(`folder:${item.folder_name}`) || (item.id ? taskMap.get(`id:${item.id}`) : null)}));
 });
 
-const sortedRepositories = computed(() => Array.isArray(mcpZooRepositories.value) ? [...mcpZooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
+const sortedRepositories = computed(() => Array.isArray(mcpZooRepositories.value) ? [...toolsZooRepositories.value].sort((a, b) => (a.name || '').localeCompare(b.name || '')) : []);
 const categories = computed(() => ['All', 'Starred', ...(zooMcps.value.categories || [])]);
 
 function handleStarToggle(itemName) { const index = starredItems.value.indexOf(itemName); if (index > -1) starredItems.value.splice(index, 1); else starredItems.value.push(itemName); }

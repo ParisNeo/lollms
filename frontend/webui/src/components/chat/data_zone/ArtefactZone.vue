@@ -131,22 +131,15 @@ async function handleDrop(event) {
             <p class="text-sm font-bold text-blue-600">Drop to Add</p>
         </div>
 
-        <div class="flex justify-between items-center mb-2 flex-shrink-0 bg-white/50 dark:bg-gray-800/50 p-1 rounded">
-            <button @click="isArtefactsCollapsed = !isArtefactsCollapsed" class="flex items-center gap-2 text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">
-                <IconChevronRight class="w-3.5 h-3.5 transition-transform" :class="{'rotate-90': !isArtefactsCollapsed}"/>
-                <span>{{ notebookId ? 'Sources' : 'Artefacts' }}</span>
+        <div class="flex justify-between items-center mb-4 flex-shrink-0 px-2">
+            <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Artefacts</h2>
+            <button 
+                @click="handleDownloadAll" 
+                class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-colors"
+            >
+                <IconArrowDownTray class="w-4 h-4" />
+                <span>Download All</span>
             </button>
-            <div class="flex items-center gap-0.5">
-                <button @click="handleRefreshArtefacts" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500" title="Refresh">
-                    <IconRefresh class="w-3.5 h-3.5" :class="{'animate-spin': isLoadingArtefacts}" />
-                </button>
-                <DropdownMenu icon="menu" buttonClass="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-500" title="Actions">
-                    <button @click="handleLoadAllArtefacts" class="menu-item"><IconGather class="w-4 h-4 mr-2" />Load All</button>
-                    <button @click="handleCreateArtefact" class="menu-item"><IconPencil class="w-4 h-4 mr-2" />Manual Entry</button>
-                    <button @click="handleImportFromUrl" class="menu-item"><IconWeb class="w-4 h-4 mr-2" />Scrape URL</button>
-                    <button @click="triggerArtefactFileUpload" class="menu-item"><IconArrowUpTray class="w-4 h-4 mr-2" />Upload File</button>
-                </DropdownMenu>
-            </div>
         </div>
         <div v-if="!isArtefactsCollapsed" class="flex-grow overflow-y-auto custom-scrollbar">
             <div v-if="isLoadingArtefacts" class="text-center py-10"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>

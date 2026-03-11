@@ -11,7 +11,7 @@ class PersonalityBase(BaseModel):
     disclaimer: Optional[str] = Field(None)
     script_code: Optional[str] = None
     icon_base64: Optional[str] = None
-    active_mcps: Optional[List[str]] = Field(default_factory=list)
+    tools: Optional[List[str]] = Field(default_factory=list)
     required_context_options: Optional[List[str]] = Field(default_factory=list) # NEW
     data_source_type: Optional[str] = "none"
     data_source: Optional[str] = None

@@ -74,7 +74,7 @@ def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any
                 'author': legacy_data.get('author'), 'category': legacy_data.get('category'),
                 'description': legacy_data.get('personality_description'),
                 'prompt_text': legacy_data.get('personality_conditioning'),
-                'disclaimer': legacy_data.get('disclaimer'), 'active_mcps': legacy_data.get('dependencies', [])
+                'disclaimer': legacy_data.get('disclaimer'), 'tools': legacy_data.get('dependencies', [])
             }
     else: # app, mcp, prompt
         config_path = item_path / "description.yaml"

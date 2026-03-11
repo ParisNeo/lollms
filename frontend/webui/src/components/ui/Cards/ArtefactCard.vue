@@ -92,108 +92,142 @@ async function handleDelete() {
 }
 </script>
 
+<script setup>
+import { computed, ref } from 'vue';
+import { useDiscussionsStore } from '../../../stores/discussions';
+import { useUiStore } from '../../../stores/ui';
+
+// Icons
+import IconFileText from '../../../assets/icons/IconFileText.vue';
+import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
+import IconPencil from '../../../assets/icons/IconPencil.vue';
+import IconTrash from '../../../assets/icons/IconTrash.vue';
+import IconRefresh from '../../../assets/icons/IconRefresh.vue';
+import IconMenu from '../../../assets/icons/IconMenu.vue';
+import DropdownMenu from '../DropdownMenu/DropdownMenu.vue';
+
+const props = defineProps({
+  artefactGroup: { type: Object, required: true },
+});
+
+const discussionsStore = useDiscussionsStore();
+const uiStore = useUiStore();
+
+const selectedVersion = ref(props.artefactGroup.versions[0]?.version || 1);
+
+const fileExtension = computed(() => {
+    const title = props.artefactGroup.title;
+    const parts = title.split('.');
+    return parts.length > 1 ? parts.pop().toUpperCase() : 'DOC';
+});
+
+const isLoadedToDataZone = computed(() => props.artefactGroup.isAnyVersionLoaded);
+
+function handleView() {
+    uiStore.activeSplitArtefactTitle = props.artefactGroup.title;
+    if (!uiStore.isDataZoneVisible) uiStore.isDataZoneVisible = true;
+}
+
+async function handleDelete() {
+    const confirmed = await uiStore.showConfirmation({
+        title: `Delete Artefact?`,
+        message: `This will delete "${props.artefactGroup.title}" and all its versions.`,
+        confirmText: 'Delete'
+    });
+    if (confirmed.confirmed) {
+        await discussionsStore.deleteArtefact({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: props.artefactGroup.title,
+        });
+    }
+}
+
+async function handleDownload() {
+    const data = await discussionsStore.fetchArtefactContent({
+        discussionId: discussionsStore.currentDiscussionId,
+        artefactTitle: props.artefactGroup.title,
+        version: selectedVersion.value
+    });
+    const blob = new Blob([data.content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = props.artefactGroup.title;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+async function toggleLoad() {
+    if (isLoadedToDataZone.value) {
+        await discussionsStore.unloadArtefactFromContext({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: props.artefactGroup.title,
+            version: selectedVersion.value
+        });
+    } else {
+        await discussionsStore.loadArtefactToContext({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: props.artefactGroup.title,
+            version: selectedVersion.value
+        });
+    }
+}
+</script>
+
 <template>
-  <div class="artefact-card group" :class="cardClasses">
-    <div class="artefact-header">
-      <div class="artefact-info cursor-pointer hover:opacity-80 transition-opacity flex-grow" @click="handleView">
-        <div class="artefact-icon" :class="{ 'loaded-data-zone': isLoadedToDataZone, 'loaded-prompt': isLoadedToPrompt }">
-          <IconFileText class="w-4 h-4" />
-        </div>
-        <div class="artefact-details">
-          <h5 class="artefact-title" :title="artefactGroup.title">{{ artefactGroup.title }}</h5>
-        </div>
-      </div>
-      <div class="artefact-actions">
-        <button @click.stop="handleEdit" class="artefact-action-btn" title="Edit Content"><IconPencil class="w-3 h-3" /></button>
-        <button @click.stop="handleDelete" class="artefact-action-btn artefact-action-btn-danger" title="Delete Artefact"><IconTrash class="w-3 h-3" /></button>
-      </div>
+  <div class="artefact-list-item group" :class="{'is-active': isLoadedToDataZone}">
+    <!-- File Icon Box -->
+    <div class="file-icon-box" @click="handleView">
+        <svg class="w-8 h-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+            <path d="M14 2v6h6" />
+        </svg>
     </div>
-    <div class="artefact-body">
-        <div class="w-full">
-            <select v-model="selectedVersion" @click.stop class="version-select">
-                <option v-for="v in artefactGroup.versions" :key="v.version" :value="v.version">
-                  Version {{ v.version }}
-                </option>
-            </select>
+
+    <!-- Info Column -->
+    <div class="flex-grow min-w-0 flex flex-col justify-center cursor-pointer" @click="handleView">
+        <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate" :title="artefactGroup.title">
+            {{ artefactGroup.title }}
+        </h4>
+        <div class="flex items-center gap-2 mt-0.5">
+            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ fileExtension }}</span>
+            <span class="text-[10px] text-gray-400">•</span>
+            <span class="text-[10px] font-bold text-gray-400">v{{ selectedVersion }}</span>
         </div>
-      
-        <div class="grid grid-cols-2 gap-1 w-full mt-1.5">
-            <button v-if="!isLoadedToDataZone" @click.stop="handleLoadToDataZone" class="load-btn" title="Load to Data Zone">
-                <IconArrowDownTray class="w-3 h-3" /> Load DZ
+    </div>
+
+    <!-- Actions -->
+    <div class="flex items-center gap-1 pr-1">
+        <button @click.stop="handleDownload" class="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download">
+            <IconArrowDownTray class="w-5 h-5" />
+        </button>
+        
+        <!-- Advanced Actions Dropdown -->
+        <DropdownMenu icon="menu" buttonClass="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Actions">
+            <button @click="toggleLoad" class="menu-item">
+                <IconRefresh class="w-4 h-4 mr-3" :class="{'text-green-500': isLoadedToDataZone}"/> 
+                <span>{{ isLoadedToDataZone ? 'Unload from Context' : 'Load to Context' }}</span>
             </button>
-            <button v-else @click.stop="handleUnloadFromDataZone" class="load-btn loaded-data-zone-btn" title="Unload from Data Zone">
-                <IconCheckCircle class="w-3 h-3" /> Unload DZ
+            <div class="menu-divider"></div>
+            <button @click="handleDelete" class="menu-item text-red-500">
+                <IconTrash class="w-4 h-4 mr-3" />
+                <span>Delete</span>
             </button>
-            
-            <button v-if="!isLoadedToPrompt" @click.stop="handleLoadToPrompt" class="load-btn" title="Load to Prompt">
-                <IconPlus class="w-3 h-3" /> Load PMPT
-            </button>
-            <button v-else @click.stop="handleUnloadFromPrompt" class="load-btn loaded-prompt-btn" title="Unload from Prompt">
-                <IconXMark class="w-3 h-3" /> Unload PMPT
-            </button>
-        </div>
+        </DropdownMenu>
     </div>
   </div>
 </template>
+
 <style scoped>
-/* Main card styling */
-.artefact-card {
-    @apply bg-white dark:bg-gray-800 border dark:border-gray-700/50 rounded-md p-0 flex flex-col;
+.artefact-list-item {
+    @apply flex items-center gap-4 p-2 bg-white dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-700/50 hover:border-gray-300 dark:hover:border-gray-600 transition-all shadow-sm;
 }
-.artefact-card.loaded-data-zone {
-    @apply border-green-500 bg-green-50 dark:bg-green-900/20;
+.artefact-list-item.is-active {
+    @apply ring-1 ring-blue-500/50 bg-blue-50/10 dark:bg-blue-900/5;
 }
-.artefact-icon.loaded-data-zone {
-    @apply bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300;
+.file-icon-box {
+    @apply w-12 h-12 flex-shrink-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 rounded-lg border dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors;
 }
-.artefact-card.loaded-prompt {
-    @apply border-blue-500 bg-blue-50 dark:bg-blue-900/20;
-}
-.artefact-icon.loaded-prompt {
-    @apply bg-blue-100 text-blue-600 dark:bg-blue-900 dark:text-blue-300;
-}
-.artefact-header {
-    @apply flex items-center justify-between p-1.5 pr-1;
-}
-.artefact-info {
-    @apply flex items-center gap-2 min-w-0 hover:bg-gray-50 dark:hover:bg-gray-700/50 p-1 -m-1 rounded-md transition-colors;
-}
-.artefact-icon {
-    @apply w-6 h-6 rounded-md flex-shrink-0 flex items-center justify-center bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300;
-}
-.artefact-details {
-    @apply min-w-0;
-}
-.artefact-title {
-    @apply text-xs font-semibold truncate;
-}
-.artefact-actions {
-    @apply flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity;
-}
-.artefact-action-btn {
-    @apply p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-500 dark:text-gray-400;
-}
-.artefact-action-btn-danger {
-    @apply hover:bg-red-100 dark:hover:bg-red-900/50 hover:text-red-600 dark:hover:text-red-400;
-}
-
-.artefact-body {
-    @apply p-1.5 pt-1 border-t border-gray-200 dark:border-gray-700;
-}
-.version-select {
-    @apply w-full text-xs bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded-md px-2 py-1 focus:ring-1 focus:ring-blue-500;
-}
-
-/* Action buttons styling */
-.load-btn {
-    @apply w-full flex items-center justify-center gap-1.5 px-2 py-1.5 text-xs font-semibold rounded-md transition-colors
-           bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-gray-600;
-}
-
-.load-btn.loaded-data-zone-btn:not(.is-disabled) {
-    @apply bg-green-500 text-white hover:bg-green-600;
-}
-.load-btn.loaded-prompt-btn:not(.is-disabled) {
-    @apply bg-blue-500 text-white hover:bg-blue-600;
-}
+.menu-item { @apply flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors; }
+.menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
 </style>

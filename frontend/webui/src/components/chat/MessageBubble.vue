@@ -485,19 +485,22 @@ const eventIconMap = {
 
 const groupedEvents = computed(() => {
     if (!hasEvents.value) return [];
-    const result = [];
-    const stack = [];
+    const result =[];
+    const stack =[];
     // Filter out internal or unwanted event types
     const filteredEvents = props.message.events.filter(event => event.type !== 'sources' && event.type !== 'ui_update');
     
-    for (const event of filteredEvents) {
+    for (let i = 0; i < filteredEvents.length; i++) {
+        const event = filteredEvents[i];
         const lowerType = event.type?.toLowerCase() || '';
+        const stableId = event.id || `${event.type}-${i}`;
         
         if (lowerType.includes('step_start')) {
             const newGroup = { 
+                id: `group-${stableId}`,
                 type: 'step_group', 
                 startEvent: event, 
-                children: [], 
+                children:[], 
                 endEvent: null, 
                 isInitiallyOpen: true // Steps usually contain important context
             };
@@ -509,9 +512,11 @@ const groupedEvents = computed(() => {
                 const currentGroup = stack.pop();
                 currentGroup.endEvent = event;
             } else { 
+                event._stableId = stableId;
                 result.push(event); 
             }
         } else {
+            event._stableId = stableId;
             if (stack.length > 0) stack[stack.length - 1].children.push(event);
             else result.push(event);
         }
@@ -622,7 +627,17 @@ function handleTagRegeneration(part) {
     });
 }
 
-function showSourceDetails(source) { uiStore.openModal('sourceViewer', { ...source }); }
+function showSourceDetails(source) { 
+    // Normalize data: ensure it has 'content' and 'title' for the viewer modal
+    const data = {
+        title: source.title || source.name || 'Source Details',
+        content: source.content || source.chunk_text || source.text || '',
+        source: source.source || source.url || '',
+        score: source.relevance_score || source.score || 0,
+        metadata: source.metadata || {}
+    };
+    uiStore.openModal('sourceViewer', data); 
+}
 function openAllSourcesSearch() { uiStore.openModal('allSourcesSearch', { sources: props.message.sources }); }
 function getSimilarityColor(score) { if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600'; if (score >= 80) return 'bg-green-500'; if (score >= 50) return 'bg-yellow-500'; return 'bg-red-500'; }
 
@@ -663,78 +678,10 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                 <!-- Content Wrapper -->
                 <div class="message-content-wrapper">
                     <div v-if="!isEditing">
-                        <!-- Integrated Event Timeline (Moved to Top) -->
-                        <div v-if="hasEvents" class="mb-4 space-y-2 border-l-2 border-gray-100 dark:border-gray-800 ml-1">
-                            <details class="events-details-container group/events" :open="!isEventsCollapsed" @toggle="isEventsCollapsed = !$event.target.open">
-                                <summary class="flex items-center gap-2 cursor-pointer list-none select-none px-3 py-1 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
-                                    <IconChevronRight class="w-3 h-3 transition-transform duration-200 group-open/events:rotate-90" />
-                                    <span class="font-bold uppercase tracking-widest">{{ isEventsCollapsed ? 'Show Timeline' : 'Hide Timeline' }}</span>
-                                    <span v-if="isEventsCollapsed" class="truncate opacity-60 italic">— {{ lastEventSummary }}</span>
-                                </summary>
-                                
-                                <div class="mt-2 space-y-4 pl-4 pr-2">
-                                    <template v-for="(item, index) in groupedEvents" :key="index">
-                                        <!-- Nested Step Group -->
-                                        <div v-if="item.type === 'step_group'" class="step-card bg-gray-50/50 dark:bg-gray-900/30 rounded-xl border border-gray-100 dark:border-gray-800 overflow-hidden">
-                                            <div class="flex items-center gap-3 p-3 bg-gray-100/50 dark:bg-gray-800/50">
-                                                <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
-                                                    <component :is="getEventIcon(item.startEvent.type)" class="w-4 h-4" />
-                                                </div>
-                                                <div class="flex-1 min-w-0">
-                                                    <div class="text-[10px] font-black uppercase tracking-widest text-gray-400">{{ item.startEvent.type.replace(/_/g, ' ') }}</div>
-                                                    <div class="text-sm font-bold truncate dark:text-gray-200" v-html="parsedMarkdown(String(item.startEvent.content || 'Executing Step'))"></div>
-                                                </div>
-                                            </div>
-                                            
-                                            <div class="p-3 space-y-3">
-                                                <div v-for="(child, cIdx) in item.children" :key="cIdx" class="flex gap-3">
-                                                    <div class="flex-shrink-0 pt-1">
-                                                        <component :is="getEventIcon(child.type)" class="w-3.5 h-3.5 text-gray-400" />
-                                                    </div>
-                                                    <div class="flex-1 min-w-0">
-                                                        <div class="text-[9px] font-bold uppercase text-gray-400 mb-0.5">{{ child.type }}</div>
-                                                        <div class="text-xs text-gray-700 dark:text-gray-300">
-                                                            <div v-if="typeof child.content === 'string'" v-html="parsedMarkdown(child.content)"></div>
-                                                            <StepDetail v-else :data="child.content" :level="1" />
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                                
-                                                <!-- Step End Info -->
-                                                <div v-if="item.endEvent" class="mt-2 pt-2 border-t border-gray-100 dark:border-gray-800 flex gap-3">
-                                                    <IconCheckCircle class="w-3.5 h-3.5 text-green-500" />
-                                                    <div class="flex-1 text-xs font-medium text-gray-500">
-                                                        <div v-if="item.endEvent.content" v-html="parsedMarkdown(String(item.endEvent.content))"></div>
-                                                        <span v-else>Step completed successfully</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-
-                                        <!-- Single Event -->
-                                        <div v-else class="flex gap-3 items-start group/ev-item">
-                                            <div class="p-1.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500 group-hover/ev-item:bg-blue-50 dark:group-hover/ev-item:bg-blue-900/20 group-hover/ev-item:text-blue-500 transition-colors">
-                                                <component :is="getEventIcon(item.type)" class="w-3.5 h-3.5" />
-                                            </div>
-                                            <div class="flex-1 pt-0.5 min-w-0">
-                                                <div class="flex items-center justify-between mb-0.5">
-                                                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">{{ item.type.replace(/_/g, ' ') }}</span>
-                                                    <span class="text-[9px] font-mono text-gray-300 dark:text-gray-600">{{ new Date(item.timestamp || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
-                                                </div>
-                                                <div class="text-xs text-gray-700 dark:text-gray-300">
-                                                    <div v-if="typeof item.content === 'string'" v-html="parsedMarkdown(item.content)"></div>
-                                                    <StepDetail v-else :data="item.content" :level="1" />
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </template>
-                                </div>
-                            </details>
-                        </div>
-
                         <!-- Text Content -->
                         <MessageContentRenderer
                             :content="message.content"
+                            :sources="message.sources"
                             :is-streaming="message.isStreaming"
                             :is-user="isCurrentUser"
                             :has-images="allImages.length > 0"
@@ -743,6 +690,41 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             @regenerate="handleTagRegeneration"
                             @citation-click="handleCitationClick"
                         />
+
+                        <!-- ── [NEW] Execution Timeline (Discrete Bottom Collapsible) ── -->
+                        <div v-if="hasEvents" class="mt-4 border-t dark:border-gray-700/50 pt-3">
+                            <details class="group/timeline timeline-details overflow-hidden rounded-xl bg-gray-50/30 dark:bg-gray-900/20 border border-gray-100 dark:border-gray-800">
+                                <summary class="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors list-none select-none">
+                                    <div class="flex items-center gap-3">
+                                        <div class="p-1 rounded-md bg-gray-200 dark:bg-gray-800 text-gray-500">
+                                            <IconCog class="w-3.5 h-3.5" :class="{'animate-spin': message.isStreaming}" />
+                                        </div>
+                                        <div class="flex flex-col">
+                                            <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">Execution Workflow</span>
+                                            <span class="text-[10px] font-bold text-gray-600 dark:text-gray-400 line-clamp-1">{{ lastEventSummary }}</span>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center gap-3">
+                                        <span class="text-[9px] font-black text-blue-500 uppercase tracking-widest group-open/timeline:hidden">View Logs</span>
+                                        <IconChevronRight class="w-3.5 h-3.5 text-gray-300 group-open/timeline:rotate-90 transition-transform" />
+                                    </div>
+                                </summary>
+                                
+                                <div class="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-950/40 max-h-[400px] overflow-y-auto custom-scrollbar">
+                                    <div class="space-y-4">
+                                        <div v-for="(event, idx) in message.events" :key="event.id || idx" class="flex flex-col gap-1 border-l-2 border-gray-100 dark:border-gray-800 pl-4 py-1">
+                                            <div class="flex items-center gap-2 mb-1">
+                                                <component :is="getEventIcon(event.type)" class="w-3.5 h-3.5 text-blue-500" />
+                                                <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">
+                                                    {{ event.type.replace('_', ' ') }}
+                                                </span>
+                                            </div>
+                                            <StepDetail :data="event.content" :level="0" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </details>
+                        </div>
 
                         <!-- Centralized Image Zone with Gallery Underneath -->
                         <!-- MOVED BELOW TEXT CONTENT -->
@@ -908,7 +890,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     </div>
 
                     <div v-if="isSourcesVisible" class="mt-2 space-y-2 pl-4">
-                        <div v-for="(source, index) in sortedSources" :key="index" :ref="el => { if(el) sourceRefs[index] = el }" class="flex flex-col gap-1 transition-all duration-300">
+                        <div v-for="(source, index) in sortedSources" :key="source.source || source.title || `source-${index}`" :ref="el => { if(el) sourceRefs[index] = el }" class="flex flex-col gap-1 transition-all duration-300">
                              <div class="flex items-center justify-between p-2 rounded-lg bg-gray-50 dark:bg-gray-800/50 border border-transparent hover:border-gray-300 dark:hover:border-gray-600 transition-all cursor-pointer group" @click="showSourceDetails(source)">
                                 <div class="flex items-center gap-2 min-w-0">
                                     <div class="similarity-chip" :class="getSimilarityColor(source.score)" :title="typeof source.score === 'number' ? `Similarity: ${(source.score).toFixed(1)}%` : 'Similarity: N/A'"></div>

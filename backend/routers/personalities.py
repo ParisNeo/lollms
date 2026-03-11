@@ -75,7 +75,7 @@ def _generate_personality_task(task: Task, username: str, prompt: str):
                 "prompt_text": {"type": "string", "description": "The core system prompt that defines the AI's role, rules, and initial instructions for character."},
                 "disclaimer": {"type": "string", "description": "Any necessary warnings or disclaimers users should be aware of."},
                 "script_code": {"type": "string", "description": "Optional Python code for advanced behaviors. Can be empty."},
-                "active_mcps": {"type": "array", "items": {"type": "string"}, "description": "A list of default MCP tools to activate with this personality."},
+                "tools": {"type": "array", "items": {"type": "string"}, "description": "A list of default MCP tools to activate with this personality."},
                 "required_context_options": {
                     "type": "array",
                     "items": {
@@ -170,8 +170,8 @@ The prompt should specify the subject, art style, lighting, and composition. Ens
         task.log("Creating new personality in the database...")
         task.set_progress(90)
 
-        # FIX: Clear active_mcps to prevent hallucinated tools, but keep required_context_options
-        generated_data_dict['active_mcps'] = []
+        # FIX: Clear tools to prevent hallucinated tools, but keep required_context_options
+        generated_data_dict['tools'] = []
         
         existing_personality = db_session.query(DBPersonality).filter(
             DBPersonality.owner_user_id == current_user.id,
@@ -397,7 +397,7 @@ def get_personality_public_from_db(db_personality: DBPersonality, owner_username
         created_at=db_personality.created_at,
         updated_at=db_personality.updated_at,
         is_public=db_personality.is_public,
-        active_mcps=db_personality.active_mcps or [],
+        tools=db_personality.tools or [],
         required_context_options=db_personality.required_context_options or [],
         owner_username=owner_username,
         data_source_type=db_personality.data_source_type,
@@ -599,7 +599,7 @@ async def send_personality_to_user(personality_id: str, send_request: Personalit
         script_code=original_personality.script_code,
         icon_base64=original_personality.icon_base64,
         owner_user_id=target_user.id,
-        active_mcps=original_personality.active_mcps,
+        tools=original_personality.tools,
         required_context_options=original_personality.required_context_options,
         is_public=False
     )
@@ -642,7 +642,7 @@ async def export_personality(personality_id: str, current_user: UserAuthDetails 
             'prompt_text': db_personality.prompt_text,
             'disclaimer': db_personality.disclaimer,
             'version': db_personality.version or '1.0.0',
-            'active_mcps': db_personality.active_mcps or [],
+            'tools': db_personality.tools or [],
             'required_context_options': db_personality.required_context_options or []
         }
         
@@ -752,7 +752,7 @@ async def import_personality(
             # Map legacy fields if needed
             prompt_text = desc_data.get('prompt_text') or desc_data.get('personality_conditioning')
             description = desc_data.get('description') or desc_data.get('personality_description')
-            active_mcps = desc_data.get('active_mcps') or desc_data.get('dependencies', [])
+            tools = desc_data.get('tools') or desc_data.get('dependencies', [])
             required_context = desc_data.get('required_context_options') or []
 
             # Handle Owner
@@ -773,7 +773,7 @@ async def import_personality(
                 disclaimer=desc_data.get('disclaimer'),
                 version=str(desc_data.get('version', '1.0')),
                 icon_base64=icon_base64,
-                active_mcps=active_mcps,
+                tools=tools,
                 required_context_options=required_context,
                 data_source_type=data_source_type,
                 data_source=data_source,
