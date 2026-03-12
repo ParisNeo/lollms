@@ -23,11 +23,45 @@ def _serialize_task(db_task: DBTask) -> Optional[dict]:
         return None
     
     try:
-        # Optimization: Only send the latest logs over WebSocket to prevent 
-        # browser memory crashes (STATUS_BREAKPOINT) from massive JSON payloads.
-        recent_logs = db_task.logs[-5:] if db_task.logs else []
-        
-        
+        # 1. Truncate Logs with Cumulative Size Guard
+        # This prevents a payload from exploding if multiple logs are individually "medium" sized.
+        recent_logs = []
+        if db_task.logs and isinstance(db_task.logs, list):
+            cumulative_size = 0
+            # Iterate backwards through last 10 logs
+            for log in reversed(db_task.logs[-10:]):
+                msg = log.get("message", "")
+                # Clip very long single entries
+                if len(msg) > 2000:
+                    msg = msg[:2000] + "... [clipped]"
+                
+                log_entry = {**log, "message": msg}
+                entry_size = len(json.dumps(log_entry))
+                
+                # If adding this log would push the payload toward the 1MB limit, stop here.
+                if cumulative_size + entry_size > 50000: # 50KB limit for logs in UI
+                    recent_logs.insert(0, {"timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(), "message": "[Older logs omitted]", "level": "INFO"})
+                    break
+                    
+                recent_logs.insert(0, log_entry)
+                cumulative_size += entry_size
+            
+        # 2. STRIP LARGE RESULTS (Crucial for Images)
+        # We NEVER send the full base64 image or huge JSON over WebSocket.
+        # This data is saved in the DB; the UI will fetch it via standard API calls.
+        safe_result = db_task.result
+        if safe_result:
+            if isinstance(safe_result, str) and len(safe_result) > 10000:
+                # Flag to the UI that data exists but is omitted for transport stability
+                safe_result = "[Large Output Stored in DB]"
+            elif isinstance(safe_result, (dict, list)):
+                try:
+                    # Check if the serialized dict is over 10KB
+                    if len(json.dumps(safe_result)) > 10000:
+                        safe_result = {"ui_hint": "large_data_omitted", "full_data": "available_in_db"}
+                except:
+                    safe_result = "[Unserializable Data]"
+
         task_info = {
             "id": db_task.id,
             "name": db_task.name,
@@ -35,7 +69,7 @@ def _serialize_task(db_task: DBTask) -> Optional[dict]:
             "status": db_task.status,
             "progress": db_task.progress,
             "logs": recent_logs,
-            "result": db_task.result,
+            "result": safe_result,
             "error": db_task.error,
             "result": db_task.result,
             "error": db_task.error,

@@ -305,22 +305,31 @@ export const useDataStore = defineStore('data', () => {
     async function loadAllInitialData() {
         const { usePromptsStore } = await import('./prompts');
         const promptsStore = usePromptsStore();
-        const promises = [
-            fetchAvailableLollmsModels().catch(e => console.error("Error fetching models:", e)),
-            fetchAvailableTtiModels().catch(e => console.error("Error fetching TTI models:", e)),
-            fetchAvailableTtsModels().catch(e => console.error("Error fetching TTS models:", e)),
-            fetchAvailableSttModels().catch(e => console.error("Error fetching STT models:", e)),
-            fetchUserVoices().catch(e => console.error("Error fetching user voices:", e)),
-            fetchDataStores().catch(e => console.error("Error fetching data stores:", e)),
-            fetchPersonalities().catch(e => console.error("Error fetching personalities:", e)),
-            fetchMcps().catch(e => console.error("Error fetching MCPs:", e)),
-            fetchMcpTools().catch(e => console.error("Error fetching MCP tools:", e)),
-            fetchApps().catch(e => console.error("Error fetching apps:", e)),
-            fetchLanguages().catch(e => console.error("Error fetching languages:", e)),
-            fetchApiKeys().catch(e => console.error("Error fetching API keys:", e)),
-            promptsStore.fetchPrompts().catch(e => console.error("Error fetching saved prompts:", e))
-        ];
-        await Promise.allSettled(promises);
+        
+        // We use allSettled so that if one service (like an external MCP) is down,
+        // the user can still access the rest of the application.
+        const results = await Promise.allSettled([
+            fetchAvailableLollmsModels(),
+            fetchAvailableTtiModels(),
+            fetchAvailableTtsModels(),
+            fetchAvailableSttModels(),
+            fetchUserVoices(),
+            fetchDataStores(),
+            fetchPersonalities(),
+            fetchMcps(),
+            fetchMcpTools(),
+            fetchApps(),
+            fetchLanguages(),
+            fetchApiKeys(),
+            promptsStore.fetchPrompts()
+        ]);
+
+        // Log failures for debugging without blocking the UI
+        results.forEach((result, index) => {
+            if (result.status === 'rejected') {
+                console.error(`Initial data fetch #${index} failed:`, result.reason);
+            }
+        });
     }
 
     /**

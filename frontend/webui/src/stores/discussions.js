@@ -136,25 +136,22 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const dataZonesTokensFromContext = computed(() => activeDiscussionContextStatus.value?.zones?.system_context?.breakdown?.discussion_data_zone?.tokens || 0);
     const activeDiscussionContainsCode = computed(() => activeMessages.value.some(msg => msg.content && msg.content.includes('```')));
     
-    // CRITICAL FIX: Ensure reactivity and proper deduplication of versions
+    // Group artefacts by title, showing only the latest version but preserving 'is_loaded' status
     const uniqueAttachedArtefacts = computed(() => {
         const list = activeDiscussionArtefacts.value;
         if (!list || !Array.isArray(list)) return [];
         
-        const map = new Map();
+        const groups = {};
         list.forEach(art => {
-            const existing = map.get(art.title);
-            // If new version found, update the entry in the map
-            if (!existing || art.version > existing.version) {
-                map.set(art.title, {
-                    ...art,
-                    // Ensure author is present for visual coding (AI vs User)
-                    author: art.author || 'assistant'
-                });
+            if (!groups[art.title] || art.version > groups[art.title].version) {
+                groups[art.title] = { ...art };
             }
         });
-        return Array.from(map.values());
+        
+        return Object.values(groups).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
     });
+
+    const loadedContextItems = computed(() => []);
 
     const currentModelVisionSupport = computed(() => {
         const modelId = authStore.user?.lollms_model_name;
@@ -162,45 +159,14 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelId);
         return modelInfo?.alias?.has_vision ?? true;
     });
-    const loadedContextItems = computed(() => {
-        const zone = activeDiscussion.value?.discussion_data_zone;
-        if (!zone) return [];
-        const items = [];
-        // Support Document, Skill, and Note blocks
-        const regex = /--- (Document|Skill|Note): (.*?) ---[\s\r\n]*([\s\S]*?)[\s\r\n]*--- End \1(?:: .*?)? ---/g;
-        let match;
-        while ((match = regex.exec(zone)) !== null) {
-            if (match[1] && match[2]) {
-                items.push({
-                    type: match[1].toLowerCase(),
-                    title: match[2].trim(),
-                    content: match[3] || '',
-                    raw: match[0]
-                });
-            }
-        }
-        return items;
-    });
 
     async function removeContextItem(itemTitle, itemType) {
+        // This is now handled by unloading the artefact in the library
         if (!activeDiscussion.value) return;
-        
-        const escapedTitle = itemTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        // Handle "document", "skill", or "note" types
-        const typePattern = itemType.charAt(0).toUpperCase() + itemType.slice(1);
-        
-        // Use a more aggressive regex for removal that ignores specific newline counts
-        const regex = new RegExp(`[\\s\\r\\n]*--- ${typePattern}: ${escapedTitle} ---[\\s\\S]*?--- End ${typePattern}(?:: ${escapedTitle})? ---[\\s\\r\\n]*`, 'g');
-        
-        const newContent = activeDiscussion.value.discussion_data_zone.replace(regex, '\n\n').trim();
-        
-        await getActions().updateDataZone({
+        await getActions().unloadArtefactFromContext({
             discussionId: activeDiscussion.value.id,
-            content: newContent
+            artefactTitle: itemTitle
         });
-        
-        await getActions().fetchContextStatus(activeDiscussion.value.id);
-        uiStore.addNotification(`${typePattern} removed from context.`, 'success');
     }
 
     const discussionGroupsTree = computed(() => {

@@ -45,8 +45,15 @@ function forceClose() {
     isOpen.value = false;
 }
 
-function handleItemClick() {
-    emit('close-all-dropdowns');
+function handleItemClick(event) {
+    // Only close if we didn't click on a toggle or input
+    // and the item doesn't have data-keep-open attribute
+    const isControl = event.target.closest('input, select, .toggle-switch, .slider, .slider-sm');
+    const keepOpen = event.target.closest('[data-keep-open="true"]');
+    
+    if (!isControl && !keepOpen) {
+        emit('close-all-dropdowns');
+    }
 }
 
 // NEW: Function for submenus to report their status

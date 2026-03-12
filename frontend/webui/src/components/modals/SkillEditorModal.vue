@@ -89,6 +89,23 @@ async function handleSave() {
     }
 }
 
+async function handleAddToDiscussion() {
+    if (!discussionsStore.currentDiscussionId) {
+        uiStore.addNotification('Please select an active discussion first.', 'warning');
+        return;
+    }
+    
+    // Create the skill as a versioned artefact in the background
+    await discussionsStore.addSkillAsArtefact({
+        name: name.value,
+        content: content.value,
+        description: description.value,
+        category: category.value
+    });
+    
+    uiStore.addNotification('Skill added to discussion.', 'success');
+}
+
 async function exportFormat(format) {
     if (skill.value && skill.value.id) {
         await skillsStore.exportSkill(skill.value.id, format);
@@ -141,6 +158,10 @@ async function exportFormat(format) {
                             <IconArrowDownTray class="w-3.5 h-3.5" /> Claude
                         </button>
                     </template>
+                    <button @click="handleAddToDiscussion" class="btn btn-secondary flex items-center gap-2" :disabled="!content || !content.trim()">
+                        <IconArrowUpTray class="w-4 h-4" />
+                        Add to Discussion
+                    </button>
                 </div>
                 <div class="flex gap-2">
                     <button @click="uiStore.closeModal('skillEditor')" class="btn btn-secondary">Cancel</button>

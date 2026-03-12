@@ -27,6 +27,7 @@ const ExportModal = defineAsyncComponent(() => import('./ExportModal.vue'));
 const ImportModal = defineAsyncComponent(() => import('./ImportModal.vue'));
 const InteractiveOutputModal = defineAsyncComponent(() => import('./InteractiveOutputModal.vue'));
 const ShareDiscussionModal = defineAsyncComponent(() => import('./ShareDiscussionModal.vue'));
+const ShareResourceModal = defineAsyncComponent(() => import('./ShareResourceModal.vue'));
 const ResetPasswordModal = defineAsyncComponent(() => import('./ResetPasswordModal.vue'));
 const EmailAllUsersModal = defineAsyncComponent(() => import('./EmailAllUsersModal.vue'));
 const EmailListModal = defineAsyncComponent(() => import('./EmailListModal.vue'));
@@ -98,6 +99,7 @@ const SkillEditorModal = defineAsyncComponent(() => import('./SkillEditorModal.v
     <ImportModal v-if="activeModal === 'import'" />
     <InteractiveOutputModal v-if="activeModal === 'interactiveOutput'" />
     <ShareDiscussionModal v-if="activeModal === 'shareDiscussion'" />
+    <ShareResourceModal v-if="activeModal === 'shareResource'" />
     <ResetPasswordModal v-if="activeModal === 'resetPassword'" />
     <EmailAllUsersModal v-if="activeModal === 'emailAllUsers'" />
     <EmailListModal v-if="activeModal === 'emailList'" />

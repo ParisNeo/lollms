@@ -209,10 +209,11 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     if (data.content && data.content.title) {
                         const title = data.content.title;
                         
-                        // 1. OPEN WORKSPACE: Switch focus to the new document
+                        // 1. SHOW ARTEFACT SPLIT VIEW: Transition focus to Workspace immediately
+                        // This prevents the 'Context Memory' view from showing during builds
                         uiStore.activeSplitArtefactTitle = title;
                         
-                        // 2. ENSURE SIDE PANEL: Workspace requires the panel container to be open
+                        // 2. ENSURE SIDE PANEL: Container must be visible for Split View to render
                         uiStore.isDataZoneVisible = true; 
 
                         // 3. Mark as live for the typing buffer
@@ -272,9 +273,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'tool_output':
                     generationState.value = { status: 'thinking', details: 'Tool execution complete.' };
                     
-                    if (!uiStore.isDataZoneVisible) {
-                        uiStore.isDataZoneVisible = true;
-                    }
+                    // REMOVED: Auto-opening the Context Explorer sidebar for tool outputs.
+                    // Tools results are rendered inline or in the timeline, so the sidebar is redundant here.
 
                     if (!messageToUpdate.events) messageToUpdate.events = [];
                     
@@ -319,14 +319,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     // Ensure stable ID for Vue transition rendering
                     if (!data.id) data.id = `step_end_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
                     messageToUpdate.events.push(data);
-                    break;
-                case 'artefact_update':
-                    // Auto-open split view if AI is patching an artefact
-                    if (data.content && data.content.title) {
-                        uiStore.activeSplitArtefactTitle = data.content.title;
-                        // Refresh the artefact list to get the new version count
-                        getActions().fetchArtefacts(currentDiscussionId.value);
-                    }
                     break;
                 case 'sources':
                     if (!messageToUpdate.sources) messageToUpdate.sources = [];

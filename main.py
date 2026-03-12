@@ -44,7 +44,7 @@ from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (
     get_user_data_root, get_user_discussion_path, user_sessions,
-    build_lollms_client_from_params
+    build_lollms_client_from_params, get_user_lollms_client
 )
 from lollms_client import LollmsDataManager
 from backend.settings import settings
@@ -567,6 +567,31 @@ def run_one_time_startup_tasks(lock: Lock):
         ASCIIColors.error(f"Autostart failure: {e}")
         trace_exception(e)
 
+    # ----------------------------------------------------------------------
+    # 1️⃣2️⃣ Pre-warm Active Bindings (The "lollms" user logic)
+    # ----------------------------------------------------------------------
+    try:
+        db_warmup = next(get_db())
+        active_llm_bindings = db_warmup.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+        if active_llm_bindings:
+            ASCIIColors.info(f"Pre-warming {len(active_llm_bindings)} active LLM bindings...")
+            for binding in active_llm_bindings:
+                try:
+                    # Explicitly passing None for callback to avoid scope issues in session.py
+                    build_lollms_client_from_params(
+                        "lollms", 
+                        binding_alias=binding.alias, 
+                        load_llm=True, 
+                        callback=None
+                    )
+                    ASCIIColors.green(f"  ✔ Binding '{binding.alias}' is ready.")
+                except Exception as ex:
+                    ASCIIColors.warning(f"  ✘ Failed to pre-warm '{binding.alias}': {ex}")
+        db_warmup.close()
+        steps.append(("Pre-warm Active Bindings", True))
+    except Exception as e:
+        ASCIIColors.error(f"Pre-warming error: {e}")
+
     lock.release()
     ASCIIColors.green(f"Worker {os.getpid()} released startup lock.")
 
@@ -578,6 +603,20 @@ async def startup_event():
     db = db_session_module.SessionLocal()
     try:
         settings.load_from_db(db)
+        
+        # --- PER-WORKER PRE-WARMING ---
+        # We load all active bindings into the global registry of THIS worker process.
+        # This makes subsequent 'first loads' for any user nearly instant.
+        active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+        if active_bindings:
+            ASCIIColors.info(f"Worker {os.getpid()}: Pre-warming {len(active_bindings)} active bindings...")
+            for b in active_bindings:
+                try:
+                    # Using 'lollms' system user to trigger the shared registry build
+                    get_user_lollms_client("lollms", binding_alias_override=b.alias)
+                    ASCIIColors.green(f"  ✔ {b.alias} ready.")
+                except Exception as e:
+                    ASCIIColors.warning(f"  ✘ {b.alias} warmup failed: {e}")
     finally:
         db.close()
     

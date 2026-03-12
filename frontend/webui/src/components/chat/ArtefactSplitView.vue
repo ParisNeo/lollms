@@ -86,63 +86,78 @@ const dbContent = ref('');
 const isSaving = ref(false);
 const isFetching = ref(false);
 
-// Combined logic: Show the live stream if AI is writing, otherwise show DB content
-const content = computed({
-    get: () => {
-        if (isLiveUpdating.value && discussionsStore.liveArtefactBuffers && discussionsStore.liveArtefactBuffers[title.value]) {
-            return discussionsStore.liveArtefactBuffers[title.value];
+    // Combined logic: Show the live stream if AI is writing, otherwise show DB content
+    const content = computed({
+        get: () => {
+            // Priority 1: Live streaming buffer (when AI is currently generating/patching)
+            if (isLiveUpdating.value && discussionsStore.liveArtefactBuffers && discussionsStore.liveArtefactBuffers[title.value]) {
+                return discussionsStore.liveArtefactBuffers[title.value];
+            }
+            // Priority 2: Persistent content from DB
+            return dbContent.value;
+        },
+        set: (val) => {
+            dbContent.value = val;
         }
-        return dbContent.value;
-    },
-    set: (val) => {
-        dbContent.value = val;
-    }
-});
+    });
 
-async function loadVersion(v) {
-    if (!title.value || v === null) return;
-    isFetching.value = true;
-    try {
-        const data = await discussionsStore.fetchArtefactContent({
-            discussionId: discussionsStore.currentDiscussionId,
-            artefactTitle: title.value,
-            version: v
-        });
-        
-        if (data && data.content !== undefined) {
-            // [FIX] Strip out legacy redundant headers (--- Document: ... ---) 
-            // to keep the Workspace view clean and pure.
-            let cleaned = data.content.trim();
-            const headerPattern = /^--- (Document|Skill|Note|Artefact): .*? ---/i;
-            const footerPattern = /--- End (Document|Skill|Note|Artefact)(?:: .*?)? ---$/i;
+    async function loadVersion(v) {
+        if (!title.value || v === null) return;
+        isFetching.value = true;
+        try {
+            const data = await discussionsStore.fetchArtefactContent({
+                discussionId: discussionsStore.currentDiscussionId,
+                artefactTitle: title.value,
+                version: v
+            });
             
-            cleaned = cleaned.replace(headerPattern, '').replace(footerPattern, '').trim();
-            dbContent.value = cleaned;
-        }
-    } finally {
-        isFetching.value = false;
-    }
-}
-
-// Watch both title AND group availability to trigger initial load
-watch([title, () => !!artefactGroup.value], ([newTitle, hasGroup]) => {
-    if (newTitle && hasGroup) {
-        const latest = artefactGroup.value.versions[0].version;
-        if (selectedVersion.value !== latest) {
-            selectedVersion.value = latest;
-            loadVersion(latest);
+            if (data && data.content !== undefined) {
+                // Strip out library-injected context markers to keep the Workspace view "Pure"
+                let cleaned = data.content.trim();
+                const headerPattern = /^--- (Document|Skill|Note|Artefact): .*? ---/i;
+                const footerPattern = /--- End (Document|Skill|Note|Artefact)(?:: .*?)? ---$/i;
+                
+                cleaned = cleaned.replace(headerPattern, '').replace(footerPattern, '').trim();
+                dbContent.value = cleaned;
+            }
+        } finally {
+            isFetching.value = false;
         }
     }
-}, { immediate: true });
 
-// Watch for AI updates adding new versions to the current file
-watch(() => artefactGroup.value?.versions.length, (newLen, oldLen) => {
-    if (newLen > oldLen && artefactGroup.value) {
-        const latest = artefactGroup.value.versions[0].version;
-        selectedVersion.value = latest;
-        loadVersion(latest);
-    }
-});
+    // [FIX] Robust observer: Automatically loads the latest version whenever a file is selected
+    // or when a new version is created by the AI.
+    watch(() => artefactGroup.value, async (newGroup, oldGroup) => {
+        // If no group is found, we might still be loading or nothing is selected
+        if (!newGroup) {
+            if (!title.value) {
+                dbContent.value = '';
+                selectedVersion.value = null;
+            }
+            return;
+        }
+
+        const isNewFileSelection = !oldGroup || newGroup.title !== oldGroup.title;
+        const hasNewVersion = oldGroup && newGroup.versions.length > oldGroup.versions.length;
+
+        // Trigger load if:
+        // 1. We just switched to a different file
+        // 2. The AI just added a new version to the current file
+        // 3. The workspace is open but no version is selected yet (initial load)
+        if (isNewFileSelection || hasNewVersion || selectedVersion.value === null) {
+            
+            if (isNewFileSelection) {
+                dbContent.value = ''; // Clear previous text immediately to prevent flickering
+            }
+
+            // Default to the latest version (at index 0 due to our DESC sorting)
+            const latestVersion = newGroup.versions[0].version;
+            
+            // Sync the dropdown state and fetch the actual text content
+            selectedVersion.value = latestVersion;
+            await loadVersion(latestVersion);
+        }
+    }, { immediate: true, deep: true });
 
 async function handleSave() {
     if (isLiveUpdating.value) return;
@@ -201,10 +216,10 @@ function download() {
             <div class="flex items-center gap-3 min-w-0">
                 <!-- Dynamic Icon based on Type -->
                 <div class="p-2 rounded-lg" :class="{
-                    'bg-blue-100 text-blue-600': (artefactGroup?.versions[0]?.artefact_type || 'document') === 'document',
+                    'bg-blue-100 text-blue-600': (artefactGroup?.versions[0]?.artefact_type || 'document') === 'document' || artefactGroup?.versions[0]?.artefact_type === 'file',
                     'bg-purple-100 text-purple-600': artefactGroup?.versions[0]?.artefact_type === 'code',
                     'bg-amber-100 text-amber-600': artefactGroup?.versions[0]?.artefact_type === 'note',
-                    'bg-teal-100 text-teal-600': artefactGroup?.versions[0]?.artefact_type === 'skill'
+                    'bg-emerald-100 text-emerald-600': artefactGroup?.versions[0]?.artefact_type === 'skill'
                 }">
                     <IconCode v-if="artefactGroup?.versions[0]?.artefact_type === 'code'" class="w-4 h-4" />
                     <IconPencil v-else-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
@@ -214,7 +229,12 @@ function download() {
                 
                 <div class="flex flex-col min-w-0">
                     <span class="text-[9px] font-black uppercase text-gray-400 tracking-widest">
-                        {{ artefactGroup?.versions[0]?.artefact_type || 'Artefact' }} Workspace
+                        {{ 
+                          artefactGroup?.versions[0]?.artefact_type === 'note' ? 'Research Note' :
+                          artefactGroup?.versions[0]?.artefact_type === 'skill' ? 'AI Capability' :
+                          artefactGroup?.versions[0]?.artefact_type === 'file' ? 'External Document' :
+                          'Document'
+                        }} Workspace
                     </span>
                     <span class="font-bold text-sm truncate dark:text-gray-100">{{ title }}</span>
                 </div>

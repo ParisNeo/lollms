@@ -1,9 +1,10 @@
+import os
 import json
 import traceback
 import datetime
 import threading
 from pathlib import Path
-from typing import Dict, Optional, Any, cast
+from typing import Dict, Optional, Any, cast, Callable
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Depends, status
@@ -43,6 +44,11 @@ except ImportError:
 
 # Global In-Memory Session Cache
 user_sessions: Dict[str, Dict[str, Any]] = {}
+
+# Global Client Registry to prevent file descriptor exhaustion
+# Maps Hash(BindingName + Config) -> LollmsClient Instance
+_global_client_registry: Dict[str, LollmsClient] = {}
+_registry_lock = threading.Lock()
 
 # Locks to prevent race conditions during concurrent requests
 _session_init_lock = threading.Lock()
@@ -117,13 +123,11 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         db_was_created = True
 
     try:
-        if db_user.is_admin and db_user.user_ui_level != 4:
-            db_user.user_ui_level = 4
-            try:
-                db.commit()
-                db.refresh(db_user)
-            except Exception as e:
-                db.rollback()
+        # Determine the user's UI level for this session without modifying the DB.
+        # Initializing here ensures the variable is always defined for the return statement.
+        session_ui_level = db_user.user_ui_level
+        if db_user.is_admin and session_ui_level != 4:
+            session_ui_level = 4
 
         if username not in user_sessions:
             with _session_init_lock:
@@ -189,14 +193,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                                 ctx_size_to_enforce = alias_info['ctx_size']
 
         if ctx_size_to_enforce is not None:
+            # Enforce the locked context size in the local dictionary only.
+            # We DO NOT update db_user.llm_ctx_size here to prevent startup DB writes.
             effective_llm_params["llm_ctx_size"] = ctx_size_to_enforce
-            if db_user.llm_ctx_size != ctx_size_to_enforce:
-                db_user.llm_ctx_size = ctx_size_to_enforce
-                try:
-                    db.commit()
-                    db.refresh(db_user)
-                except Exception as e:
-                    db.rollback()
             
             session_params = user_sessions[username].get("llm_params", {})
             if session_params.get("ctx_size") != ctx_size_to_enforce:
@@ -247,7 +246,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             default_rag_chunk_overlap=db_user.default_rag_chunk_overlap,
             default_rag_metadata_mode=db_user.default_rag_metadata_mode,
             auto_title=db_user.auto_title,
-            user_ui_level=db_user.user_ui_level, chat_active=db_user.chat_active, first_page=db_user.first_page,
+            user_ui_level=session_ui_level, chat_active=db_user.chat_active, first_page=db_user.first_page,
             ai_response_language=db_user.ai_response_language,
             force_ai_response_language=db_user.force_ai_response_language,
             fun_mode=db_user.fun_mode,
@@ -284,6 +283,8 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             note_generation_enabled=db_user.note_generation_enabled,
             memory_enabled=db_user.memory_enabled,
             auto_memory_enabled=db_user.auto_memory_enabled,
+            skills_library_enabled=db_user.skills_library_enabled,
+            skills_building_enabled=db_user.skills_building_enabled,
             preferred_name=db_user.preferred_name,
             user_personal_info=db_user.user_personal_info,
             share_personal_info_with_llm=db_user.share_personal_info_with_llm,
@@ -295,13 +296,23 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             # Herd Mode Settings
             herd_mode_enabled=db_user.herd_mode_enabled,
             herd_participants=db_user.herd_participants or [],
+            herd_precode_participants=db_user.herd_precode_participants or [],
+            herd_postcode_participants=db_user.herd_postcode_participants or [],
             herd_rounds=db_user.herd_rounds,
+            herd_dynamic_mode=db_user.herd_dynamic_mode,
+            herd_model_pool=db_user.herd_model_pool or [],
             
-            # Google Search Settings
+            # Web Search & Tools Settings
             google_api_key=db_user.google_api_key,
             google_cse_id=db_user.google_cse_id,
             web_search_enabled=db_user.web_search_enabled,
-            web_search_deep_analysis=db_user.web_search_deep_analysis
+            web_search_providers=db_user.web_search_providers or [],
+            web_search_deep_analysis=db_user.web_search_deep_analysis,
+            street_view_enabled=db_user.street_view_enabled,
+            scheduler_enabled=db_user.scheduler_enabled,
+            google_drive_enabled=db_user.google_drive_enabled,
+            google_calendar_enabled=db_user.google_calendar_enabled,
+            google_gmail_enabled=db_user.google_gmail_enabled
         )
     finally:
         if db_was_created:
@@ -409,34 +420,22 @@ def reload_lollms_client_mcp(username: str):
 
 
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None, load_mcp: bool = True) -> LollmsClient:
-    session = user_sessions.get(username)
-    if not session:
-        return build_lollms_client_from_params(username, binding_alias_override, load_mcp=load_mcp)
-
-    clients_cache = session.setdefault("lollms_clients_cache", {})
-    cache_key = binding_alias_override or "default"
-    if not load_mcp:
-        cache_key += "_no_mcp"
-
-    if cache_key in clients_cache:
-        return clients_cache[cache_key]
+    """
+    Retrieves a LollmsClient. Now uses global registry to share engine instances 
+    across users with identical configurations to prevent file handle exhaustion.
+    """
+    # Build the client - build_lollms_client_from_params now handles the global registry
+    client = build_lollms_client_from_params(username, binding_alias_override, load_mcp=load_mcp)
     
-    lock_key = f"{username}_{cache_key}"
-    
-    with _client_build_locks_lock:
-        if lock_key not in _client_build_locks:
-            _client_build_locks[lock_key] = threading.Lock()
-        lock = _client_build_locks[lock_key]
-
-    with lock:
-        # Check cache again inside lock
-        if cache_key in clients_cache:
-            return clients_cache[cache_key]
-
-        print(f"INFO: LollmsClient not in cache for user '{username}' with key '{cache_key}'. Building new client.")
-        client = build_lollms_client_from_params(username, binding_alias_override, load_mcp=load_mcp)
+    # Store in session cache for legacy compatibility and quick access
+    if username in user_sessions:
+        clients_cache = user_sessions[username].setdefault("lollms_clients_cache", {})
+        cache_key = binding_alias_override or "default"
+        if not load_mcp:
+            cache_key += "_no_mcp"
         clients_cache[cache_key] = client
-        return client
+        
+    return client
 
 def build_lollms_client_from_params(
     username: str, 
@@ -456,7 +455,8 @@ def build_lollms_client_from_params(
     load_tti: bool = False,
     load_tts: bool = False,
     load_stt: bool = False,
-    load_mcp: bool = True
+    load_mcp: bool = True,
+    callback: Optional[Callable] = None
 ) -> LollmsClient:
     session = user_sessions.get(username)
     
@@ -753,9 +753,22 @@ def build_lollms_client_from_params(
             client_init_params["tools_binding_config"] = {"servers_infos": servers_infos}
 
         try:
-            ASCIIColors.panel(f"Initializing LollmsClient for user '{username}'.")
-            lc = LollmsClient(**{k: v for k, v in client_init_params.items() if v is not None})
-            return lc
+            # --- GLOBAL REGISTRY LOGIC ---
+            registry_payload = {k: v for k, v in client_init_params.items() if v is not None}
+            registry_key = str(hash(json.dumps(registry_payload, sort_keys=True)))
+
+            with _registry_lock:
+                if registry_key in _global_client_registry:
+                    # If already loaded, trigger a "Fast Load" completion message
+                    if callback:
+                        callback("⚡ Engine cached - Instant access enabled.", 28, {}) # MSG_TYPE_INIT_PROGRESS = 28
+                    return _global_client_registry[registry_key]
+
+                ASCIIColors.info(f"Worker {os.getpid()}: Building Engine [Hash: {registry_key[:8]}]")
+                # Pass the callback directly to LollmsClient
+                lc = LollmsClient(**registry_payload, callback=callback)
+                _global_client_registry[registry_key] = lc
+                return lc
         except Exception as e:
             traceback.print_exc()
             binding_alias_to_show = binding_to_use.alias if binding_to_use else 'N/A'

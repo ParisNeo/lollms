@@ -93,6 +93,15 @@ export const useNotesStore = defineStore('notes', () => {
         }
     }
 
+    async function shareNote(noteId, targetUsername) {
+        try {
+            await apiClient.post(`/api/notes/${noteId}/share`, { target_username: targetUsername });
+            uiStore.addNotification(`Note shared with ${targetUsername}`, 'success');
+        } catch (error) {
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to share note', 'error');
+        }
+    }
+
     async function deleteNote(id) {
         try {
             await apiClient.delete(`/api/notes/${id}`);

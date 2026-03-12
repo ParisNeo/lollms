@@ -18,6 +18,16 @@ const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
 const fileInput = ref(null);
+const activeMenuId = ref(null);
+
+function toggleMenu(event, skillId) {
+    event.stopPropagation();
+    activeMenuId.value = activeMenuId.value === skillId ? null : skillId;
+}
+
+function closeMenu() {
+    activeMenuId.value = null;
+}
 
 onMounted(() => {
     if (skillsStore.skills.length === 0) {
@@ -104,30 +114,42 @@ async function handleFileImport(event) {
                 Create a new skill to teach the AI new capabilities.
             </p>
         </div>
-        <div v-else class="space-y-1 flex-1 overflow-y-auto custom-scrollbar">
-            <div v-for="skill in filteredSkills" :key="skill.id" 
-                 class="group flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors"
+        <div v-else class="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
+                        <div v-for="skill in filteredSkills" :key="skill.id" 
+                 class="group flex items-center gap-3 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors mb-1"
                  @click="editSkill(skill)">
-                <div class="flex items-center gap-3 min-w-0">
-                    <button 
-                        @click.stop="addToContext(skill)"
-                        class="p-1.5 rounded-md bg-gray-50 dark:bg-gray-700 text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all border dark:border-gray-600 shadow-sm"
-                        title="Add to Context"
-                    >
-                        <IconArrowUpTray class="w-3.5 h-3.5" />
-                    </button>
-                    <IconSparkles class="w-4 h-4 flex-shrink-0 text-teal-500" />
-                    <div class="flex flex-col min-w-0">
-                        <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ skill.name }}</span>
-                        <span class="text-[10px] text-gray-500 truncate">{{ skill.category || 'Uncategorized' }}</span>
+                
+                <div class="flex items-center gap-2 min-w-0 flex-grow">
+                    <div class="p-1.5 rounded bg-green-50 dark:bg-green-900/30 text-green-600 flex-shrink-0 border border-green-100 dark:border-green-800">
+                        <IconSparkles class="w-3.5 h-3.5" />
+                    </div>
+                    <div class="flex flex-col min-w-0 leading-tight">
+                        <span class="text-xs font-bold text-slate-700 dark:text-gray-200 truncate">{{ skill.name }}</span>
+                        <span class="text-[9px] text-gray-500 truncate uppercase tracking-tighter">{{ skill.category || 'Uncategorized' }}</span>
                     </div>
                 </div>
-                <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button @click.stop="deleteSkill(skill)" class="p-1 text-gray-400 hover:text-red-500 transition-opacity" title="Delete Skill">
-                        <IconTrash class="w-4 h-4" />
-                    </button>
+
+                <!-- Compact Menu at end of row -->
+                <div @click.stop class="opacity-0 group-hover:opacity-100 transition-opacity">
+                    <DropdownMenu icon="ellipsis-vertical" buttonClass="p-1 text-gray-400 hover:text-gray-600">
+                        <button @click="addToContext(skill)" class="menu-item text-blue-600">
+                            <IconArrowUpTray class="w-4 h-4 mr-2"/> Add to Discussion
+                        </button>
+                        <button @click="uiStore.openModal('shareDiscussion', { title: skill.name, content: skill.content })" class="menu-item">
+                            <IconUserCircle class="h-4 w-4 mr-2"/> Share with Friend
+                        </button>
+                        <button @click="uiStore.openModal('shareDiscussion', { title: skill.name, content: skill.content, isGroupShare: true })" class="menu-item">
+                            <IconShare class="h-4 w-4 mr-2"/> Share with Group
+                        </button>
+                        <div class="menu-divider"></div>
+                        <button @click="deleteSkill(skill)" class="menu-item text-red-500 font-bold">
+                            <IconTrash class="w-4 h-4 mr-2"/> Remove
+                        </button>
+                    </DropdownMenu>
                 </div>
             </div>
+            <!-- Click-away overlay -->
+            <div v-if="activeMenuId" class="fixed inset-0 z-10" @click="closeMenu"></div>
         </div>
     </div>
 </template>

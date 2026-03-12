@@ -139,24 +139,49 @@ const showContextBar = computed(() => user.value?.show_token_counter && activeDi
 const maxTokens = computed(() => activeDiscussionContextStatus.value?.max_tokens || 1);
 
 const totalCurrentTokens = computed(() => {
-    const breakdown = activeDiscussionContextStatus.value?.zones?.system_context?.breakdown || {};
-    const historyBreakdown = activeDiscussionContextStatus.value?.zones?.message_history?.breakdown || {};
-    const sys = breakdown.system_prompt?.tokens || 0;
-    const history = (historyBreakdown.text_tokens || 0) + (historyBreakdown.image_tokens || 0);
-    return sys + dataZonesTokensFromContext.value + history + inputTokenCount.value;
+    // Backend 'current_tokens' represents the last known stable state.
+    // We add the 'inputTokenCount' (real-time typing) for a live projection.
+    return (activeDiscussionContextStatus.value?.current_tokens || 0) + inputTokenCount.value;
 });
 
 const getPercentage = (tokens) => maxTokens.value > 0 ? (tokens / maxTokens.value) * 100 : 0;
 
 const contextParts = computed(() => {
-    const breakdown = activeDiscussionContextStatus.value?.zones?.system_context?.breakdown || {};
-    const historyBreakdown = activeDiscussionContextStatus.value?.zones?.message_history?.breakdown || {};
+    if (!activeDiscussionContextStatus.value) return [];
+    
+    const sys = activeDiscussionContextStatus.value.zones.system_context?.breakdown || {};
+    const history = activeDiscussionContextStatus.value.zones.message_history?.breakdown || {};
+    const globalImages = activeDiscussionContextStatus.value.zones.discussion_images?.tokens || 0;
+    
     const parts = [];
-    if (breakdown.system_prompt?.tokens > 0) parts.push({ label: 'S', value: breakdown.system_prompt.tokens, title: 'System Prompt', colorClass: 'bg-blue-500' });
-    if (dataZonesTokensFromContext.value > 0) parts.push({ label: 'D', value: dataZonesTokensFromContext.value, title: 'Data Zones', colorClass: 'bg-yellow-500' });
-    if (historyBreakdown.text_tokens > 0) parts.push({ label: 'H', value: historyBreakdown.text_tokens, title: 'History (Text)', colorClass: 'bg-green-500' });
-    if (historyBreakdown.image_tokens > 0) parts.push({ label: 'I', value: historyBreakdown.image_tokens, title: 'History (Images)', colorClass: 'bg-teal-500' });
-    if (inputTokenCount.value > 0) parts.push({ label: 'U', value: inputTokenCount.value, title: 'User Input', colorClass: 'bg-purple-500' });
+
+    // 1. Directives (Indigo)
+    const directiveTokens = (sys.system_prompt?.tokens || 0) + (sys.pruning_summary?.tokens || 0);
+    if (directiveTokens > 0) parts.push({ label: 'S', value: directiveTokens, title: 'Directives', colorClass: 'bg-indigo-500' });
+
+    // 2. Memory (Teal)
+    if (sys.memory?.tokens > 0) parts.push({ label: 'M', value: sys.memory.tokens, title: 'Memory', colorClass: 'bg-teal-500' });
+
+    // 3. Dynamic Data Zones (Amber)
+    const zoneTokens = (sys.user_data_zone?.tokens || 0) + (sys.discussion_data_zone?.tokens || 0) + (sys.personality_data_zone?.tokens || 0);
+    if (zoneTokens > 0) parts.push({ label: 'Z', value: zoneTokens, title: 'Data Zones', colorClass: 'bg-amber-500' });
+
+    // 4. Workspace Artefacts (Blue)
+    if (sys.artefacts?.tokens > 0) parts.push({ label: 'A', value: sys.artefacts.tokens, title: 'Artefacts', colorClass: 'bg-blue-500' });
+
+    // 5. Message Text History (Green)
+    if (history.text_tokens > 0) parts.push({ label: 'H', value: history.text_tokens, title: 'History', colorClass: 'bg-green-500' });
+
+    // 6. All Images (Cyan) - Message images + Global images
+    const totalImageTokens = (history.image_tokens || 0) + globalImages;
+    if (totalImageTokens > 0) parts.push({ label: 'I', value: totalImageTokens, title: 'Images', colorClass: 'bg-cyan-500' });
+
+    // 7. Agentic Scratchpad (Orange)
+    if (sys.scratchpad?.tokens > 0) parts.push({ label: 'P', value: sys.scratchpad.tokens, title: 'Scratchpad', colorClass: 'bg-orange-400' });
+
+    // 8. Live User Input (Purple)
+    if (inputTokenCount.value > 0) parts.push({ label: 'U', value: inputTokenCount.value, title: 'Your Input', colorClass: 'bg-purple-500' });
+
     return parts;
 });
 
@@ -218,15 +243,23 @@ async function toggleWebSearch() {
     }
 }
 
-async function toggleUserPref(key, currentValue) {
+async function toggleUserPref(key) {
+    if (!authStore.user) return;
+    
+    const currentValue = !!authStore.user[key];
+    const newValue = !currentValue;
+    
     if (key === 'herd_mode_enabled' && !currentValue && !canEnableHerd.value) {
         uiStore.addNotification("Please configure Herd participants in Settings > User Context first.", "warning");
         return;
     }
+    
     try {
-        await authStore.updateUserPreferences({ [key]: !currentValue }, false);
+        // Store action now handles optimistic update and API call internally
+        await authStore.updateUserPreferences({ [key]: newValue }, true);
     } catch (e) {
-        console.error("Failed to toggle preference:", e);
+        console.error(`Failed to toggle preference [${key}]:`, e);
+        uiStore.addNotification(`Failed to save ${key.replace(/_/g, ' ')} setting.`, "error");
     }
 }
 
@@ -616,15 +649,18 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
         <div v-if="showHeaderRow" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700 overflow-x-auto no-scrollbar">
              <div class="max-w-4xl mx-auto flex items-center gap-3">
                 <template v-if="showContextBar">
-                    <div class="flex items-center gap-1 text-gray-500 flex-shrink-0">
-                        <IconToken class="w-3.5 h-3.5" />
-                        <span class="text-[10px] font-black uppercase tracking-tight hidden sm:inline">Context</span>
-                    </div>
-                    <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 bg-gray-200 dark:bg-gray-700', progressBorderColorClass]">
-                        <div v-for="part in contextParts" :key="part.label" :class="[part.colorClass, 'h-full transition-all duration-500 ease-out']" :style="{ width: `${getPercentage(part.value)}%` }" :title="`${part.title}: ${part.value} tokens`"></div>
-                    </div>
-                    <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap flex-shrink-0">
-                        <span>{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
+                    <div @click="uiStore.openModal('contextViewer')" 
+                         class="flex-grow flex items-center gap-3 cursor-pointer group/context select-none active:scale-[0.99] transition-transform">
+                        <div class="flex items-center gap-1 text-gray-500 flex-shrink-0 group-hover/context:text-blue-500 transition-colors">
+                            <IconToken class="w-3.5 h-3.5" />
+                            <span class="text-[10px] font-black uppercase tracking-tight hidden sm:inline">Context</span>
+                        </div>
+                        <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 bg-gray-200 dark:bg-gray-700 group-hover/context:ring-2 group-hover/context:ring-blue-400/50 transition-all', progressBorderColorClass]">
+                            <div v-for="part in contextParts" :key="part.label" :class="[part.colorClass, 'h-full transition-all duration-500 ease-out']" :style="{ width: `${getPercentage(part.value)}%` }" :title="`${part.title}: ${part.value} tokens`"></div>
+                        </div>
+                        <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap flex-shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors">
+                            <span class="font-bold">{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
+                        </div>
                     </div>
                 </template>
                 <div v-else class="flex-grow"></div> 
@@ -662,18 +698,21 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     </div>
                 </div>
 
-                <!-- Unified Artefact Chips (User Uploads + AI Created) -->
-                <div v-for="file in attachedFiles" :key="`${file.title}-v${file.version}`" 
-                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold border transition-all duration-200 shadow-sm group/file"
+                <!-- Unified Artefact Chips (Versioning + Type Aware) -->
+                <div v-for="file in attachedFiles" :key="file.title" 
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold border-2 transition-all duration-200 shadow-sm group/file"
                      :class="[
                         file.is_loaded 
-                            ? (file.author === user.username ? 'border-blue-400 bg-blue-50 text-blue-700 dark:bg-blue-900/20' : 'border-purple-500 bg-purple-50 text-purple-700 dark:bg-purple-900/30')
+                            ? (file.artefact_type === 'note' ? 'border-amber-500 bg-amber-50 text-amber-700 dark:border-amber-900/30' : 
+                               file.artefact_type === 'skill' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-900/30' :
+                               'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-900/30')
                             : 'border-gray-300 bg-gray-50 dark:bg-gray-800 text-gray-400 opacity-50'
                      ]">
                     
-                    <!-- Icon: Distinguish AI from User -->
-                    <IconSparkles v-if="file.author !== user.username" class="w-3.5 h-3.5 text-purple-500" />
-                    <IconFileText v-else class="w-3.5 h-3.5 text-blue-500" />
+                    <!-- Icon based on registered custom types -->
+                    <IconPencil v-if="file.artefact_type === 'note'" class="w-4 h-4 text-amber-600" />
+                    <IconSparkles v-else-if="file.artefact_type === 'skill'" class="w-4 h-4 text-emerald-600" />
+                    <IconFileText v-else class="w-4 h-4 text-blue-600" />
 
                     <!-- Title (Opens Split View Workspace) -->
                     <span @click.stop="viewAttachedFile(file)" class="truncate max-w-[200px] cursor-pointer hover:underline decoration-2" :title="`Open Workspace: ${file.title} (v${file.version})` ">
@@ -743,14 +782,14 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                         :title="`Active Engines: ${currentProviderList}`">
                                     <span class="flex items-center gap-2">
                                         <IconGlobeAlt class="w-4 h-4 text-blue-500" />
-                                        <span>Search ({{ currentProviderName }})</span>
+                                        <span>Web Search ({{ currentProviderName }})</span>
                                     </span>
                                     <IconCheckCircle v-if="isWebSearchActive" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
                                 
                                 <!-- Memory Master Toggle -->
-                                <button @click.stop="toggleUserPref('memory_enabled', user.memory_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleUserPref('memory_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconThinking class="w-4 h-4 text-teal-500" />
                                         <span>Memory</span>
@@ -760,7 +799,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
 
                                 <!-- Skills Library Toggle -->
-                                <button @click.stop="toggleUserPref('skills_library_enabled', user.skills_library_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleUserPref('skills_library_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconDatabase class="w-4 h-4 text-emerald-500" />
                                         <span>Skills Auto-Search</span>
@@ -769,8 +808,8 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
-                                <!-- Street View Toggle -->
-                                <button @click.stop="toggleUserPref('street_view_enabled', user.street_view_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <!-- Street View Toggle (Only if Google API Key is present) -->
+                                <button v-if="user?.google_api_key" @click.stop="toggleUserPref('street_view_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconMap class="w-4 h-4 text-amber-500" />
                                         <span>Street View</span>
@@ -780,7 +819,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
 
                                 <!-- Scheduler Toggle -->
-                                <button @click.stop="toggleUserPref('scheduler_enabled', user.scheduler_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleUserPref('scheduler_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconClock class="w-4 h-4 text-indigo-500" />
                                         <span>Scheduler</span>
@@ -789,53 +828,47 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
                                 
-                                <!-- Google Workspace Link (Redirects to settings as it needs setup) -->
-                                <div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>
-                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Google Workspace</div>
-                                
-                                <!-- Auto-Memory Sub-Toggle -->
-                                <button v-if="user?.memory_enabled" @click.stop="toggleUserPref('auto_memory_enabled', user.auto_memory_enabled)" class="menu-item flex justify-between items-center group/item pl-8 text-xs">
-                                    <span class="flex items-center gap-2 text-gray-600 dark:text-gray-400">
-                                        <span>↳ Auto Save</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.auto_memory_enabled" class="w-3.5 h-3.5 text-green-500" />
-                                    <IconCircle v-else class="w-3.5 h-3.5 text-gray-400" />
-                                </button>
-                                
-                                <!-- Drive -->
-                                <button @click.stop="toggleUserPref('google_drive_enabled', user.google_drive_enabled)" class="menu-item flex justify-between items-center group/item">
-                                    <span class="flex items-center gap-2">
-                                        <IconGoogleDrive class="w-4 h-4 text-green-600" />
-                                        <span>Drive</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.google_drive_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                <!-- Calendar -->
-                                <button @click.stop="toggleUserPref('google_calendar_enabled', user.google_calendar_enabled)" class="menu-item flex justify-between items-center group/item">
-                                    <span class="flex items-center gap-2">
-                                        <IconCalendar class="w-4 h-4 text-blue-600" />
-                                        <span>Calendar</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.google_calendar_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                <!-- Gmail -->
-                                <button @click.stop="toggleUserPref('google_gmail_enabled', user.google_gmail_enabled)" class="menu-item flex justify-between items-center group/item">
-                                    <span class="flex items-center gap-2">
-                                        <IconGoogle class="w-4 h-4 text-red-600" />
-                                        <span>Gmail</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.google_gmail_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                                <!-- Google Workspace Tools (Only shown if Client Secret is configured) -->
+                                <template v-if="user?.google_client_secret_json">
+                                    <div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>
+                                    <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Google Workspace</div>
+                                    
+                                    <!-- Drive -->
+                                    <button @click.stop="toggleUserPref('google_drive_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
+                                        <span class="flex items-center gap-2">
+                                            <IconGoogleDrive class="w-4 h-4 text-green-600" />
+                                            <span>Drive</span>
+                                        </span>
+                                        <IconCheckCircle v-if="user?.google_drive_enabled" class="w-4 h-4 text-green-500" />
+                                        <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                    </button>
+                                    <!-- Calendar -->
+                                    <button @click.stop="toggleUserPref('google_calendar_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
+                                        <span class="flex items-center gap-2">
+                                            <IconCalendar class="w-4 h-4 text-blue-600" />
+                                            <span>Calendar</span>
+                                        </span>
+                                        <IconCheckCircle v-if="user?.google_calendar_enabled" class="w-4 h-4 text-green-500" />
+                                        <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                    </button>
+                                    <!-- Gmail -->
+                                    <button @click.stop="toggleUserPref('google_gmail_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
+                                        <span class="flex items-center gap-2">
+                                            <IconGoogle class="w-4 h-4 text-red-600" />
+                                            <span>Gmail</span>
+                                        </span>
+                                        <IconCheckCircle v-if="user?.google_gmail_enabled" class="w-4 h-4 text-green-500" />
+                                        <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                    </button>
+                                </template>
                                 
                                 <!-- Group: Reasoning -->
                                 <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Reasoning</div>
                                 
                                 <!-- Herd Mode Toggle -->
                                 <button 
-                                    @click.stop="toggleUserPref('herd_mode_enabled', user.herd_mode_enabled)" 
+                                    @click.stop="toggleUserPref('herd_mode_enabled')" 
+                                    data-keep-open="true"
                                     class="menu-item flex justify-between items-center group/item"
                                     :disabled="!canEnableHerd"
                                     :class="{'opacity-50 cursor-not-allowed': !canEnableHerd}"
@@ -850,7 +883,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
                                 
                                 <!-- Thinking Mode Toggle -->
-                                <button @click.stop="toggleUserPref('reasoning_activation', user.reasoning_activation)" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleUserPref('reasoning_activation')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconThinking class="w-4 h-4 text-purple-500" />
                                         <span>Thinking</span>
@@ -863,7 +896,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Generation</div>
 
                                 <!-- Image Generation Toggle -->
-                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_generation_enabled', user.image_generation_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconPhoto class="w-4 h-4 text-pink-500" />
                                         <span>Image Gen</span>
@@ -873,7 +906,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
                                 
                                 <!-- Image Editing Toggle -->
-                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_editing_enabled', user.image_editing_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_editing_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconPencil class="w-4 h-4 text-indigo-500" />
                                         <span>Image Edit</span>
@@ -883,7 +916,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
                                 
                                 <!-- Image Annotation Toggle -->
-                                <button @click.stop="toggleUserPref('image_annotation_enabled', user.image_annotation_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleUserPref('image_annotation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <div class="w-4 h-4 flex-shrink-0 flex items-center justify-center">
                                             <IconObservation class="w-full h-full text-pink-600" />
@@ -895,7 +928,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
 
                                 <!-- Slide Maker Toggle -->
-                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('slide_maker_enabled', user.slide_maker_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('slide_maker_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconPresentationChartBar class="w-4 h-4 text-orange-500" />
                                         <span>Slide Maker</span>
@@ -905,7 +938,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
 
                                 <!-- Note Generation Toggle -->
-                                <button @click.stop="toggleUserPref('note_generation_enabled', user.note_generation_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleUserPref('note_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconFileText class="w-4 h-4 text-gray-500" />
                                         <span>Notes Gen</span>
@@ -915,7 +948,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
 
                                 <!-- Skill Builder Toggle -->
-                                <button @click.stop="toggleUserPref('skills_building_enabled', user.skills_building_enabled)" class="menu-item flex justify-between items-center group/item">
+                                <button @click.stop="toggleUserPref('skills_building_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconPencil class="w-4 h-4 text-sky-500" />
                                         <span>Skill Builder</span>

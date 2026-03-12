@@ -64,9 +64,10 @@ def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str
         if not discussion:
             raise ValueError("Discussion not found after scraping.")
 
+        # Use positional arguments for required fields (title, content)
         artefact_info = discussion.add_artefact(
-            title=url,
-            content=final_content,
+            url,
+            final_content,
             author=username
         )
         discussion.commit()

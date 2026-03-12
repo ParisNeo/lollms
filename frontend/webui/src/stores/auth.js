@@ -158,6 +158,17 @@ export const useAuthStore = defineStore('auth', () => {
 
             // Process message type
             switch (data.type) {
+                case 'init_progress':
+                    // Update splash screen in real-time
+                    loadingMessage.value = data.data.message;
+                    // Increment progress bar: we add a bit for every step until it hits 100
+                    if (loadingProgress.value < 95) {
+                        loadingProgress.value += 5;
+                    }
+                    if (data.data.is_error) {
+                        uiStore.addNotification(data.data.message, 'error');
+                    }
+                    break;
                 case 'notification': 
                     uiStore.addNotification(data.data.message, data.data.type || 'info', data.data.duration || 3000); 
                     break;
@@ -277,35 +288,55 @@ export const useAuthStore = defineStore('auth', () => {
 
     async function fetchUserAndInitialData() {
         try {
-            loadingProgress.value = 20;
-            loadingMessage.value = 'Authenticating...';
+            loadingProgress.value = 10;
+            loadingMessage.value = 'Verifying session...';
             await refreshUser();
             
             if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+            
+            loadingProgress.value = 20;
+            loadingMessage.value = 'Establishing connection...';
             connectWebSocket();
             
+            // Import stores sequentially to update UI
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
             const { useSocialStore } = await import('./social');
             const { useMemoriesStore } = await import('./memories');
+            
             const discussionsStore = useDiscussionsStore();
             const dataStore = useDataStore();
             const socialStore = useSocialStore();
             const memoriesStore = useMemoriesStore();
-            
-            loadingProgress.value = 40;
-            loadingMessage.value = 'Loading user data...';
+
+            // 1. Discussions
+            loadingProgress.value = 30;
+            loadingMessage.value = 'Syncing your conversations...';
             await Promise.all([
                 discussionsStore.loadDiscussions(),
                 discussionsStore.fetchSharedWithMe(),
-                discussionsStore.fetchDiscussionGroups(),
-                dataStore.loadAllInitialData(),
-                memoriesStore.fetchMemories(),
-                socialStore.fetchFriends().catch(() => {}),
-                socialStore.fetchConversations().catch(() => {})
+                discussionsStore.fetchDiscussionGroups()
             ]);
 
-            loadingProgress.value = 80;
+            // 2. AI Engines & Models (The heavy part)
+            loadingProgress.value = 50;
+            loadingMessage.value = 'Loading AI Models & Personalities...';
+            await dataStore.loadAllInitialData();
+
+            // 3. Personal Knowledge & Memory
+            loadingProgress.value = 75;
+            loadingMessage.value = 'Restoring long-term memory...';
+            await memoriesStore.fetchMemories();
+
+            // 4. Social & Connections
+            loadingProgress.value = 85;
+            loadingMessage.value = 'Connecting with friends...';
+            await Promise.allSettled([
+                socialStore.fetchFriends(),
+                socialStore.fetchConversations()
+            ]);
+
+            loadingProgress.value = 95;
             loadingMessage.value = 'Preparing interface...';
 
             if (user.value) {
@@ -464,12 +495,39 @@ export const useAuthStore = defineStore('auth', () => {
             'image_editing': 'image_editing_enabled',
             'slide_maker': 'slide_maker_enabled',
             'memory': 'memory_enabled',
-            'note_generation': 'note_generation_enabled'
+            'note_generation': 'note_generation_enabled',
+            'skills_building': 'skills_building_enabled',
+            'skills_library': 'skills_library_enabled',
+            'web_search': 'web_search_enabled'
         };
         return map[opt];
     }
 
     async function updateUserPreferences(preferences, notify = true) {
+        // 0. Equality Guard: Prevent infinite loops if the values match the current state
+        if (user.value) {
+            let isActualChange = false;
+            for (const [key, value] of Object.entries(preferences)) {
+                // Perform a simple comparison. For objects/arrays, we check JSON equality.
+                const currentVal = user.value[key];
+                if (typeof value === 'object' && value !== null) {
+                    if (JSON.stringify(currentVal) !== JSON.stringify(value)) {
+                        isActualChange = true;
+                        break;
+                    }
+                } else if (currentVal !== value) {
+                    isActualChange = true;
+                    break;
+                }
+            }
+            if (!isActualChange) return; // Exit immediately to prevent recursion
+        }
+
+        // 1. Optimistic Update
+        if (user.value) {
+            user.value = { ...user.value, ...preferences };
+        }
+
         // --- NEW LOGIC: Handle Personality Requirements ---
         const { useDataStore } = await import('./data');
         const dataStore = useDataStore();
@@ -514,7 +572,10 @@ export const useAuthStore = defineStore('auth', () => {
 
         const response = await apiClient.put('/api/auth/me', preferences);
         if (user.value) {
-            Object.assign(user.value, response.data);
+            // CRITICAL: Replace the object reference to ensure deep reactivity 
+            // and trigger computed properties in the UI (like breadcrumb badges)
+            user.value = { ...user.value, ...response.data };
+            
             if (preferences.message_font_size) uiStore.message_font_size = preferences.message_font_size;
         }
         if (notify) uiStore.addNotification('Settings saved.', 'success');

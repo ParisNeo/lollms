@@ -14,6 +14,7 @@ from backend.db.models.skill import Skill as DBSkill
 from backend.db.models.user import User as DBUser
 from backend.models.user import UserAuthDetails
 from backend.session import get_current_active_user
+from backend.models.personality import PersonalitySendRequest
 
 skills_router = APIRouter(
     prefix="/api/skills",
@@ -135,6 +136,49 @@ def export_skill(skill_id: str, payload: ExportFormat, current_user: UserAuthDet
         return Response(content=claude_str, media_type="text/markdown", headers={"Content-Disposition": f'attachment; filename="skill_{safe_name}.md"'})
     else:
         raise HTTPException(status_code=400, detail="Unsupported format")
+
+@skills_router.post("/{skill_id}/share", status_code=status.HTTP_200_OK)
+async def share_skill(
+    skill_id: str, 
+    payload: PersonalitySendRequest, # Reusing same model for target_username
+    current_user: UserAuthDetails = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+):
+    skill = db.query(DBSkill).filter(DBSkill.id == skill_id, DBSkill.owner_user_id == current_user.id).first()
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    target_user = db.query(DBUser).filter(DBUser.username == payload.target_username).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+
+    # Check for duplicates
+    if db.query(DBSkill).filter(DBSkill.owner_user_id == target_user.id, DBSkill.name == skill.name).first():
+        raise HTTPException(status_code=409, detail=f"User already has a skill named '{skill.name}'")
+
+    new_skill = DBSkill(
+        name=skill.name,
+        description=skill.description,
+        category=skill.category,
+        language=skill.language,
+        content=skill.content,
+        owner_user_id=target_user.id
+    )
+    db.add(new_skill)
+    try:
+        db.commit()
+        from backend.ws_manager import manager
+        manager.send_personal_message_sync({
+            "type": "notification",
+            "data": {"message": f"{current_user.username} sent you a new skill: {skill.name}", "type": "success"}
+        }, target_user.id)
+        # Trigger a refresh on the recipient's side
+        manager.send_personal_message_sync({"type": "skill_saved", "data": {"title": skill.name}}, target_user.id)
+        
+        return {"message": "Skill shared successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @skills_router.post("/import", response_model=SkillPublic)
 async def import_skill(file: UploadFile = File(...), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):

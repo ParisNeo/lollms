@@ -24,6 +24,7 @@ class ConnectionManager:
         self.admin_user_ids: Set[int] = set()
         self._loop: asyncio.AbstractEventLoop = None
         self.cleanup_tasks: Dict[int, asyncio.Task] = {} # {user_id: Task}
+        self.is_ready = False # Guard for startup sync storms
         
         # Hub Client State
         self.hub_writer: Optional[asyncio.StreamWriter] = None
@@ -57,17 +58,31 @@ class ConnectionManager:
             
             connecting_user = db.query(DBUser).filter(DBUser.id == user_id).first()
             if connecting_user:
-                # [FIX] Automatically register as admin if user has the flag
-                # This ensures broadcast_to_admins reaches them if they are on another worker
                 if connecting_user.is_admin:
                     self.register_admin(user_id)
-                    ASCIIColors.panel(f"Worker {os.getpid()}: Registered admin user {user_id}")
 
                 db.commit()
 
-                # Warm up LollmsClient in a separate thread to avoid blocking WebSocket handshake
-                from backend.session import get_user_lollms_client
-                threading.Thread(target=get_user_lollms_client, args=(connecting_user.username,), daemon=True).start()
+                # --- CLIENT WARMUP WITH PROGRESS STREAMING ---
+                def init_callback(text, msg_type, meta):
+                    # We pipe progress messages directly to the user's socket
+                    self.send_personal_message_sync({
+                        "type": "init_progress",
+                        "data": {
+                            "message": text,
+                            "is_error": msg_type == 24 # MSG_TYPE_ERROR = 24
+                        }
+                    }, user_id)
+                    return True
+
+                from backend.session import build_lollms_client_from_params
+                # Trigger warmup in background
+                threading.Thread(
+                    target=build_lollms_client_from_params, 
+                    args=(connecting_user.username,), 
+                    kwargs={'callback': init_callback},
+                    daemon=True
+                ).start()
 
                 friendships = db.query(DBFriendship).filter(
                     ((DBFriendship.user1_id == user_id) | (DBFriendship.user2_id == user_id)),
@@ -217,13 +232,34 @@ class ConnectionManager:
     def broadcast_sync(self, message_data: dict):
         """
         Broadcasts a message across the worker cluster.
-        Pushes to local connections via the event loop and forwards to the Hub for other workers.
+        STRICT SIZE GUARD: Prevents browser STATUS_BREAKPOINT crashes.
         """
-        if not isinstance(message_data, dict):
+        if not self.is_ready or not isinstance(message_data, dict):
             return
 
-        # Safety Check: Prevent huge payloads from crashing the browser (STATUS_BREAKPOINT)
-        # 1MB is a reasonable limit for routine WebSocket updates
+        # --- CRITICAL FRONTEND PROTECTION TEST ---
+        try:
+            # Prepare the JSON string to measure exact payload size
+            payload_json = json.dumps(message_data)
+            payload_size = len(payload_json)
+            
+            # 1MB Hard Limit. Chromium browsers crash when the heap is flooded 
+            # with large objects via WebSockets during high-frequency updates.
+            if payload_size > 1048576: 
+                msg_type = message_data.get("type", "unknown")
+                # Extract diagnostics to help developers find the source of the bloat
+                bloated_fields = []
+                if "data" in message_data and isinstance(message_data["data"], dict):
+                    for k, v in message_data["data"].items():
+                        s = len(json.dumps(v))
+                        if s > 102400: # 100KB
+                            bloated_fields.append(f"{k}: {s//1024}KB")
+                
+                ASCIIColors.warning(f"⚠️  DROPPED PAYLOAD [{msg_type}]: {payload_size//1024}KB. Bloat: {', '.join(bloated_fields)}")
+                return # DROP THE MESSAGE
+        except Exception:
+            # If we can't even JSON encode it, it's definitely too dangerous to send
+            return
         try:
             encoded_payload = json.dumps(message_data)
             encoded_len = len(encoded_payload)

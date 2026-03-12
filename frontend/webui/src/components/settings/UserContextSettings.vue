@@ -91,6 +91,7 @@ const showWorkspaceHelp = ref(false);
 const isKeyVisible = ref(false);
 const hasChanges = ref(false);
 const isSaving = ref(false);
+let isPopulating = false; // Guard flag to prevent loops
 
 const availableEngines = [
     { id: 'google', name: 'Google Search' },
@@ -119,6 +120,7 @@ function populateForm() {
   if (isSaving.value) return;
 
   if (user.value) {
+    isPopulating = true; // Block change detection
     preferredName.value = user.value.preferred_name || '';
     generalInfo.value = user.value.data_zone || '';
     personalInfo.value = user.value.user_personal_info || '';
@@ -177,6 +179,7 @@ function populateForm() {
     
     nextTick(() => {
         hasChanges.value = false;
+        isPopulating = false; // Unblock change detection
     });
   }
 }
@@ -199,8 +202,10 @@ watch([
     streetViewEnabled, googleDriveEnabled, googleCalendarEnabled, googleGmailEnabled, googleClientSecret, schedulerEnabled,
     herdDynamicMode, herdModelPool
 ], () => {
-    // Only mark as changed if we aren't currently populating from the store
-    hasChanges.value = true;
+    // Only mark as changed if a human edited the field, not during programmatic populateForm
+    if (!isPopulating) {
+        hasChanges.value = true;
+    }
 }, { deep: true });
 
 // --- List Management (Using Immutable patterns to help Vue detection) ---

@@ -85,7 +85,6 @@ def _process_data_zone_task(task: Task, username: str, discussion_id: str, conte
         summary = str(summary)
         
     discussion.discussion_data_zone = summary
-    discussion.loaded_artefacts = [] # Unload all artefacts after processing
     discussion.commit()
     
     all_images_info = discussion.get_discussion_images()
@@ -235,28 +234,15 @@ def _clean_discussion_data_zone_task(task: Task, username: str, discussion_id: s
         task.log("Data zone is empty, nothing to clean.")
         return {"discussion_id": discussion_id, "new_content": ""}
 
-    # [FIX] Greedy-resistant regex for robust platform-independent block extraction
-    # Updated to include Note type
+    # [FIX] In Pure Artefact mode, we STRIP these blocks from the data zone string 
+    # if they are found, as they should only exist in the Artefact Manager.
     block_pattern = re.compile(
         r"--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---",
         re.MULTILINE
     )
 
-    matches = list(block_pattern.finditer(content))
-    task.log(f"Found {len(matches)} valid context blocks.")
-
-    cleaned_blocks = []
-    for match in matches:
-        # Re-construct the block exactly to ensure no extra whitespace or junk inside/outside
-        block_type = match.group(1)
-        title = match.group(2).strip() + (match.group(3) or '')
-        block_content = match.group(4).strip()
-        
-        cleaned_block = f"--- {block_type}: {title} ---\n{block_content}\n--- End {block_type} ---"
-        cleaned_blocks.append(cleaned_block)
-
-    # Join cleaned blocks with double newlines
-    final_content = "\n\n".join(cleaned_blocks)
+    # Remove all known artefact-like blocks from the string to eliminate duplication
+    final_content = block_pattern.sub("", content).strip()
     
     discussion.discussion_data_zone = final_content
     discussion.commit()

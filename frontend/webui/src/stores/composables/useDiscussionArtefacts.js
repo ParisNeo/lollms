@@ -94,14 +94,18 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
             await fetchArtefacts(discussionId);
             
             // 2. Clean up UI states
-            if (state.activeSplitArtefactTitle?.value === artefactTitle) {
+            // Fix: activeSplitArtefactTitle is a direct property of uiStore, not inside state
+            if (uiStore.activeSplitArtefactTitle === artefactTitle) {
                 uiStore.activeSplitArtefactTitle = null;
             }
+            
             if (promptLoadedArtefacts.value.has(artefactTitle)) {
                 unloadArtefactFromPrompt(artefactTitle);
             }
-            uiStore.addNotification('Artefact deleted.', 'success');
+            
+            uiStore.addNotification(`'${artefactTitle}' deleted.`, 'success');
         } catch (e) {
+            console.error("Delete artefact failed:", e);
             uiStore.addNotification('Failed to delete artefact.', 'error');
         }
     }
@@ -259,37 +263,87 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     async function addNoteAsArtefact(note) {
         if (!currentDiscussionId.value) return;
         try {
-            // Check for existing version to prevent duplicate chips
-            const existing = activeDiscussionArtefacts.value.find(a => a.title === note.title);
-            
-            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
-                { title: note.title, content: note.content, images_b64: [] },
-                { params: { artefact_type: 'note', auto_load: true } }
+            // Explicitly force 'note' type and 'active' status via query parameters
+            const response = await apiClient.post(
+                `/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
+                { 
+                    title: note.title, 
+                    content: note.content, 
+                    images_b64: [] 
+                },
+                { 
+                    params: { 
+                        artefact_type: 'note', 
+                        auto_load: 'true' 
+                    } 
+                }
             );
-            _handleArtefactAndDataZoneUpdate(response);
             
+            // Refresh local state
+            await fetchArtefacts(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
+            
+            // Switch Workspace focus to the newly added note
             uiStore.activeSplitArtefactTitle = note.title;
-            const msg = existing ? `Updated '${note.title}' to v${existing.version + 1}` : `Added '${note.title}' to workspace.`;
-            uiStore.addNotification(msg, 'success');
-        } catch (e) { console.error(e); }
+            uiStore.addNotification(`Note added to discussion.`, 'success');
+        } catch (e) { 
+            console.error("Failed to add note as artefact:", e); 
+        }
     }
 
     async function addSkillAsArtefact(skill) {
         if (!currentDiscussionId.value) return;
         try {
-            // Check for existing version to prevent duplicate chips
-            const existing = activeDiscussionArtefacts.value.find(a => a.title === skill.name);
-
-            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
+            // CRITICAL FIX: Explicitly set type to 'skill' and auto_load to 'true'
+            const response = await apiClient.post(
+                `/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
                 { title: skill.name, content: skill.content, images_b64: [] },
-                { params: { artefact_type: 'skill', auto_load: true } }
+                { params: { artefact_type: 'skill', auto_load: 'true' } }
             );
-            _handleArtefactAndDataZoneUpdate(response);
+            
+            await fetchArtefacts(currentDiscussionId.value);
+            await getActions().fetchContextStatus(currentDiscussionId.value);
             
             uiStore.activeSplitArtefactTitle = skill.name;
-            const msg = existing ? `Updated skill '${skill.name}' to v${existing.version + 1}` : `Skill added to workspace.`;
-            uiStore.addNotification(msg, 'success');
+            uiStore.addNotification(`Skill '${skill.name}' active in workspace.`, 'success');
         } catch (e) { console.error(e); }
+    }
+
+    async function importSourceToArtefacts(source) {
+        if (!currentDiscussionId.value) return;
+        
+        const title = source.title || "Imported Source";
+        const pathOrUrl = source.source || "";
+        
+        try {
+            if (pathOrUrl.startsWith('http')) {
+                // External Web Source: Use the scraping background task
+                await importArtefactFromUrl(currentDiscussionId.value, pathOrUrl, 0, false);
+                uiStore.addNotification(`Initiated import for: ${title}`, 'info');
+            } else {
+                // Internal/Snippet Source: Create a manual artefact from the content
+                const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
+                    { 
+                        title: title.endsWith('.md') ? title : `${title}.md`, 
+                        content: source.content || "", 
+                        images_b64: [] 
+                    },
+                    { params: { artefact_type: 'document', auto_load: true } }
+                );
+                _handleArtefactAndDataZoneUpdate(response);
+                
+                uiStore.activeSplitArtefactTitle = title;
+                uiStore.addNotification(`Source '${title}' saved to workspace.`, 'success');
+            }
+            
+            // Ensure the side panel is open to show the new artefact
+            if (!uiStore.isDataZoneVisible) {
+                uiStore.isDataZoneVisible = true;
+            }
+        } catch (e) {
+            console.error("Failed to import source:", e);
+            uiStore.addNotification("Failed to import source to artefacts.", "error");
+        }
     }
 
     return {
@@ -312,6 +366,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         importWikipediaArtefact,
         importGithubArtefact,
         importStackOverflowArtefact,
-        importYoutubeTranscript
+        importYoutubeTranscript,
+        importSourceToArtefacts
     };
 }

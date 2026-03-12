@@ -89,15 +89,13 @@ async function handleImportToDataZone() {
         return;
     }
 
-    // Standardized delimiter format for notes
-    const formattedContent = `\n--- Note: ${title.value} ---\n${content.value}\n--- End Note ---\n`;
-
-    await discussionsStore.appendToDataZone({
-        discussionId: discussionsStore.currentDiscussionId,
-        content: formattedContent
+    // Use the versioned artefact system instead of raw string injection
+    await discussionsStore.addNoteAsArtefact({
+        title: title.value,
+        content: content.value
     });
     
-    uiStore.addNotification('Note added to context.', 'success');
+    uiStore.addNotification('Note added to discussion.', 'success');
 }
 </script>
 
@@ -131,7 +129,7 @@ async function handleImportToDataZone() {
             <div class="flex justify-between items-center w-full">
                  <button @click="handleImportToDataZone" class="btn btn-secondary flex items-center gap-2" :disabled="!content || !content.trim()">
                     <IconArrowUpTray class="w-4 h-4" />
-                    Import to Data Zone
+                    Add to Discussion
                 </button>
                 <div class="flex gap-2">
                     <button @click="uiStore.closeModal('noteEditor')" class="btn btn-secondary">Cancel</button>

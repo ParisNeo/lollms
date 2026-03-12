@@ -30,10 +30,12 @@ class ArtefactInfo(BaseModel):
     version: int
     is_loaded: bool = False
     author: Optional[str] = None
+    artefact_type: str = "document" # note, skill, code, document
     created_at: str
     updated_at: str
-    content: Optional[str] = None # Will be populated only on single-artefact fetch
-    images: Optional[List[str]] = None
+    # Heavily modified: ensuring these are never required for list validation
+    content: Optional[str] = Field(default=None, description="Only populated on direct fetch")
+    images: Optional[List[str]] = Field(default=None, description="Only populated on direct fetch")
 
 class ArtefactUploadResponse(BaseModel):
     new_artefact_info: ArtefactInfo

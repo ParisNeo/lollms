@@ -45,7 +45,8 @@ def build_discussion_sharing_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        discussion_obj, _, permission_level, owner_user_db = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        # Enforce 'owner' check during retrieval to prevent illegal sharing attempts
+        discussion_obj, _, permission_level, owner_user_db = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'owner')
     
         if permission_level != 'owner':
             raise HTTPException(status_code=403, detail="You can only share discussions that you own.")

@@ -2,9 +2,8 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.session import get_current_active_user
-from backend.task_manager import task_manager
+from backend.task_manager import task_manager, _serialize_task
 from backend.models import TaskInfo, UserAuthDetails
-from backend.tasks.utils import _to_task_info
 
 tasks_router = APIRouter(
     prefix="/api/tasks",
@@ -31,7 +30,9 @@ def get_all_tasks(
     else:
         tasks = task_manager.get_tasks_for_user(current_user.username)
     
-    return [_to_task_info(task) for task in tasks]
+    # CRITICAL: Use optimized serialization to prevent frontend crashes (STATUS_BREAKPOINT)
+    # This ensures logs and results are truncated for the list view.
+    return [_serialize_task(task) for task in tasks]
 
 @tasks_router.get("/{task_id}", response_model=TaskInfo)
 def get_task_details(task_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
@@ -46,7 +47,7 @@ def get_task_details(task_id: str, current_user: UserAuthDetails = Depends(get_c
     if not current_user.is_admin and owner_username != current_user.username:
         raise HTTPException(status_code=403, detail="Not authorized to view this task.")
         
-    return _to_task_info(task)
+    return _serialize_task(task)
 
 @tasks_router.post("/{task_id}/cancel", response_model=TaskInfo)
 def cancel_task(task_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
@@ -70,7 +71,7 @@ def cancel_task(task_id: str, current_user: UserAuthDetails = Depends(get_curren
     if not final_task_state:
          raise HTTPException(status_code=404, detail="Task disappeared after cancellation attempt.")
 
-    return _to_task_info(final_task_state)
+    return _serialize_task(final_task_state)
 
 
 @tasks_router.post("/cancel-all", response_model=dict)

@@ -3,11 +3,17 @@ from pathlib import Path
 import platform
 from typing import List, Optional, Any, Dict
 from lollms_client import LollmsClient, LollmsDataManager, LollmsDiscussion
+from lollms_client.lollms_discussion import ArtefactType
 from backend.session import user_sessions, get_user_lollms_client
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.discussion_manager import get_user_discussion_manager
+
+# --- Register Custom Artefact Types for LoLLMs Platform ---
+ArtefactType.register_custom_type("note", label="Research Note")
+ArtefactType.register_custom_type("skill", label="AI Capability")
+ArtefactType.register_custom_type("file", label="External Document")
 
 
 def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None) -> Optional[LollmsDiscussion]:

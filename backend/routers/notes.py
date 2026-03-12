@@ -9,6 +9,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.note import Note as DBNote, NoteGroup as DBNoteGroup
 from backend.session import get_current_active_user
 from backend.models import UserAuthDetails
+from backend.models.personality import PersonalitySendRequest
 
 notes_router = APIRouter(
     prefix="/api/notes",
@@ -192,6 +193,39 @@ def update_note(
         id=note.id, title=note.title, content=note.content, group_id=note.group_id,
         created_at=note.created_at.isoformat(), updated_at=note.updated_at.isoformat()
     )
+
+@notes_router.post("/{note_id}/share", status_code=status.HTTP_200_OK)
+async def share_note(
+    note_id: str, 
+    payload: PersonalitySendRequest, 
+    current_user: UserAuthDetails = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+):
+    note = db.query(DBNote).filter(DBNote.id == note_id, DBNote.owner_user_id == current_user.id).first()
+    if not note:
+        raise HTTPException(status_code=404, detail="Note not found")
+
+    target_user = db.query(DBUser).filter(DBUser.username == payload.target_username).first()
+    if not target_user:
+        raise HTTPException(status_code=404, detail="Target user not found")
+
+    new_note = DBNote(
+        title=f"{note.title} (Shared by {current_user.username})",
+        content=note.content,
+        owner_user_id=target_user.id
+    )
+    db.add(new_note)
+    try:
+        db.commit()
+        from backend.ws_manager import manager
+        manager.send_personal_message_sync({
+            "type": "notification", 
+            "data": {"message": f"{current_user.username} sent you a note.", "type": "info"}
+        }, target_user.id)
+        return {"message": "Note shared successfully"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 @notes_router.delete("/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_note(

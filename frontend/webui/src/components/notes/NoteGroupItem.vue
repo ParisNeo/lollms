@@ -23,6 +23,16 @@ const props = defineProps({
 const emit = defineEmits(['new-subgroup', 'edit-group', 'delete-group', 'note-click', 'delete-note', 'import-note']);
 
 const isOpen = ref(false);
+const activeNoteMenuId = ref(null);
+
+function toggleNoteMenu(event, noteId) {
+    event.stopPropagation();
+    activeNoteMenuId.value = activeNoteMenuId.value === noteId ? null : noteId;
+}
+
+function closeNoteMenu() {
+    activeNoteMenuId.value = null;
+}
 const paddingLeft = computed(() => `${props.level * 0.75}rem`);
 
 function toggle() {
@@ -68,21 +78,42 @@ function toggle() {
             
             <!-- Notes in this group -->
             <div v-for="note in group.notes" :key="note.id" 
-                 class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer group ml-2"
+                 class="discussion-item-flat group ml-2"
+                 :class="{ 'selected': activeNoteMenuId === note.id }"
                  @click="emit('note-click', note)">
-                <div class="flex items-center gap-2 min-w-0">
-                    <IconFileText class="w-4 h-4 text-blue-500 flex-shrink-0" />
-                    <span class="text-sm truncate">{{ note.title || 'Untitled' }}</span>
+                
+                <div class="flex items-center gap-3 min-w-0 flex-grow">
+                    <IconPencil class="w-4 h-4 flex-shrink-0 text-amber-500" />
+                    <p class="discussion-title">{{ note.title || 'Untitled' }}</p>
                 </div>
-                <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                     <button @click.stop="emit('import-note', note)" class="p-1 text-gray-500 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded" title="Import to Data Zone">
-                        <IconArrowUpTray class="w-3 h-3" />
+
+                <div class="relative">
+                    <button 
+                        @click.stop="toggleNoteMenu($event, note.id)" 
+                        class="menu-trigger opacity-0 group-hover:opacity-100 text-amber-500"
+                        :class="{ 'opacity-100': activeNoteMenuId === note.id }"
+                    >
+                        <IconEllipsisVertical class="h-4 w-4" />
                     </button>
-                    <button @click.stop="emit('delete-note', note)" class="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded" title="Delete Note">
-                        <IconTrash class="w-3 h-3" />
-                    </button>
+
+                    <div v-if="activeNoteMenuId === note.id" class="dropdown-menu" @click.stop>
+                        <div class="menu-content relative">
+                            <button @click="emit('import-note', note); closeNoteMenu()" class="menu-item">
+                                <IconArrowUpTray class="w-4 h-4 mr-3 text-blue-500"/> Add to Discussion
+                            </button>
+                            <button @click="uiStore.openModal('shareResource', { id: note.id, name: note.title, type: 'note' }); closeNoteMenu()" class="menu-item">
+                                <IconUserCircle class="w-4 h-4 mr-3 text-gray-400"/> Share with Friend
+                            </button>
+                            <div class="menu-divider"></div>
+                            <button @click="emit('delete-note', note); closeNoteMenu()" class="menu-item danger-item">
+                                <IconTrash class="w-4 h-4 mr-3"/> Remove
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
+            <!-- Click-away overlay -->
+            <div v-if="activeNoteMenuId" class="fixed inset-0 z-10" @click="closeNoteMenu"></div>
         </div>
     </div>
 </template>

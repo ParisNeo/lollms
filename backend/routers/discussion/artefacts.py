@@ -163,13 +163,26 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
-        artefacts = discussion.list_artefacts()
-        for artefact in artefacts:
-            if isinstance(artefact.get('created_at'), datetime):
-                artefact['created_at'] = artefact['created_at'].isoformat()
-            if isinstance(artefact.get('updated_at'), datetime):
-                artefact['updated_at'] = artefact['updated_at'].isoformat()
-        return artefacts
+        
+        # Fetch raw artefacts from the manager
+        raw_artefacts = discussion.list_artefacts()
+        
+        lightweight_artefacts = []
+        for art in raw_artefacts:
+            # Strip heavy fields to prevent browser heap overflow (STATUS_BREAKPOINT)
+            light_art = {k: v for k, v in art.items() if k not in ['content', 'images']}
+            
+            # CRITICAL FIX: Map the library's internal 'active' field to the UI's 'is_loaded'
+            light_art['is_loaded'] = art.get('active', False)
+            
+            if isinstance(light_art.get('created_at'), datetime):
+                light_art['created_at'] = light_art['created_at'].isoformat()
+            if isinstance(light_art.get('updated_at'), datetime):
+                light_art['updated_at'] = light_art['updated_at'].isoformat()
+                
+            lightweight_artefacts.append(light_art)
+            
+        return lightweight_artefacts
 
     @router.post("/{discussion_id}/artefacts", response_model=ArtefactUploadResponse)
     async def add_discussion_artefact(
@@ -364,23 +377,30 @@ def build_artefacts_router(router: APIRouter):
             # Check if artefact already exists to avoid duplicate entries with same name
             existing = discussion.get_artefact(title=title)
             
+            # Determine type: Code stays code, everything else is a 'file' (custom registered type)
+            target_type = "code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "file"
+
             if existing:
-                # Creates v2, v3, etc. instead of a new file with same name
+                # Use positional arguments for title and new_content
+                # Enforce 'active' from the auto_load query parameter
                 artefact_info = discussion.update_artefact(
-                    title=title,
-                    new_content=content,
+                    title,
+                    content,
                     new_images=images,
                     author=current_user.username,
-                    artefact_type="code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "document"
+                    active=auto_load,
+                    artefact_type=target_type # Explicitly specifying registered custom type
                 )
             else:
-                # Standard new creation
+                # Use positional arguments for title and content
+                # Enforce 'active' from the auto_load query parameter
                 artefact_info = discussion.add_artefact(
-                    title=title,
-                    content=content,
+                    title,
+                    content,
                     images=images,
                     author=current_user.username,
-                    artefact_type="code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "document"
+                    active=auto_load,
+                    artefact_type=target_type # Explicitly specifying registered custom type
                 )
             
             discussion.commit()
@@ -475,7 +495,7 @@ def build_artefacts_router(router: APIRouter):
                 if page_id != "-1":
                     content = pages[page_id].get("extract", "")
                     full_md = f"# {item.title}\nSource: {item.url}\n\n{content}"
-                    art_info = discussion.add_artefact(title=f"{item.title}.md", content=full_md, author=current_user.username)
+                    art_info = discussion.add_artefact(f"{item.title}.md", full_md, author=current_user.username)
                     if request.auto_load:
                         discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
             
@@ -572,9 +592,8 @@ def build_artefacts_router(router: APIRouter):
                 else:
                     content = f"# {paper.title} (Abstract)\nAuthors: {', '.join([a.name for a in paper.authors])}\nSource: {paper.entry_id}\n\n{paper.summary}"
                 
-                art_info = discussion.add_artefact(title=f"Arxiv_{item.id}.md", content=content, author=current_user.username)
-                if request.auto_load:
-                    discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+                # Specify active state directly in add_artefact
+                art_info = discussion.add_artefact(f"Arxiv_{item.id}.md", content, author=current_user.username, active=request.auto_load)
             
             discussion.commit()
             
@@ -688,9 +707,8 @@ def build_artefacts_router(router: APIRouter):
             # Ensure safe filename
             safe_title = re.sub(r'[^A-Za-z0-9_.-]', '_', title) + ".md"
             
-            art_info = discussion.add_artefact(title=safe_title, content=content, author=current_user.username)
-            if request.auto_load:
-                discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+            # Specify active state directly in add_artefact
+            art_info = discussion.add_artefact(safe_title, content, author=current_user.username, active=request.auto_load)
             
             discussion.commit()
             
@@ -786,9 +804,8 @@ def build_artefacts_router(router: APIRouter):
                 
             title = f"SO_{q_id}.md"
             
-            art_info = discussion.add_artefact(title=title, content=content, author=current_user.username)
-            if request.auto_load:
-                discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+            # Specify active state directly in add_artefact
+            art_info = discussion.add_artefact(title, content, author=current_user.username, active=request.auto_load)
             
             discussion.commit()
             
@@ -913,13 +930,12 @@ def build_artefacts_router(router: APIRouter):
             # 6. Save
             artefact_name = f"Youtube_Transcript_{video_id}.md"
             artefact_info = discussion.add_artefact(
-                title=artefact_name,
-                content=full_content,
+                artefact_name,
+                full_content,
                 author=current_user.username
             )
             
-            if request.auto_load:
-                 discussion.load_artefact_into_data_zone(title=artefact_name, version=artefact_info['version'])
+            # Activation is already handled by the 'active' parameter logic (default is True in add_artefact)
             
             discussion.commit()
             
@@ -949,7 +965,7 @@ def build_artefacts_router(router: APIRouter):
     async def create_manual_artefact(
         discussion_id: str,
         payload: ArtefactCreateManual,
-        artefact_type: str = Query("document"),
+        artefact_type: str = Query(None), # Let payload take precedence
         auto_load: bool = Query(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
@@ -959,31 +975,48 @@ def build_artefacts_router(router: APIRouter):
         existing = discussion.get_artefact(title=payload.title)
         
         try:
+            # Determine final type (priority: Query Param > Payload Hint > Default)
+            # We explicitly check for 'note' or 'skill' strings from the Query param first.
+            raw_type = (artefact_type or "").lower()
+            
+            if "note" in raw_type:
+                final_type = "note"
+            elif "skill" in raw_type:
+                final_type = "skill"
+            else:
+                # Fallback to extension-based detection if no explicit type provided
+                ext = payload.title.split('.')[-1].lower() if '.' in payload.title else ""
+                if ext in ['py', 'js', 'ts', 'html', 'css', 'sql', 'cpp', 'c', 'sh']:
+                    final_type = "code"
+                else:
+                    final_type = "document"
+
             if existing:
-                # CRITICAL: Library uses 'name' and 'type'
+                # Use positional arguments for required fields (title, new_content) to ensure compatibility
                 artefact_info = discussion.update_artefact(
-                    title=payload.title, 
-                    content=payload.content, 
-                    images=payload.images_b64, 
+                    payload.title, 
+                    payload.content, 
+                    new_images=payload.images_b64, 
                     author=current_user.username,
-                    type=artefact_type
+                    active=True,
+                    artefact_type=final_type
                 )
             else:
-                # CRITICAL: Library uses 'name' and 'type'
+                # Use positional arguments for required fields (title, content) to ensure compatibility
                 artefact_info = discussion.add_artefact(
-                    title=payload.title, 
-                    content=payload.content, 
+                    payload.title, 
+                    payload.content, 
                     images=payload.images_b64, 
                     author=current_user.username,
-                    type=artefact_type
+                    active=True,
+                    artefact_type=final_type
                 )
             
             # NOTE: We do NOT modify discussion.discussion_data_zone string here.
             # Artefacts are managed by the library's internal list.
             
-            if auto_load:
-                discussion.load_artefact_into_data_zone(title=payload.title, version=artefact_info['version'])
-                
+            # Removed legacy load_artefact_into_data_zone call to prevent content duplication
+            # The artefact is already 'active=True' in the ArtefactManager
             discussion.commit()
             
             if isinstance(artefact_info.get('created_at'), datetime):
@@ -1022,9 +1055,10 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         try:
+            # Use positional arguments for required fields (title, new_content)
             artefact_info = discussion.update_artefact(
-                title=artefact_title, 
-                new_content=payload.new_content, 
+                artefact_title, 
+                payload.new_content, 
                 new_images=payload.kept_images_b64 + payload.new_images_b64,
                 version=payload.version,
                 update_in_place=payload.update_in_place
@@ -1057,9 +1091,11 @@ def build_artefacts_router(router: APIRouter):
             raise HTTPException(status_code=400, detail="Data zone is empty.")
         try:
             if discussion.get_artefact(title=request.title):
-                artefact_info = discussion.update_artefact(title=request.title, new_content=content, author=current_user.username)
+                # Use positional arguments for required fields
+                artefact_info = discussion.update_artefact(request.title, content, author=current_user.username)
             else:
-                artefact_info = discussion.add_artefact(title=request.title, content=content, author=current_user.username)
+                # Use positional arguments for required fields
+                artefact_info = discussion.add_artefact(request.title, content, author=current_user.username)
             discussion.commit()
             if isinstance(artefact_info.get('created_at'), datetime):
                 artefact_info['created_at'] = artefact_info['created_at'].isoformat()
@@ -1136,18 +1172,11 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.discussion_data_zone = ""
-            discussion.loaded_artefacts = []
-            
+            # The library manages the context layer. We just activate everything.
             all_artefacts_infos = discussion.list_artefacts()
             
-            latest_artefacts = {}
             for art_info in all_artefacts_infos:
-                if art_info['title'] not in latest_artefacts or art_info['version'] > latest_artefacts[art_info['title']]['version']:
-                    latest_artefacts[art_info['title']] = art_info
-            
-            for title, art_info in latest_artefacts.items():
-                discussion.load_artefact_into_data_zone(title=title, version=art_info['version'])
+                discussion.artefacts.activate(art_info['title'], version=art_info['version'])
 
             discussion.commit()
             
@@ -1182,7 +1211,9 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.load_artefact_into_data_zone(title=request.title, version=request.version)
+            # We only update the library metadata. The library handles 
+            # context injection natively during chat() without modifying the data_zone string.
+            discussion.artefacts.activate(request.title, version=request.version)
             discussion.commit()
             
             artefacts = discussion.list_artefacts()
@@ -1217,7 +1248,8 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            discussion.unload_artefact_from_data_zone(title=request.title, version=request.version)
+            # Deactivate in the library metadata only.
+            discussion.artefacts.deactivate(request.title, version=request.version)
             discussion.commit()
             
             artefacts = discussion.list_artefacts()

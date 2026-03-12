@@ -81,22 +81,9 @@ def build_discussions_router():
                 disc_id = disc_data['id']
                 metadata = disc_data.get('discussion_metadata', {})
                 
-                image_data = metadata.get("discussion_images", [])
-                discussion_images_b64 = []
-                active_discussion_images = []
-
-                if isinstance(image_data, dict) and 'data' in image_data:
-                    discussion_images_b64 = image_data.get('data', [])
-                    active_discussion_images = image_data.get('active', [])
-                elif isinstance(image_data, list):
-                    for item in image_data:
-                        if isinstance(item, dict) and 'data' in item:
-                            discussion_images_b64.append(item['data'])
-                            active_discussion_images.append(item.get('active', True))
-                        elif isinstance(item, str):
-                            discussion_images_b64.append(item)
-                            active_discussion_images.append(True)
-
+                # CRITICAL: Strip base64 image data from the list view.
+                # This prevents the browser from crashing (STATUS_BREAKPOINT) 
+                # when loading dozens of discussions.
                 is_shared_by_me = disc_id in owned_shared_ids
 
                 info = DiscussionInfo(
@@ -108,8 +95,8 @@ def build_discussions_router():
                     active_branch_id=disc_data.get('active_branch_id'),
                     created_at=disc_data.get('created_at'),
                     last_activity_at=disc_data.get('updated_at'),
-                    discussion_images=discussion_images_b64,
-                    active_discussion_images=active_discussion_images,
+                    discussion_images=[], # EMPTY in list view
+                    active_discussion_images=[], # EMPTY in list view
                     group_id=metadata.get('group_id'),
                     owner_username=None,
                     permission_level="shared_by_me" if is_shared_by_me else None,
@@ -179,7 +166,10 @@ def build_discussions_router():
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
         branch_tip_to_load = branch_id or discussion_obj.active_branch_id
+        # Limit the initial fetch to the last 50 messages to protect browser memory
         messages_in_branch = discussion_obj.get_branch(branch_tip_to_load)
+        if len(messages_in_branch) > 50:
+            messages_in_branch = messages_in_branch[-50:]
 
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
@@ -218,7 +208,19 @@ def build_discussions_router():
                 try: msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
                 except json.JSONDecodeError: msg_metadata = {}
             else:
-                msg_metadata = msg_metadata_raw or {}
+                msg_metadata = (msg_metadata_raw or {}).copy()
+
+            # --- METADATA BLOAT GUARD ---
+            # If RAG produced 20 huge chunks, the 'sources' list will be massive.
+            # We keep the titles for the UI but clip the 'content' of each source.
+            if 'sources' in msg_metadata and isinstance(msg_metadata['sources'], list):
+                for src in msg_metadata['sources']:
+                    if 'content' in src and isinstance(src['content'], str) and len(src['content']) > 500:
+                        src['content'] = src['content'][:500] + "... [clipped for stability]"
+            
+            # Clip 'query_history' or internal 'events' if they are too long
+            if 'query_history' in msg_metadata and len(json.dumps(msg_metadata['query_history'])) > 10000:
+                msg_metadata['query_history'] = "[Too many queries to list in history]"
 
             msg_branches = None
             if msg.id in children_map and len(children_map[msg.id]) > 1:
@@ -235,12 +237,6 @@ def build_discussions_router():
                     created_at=msg.created_at, branch_id=branch_tip_to_load, branches=msg_branches
                 )
             )
-        try:
-            db_user.last_discussion_id = discussion_id
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            print(f"Warning: Could not update last_discussion_id for user {current_user.username}. Error: {e}")
 
         return messages_output
 

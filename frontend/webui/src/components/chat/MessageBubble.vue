@@ -487,8 +487,13 @@ const groupedEvents = computed(() => {
     if (!hasEvents.value) return [];
     const result =[];
     const stack =[];
-    // Filter out internal or unwanted event types
-    const filteredEvents = props.message.events.filter(event => event.type !== 'sources' && event.type !== 'ui_update');
+    
+    // CRITICAL: Filter out technical 'new_message_id' events to keep the UI human-friendly
+    const filteredEvents = props.message.events.filter(event => 
+        event.type !== 'sources' && 
+        event.type !== 'ui_update' && 
+        event.type !== 'new_message_id'
+    );
     
     for (let i = 0; i < filteredEvents.length; i++) {
         const event = filteredEvents[i];
@@ -638,6 +643,11 @@ function showSourceDetails(source) {
     };
     uiStore.openModal('sourceViewer', data); 
 }
+
+function handleImportSource(source) {
+    discussionsStore.importSourceToArtefacts(source);
+}
+
 function openAllSourcesSearch() { uiStore.openModal('allSourcesSearch', { sources: props.message.sources }); }
 function getSimilarityColor(score) { if (score === undefined || score === null) return 'bg-gray-400 dark:bg-gray-600'; if (score >= 80) return 'bg-green-500'; if (score >= 50) return 'bg-yellow-500'; return 'bg-red-500'; }
 

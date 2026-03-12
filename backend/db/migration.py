@@ -313,6 +313,20 @@ def _bootstrap_lollms_user(connection):
         print("INFO: AI user '@lollms' already exists.")
 
 def run_schema_migrations_and_bootstrap(connection, inspector):
+    # --- STAGE 0: NUCLEAR CLEANUP FOR STABILITY ---
+    # We clear these immediately to prevent the manager from attempting to 
+    # broadcast massive stale payloads during the boot sequence.
+    if inspector.has_table("broadcast_messages"):
+        connection.execute(text("DELETE FROM broadcast_messages"))
+    
+    if inspector.has_table("tasks"):
+        # We don't just mark them failed; we strip the heavy data (results/logs)
+        # to ensure any accidental broadcast is lightweight.
+        connection.execute(text("UPDATE tasks SET status='failed', error='Interrupted by server restart', result=NULL, logs='[]' WHERE status IN ('running', 'pending')"))
+        # Optional: connection.execute(text("DELETE FROM tasks")) # Uncomment to wipe all history every time
+    
+    connection.commit()
+
     _migrate_user_data_folders(connection)
 
     if inspector.has_table("global_configs"):
@@ -937,6 +951,17 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
     _bootstrap_lollms_user(connection)
 
+    # --- TASK PURGE ---
+    # Delete all background tasks from the DB on startup.
+    # This ensures the frontend doesn't download a massive history of logs/results.
+    if inspector.has_table("tasks"):
+        try:
+            connection.execute(text("DELETE FROM tasks"))
+            connection.commit()
+            print("INFO: Task history purged for stability.")
+        except Exception as e:
+            print(f"WARNING: Could not purge tasks: {e}")
+
     if inspector.has_table("mcps"):
         mcp_columns_db = [col['name'] for col in inspector.get_columns('mcps')]
         new_mcp_cols_defs = { "active": "BOOLEAN DEFAULT 1 NOT NULL", "type": "VARCHAR", "icon": "TEXT", "authentication_type": "VARCHAR", "authentication_key": "VARCHAR", "sso_redirect_uri": "VARCHAR", "sso_user_infos_to_share": "JSON", "client_id": "VARCHAR" }
@@ -1085,6 +1110,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         from backend.db.models.broadcast import BroadcastMessage
         BroadcastMessage.__table__.create(connection)
         connection.commit()
+    else:
+        # --- STARTUP CLEANUP ---
+        # Clear the broadcast queue on every server start. 
+        # This prevents "Sync Storms" where a new worker process tries to broadcast
+        # massive stale messages (like base64 images) from a previous crashed session.
+        try:
+            connection.execute(text("DELETE FROM broadcast_messages"))
+            connection.commit()
+            print("INFO: Broadcast message sync queue cleared for clean startup.")
+        except Exception as e:
+            print(f"WARNING: Could not clear broadcast queue: {e}")
+            connection.rollback()
 
     if not inspector.has_table("shared_discussion_links"):
         from backend.db.models.discussion import SharedDiscussionLink

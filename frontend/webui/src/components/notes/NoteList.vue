@@ -18,6 +18,16 @@ const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
 const notesTree = computed(() => notesStore.notesTree);
+const activeMenuId = ref(null); // Track which note's menu is open
+
+function toggleMenu(event, noteId) {
+    event.stopPropagation();
+    activeMenuId.value = activeMenuId.value === noteId ? null : noteId;
+}
+
+function closeMenu() {
+    activeMenuId.value = null;
+}
 
 // Filter logic
 const filteredTree = computed(() => {
@@ -97,16 +107,12 @@ async function toggleNoteInContext(note) {
 }
 async function handleImportNote(note) {
     if (!discussionsStore.currentDiscussionId) {
-        uiStore.addNotification('No active discussion to import to.', 'warning');
+        uiStore.addNotification('Please select or start a discussion first.', 'warning');
         return;
     }
-    // Wrap in standardized Note delimiters for easy removal
-    const formattedContent = `\n--- Note: ${note.title} ---\n${note.content}\n--- End Note ---\n`;
-    
-    await discussionsStore.appendToDataZone({ 
-        discussionId: discussionsStore.currentDiscussionId, 
-        content: formattedContent 
-    });
+
+    // Call the structured artefact creation method
+    await discussionsStore.addNoteAsArtefact(note);
 }
 </script>
 
@@ -126,23 +132,48 @@ async function handleImportNote(note) {
       />
       
       <div v-if="filteredTree.ungrouped && filteredTree.ungrouped.length > 0">
-          <div class="px-2 py-1 text-xs font-semibold text-gray-500 uppercase mt-2">Ungrouped Notes</div>
-          <div v-for="note in filteredTree.ungrouped" :key="note.id" 
-                 class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer group"
+          <div class="px-2 py-1 text-[10px] font-black uppercase text-gray-400 tracking-widest mt-4 mb-2">Ungrouped Notes</div>
+            <div v-for="note in filteredTree.ungrouped" :key="note.id" 
+                 class="discussion-item-flat group"
+                 :class="{ 'selected': activeMenuId === note.id }"
                  @click="handleNoteClick(note)">
-                <div class="flex items-center gap-2 min-w-0">
-                    <IconFileText class="w-4 h-4 text-blue-500 flex-shrink-0" />
-                    <span class="text-sm truncate">{{ note.title || 'Untitled' }}</span>
+                
+                <div class="flex items-center gap-3 min-w-0 flex-grow">
+                    <IconPencil class="w-4 h-4 flex-shrink-0 text-amber-500" />
+                    <p class="discussion-title">{{ note.title || 'Untitled' }}</p>
                 </div>
-                 <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                     <button @click.stop="handleImportNote(note)" class="p-1 text-gray-500 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded" title="Import to Data Zone">
-                        <IconArrowUpTray class="w-3 h-3" />
+
+                <!-- Three Dot Menu (Parity with DiscussionItem) -->
+                <div class="relative">
+                    <button 
+                        @click.stop="toggleMenu($event, note.id)" 
+                        class="menu-trigger opacity-0 group-hover:opacity-100 text-amber-500"
+                        :class="{ 'opacity-100': activeMenuId === note.id }"
+                    >
+                        <IconEllipsisVertical class="h-4 w-4" />
                     </button>
-                    <button @click.stop="handleDeleteNote(note)" class="p-1 text-red-500 hover:bg-red-100 dark:hover:bg-red-900/30 rounded" title="Delete Note">
-                        <IconTrash class="w-3 h-3" />
-                    </button>
+
+                    <div v-if="activeMenuId === note.id" class="dropdown-menu" @click.stop>
+                        <div class="menu-content relative">
+                            <button @click="handleImportNote(note); closeMenu()" class="menu-item">
+                                <IconArrowUpTray class="w-4 h-4 mr-3 text-blue-500"/> 
+                                <span>Add to Discussion</span>
+                            </button>
+                            <button @click="uiStore.openModal('shareResource', { id: note.id, name: note.title, type: 'note' }); closeMenu()" class="menu-item">
+                                <IconUserCircle class="w-4 h-4 mr-3 text-gray-400"/> 
+                                <span>Share with Friend</span>
+                            </button>
+                            <div class="menu-divider"></div>
+                            <button @click="handleDeleteNote(note); closeMenu()" class="menu-item danger-item">
+                                <IconTrash class="w-4 h-4 mr-3"/> 
+                                <span>Remove</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
+            <!-- Click-away overlay -->
+            <div v-if="activeMenuId" class="fixed inset-0 z-10" @click="closeMenu"></div>
       </div>
       
       <div v-if="filteredTree.groups.length === 0 && filteredTree.ungrouped.length === 0" class="text-center py-8 text-gray-500 text-sm">

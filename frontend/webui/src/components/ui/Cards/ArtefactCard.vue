@@ -123,6 +123,11 @@ const fileExtension = computed(() => {
 
 const isLoadedToDataZone = computed(() => props.artefactGroup.isAnyVersionLoaded);
 
+const currentType = computed(() => {
+    // Get type from the first (latest) version
+    return props.artefactGroup.versions[0]?.artefact_type || 'file';
+});
+
 function handleView() {
     uiStore.activeSplitArtefactTitle = props.artefactGroup.title;
     if (!uiStore.isDataZoneVisible) uiStore.isDataZoneVisible = true;
@@ -177,11 +182,14 @@ async function toggleLoad() {
 <template>
   <div class="artefact-list-item group" :class="{'is-active': isLoadedToDataZone}">
     <!-- File Icon Box -->
-    <div class="file-icon-box" @click="handleView">
-        <svg class="w-8 h-8 opacity-40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-            <path d="M14 2v6h6" />
-        </svg>
+    <div class="file-icon-box" @click="handleView" :class="{
+        'bg-blue-50 text-blue-500 border-blue-200': currentType === 'file' || currentType === 'document' || currentType === 'code',
+        'bg-amber-50 text-amber-500 border-amber-200': currentType === 'note',
+        'bg-green-50 text-green-500 border-green-200': currentType === 'skill'
+    }">
+        <IconFileText v-if="currentType === 'file' || currentType === 'document' || currentType === 'code'" class="w-6 h-6" />
+        <IconPencil v-else-if="currentType === 'note'" class="w-6 h-6" />
+        <IconSparkles v-else-if="currentType === 'skill'" class="w-6 h-6" />
     </div>
 
     <!-- Info Column -->

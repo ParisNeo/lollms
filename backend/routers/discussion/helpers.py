@@ -18,16 +18,18 @@ async def get_discussion_and_owner_for_request(
     """
     Retrieves a discussion object. Handles owned chats, notebooks, and shared discussions.
     """
-    # 1. Check owned chat
-    discussion_obj = get_user_discussion(current_user.username, discussion_id)
-    if discussion_obj:
+    # 1. Check if it's a Notebook (Priority for shadow discussions)
+    notebook = db.query(DBNotebook).filter(DBNotebook.id == discussion_id, DBNotebook.owner_user_id == current_user.id).first()
+    if notebook:
+        # Force creation/load with create_if_missing=True to ensure the manager sees it
+        discussion_obj = get_user_discussion(current_user.username, discussion_id, create_if_missing=True)
         owner_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
         return discussion_obj, current_user.username, 'owner', owner_db
 
-    # 2. Check if it's a Notebook (Allow access to its shadow discussion)
-    notebook = db.query(DBNotebook).filter(DBNotebook.id == discussion_id, DBNotebook.owner_user_id == current_user.id).first()
-    if notebook:
-        discussion_obj = get_user_discussion(current_user.username, discussion_id, create_if_missing=True)
+    # 2. Check owned chat - using create_if_missing=True for the owner ensures 
+    # we can share "New Chats" before the first message is sent.
+    discussion_obj = get_user_discussion(current_user.username, discussion_id, create_if_missing=True)
+    if discussion_obj:
         owner_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
         return discussion_obj, current_user.username, 'owner', owner_db
 

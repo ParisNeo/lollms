@@ -236,11 +236,24 @@ def generate_mistral_compatible_id() -> str:
     """Generates a 9-character alphanumeric ID required by Mistral/LiteLLM."""
     return ''.join(random.choices(string.ascii_letters + string.digits, k=9))
 
+_global_model_cache = None
+_last_cache_time = 0
+CACHE_TTL = 300 # 5 minutes
+
 def get_cached_models(db: Session):
+    global _global_model_cache, _last_cache_time
+    
+    # Try memory cache first for ultra-fast UI loading
+    if _global_model_cache and (time.time() - _last_cache_time < CACHE_TTL):
+        return _global_model_cache
+
     config = db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").first()
     if config:
         try:
-            return json.loads(config.value).get("value")
+            data = json.loads(config.value).get("value")
+            _global_model_cache = data
+            _last_cache_time = time.time()
+            return data
         except: return None
     return None
 
