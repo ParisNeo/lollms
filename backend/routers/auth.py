@@ -198,7 +198,6 @@ async def login_for_access_token(
         initial_vectorizer = user.safe_store_vectorizer or SAFE_STORE_DEFAULTS.get("global_default_vectorizer")
         
         session_llm_params = {
-            "ctx_size": user.llm_ctx_size,
             "temperature": user.llm_temperature,
             "top_k": user.llm_top_k,
             "top_p": user.llm_top_p,
