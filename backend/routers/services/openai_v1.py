@@ -292,7 +292,7 @@ async def get_user_from_api_key(
         
         if admin_user.username not in user_sessions:
             session_llm_params = {
-                "ctx_size": admin_user.llm_ctx_size, "temperature": admin_user.llm_temperature,
+                "temperature": admin_user.llm_temperature,
                 "top_k": admin_user.llm_top_k, "top_p": admin_user.llm_top_p,
                 "repeat_penalty": admin_user.llm_repeat_penalty, "repeat_last_n": admin_user.llm_repeat_last_n
             }
@@ -329,7 +329,7 @@ async def get_user_from_api_key(
 
     if user.username not in user_sessions:
         session_llm_params = {
-            "ctx_size": user.llm_ctx_size, "temperature": user.llm_temperature,
+            "temperature": user.llm_temperature,
             "top_k": user.llm_top_k, "top_p": user.llm_top_p,
             "repeat_penalty": user.llm_repeat_penalty, "repeat_last_n": user.llm_repeat_last_n
         }
