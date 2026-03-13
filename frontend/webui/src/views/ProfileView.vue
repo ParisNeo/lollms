@@ -147,7 +147,7 @@ watch(() => route.params.username, (newUsername) => {
         <!-- Not Found State -->
         <div v-else class="text-center py-20">
              <h2 class="text-2xl font-bold text-red-500">User Not Found</h2>
-             <p class="mt-2 text-gray-500">The profile for "{{ route.params.username }}" could not be found.</p>
+             <p class="mt-2 text-gray-500">The profile for "{{ route.params.username === 'me' ? 'your account' : route.params.username }}" could not be found.</p>
         </div>
     </div>
   </div>

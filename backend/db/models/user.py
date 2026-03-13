@@ -137,7 +137,6 @@ class User(Base):
     safe_store_vectorizer = Column(String, nullable=True)
     active_personality_id = Column(String, ForeignKey("personalities.id", name="fk_user_active_personality", ondelete="SET NULL"), nullable=True)
     active_voice_id = Column(String, ForeignKey("user_voices.id", ondelete="SET NULL"), nullable=True)
-    llm_ctx_size = Column(Integer, nullable=True)
     llm_temperature = Column(Float, nullable=True)
     llm_top_k = Column(Integer, nullable=True)
     llm_top_p = Column(Float, nullable=True)
@@ -146,7 +145,8 @@ class User(Base):
 
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False, server_default='0')
     include_memory_date_in_context = Column(Boolean, default=False, nullable=False, server_default='0')
-    
+    discussion_sorting_mode = Column(String, default="alpha", nullable=False, server_default="'alpha'") # 'alpha' or 'activity'
+
     rag_top_k = Column(Integer, nullable=True)
     max_rag_len = Column(Integer, nullable=True)
     rag_n_hops = Column(Integer, nullable=True)

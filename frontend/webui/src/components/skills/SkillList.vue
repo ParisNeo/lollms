@@ -8,6 +8,10 @@ import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
+import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
+import IconShare from '../../assets/icons/IconShare.vue';
+import DropdownMenu from '../ui/DropDownMenu/DropdownMenu.vue';
+
 
 const props = defineProps({
     searchTerm: { type: String, default: '' }
@@ -42,9 +46,13 @@ const filteredSkills = computed(() => {
 });
 
 function editSkill(skill) {
-    // Clear any active artefact split to avoid confusion
-    uiStore.activeSplitArtefactTitle = null;
-    uiStore.openModal('skillEditor', { skill });
+    if (discussionsStore.currentDiscussionId) {
+        // Automatically add/open the skill in the current discussion workspace
+        discussionsStore.addSkillAsArtefact(skill);
+        uiStore.isDataZoneVisible = true;
+    } else {
+        uiStore.openModal('skillEditor', { skill });
+    }
 }
 
 async function deleteSkill(skill) {
@@ -131,7 +139,12 @@ async function handleFileImport(event) {
 
                 <!-- Compact Menu at end of row -->
                 <div @click.stop class="opacity-0 group-hover:opacity-100 transition-opacity">
-                    <DropdownMenu icon="ellipsis-vertical" buttonClass="p-1 text-gray-400 hover:text-gray-600">
+                    <DropdownMenu title="Options" buttonClass="p-1 text-gray-400 hover:text-gray-600">
+                        <template #icon>
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                            <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                            </svg>
+                        </template>
                         <button @click="addToContext(skill)" class="menu-item text-blue-600">
                             <IconArrowUpTray class="w-4 h-4 mr-2"/> Add to Discussion
                         </button>

@@ -51,6 +51,16 @@
 
     <!-- Top-right: action buttons (always visible so you can access source even on error) -->
     <div class="absolute top-3 right-3 flex gap-1.5 z-20">
+      <!-- AI Refinement Trigger -->
+      <button
+        @click="showRefinement = !showRefinement"
+        class="px-2.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded shadow-md transition-colors flex items-center gap-1"
+        title="Edit diagram with AI"
+      >
+        <IconSparkles class="h-3.5 w-3.5" />
+        <span>AI Edit</span>
+      </button>
+
       <!-- View Source toggle -->
       <button
         @click="showSource = !showSource"
@@ -84,6 +94,29 @@
           PNG
         </button>
       </template>
+    </div>
+
+    <!-- AI Refinement Overlay -->
+    <div v-if="showRefinement" class="absolute inset-x-0 top-0 z-30 p-3 animate-in fade-in slide-in-from-top-2">
+        <div class="bg-white dark:bg-gray-900 rounded-xl shadow-2xl border-2 border-blue-500 p-3 space-y-3">
+            <div class="flex justify-between items-center">
+                <span class="text-[10px] font-black uppercase tracking-widest text-blue-500">AI Refinement</span>
+                <button @click="showRefinement = false" class="text-gray-400 hover:text-red-500"><IconXMark class="w-4 h-4"/></button>
+            </div>
+            <textarea 
+                v-model="refinementInstruction" 
+                placeholder="How should I change this diagram? (e.g. 'Add a database node', 'Make it top-down')"
+                class="w-full text-xs input-field h-20 resize-none"
+                @keyup.enter.ctrl="handleRefinement"
+            ></textarea>
+            <div class="flex justify-end">
+                <button @click="handleRefinement" class="btn btn-primary btn-xs py-1.5 px-4 flex items-center gap-2" :disabled="!refinementInstruction.trim() || isProcessing">
+                    <IconAnimateSpin v-if="isProcessing" class="w-3.5 h-3.5 animate-spin" />
+                    <IconSend v-else class="w-3.5 h-3.5" />
+                    <span>Update Diagram</span>
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Source overlay (inline) -->
@@ -132,13 +165,18 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import mermaid from 'mermaid'
 import svgPanZoom from 'svg-pan-zoom'
 import { useUiStore } from '../../stores/ui'
+import { useDiscussionsStore } from '../../stores/discussions'
 import { Canvg } from 'canvg'
+import IconSparkles from '../../assets/icons/IconSparkles.vue'
+import IconSend from '../../assets/icons/IconSend.vue'
+import IconXMark from '../../assets/icons/IconXMark.vue'
 
 const props = defineProps({
-  mermaidCode: { type: String, required: true }
+  mermaidCode: { type: String, required: true },
+  messageId: { type: String, default: null } // Link to context if available
 })
 
-const emit = defineEmits(['error', 'ready'])
+const emit = defineEmits(['error', 'ready', 'refine'])
 
 const wrapperRef = ref(null)
 const mountRef = ref(null)
@@ -157,6 +195,36 @@ const showProcessed = ref(false)
 const showSource = ref(false)
 const isFullscreen = ref(false)
 const fullscreenError = ref('')
+const showRefinement = ref(false)
+const refinementInstruction = ref('')
+const isProcessing = ref(false)
+const discussionsStore = useDiscussionsStore()
+
+async function handleRefinement() {
+    if (!refinementInstruction.value.trim() || isProcessing.value) return;
+    
+    isProcessing.value = true;
+    try {
+        // Send a targeted prompt to the AI
+        const prompt = `Please update this Mermaid diagram based on the following instruction: "${refinementInstruction.value}"
+Current Mermaid Code:
+\`\`\`mermaid
+${props.mermaidCode}
+\`\`\`
+Return only the updated mermaid code block.`;
+
+        await discussionsStore.sendMessage({
+            prompt: prompt,
+            parent_message_id: props.messageId,
+            is_resend: false // This will create a new turn refining the diagram
+        });
+        
+        showRefinement.value = false;
+        refinementInstruction.value = '';
+    } finally {
+        isProcessing.value = false;
+    }
+}
 
 const getBaseMermaidConfig = (theme) => ({
   startOnLoad: false,
@@ -203,6 +271,9 @@ function processMermaidCode(code) {
 
   // 5. Remove trailing hallucinated brackets after :::class
   processed = processed.replace(/(:::[a-zA-Z0-9_-]+)[)\]\s]+$/gm, '$1')
+  
+  // 5.1 Fix labels containing unescaped parentheses which break mermaid
+  processed = processed.replace(/\[(.*?\s?\(.*?\).*?)\]/g, '["$1"]')
 
   // 6. Line-by-line normalization — only for nodes with UNQUOTED labels outside subgraphs
   const reserved = new Set([
@@ -394,32 +465,85 @@ async function openFullscreen() {
 async function getSvgForExport() {
   const originalTheme = uiStore.currentTheme === 'dark' ? 'dark' : 'default'
   try {
-    mermaid.initialize(getBaseMermaidConfig('base'))
+    // 1. Initialize with 'default' theme for export (best for white backgrounds/documents)
+    mermaid.initialize(getBaseMermaidConfig('default'))
     const { svg: s } = await mermaid.render(`export-${Date.now()}`, processMermaidCode(props.mermaidCode))
+    
+    // 2. Restore UI theme immediately to prevent UI flicker
     mermaid.initialize(getBaseMermaidConfig(originalTheme))
+    
     const tempDiv = document.createElement('div')
-    tempDiv.style.cssText = 'position:absolute;left:-9999px;top:-9999px;visibility:hidden'
+    // CRITICAL: Use visibility:hidden + position:fixed instead of display:none.
+    // Elements must be in the layout flow for getComputedStyle and getBBox to work.
+    tempDiv.style.cssText = 'position:fixed; top:0; left:0; width:100%; height:100%; visibility:hidden; pointer-events:none; z-index:-9999;'
     tempDiv.innerHTML = s
     document.body.appendChild(tempDiv)
+    
     const svgEl = tempDiv.querySelector('svg')
-    if (!svgEl) { document.body.removeChild(tempDiv); throw new Error('No SVG.') }
-    const cssProps = ['fill','stroke','stroke-width','stroke-dasharray','font-family','font-size','font-weight','font-style','text-anchor','dominant-baseline','alignment-baseline','letter-spacing','opacity','visibility','display']
+    if (!svgEl) { 
+        document.body.removeChild(tempDiv)
+        throw new Error('No SVG element produced during export render.') 
+    }
+
+    // 3. Inline all computed styles into the SVG elements
+    // This embeds colors and fonts directly into the file for standalone viewing.
+    const cssProps = [
+        'fill', 'stroke', 'stroke-width', 'stroke-dasharray', 'stroke-opacity', 'fill-opacity',
+        'font-family', 'font-size', 'font-weight', 'font-style', 'text-anchor', 
+        'dominant-baseline', 'alignment-baseline', 'letter-spacing', 'opacity'
+    ]
+    
     svgEl.querySelectorAll('*').forEach(el => {
       const cs = window.getComputedStyle(el)
-      let st = ''
-      for (const p of cssProps) { const v = cs.getPropertyValue(p); if (v && v !== 'none' && v !== 'normal') st += `${p}:${v};` }
-      if (st) el.setAttribute('style', st)
-      if ((el.tagName === 'text' || el.tagName === 'tspan') && !cs.getPropertyValue('fill')) el.setAttribute('fill', '#000')
+      let styleString = ''
+      for (const p of cssProps) { 
+          const v = cs.getPropertyValue(p)
+          if (v && v !== 'normal') {
+              styleString += `${p}:${v};` 
+          }
+      }
+      
+      // Explicit fix for text: ensure black fill if the detected style is transparent/empty.
+      // This prevents text from disappearing when exporting from Dark Mode.
+      if (el.tagName === 'text' || el.tagName === 'tspan') {
+          const fill = cs.getPropertyValue('fill')
+          if (!fill || fill === 'none' || fill === 'rgba(0, 0, 0, 0)' || fill === 'transparent') {
+              styleString += 'fill:#000000;'
+          }
+      }
+      
+      if (styleString) el.setAttribute('style', styleString)
     })
-    const bbox = svgEl.querySelector('g')?.getBBox()
+
+    // 4. Calculate bounding box for precise cropping
+    const contentGroup = svgEl.querySelector('g')
+    const bbox = contentGroup ? contentGroup.getBBox() : svgEl.getBBox()
+    
+    // Cleanup temporary DOM elements
     document.body.removeChild(tempDiv)
-    if (!bbox) throw new Error('No bbox.')
-    const p = 20, w = Math.ceil(bbox.width + p * 2), h = Math.ceil(bbox.height + p * 2)
-    svgEl.setAttribute('viewBox', `${bbox.x - p} ${bbox.y - p} ${w} ${h}`)
-    svgEl.setAttribute('width', String(w)); svgEl.setAttribute('height', String(h))
-    svgEl.setAttribute('style', 'font-family:Arial,sans-serif;')
+
+    if (!bbox || bbox.width === 0) throw new Error('Exported diagram bounding box is empty.')
+
+    // 5. Final SVG geometry setup
+    const padding = 20
+    const w = Math.ceil(bbox.width + padding * 2)
+    const h = Math.ceil(bbox.height + padding * 2)
+    
+    // Set viewBox to wrap the diagram content exactly with a small margin
+    svgEl.setAttribute('viewBox', `${bbox.x - padding} ${bbox.y - padding} ${w} ${h}`)
+    svgEl.setAttribute('width', String(w))
+    svgEl.setAttribute('height', String(h))
+    svgEl.setAttribute('style', 'background-color: transparent; font-family: Arial, sans-serif;')
+    
+    // Ensure valid XML namespace
+    svgEl.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+    
     return { svg: svgEl, width: w, height: h }
-  } catch (err) { mermaid.initialize(getBaseMermaidConfig(originalTheme)); throw err }
+  } catch (err) { 
+    mermaid.initialize(getBaseMermaidConfig(originalTheme))
+    console.error("Failed to prepare SVG for export:", err)
+    throw err 
+  }
 }
 
 async function exportPNG({ filename = 'diagram.png', scale = 3, bgColor = '#FFFFFF' } = {}) {

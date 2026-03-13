@@ -75,7 +75,10 @@ def get_user_profile(
     Fetches a user's public profile along with the relationship
     status relative to the current authenticated user.
     """
-    target_user = db.query(DBUser).filter(DBUser.username == username).first()
+    # Resolve 'me' keyword to current user's username
+    target_username = current_user.username if username == "me" else username
+    
+    target_user = db.query(DBUser).filter(DBUser.username == target_username).first()
     if not target_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
 

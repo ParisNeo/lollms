@@ -17,7 +17,6 @@ class UserCreateAdmin(BaseModel):
     
     # LLM Settings
     lollms_model_name: Optional[str] = None
-    llm_ctx_size: Optional[int] = None
     llm_temperature: Optional[float] = None
     llm_top_k: Optional[int] = None
     llm_top_p: Optional[float] = None
@@ -146,7 +145,6 @@ class MemoryUpdate(BaseModel):
     content: str
 
 class UserLLMParams(BaseModel):
-    llm_ctx_size: Optional[int] = None
     llm_temperature: Optional[float] = None
     llm_top_k: Optional[int] = None
     llm_top_p: Optional[float] = None
@@ -181,15 +179,13 @@ class UserPublic(BaseModel):
     class Config:
         from_attributes = True
 
+class UserRelationship(BaseModel):
+    is_following: bool
+    friendship_status: Optional[str] = None
+
 class UserProfileResponse(BaseModel):
-    id: int
-    username: str
-    icon: Optional[str] = None
-    first_name: Optional[str] = None
-    family_name: Optional[str] = None
-    is_admin: bool = False
-    is_moderator: bool = False
-    created_at: Optional[datetime] = None
+    user: UserPublic
+    relationship: UserRelationship
     
     class Config:
         from_attributes = True
@@ -227,12 +223,7 @@ class UserAuthDetails(BaseModel):
     last_discussion_id: Optional[str] = None
     lollms_client_ai_name: Optional[str] = None
     
-    llm_ctx_size: Optional[int] = None
     llm_temperature: Optional[float] = None
-    llm_top_k: Optional[int] = None
-    llm_top_p: Optional[float] = None
-    llm_repeat_penalty: Optional[float] = None
-    llm_repeat_last_n: Optional[int] = None
     put_thoughts_in_context: bool = False
     
     # RAG Settings
@@ -256,6 +247,7 @@ class UserAuthDetails(BaseModel):
     force_ai_response_language: bool = False
     fun_mode: bool = False
     show_token_counter: bool = True
+    discussion_sorting_mode: str = "alpha"
     
     openai_api_service_enabled: bool = False
     openai_api_require_key: bool = True
@@ -356,7 +348,6 @@ class UserUpdate(BaseModel):
     active_voice_id: Optional[str] = None
     last_discussion_id: Optional[str] = None
     
-    llm_ctx_size: Optional[int] = None
     llm_temperature: Optional[float] = None
     llm_top_k: Optional[int] = None
     llm_top_p: Optional[float] = None
@@ -384,6 +375,7 @@ class UserUpdate(BaseModel):
     fun_mode: Optional[bool] = None
     receive_notification_emails: Optional[bool] = None
     show_token_counter: Optional[bool] = None
+    discussion_sorting_mode: Optional[str] = None
     is_searchable: Optional[bool] = None
     first_login_done: Optional[bool] = None
     data_zone: Optional[str] = None
@@ -391,8 +383,7 @@ class UserUpdate(BaseModel):
     share_personal_info_with_llm: Optional[bool] = None
     include_memory_date_in_context: Optional[bool] = None
     
-    coding_style_constraints: Optional[str] = None
-    programming_language_preferences: Optional[str] = None
+    llm_temperature: Optional[float] = None
     tell_llm_os: Optional[bool] = None
     share_dynamic_info_with_llm: Optional[bool] = None
     message_font_size: Optional[int] = None

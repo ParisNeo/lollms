@@ -7,6 +7,8 @@ import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
+import { useNotesStore } from '../../stores/notes';
+import { useSkillsStore } from '../../stores/skills';
 import { storeToRefs } from 'pinia';
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
@@ -41,6 +43,7 @@ import IconServer from '../../assets/icons/IconServer.vue';
 import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBar.vue';
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue'; 
 import IconObservation from '../../assets/icons/IconObservation.vue';
 import IconUserGroup from '../../assets/icons/IconUserGroup.vue'; 
@@ -56,6 +59,8 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const promptsStore = usePromptsStore();
+const notesStore = useNotesStore();
+const skillsStore = useSkillsStore();
 const { on, off } = useEventBus();
 const router = useRouter();
 
@@ -73,6 +78,8 @@ const activeAiTasks = computed(() => dStoreRefs.activeAiTasks?.value || {});
 
 const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
 const { lollmsPrompts, userPromptsByCategory } = storeToRefs(promptsStore);
+const { notes } = storeToRefs(notesStore);
+const { skills } = storeToRefs(skillsStore);
 
 const messageText = ref('');
 const isUploading = ref(false);
@@ -561,7 +568,22 @@ function viewAttachedFile(file) {
     
     uiStore.addNotification(`Opening workspace: ${file.title}`, 'info', 1500);
 }
-async function toggleArtefactLoad(file) { if (!activeDiscussion.value) return; if (file.is_loaded) await discussionsStore.unloadArtefactFromContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); else await discussionsStore.loadArtefactToContext({ discussionId: activeDiscussion.value.id, artefactTitle: file.title, version: file.version }); }
+async function toggleArtefactLoad(file) { 
+    if (!activeDiscussion.value) return; 
+    if (file.is_loaded) 
+        await discussionsStore.unloadArtefactFromContext({ 
+            discussionId: activeDiscussion.value.id, 
+            artefactTitle: file.title, 
+            version: file.version,
+            artefactType: file.artefact_type
+        }); 
+    else 
+        await discussionsStore.loadArtefactToContext({ 
+            discussionId: activeDiscussion.value.id, 
+            artefactTitle: file.title, 
+            version: file.version 
+        }); 
+}
 async function removeArtefact(file) { if (!activeDiscussion.value) return; const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' }); if (confirmed.confirmed) await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title }); }
 function removeStagedImage(index) { const removed = stagedImages.value.splice(index, 1)[0]; if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl); }
 function triggerFileUpload() { fileInput.value?.click(); }
@@ -655,8 +677,12 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                             <IconToken class="w-3.5 h-3.5" />
                             <span class="text-[10px] font-black uppercase tracking-tight hidden sm:inline">Context</span>
                         </div>
-                        <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 bg-gray-200 dark:bg-gray-700 group-hover/context:ring-2 group-hover/context:ring-blue-400/50 transition-all', progressBorderColorClass]">
-                            <div v-for="part in contextParts" :key="part.label" :class="[part.colorClass, 'h-full transition-all duration-500 ease-out']" :style="{ width: `${getPercentage(part.value)}%` }" :title="`${part.title}: ${part.value} tokens`"></div>
+                        <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 transition-all', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'bg-gray-200 dark:bg-gray-700 group-hover/context:ring-blue-400/50', progressBorderColorClass]">
+                            <div v-for="part in contextParts" :key="part.label" 
+                                :class="[totalPercentage >= 100 ? 'bg-red-600' : part.colorClass, 'h-full transition-all duration-500 ease-out']" 
+                                :style="{ width: `${getPercentage(part.value)}%` }" 
+                                :title="`${part.title}: ${part.value} tokens`"
+                            ></div>
                         </div>
                         <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap flex-shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors">
                             <span class="font-bold">{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
@@ -744,18 +770,6 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     <button @click="discussionsStore.detachSkill(skill.id)" class="text-teal-400 hover:text-red-500 transition-colors ml-1" title="Remove Skill"><IconXMark class="w-3.5 h-3.5" /></button>
                 </div>
 
-                <!-- Loaded Context Items (Persistent in Data Zone) -->
-                <div v-for="(item, idx) in loadedContextItems" :key="`loaded-${idx}`" 
-                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-tighter border transition-all duration-200 shadow-sm"
-                     :class="item.type === 'skill' ? 'border-teal-500 bg-teal-500/10 text-teal-600' : 'border-amber-500 bg-amber-500/10 text-amber-600'">
-                    <button @click="viewLoadedContextItem(item)" class="flex items-center gap-1.5 hover:opacity-70">
-                        <IconSparkles v-if="item.type === 'skill'" class="w-3 h-3" />
-                        <IconFileText v-else class="w-3 h-3" />
-                        <span class="truncate max-w-[120px]">{{ item.title }}</span>
-                        <span class="opacity-50 font-normal lowercase tracking-normal italic">(loaded)</span>
-                    </button>
-                    <button @click="discussionsStore.removeContextItem(item.title, item.type)" class="hover:text-red-500 transition-colors ml-1" title="Unload from context"><IconXMark class="w-3.5 h-3.5" /></button>
-                </div>
             </div>
 
             <!-- Input Controls -->
@@ -997,6 +1011,26 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </DropdownSubmenu>
                              </div>
                         </DropdownSubmenu>
+
+                        <DropdownSubmenu title="My Notes" icon="pencil">
+                             <div class="p-1 max-h-72 overflow-y-auto min-w-[220px]">
+                                <div v-if="notes.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No notes found.</div>
+                                <button v-for="note in notes" :key="note.id" @click.stop="discussionsStore.addNoteAsArtefact(note)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="truncate pr-4 text-xs">{{ note.title }}</span>
+                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === note.title && i.type === 'note')" class="w-4 h-4 text-green-500 flex-shrink-0" />
+                                </button>
+                             </div>
+                        </DropdownSubmenu>
+
+                        <DropdownSubmenu title="My Skills" icon="sparkles">
+                             <div class="p-1 max-h-72 overflow-y-auto min-w-[220px]">
+                                <div v-if="skills.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No skills found.</div>
+                                <button v-for="skill in skills" :key="skill.id" @click.stop="discussionsStore.addSkillAsArtefact(skill)" class="menu-item flex justify-between items-center group/item">
+                                    <span class="truncate pr-4 text-xs">{{ skill.name }}</span>
+                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === skill.name && i.type === 'skill')" class="w-4 h-4 text-green-500 flex-shrink-0" />
+                                </button>
+                             </div>
+                        </DropdownSubmenu>
                     </DropdownMenu>
                     <input type="file" ref="fileInput" @change="handleFileUpload" multiple class="hidden">
                     <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
@@ -1042,7 +1076,12 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                 </div>
             </div>
             
-            <p v-if="totalPercentage > 100" class="text-[10px] text-center text-red-500 font-black animate-pulse">CONTEXT LIMIT REACHED.</p>
+            <div v-if="totalPercentage >= 100" class="flex flex-col items-center gap-1 animate-in fade-in slide-in-from-bottom-2 py-1">
+                <p class="text-[10px] text-center text-red-600 dark:text-red-400 font-black uppercase tracking-widest bg-red-500/20 px-6 py-1.5 rounded-full border border-red-500 shadow-lg shadow-red-500/20 animate-pulse">
+                    ⚠️ Context Limit Reached
+                </p>
+                <p class="text-[9px] text-gray-500 font-medium italic">Older messages or large documents will be truncated during generation.</p>
+            </div>
         </div>
     </div>
 </template>

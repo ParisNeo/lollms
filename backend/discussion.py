@@ -22,12 +22,10 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
     This function now relies on the lollms-client's native LollmsDiscussion class.
     """
     lc = lollms_client
-    max_context_size = 4096  # Default fallback
 
     if not lc:
         if username in user_sessions:
             lc = get_user_lollms_client(username)
-            max_context_size = user_sessions[username].get("llm_params", {}).get("ctx_size", None) or lc.get_ctx_size() or 4096
         else:
             # User is not logged in on this worker (e.g., owner of a shared discussion).
             # We must build a temporary client from their DB settings.
@@ -59,7 +57,6 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
                         "model_name": owner_db.lollms_model_name.split('/')[-1] if user_model_full else binding_to_use.default_model_name
                     }
                 )
-                max_context_size = owner_db.llm_ctx_size or lc.get_ctx_size() or 4096
 
             finally:
                 db.close()
@@ -69,6 +66,38 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
 
     dm = get_user_discussion_manager(username)
     
+    # Context size resolution
+    # 1. Try to get it from the client config (where admin overrides are injected)
+    # 2. Fallback to manual DB lookup using the user's selected model path (alias/model)
+    # 3. Fallback to model introspection or 4096
+    max_context_size = getattr(lc, 'llm_binding_config', {}).get('ctx_size')
+    
+    if not max_context_size:
+        db = next(get_db())
+        try:
+            user_db = db.query(DBUser).filter(DBUser.username == username).first()
+            user_model_full = user_db.lollms_model_name if user_db else None
+            
+            if user_model_full and '/' in user_model_full:
+                binding_alias_key, model_key = user_model_full.split('/', 1)
+                # Look for the binding record by alias to find the correct model definitions
+                binding_rec = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias_key).first()
+                if binding_rec and binding_rec.model_aliases:
+                    aliases = binding_rec.model_aliases
+                    if isinstance(aliases, str):
+                        aliases = json.loads(aliases)
+                    
+                    alias_info = aliases.get(model_key)
+                    if alias_info and alias_info.get('ctx_size'):
+                        max_context_size = int(alias_info['ctx_size'])
+        except Exception:
+            pass
+        finally:
+            db.close()
+
+    if not max_context_size:
+        max_context_size = lc.get_ctx_size() or 4096
+
     discussion = dm.get_discussion(
         lollms_client=lc,
         discussion_id=discussion_id,

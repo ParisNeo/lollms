@@ -140,7 +140,7 @@ def export_skill(skill_id: str, payload: ExportFormat, current_user: UserAuthDet
 @skills_router.post("/{skill_id}/share", status_code=status.HTTP_200_OK)
 async def share_skill(
     skill_id: str, 
-    payload: PersonalitySendRequest, # Reusing same model for target_username
+    payload: PersonalitySendRequest, 
     current_user: UserAuthDetails = Depends(get_current_active_user), 
     db: Session = Depends(get_db)
 ):
@@ -156,26 +156,36 @@ async def share_skill(
     if db.query(DBSkill).filter(DBSkill.owner_user_id == target_user.id, DBSkill.name == skill.name).first():
         raise HTTPException(status_code=409, detail=f"User already has a skill named '{skill.name}'")
 
+    # Tag the sender's copy
+    share_log = f"\n[Shared with {target_user.username} on {datetime.datetime.now().strftime('%Y-%m-%d')}]"
+    if not skill.description:
+        skill.description = share_log
+    elif share_log not in skill.description:
+        skill.description += f" {share_log}"
+
+    # Create the receiver's copy with the "Shared" tag
     new_skill = DBSkill(
         name=skill.name,
         description=skill.description,
         category=skill.category,
         language=skill.language,
         content=skill.content,
+        author=f"Shared by {current_user.username}", # This acts as the UI tag
         owner_user_id=target_user.id
     )
     db.add(new_skill)
     try:
         db.commit()
         from backend.ws_manager import manager
+        # 1. Notify Receiver via Toast
         manager.send_personal_message_sync({
             "type": "notification",
-            "data": {"message": f"{current_user.username} sent you a new skill: {skill.name}", "type": "success"}
+            "data": {"message": f"🎁 {current_user.username} sent you a skill: {skill.name}", "type": "success", "duration": 5000}
         }, target_user.id)
-        # Trigger a refresh on the recipient's side
+        # 2. Force Refresh Receiver's list
         manager.send_personal_message_sync({"type": "skill_saved", "data": {"title": skill.name}}, target_user.id)
         
-        return {"message": "Skill shared successfully"}
+        return {"message": f"Skill shared with {payload.target_username}"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

@@ -49,7 +49,6 @@ const getInitialFormState = () => ({
     description: '',
     has_vision: true,
     ctx_size: null,
-    ctx_size_locked: false,
     temperature: null,
     top_k: null,
     top_p: null,
@@ -421,8 +420,8 @@ watch(() => props.binding, (newBinding) => {
                             <!-- LLM Specific Fields -->
                             <h4 class="font-medium mb-3 text-sm">Generation Parameters</h4>
                             <div class="grid grid-cols-2 gap-4">
-                                <div class="col-span-2 sm:col-span-1">
-                                    <label class="label text-xs">Context Size</label>
+                                <div class="col-span-2">
+                                    <label class="label text-xs">Fixed Context Size</label>
                                     <div class="flex items-center gap-2">
                                         <input v-model="form.ctx_size" type="number" class="input-field" placeholder="e.g. 4096">
                                         <button type="button" @click="fetchCtxSize" class="btn btn-secondary p-2 h-[38px]" title="Auto-detect" :disabled="isFetchingCtxSize">
@@ -430,6 +429,7 @@ watch(() => props.binding, (newBinding) => {
                                             <IconSparkles v-else class="w-4 h-4"/>
                                         </button>
                                     </div>
+                                    <p class="text-[10px] text-gray-500 mt-1 uppercase font-bold tracking-tight">This value is forced for all users. Leave empty to use binding default.</p>
                                 </div>
                                 <div><label class="label text-xs">Temperature</label><input v-model="form.temperature" type="number" step="0.1" class="input-field"></div>
                                 <div><label class="label text-xs">Top K</label><input v-model="form.top_k" type="number" class="input-field"></div>
@@ -465,21 +465,13 @@ watch(() => props.binding, (newBinding) => {
 
                         <!-- Vision & Override Flags -->
                          <div v-if="bindingType === 'llm'" class="grid grid-cols-2 gap-4">
-                            <div class="flex items-center justify-between p-3 border rounded-md dark:border-gray-700">
+                            <div class="flex items-center justify-between p-3 border rounded-md dark:border-gray-700 col-span-2">
                                 <div class="flex items-center gap-2">
                                     <IconEye class="w-4 h-4 text-gray-500" />
                                     <span class="text-sm font-medium">Vision Support</span>
                                 </div>
                                 <button type="button" @click="form.has_vision = !form.has_vision" :class="[form.has_vision ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.has_vision ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
-                                </button>
-                            </div>
-                            <div class="flex items-center justify-between p-3 border rounded-md dark:border-gray-700">
-                                <div class="flex items-center gap-2">
-                                    <span class="text-sm font-medium">Lock Context</span>
-                                </div>
-                                <button type="button" @click="form.ctx_size_locked = !form.ctx_size_locked" :class="[form.ctx_size_locked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
-                                    <span :class="[form.ctx_size_locked ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
                         </div>

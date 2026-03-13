@@ -6,8 +6,9 @@ import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 
 const discussionsStore = useDiscussionsStore();
-const currentPlayingAudio = computed(() => discussionsStore.currentPlayingAudio);
-const isPlaying = computed(() => !!currentPlayingAudio.value.audio);
+// Fallback to empty object to prevent "reading property of undefined" if store crashes
+const currentPlayingAudio = computed(() => discussionsStore.currentPlayingAudio || { messageId: null, audio: null });
+const isPlaying = computed(() => !!currentPlayingAudio.value?.audio);
 </script>
 
 <template>

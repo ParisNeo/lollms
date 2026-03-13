@@ -180,11 +180,7 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
     defaults_map = {
         'lollms_model_name': 'default_lollms_model_name',
         'safe_store_vectorizer': 'default_safe_store_vectorizer',
-        'llm_ctx_size': 'default_llm_ctx_size',
         'llm_temperature': 'default_llm_temperature',
-        'llm_top_k': 'default_llm_top_k',
-        'llm_top_p': 'default_llm_top_p',
-        'llm_repeat_penalty': 'default_llm_repeat_penalty',
         'llm_repeat_last_n': 'default_llm_repeat_last_n',
         'rag_top_k': 'default_rag_top_k',
         'max_rag_len': 'default_max_rag_len',
@@ -292,12 +288,17 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
     # *** NEW LOGIC: keep status in sync when is_active is changed ***
     if 'is_active' in update_dict:
         # When the UI toggles activation we want the status column to reflect the same state.
-        # This mirrors the behaviour of the dedicated activate/deactivate endpoints.
         if update_dict['is_active']:
             update_dict['status'] = 'active'
         else:
-            # Use the same inactive status the deactivate endpoint sets.
             update_dict['status'] = 'inactivated_by_admin'
+
+    # Handle moderator logic: Admins are always moderators
+    if update_dict.get('is_admin') is True:
+        update_dict['is_moderator'] = True
+    elif update_dict.get('is_admin') is False:
+        # If losing admin, we don't necessarily strip moderator unless explicitly asked
+        pass
 
     for key, value in update_dict.items():
         setattr(user, key, value)
@@ -345,6 +346,23 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(user)
     return user
+
+@user_management_router.post("/users/{user_id}/disconnect", response_model=Dict[str, str])
+async def admin_disconnect_user(user_id: int, db: Session = Depends(get_db)):
+    """Forcefully clears a user's session and closes their WebSockets."""
+    user = db.query(DBUser).filter(DBUser.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # 1. Clear in-memory session
+    if user.username in user_sessions:
+        del user_sessions[user.username]
+    
+    # 2. Close active WebSockets across the cluster
+    from backend.ws_manager import manager
+    manager.disconnect_user_sync(user_id)
+    
+    return {"message": f"User '{user.username}' disconnected and session cleared."}
 
 @user_management_router.post("/users/{user_id}/deactivate", response_model=UserPublic)
 async def admin_deactivate_user(user_id: int, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user)):

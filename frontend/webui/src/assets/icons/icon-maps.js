@@ -58,6 +58,7 @@ import IconXml from './languages/IconXml.vue';
 import IconYaml from './languages/IconYaml.vue';
 import IconTicket from './IconTicket.vue';
 import IconPlus from './IconPlus.vue';
+import IconEllipsisVertical from './IconEllipsisVertical.vue';
 
 // Manually map names to imported components
 export const uiIconMap = {

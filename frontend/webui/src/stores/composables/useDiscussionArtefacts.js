@@ -210,15 +210,12 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
     
     async function unloadArtefactFromContext({ discussionId, artefactTitle, version }) {
-        // 1. Call backend to update metadata
+        // Pure Artefact Approach: Signal deactivation to the library.
+        // We no longer manually manipulate the data zone string.
         const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/unload-from-context`, {
             title: artefactTitle,
             version: version
         });
-        
-        // 2. Local cleanup: Remove the text block from the Data Zone string
-        // We call the improved removal action we just added to the main store
-        await getActions().removeContextItem(artefactTitle, 'document');
         
         _handleArtefactAndDataZoneUpdate(response);
     }
@@ -263,13 +260,14 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     async function addNoteAsArtefact(note) {
         if (!currentDiscussionId.value) return;
         try {
-            // Explicitly force 'note' type and 'active' status via query parameters
+            // Explicitly force 'note' type and 'active' status
             const response = await apiClient.post(
                 `/api/discussions/${currentDiscussionId.value}/artefacts/manual`, 
                 { 
                     title: note.title, 
                     content: note.content, 
-                    images_b64: [] 
+                    images_b64: [],
+                    type: 'note' 
                 },
                 { 
                     params: { 

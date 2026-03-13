@@ -143,7 +143,10 @@ function handleClose() {
 
                                 <!-- MERMAID RENDERING -->
                                 <div v-else-if="modalProps?.contentType === 'mermaid' && modalProps?.sourceCode" class="w-full h-[600px] border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative">
-                                    <MermaidViewer :mermaid-code="modalProps.sourceCode" />
+                                    <MermaidViewer 
+                                        :mermaid-code="modalProps.sourceCode" 
+                                        :message-id="modalProps.messageId"
+                                    />
                                 </div>
 
                                 <!-- HTML / INTERACTIVE RENDERING -->

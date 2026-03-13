@@ -46,6 +46,8 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconArrowsUpDown from '../../assets/icons/IconArrowsUpDown.vue';
+import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 
 const store = useDiscussionsStore();
 const notesStore = useNotesStore();
@@ -75,6 +77,7 @@ const isSearchVisible = ref(false);
 const isSharedVisible = ref(false);
 const showToolbox = ref(false);
 const isUngroupedVisible = ref(true);
+const isFoldersVisible = ref(true);
 const isStarredVisible = ref(false);
 const isRootDragOver = ref(false);
 
@@ -419,6 +422,24 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <button v-if="activeTab === 'chat' && user && user.user_ui_level >= 4" @click="showToolbox = !showToolbox" class="btn-icon-flat" :class="{ 'bg-slate-100 dark:bg-gray-700': showToolbox }" title="Toggle Toolbox">
                         <IconAdjustmentsHorizontal class="h-4 w-4" />
                     </button>
+
+                    <!-- Sorting Tool -->
+                    <div v-if="activeTab === 'chat' && user" @click.stop>
+                        <DropdownMenu icon="arrows-up-down" buttonClass="btn-icon-flat" title="Sort Folders">
+                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'alpha' })" class="menu-item justify-between" :class="{'text-blue-600 font-bold': user.discussion_sorting_mode === 'alpha'}">
+                                <span>Sort by Name</span>
+                                <IconCheckCircle v-if="user.discussion_sorting_mode === 'alpha'" class="w-4 h-4" />
+                            </button>
+                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'activity' })" class="menu-item justify-between" :class="{'text-blue-600 font-bold': user.discussion_sorting_mode === 'activity'}">
+                                <span>Sort by Activity</span>
+                                <IconCheckCircle v-if="user.discussion_sorting_mode === 'activity'" class="w-4 h-4" />
+                            </button>
+                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'date' })" class="menu-item justify-between" :class="{'text-blue-600 font-bold': user.discussion_sorting_mode === 'date'}">
+                                <span>Sort by Date</span>
+                                <IconCheckCircle v-if="user.discussion_sorting_mode === 'date'" class="w-4 h-4" />
+                            </button>
+                        </DropdownMenu>
+                    </div>
                 </div>
                 <button @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'skills' ? 'New Skill' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook')))))">
                     <IconPlus class="h-4 w-4" stroke-width="2.5" />
@@ -456,26 +477,12 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                 </div>
                 
                 <div v-else class="space-y-3">
-                    <div v-if="filteredSharedDiscussions.length > 0">
-                        <button @click="isSharedVisible = !isSharedVisible" class="section-header-flat">
-                            <div class="flex items-center space-x-2">
-                                <span class="font-medium text-slate-700 dark:text-gray-300">Shared with me</span>
-                                <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
-                                    {{ filteredSharedDiscussions.length }}
-                                </div>
-                            </div>
-                            <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isSharedVisible}" />
-                        </button>
-                        <div v-if="isSharedVisible" class="space-y-1 mt-2">
-                            <DiscussionItem v-for="discussion in filteredSharedDiscussions" :key="discussion.share_id" :discussion="discussion" />
-                        </div>
-                    </div>
-
+                    <!-- SECTION 1: STARRED -->
                     <div v-if="filteredDiscussionTree.starred && filteredDiscussionTree.starred.length > 0">
                         <button @click="isStarredVisible = !isStarredVisible" class="section-header-flat">
                             <div class="flex items-center space-x-2">
-                                <span class="font-medium text-slate-700 dark:text-gray-300">Starred</span>
-                                <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
+                                <span class="font-bold text-slate-700 dark:text-gray-300">Starred</span>
+                                <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-[10px] font-bold">
                                     {{ filteredDiscussionTree.starred.length }}
                                 </div>
                             </div>
@@ -486,17 +493,12 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         </div>
                     </div>
 
-                    <DiscussionGroupItem 
-                        v-for="group in filteredDiscussionTree.groups" 
-                        :key="group.id" 
-                        :group="group" 
-                    />
-
+                    <!-- SECTION 2: UNGROUPED (Now prioritized at top) -->
                     <div v-if="filteredDiscussionTree.ungrouped && filteredDiscussionTree.ungrouped.length > 0">
-                        <button @click="handleSelectUngrouped" class="section-header-flat mt-4" :class="{'bg-blue-50 dark:bg-blue-900/20': store.currentGroupId === null && !store.currentDiscussionId}">
+                        <button @click="handleSelectUngrouped" class="section-header-flat" :class="{'bg-blue-50 dark:bg-blue-900/20': store.currentGroupId === null && !store.currentDiscussionId}">
                             <div class="flex items-center space-x-2">
-                                <span class="font-medium text-slate-700 dark:text-gray-300">Discussions</span>
-                                <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
+                                <span class="font-bold text-slate-700 dark:text-gray-300">Discussions</span>
+                                <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-[10px] font-bold">
                                     {{ filteredDiscussionTree.ungrouped.length }}
                                 </div>
                             </div>
@@ -504,6 +506,42 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         </button>
                         <div v-if="isUngroupedVisible" class="space-y-1 mt-2">
                             <DiscussionItem v-for="discussion in filteredDiscussionTree.ungrouped" :key="discussion.id" :discussion="discussion" />
+                        </div>
+                    </div>
+
+                    <!-- SECTION 3: FOLDERS (Groups) -->
+                    <div v-if="filteredDiscussionTree.groups && filteredDiscussionTree.groups.length > 0">
+                        <button @click="isFoldersVisible = !isFoldersVisible" class="section-header-flat mt-4">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-slate-700 dark:text-gray-300">Folders</span>
+                                <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-[10px] font-bold">
+                                    {{ filteredDiscussionTree.groups.length }}
+                                </div>
+                            </div>
+                            <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isFoldersVisible}" />
+                        </button>
+                        <div v-if="isFoldersVisible" class="space-y-1 mt-2">
+                            <DiscussionGroupItem 
+                                v-for="group in filteredDiscussionTree.groups" 
+                                :key="group.id" 
+                                :group="group" 
+                            />
+                        </div>
+                    </div>
+
+                    <!-- SECTION 4: SHARED -->
+                    <div v-if="filteredSharedDiscussions.length > 0">
+                        <button @click="isSharedVisible = !isSharedVisible" class="section-header-flat mt-4">
+                            <div class="flex items-center space-x-2">
+                                <span class="font-bold text-slate-700 dark:text-gray-300">Shared with me</span>
+                                <div class="px-1.5 py-0.5 bg-slate-100 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-[10px] font-bold">
+                                    {{ filteredSharedDiscussions.length }}
+                                </div>
+                            </div>
+                            <IconChevronRight class="w-4 h-4 transition-transform duration-200 text-slate-400" :class="{'rotate-90': isSharedVisible}" />
+                        </button>
+                        <div v-if="isSharedVisible" class="space-y-1 mt-2">
+                            <DiscussionItem v-for="discussion in filteredSharedDiscussions" :key="discussion.share_id" :discussion="discussion" />
                         </div>
                     </div>
 

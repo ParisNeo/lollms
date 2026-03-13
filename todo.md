@@ -56,17 +56,20 @@ new ui:
 - OK loading the artefact adds the images to the data zone!
 - OK FIX inline images import
 - OK Rag datasources work fine when in normal mode. But when I link them to a personality, they always return an empty list!! The same source, returns data when in normal mode, but returns nothing when attached to a personality
-
+- OK Fix the context size setting from lollms when used as a service (force the configured context size in lollms)
+- OK make the tools sections collapsible
+- OK fix the return key not sending the message
+- OK when cancelling the generation, refresh the discussion
+- OK when the generation fails, refresh the discussion
+- OK organize the discussion elements from recent to older with optional change of organization
+- oK Add skill sharing
+- OK Fix user update and add a way to disconnect the user from admin panel
+- OK Add note building and reloading to the discussion (add a new code environment with save note button and add a notes list with open note and a use note in discussion options), 
 
 ## Discussion:
-- make the tools sections collapsible
 - Add the possibility to use multiple bindings at once with different configurations
-- fix the return key not sending the message
-- when cancelling the generation, refresh the discussion
-- when the generation fails, refresh the discussion
 - activate optional RAG for discussion datazone
 - fix deleting a message deleting the whole sub children
-- organize the discussion elements from recent to older with optional change of organization
 - Extract discussion zone from chatview
 
 ### emailing system
@@ -192,12 +195,12 @@ Use SCIM for group management
 
 Create a prompt optimizer app
 
-Add note building and reloading to the discussion (add a new code environment with save note button and add a notes list with open note and a use note in discussion options), add CRUD for notes.
+add CRUD for notes.
 
 
 URGENT
-Fix the context size setting from lollms when used as a service (force the configured context size in lollms)
-Fix user update and add a way to disconnect the user from admin panel
+
+
 Multi generation, no blocking when generating.
 
 Fix edit post in feeds ui
@@ -208,7 +211,7 @@ When adding a folder to a datasource, show a spinner while the files are being l
 Let the admin select maximal file size that can be uploaded.
 Fix mermaid view
 I see pending approval user in the main admin ui, but when I press it I get No pending users found.
-Add skill sharing
+
 
 Filter out non text files (mp4 etc).
 Add image rag

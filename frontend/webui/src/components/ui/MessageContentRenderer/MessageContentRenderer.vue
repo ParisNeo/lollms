@@ -670,7 +670,11 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
           <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm mermaid-wrapper">
-            <MermaidViewer :mermaid-code="part.code" @ready="onMermaidReady($event, index)" />
+            <MermaidViewer 
+              :mermaid-code="part.code" 
+              :message-id="messageId"
+              @ready="onMermaidReady($event, index)" 
+            />
           </div>
 
           <!-- ── Inline Event Marker (Expandable Tool Block) ────────────── -->

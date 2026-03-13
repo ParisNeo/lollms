@@ -545,6 +545,11 @@ export const useAdminStore = defineStore('admin', () => {
     async function deleteBatchNewsArticles(ids) { await apiClient.post('/api/admin/news-articles/batch-delete', { article_ids: ids }); await fetchNewsArticles(true); uiStore.addNotification(`${ids.length} article(s) deleted.`, 'success'); }
     async function fetchAllUsers(filters = {}) { isLoadingUsers.value = true; try { const response = await apiClient.get('/api/admin/users', { params: filters }); allUsers.value = response.data; } finally { isLoadingUsers.value = false; } }
     async function activateUser(userId) { await apiClient.post(`/api/admin/users/${userId}/activate`); uiStore.addNotification('User activated.', 'success'); fetchAllUsers(); }
+    async function disconnectUser(userId) { 
+        await apiClient.post(`/api/admin/users/${userId}/disconnect`); 
+        uiStore.addNotification('User session terminated.', 'success'); 
+        fetchAllUsers(); 
+    }
     async function fetchUserStats(userId) { try { const response = await apiClient.get(`/api/admin/users/${userId}/stats`); return response.data; } catch (error) { return null; } }    
     async function batchUpdateUsers(payload) { await apiClient.post('/api/admin/users/batch-update-settings', payload); await fetchAllUsers(); }
     async function sendEmailToUsers(subject, body, user_ids, backgroundColor, sendAsText) { const r = await apiClient.post('/api/admin/email-users', { subject, body, user_ids, background_color: backgroundColor, send_as_text: sendAsText }); tasksStore.addTask(r.data); return true; }
@@ -632,7 +637,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchDashboardStats, fetchConnectedUsers, broadcastMessage, createBackup, analyzeSystemLogs,
         fetchServiceDashboard, resetServiceUsage, 
         fetchSystemStatus, killProcess, fetchModelUsageStats, fetchServerInfo, purgeUnusedUploads,
-        fetchAllUsers, activateUser, fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
+        fetchAllUsers, activateUser, disconnectUser, fetchUserStats, batchUpdateUsers, fetchGlobalGenerationStats,
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
         uploadWelcomeLogo, removeWelcomeLogo, uploadSslFile, importOpenWebUIData, fetchAdminAvailableLollmsModels, generateIconForModel,
         

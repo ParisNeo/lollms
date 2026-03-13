@@ -209,8 +209,14 @@ async def share_note(
     if not target_user:
         raise HTTPException(status_code=404, detail="Target user not found")
 
+    # Tag the sender's copy
+    share_tag = f" [Shared with {target_user.username}]"
+    if share_tag not in note.title:
+        note.title += share_tag
+
+    # Create the receiver's copy
     new_note = DBNote(
-        title=f"{note.title} (Shared by {current_user.username})",
+        title=f"{note.title.replace(share_tag, '')} (from {current_user.username})",
         content=note.content,
         owner_user_id=target_user.id
     )
@@ -218,11 +224,15 @@ async def share_note(
     try:
         db.commit()
         from backend.ws_manager import manager
+        # 1. Notify Receiver via Toast
         manager.send_personal_message_sync({
             "type": "notification", 
-            "data": {"message": f"{current_user.username} sent you a note.", "type": "info"}
+            "data": {"message": f"📝 {current_user.username} shared a note: {new_note.title}", "type": "info", "duration": 5000}
         }, target_user.id)
-        return {"message": "Note shared successfully"}
+        # 2. Force Refresh Receiver's UI
+        manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "note"}}, target_user.id)
+        
+        return {"message": f"Note shared with {payload.target_username}"}
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))

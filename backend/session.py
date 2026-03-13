@@ -133,7 +133,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             with _session_init_lock:
                 if username not in user_sessions:
                     session_llm_params = {
-                        "ctx_size": db_user.llm_ctx_size, "temperature": db_user.llm_temperature,
+                        "temperature": db_user.llm_temperature,
                         "top_k": db_user.llm_top_k, "top_p": db_user.llm_top_p,
                         "repeat_penalty": db_user.llm_repeat_penalty, "repeat_last_n": db_user.llm_repeat_last_n,
                         "put_thoughts_in_context": db_user.put_thoughts_in_context
@@ -154,7 +154,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
 
         llm_settings_overridden = False
         effective_llm_params = {
-            "llm_ctx_size": db_user.llm_ctx_size,
             "llm_temperature": db_user.llm_temperature,
             "llm_top_k": db_user.llm_top_k,
             "llm_top_p": db_user.llm_top_p,
@@ -166,7 +165,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "reasoning_summary": db_user.reasoning_summary
         }
 
-        ctx_size_to_enforce = None
         if user_model_full and '/' in user_model_full:
             binding_alias, model_name = user_model_full.split('/', 1)
             binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
@@ -180,29 +178,12 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                 
                 alias_info = binding.model_aliases.get(model_name)
                 
-                if alias_info and alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
-                    ctx_size_to_enforce = alias_info['ctx_size']
-                
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
-                    param_map = {"ctx_size": "llm_ctx_size", "temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n", "reasoning_activation": "reasoning_activation", "reasoning_effort": "reasoning_effort", "reasoning_summary": "reasoning_summary"}
+                    param_map = {"temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n", "reasoning_activation": "reasoning_activation", "reasoning_effort": "reasoning_effort", "reasoning_summary": "reasoning_summary"}
                     for alias_key, user_key in param_map.items():
                         if alias_key in alias_info and alias_info[alias_key] is not None:
                             effective_llm_params[user_key] = alias_info[alias_key]
-                            if alias_key == 'ctx_size':
-                                ctx_size_to_enforce = alias_info['ctx_size']
-
-        if ctx_size_to_enforce is not None:
-            # Enforce the locked context size in the local dictionary only.
-            # We DO NOT update db_user.llm_ctx_size here to prevent startup DB writes.
-            effective_llm_params["llm_ctx_size"] = ctx_size_to_enforce
-            
-            session_params = user_sessions[username].get("llm_params", {})
-            if session_params.get("ctx_size") != ctx_size_to_enforce:
-                session_params["ctx_size"] = ctx_size_to_enforce
-                user_sessions[username]["llm_params"] = session_params
-                # Optimization: Only invalidate if ctx_size actually changed
-                user_sessions[username]["lollms_clients_cache"] = {}
 
         lc = get_user_lollms_client(username)
         ai_name_for_user = getattr(lc, "ai_name", "assistant")
@@ -540,7 +521,7 @@ def build_lollms_client_from_params(
                 llm_init_params = { **binding_to_use.config }
                 
                 user_saved_params = {
-                    "ctx_size": user_db.llm_ctx_size, "temperature": user_db.llm_temperature,
+                    "temperature": user_db.llm_temperature,
                     "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
                     "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
                     "put_thoughts_in_context": user_db.put_thoughts_in_context,
@@ -553,6 +534,15 @@ def build_lollms_client_from_params(
                 final_user_params = {**{k:v for k,v in user_saved_params.items() if v is not None}, **user_session_params}
                 if llm_params:
                     final_user_params.update(llm_params)
+
+                # --- ADMIN OVERRIDE ENFORCEMENT ---
+                # If the admin has forced a global context size, apply it now to ensure
+                # the LollmsClient is built with the correct static value.
+                force_model_mode = settings.get("force_model_mode", "disabled")
+                if force_model_mode == "force_always":
+                    forced_ctx = settings.get("force_context_size")
+                    if forced_ctx:
+                        final_user_params["ctx_size"] = forced_ctx
 
                 model_aliases = binding_to_use.model_aliases or {}
                 if isinstance(model_aliases,str):
@@ -573,7 +563,8 @@ def build_lollms_client_from_params(
                         llm_init_params.update(final_user_params)
                         llm_init_params.update(alias_params)
                     
-                    if alias_info.get('ctx_size_locked', False) and 'ctx_size' in alias_info:
+                    # Respect Alias context size if provided
+                    if 'ctx_size' in alias_info and alias_info['ctx_size']:
                         llm_init_params["ctx_size"] = alias_info['ctx_size']
                 else:
                     llm_init_params.update(final_user_params)

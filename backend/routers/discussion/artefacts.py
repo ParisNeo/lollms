@@ -109,6 +109,23 @@ class StackOverflowImportRequest(BaseModel):
     language: str = "en"
     auto_load: bool = True
 
+def _map_artefact_for_ui(art: dict) -> dict:
+    """
+    Standardizes Artefact metadata for the UI.
+    Maps internal library keys ('type', 'active') to public API keys ('artefact_type', 'is_loaded').
+    """
+    mapped = {k: v for k, v in art.items() if k not in ['content', 'images']}
+    
+    # CRITICAL: Always prioritize internal library 'type' if present
+    mapped['artefact_type'] = art.get('type', art.get('artefact_type', 'document'))
+    mapped['is_loaded'] = art.get('active', art.get('is_loaded', False))
+    
+    if isinstance(mapped.get('created_at'), datetime):
+        mapped['created_at'] = mapped['created_at'].isoformat()
+    if isinstance(mapped.get('updated_at'), datetime):
+        mapped['updated_at'] = mapped['updated_at'].isoformat()
+    return mapped
+
 def build_artefacts_router(router: APIRouter):
     # Ensure Arxiv is available
     try:
@@ -164,25 +181,9 @@ def build_artefacts_router(router: APIRouter):
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
         
-        # Fetch raw artefacts from the manager
+        # Fetch raw artefacts from the manager and use centralized mapper
         raw_artefacts = discussion.list_artefacts()
-        
-        lightweight_artefacts = []
-        for art in raw_artefacts:
-            # Strip heavy fields to prevent browser heap overflow (STATUS_BREAKPOINT)
-            light_art = {k: v for k, v in art.items() if k not in ['content', 'images']}
-            
-            # CRITICAL FIX: Map the library's internal 'active' field to the UI's 'is_loaded'
-            light_art['is_loaded'] = art.get('active', False)
-            
-            if isinstance(light_art.get('created_at'), datetime):
-                light_art['created_at'] = light_art['created_at'].isoformat()
-            if isinstance(light_art.get('updated_at'), datetime):
-                light_art['updated_at'] = light_art['updated_at'].isoformat()
-                
-            lightweight_artefacts.append(light_art)
-            
-        return lightweight_artefacts
+        return [_map_artefact_for_ui(art) for art in raw_artefacts]
 
     @router.post("/{discussion_id}/artefacts", response_model=ArtefactUploadResponse)
     async def add_discussion_artefact(
@@ -1180,12 +1181,8 @@ def build_artefacts_router(router: APIRouter):
 
             discussion.commit()
             
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime):
-                    artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime):
-                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+            raw_artefacts = discussion.list_artefacts()
+            artefacts = [_map_artefact_for_ui(art) for art in raw_artefacts]
 
             lc = get_user_lollms_client(current_user.username)
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
@@ -1216,12 +1213,8 @@ def build_artefacts_router(router: APIRouter):
             discussion.artefacts.activate(request.title, version=request.version)
             discussion.commit()
             
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime):
-                    artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime):
-                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+            raw_artefacts = discussion.list_artefacts()
+            artefacts = [_map_artefact_for_ui(art) for art in raw_artefacts]
             
             lc = get_user_lollms_client(current_user.username)
             token_count = len(lc.tokenize(discussion.discussion_data_zone))
@@ -1252,12 +1245,8 @@ def build_artefacts_router(router: APIRouter):
             discussion.artefacts.deactivate(request.title, version=request.version)
             discussion.commit()
             
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime):
-                    artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime):
-                    artefact['updated_at'] = artefact['updated_at'].isoformat()
+            raw_artefacts = discussion.list_artefacts()
+            artefacts = [_map_artefact_for_ui(art) for art in raw_artefacts]
 
             lc = get_user_lollms_client(current_user.username)
             token_count = len(lc.tokenize(discussion.discussion_data_zone))

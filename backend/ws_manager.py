@@ -157,6 +157,22 @@ class ConnectionManager:
             finally:
                 if db: db.close()
 
+    async def disconnect_user(self, user_id: int):
+        """Closes all active WebSockets for a specific user."""
+        if user_id in self.active_connections:
+            # Copy items to avoid modification during iteration
+            sessions = list(self.active_connections[user_id].values())
+            for websocket in sessions:
+                try:
+                    await websocket.close(code=1000, reason="Disconnected by administrator")
+                except Exception:
+                    pass
+                self.disconnect(user_id, websocket)
+
+    def disconnect_user_sync(self, user_id: int):
+        """Synchronous wrapper to trigger user disconnection across the cluster."""
+        self.broadcast_sync({"type": "internal_event", "event_type": "user_disconnect", "data": {"user_id": user_id}})
+
     def register_admin(self, user_id: int):
         self.admin_user_ids.add(user_id)
 
@@ -202,10 +218,18 @@ class ConnectionManager:
 
         # Internal synchronization events
         if payload.get("type") == "internal_event":
-            if payload.get("event_type") == "user_cache_invalidate":
-                username = payload.get("data", {}).get("username")
+            event_type = payload.get("event_type")
+            data = payload.get("data", {})
+            
+            if event_type == "user_cache_invalidate":
+                username = data.get("username")
                 if username in user_sessions:
                     user_sessions[username]['lollms_clients_cache'] = {}
+            
+            elif event_type == "user_disconnect":
+                user_id = data.get("user_id")
+                if user_id:
+                    await self.disconnect_user(int(user_id))
             return
 
         # Global settings refresh

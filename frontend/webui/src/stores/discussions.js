@@ -64,16 +64,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    async function removeContextItem(itemTitle, itemType) {
-        if (!activeDiscussion.value) return;
-        const escapedTitle = itemTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const typePattern = itemType.charAt(0).toUpperCase() + itemType.slice(1);
-        const regex = new RegExp(`[\\s\\r\\n]*--- ${typePattern}: ${escapedTitle} ---[\\s\\S]*?--- End ${typePattern}(?:: ${escapedTitle})? ---[\\s\\r\\n]*`, 'g');
-        const newContent = (activeDiscussion.value.discussion_data_zone || '').replace(regex, '\n\n').trim();
-        await getActions().updateDataZone({ discussionId: activeDiscussion.value.id, content: newContent });
-        await getActions().fetchContextStatus(activeDiscussion.value.id);
-        uiStore.addNotification(`${typePattern} removed from context.`, 'success');
-    }
+    /**
+     * Discussion Zone is now strictly for User Instructions. 
+     * Mirroring of artefacts is handled natively by the library's layered context model.
+     */
 
     // --- WATCHER for task updates ---
     // [OPTIMIZATION] Removed { deep: true } to prevent performance freeze on large task lists.
@@ -130,6 +124,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (!personalityId) return null;
         return dataStore.getPersonalityById(personalityId);
     });
+
+    /**
+     * Identifies notes and skills that are currently active in the context.
+     */
+    const loadedContextItems = computed(() => {
+        if (!Array.isArray(activeDiscussionArtefacts.value)) return [];
+        return activeDiscussionArtefacts.value.filter(art => 
+            art.is_loaded && (art.artefact_type === 'note' || art.artefact_type === 'skill')
+        );
+    });
     
     const sortedDiscussions = computed(() => Object.values(discussions.value).sort((a, b) => new Date(b.last_activity_at || b.created_at) - new Date(a.last_activity_at || a.created_at)));
     const activeMessages = computed(() => messages.value);
@@ -151,8 +155,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         return Object.values(groups).sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at));
     });
 
-    const loadedContextItems = computed(() => []);
-
     const currentModelVisionSupport = computed(() => {
         const modelId = authStore.user?.lollms_model_name;
         if (!modelId) return true;
@@ -172,9 +174,24 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const discussionGroupsTree = computed(() => {
         const groups = JSON.parse(JSON.stringify(discussionGroups.value));
         const allDiscussions = sortedDiscussions.value;
+        const sortMode = authStore.user?.discussion_sorting_mode || 'alpha';
         
         const starred = allDiscussions.filter(d => d.is_starred);
         const nonStarredDiscussions = allDiscussions.filter(d => !d.is_starred);
+
+        // Helper to get effective activity time for a group (recursive)
+        const getGroupActivity = (group) => {
+            let latest = new Date(group.updated_at || group.created_at).getTime();
+            group.discussions?.forEach(d => {
+                const dt = new Date(d.last_activity_at || d.created_at).getTime();
+                if (dt > latest) latest = dt;
+            });
+            group.children?.forEach(child => {
+                const dt = getGroupActivity(child);
+                if (dt > latest) latest = dt;
+            });
+            return latest;
+        };
 
         const groupsMap = new Map(groups.map(g => [g.id, { ...g, children: [], discussions: [] }]));
         
@@ -194,12 +211,21 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
 
+        const sortFn = (a, b) => {
+            if (sortMode === 'activity') {
+                return getGroupActivity(b) - getGroupActivity(a);
+            }
+            if (sortMode === 'date') {
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+            }
+            return a.name.localeCompare(b.name);
+        };
+
         for (const group of groupsMap.values()) {
-            group.children.sort((a,b) => a.name.localeCompare(b.name));
+            group.children.sort(sortFn);
         }
         
-        const sortedTree = tree.sort((a, b) => a.name.localeCompare(b.name));
-        
+        const sortedTree = tree.sort(sortFn);
         const ungrouped = nonStarredDiscussions.filter(d => !d.group_id);
 
         return {

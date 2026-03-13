@@ -280,6 +280,7 @@ async function executeCode() {
             uiStore.openModal('interactiveOutput', { htmlContent, title: 'SVG Preview', contentType: 'svg' });
             executionOutput.value = 'SVG rendered in a modal window.';
         } else if (lang === 'mermaid') {
+            isError.value = false;
             try {
                 // Stable initialization: keep configuration minimal during render loops.
                 mermaid.initialize({ 
@@ -330,7 +331,8 @@ async function executeCode() {
                 executionOutput.value = 'Mermaid diagram rendered and opened.';
             } catch (err) {
                 isError.value = true;
-                executionOutput.value = `Mermaid Error: ${err.message}`;
+                const msg = err instanceof Error ? err.message : String(err);
+                executionOutput.value = `Mermaid Syntax Error: ${msg}`;
                 console.error("Mermaid rendering failed:", err);
                 
                 // Fallback: If SVG rendering fails, open the modal with source code
@@ -575,8 +577,8 @@ async function downloadCreatedFile(filename) {
         </div>
         <div v-if="isError" class="mt-4 pt-3 border-t border-red-500/30">
             <button @click="sendErrorToAI" class="btn btn-danger-outline btn-sm">
-                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
-                Send Error to AI for Correction
+                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
+                {{ language.toLowerCase() === 'mermaid' ? 'Fix Diagram with AI' : 'Fix Code with AI' }}
             </button>
         </div>
          <div v-if="compilationResult && compilationResult.error" class="mt-4 pt-3 border-t border-red-500/30">

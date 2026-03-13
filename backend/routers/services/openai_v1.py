@@ -788,8 +788,6 @@ async def chat_completions(
         async def stream_generator():
             try:
                 if request.tools:
-                    generation_kwargs["ctx_size"]=user.llm_ctx_size
-                    
                     # Blocking generation for tools
                     result_content = await loop.run_in_executor(
                         executor,
@@ -883,7 +881,6 @@ async def chat_completions(
 
                     def blocking_gen():
                         try:
-                            generation_kwargs["ctx_size"]=user.llm_ctx_size
                             lc.generate_from_messages(
                                 openai_messages,
                                 streaming_callback=llm_callback,
@@ -932,8 +929,6 @@ async def chat_completions(
 
     else:
         try:
-            generation_kwargs["ctx_size"]=user.llm_ctx_size
-            
             # Use executor for non-streaming blocking call as well
             result_content = await loop.run_in_executor(
                 executor, 
@@ -1233,7 +1228,7 @@ async def get_model_context_size(
     binding_alias, model_name = resolve_model_name(db, request.model)
     loop = asyncio.get_running_loop()
     
-    # 1. Check alias configuration first for context size override
+    # 1. Check alias configuration for context size override (forced by admin)
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
     if binding:
         model_aliases = binding.model_aliases or {}
@@ -1257,7 +1252,7 @@ async def get_model_context_size(
             )
         )
         ctx_size = await loop.run_in_executor(executor, lambda: lc.get_ctx_size(model_name))
-        return ContextSizeResponse(context_size=ctx_size)
+        return ContextSizeResponse(context_size=ctx_size or lc.llm.default_ctx_size)
     except HTTPException as e:
         raise e
     except Exception as e:

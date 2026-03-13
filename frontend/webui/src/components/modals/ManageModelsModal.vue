@@ -85,8 +85,8 @@
                             <div v-if="bindingType === 'llm'" class="p-4 border rounded-lg dark:border-gray-700">
                                 <h4 class="font-medium mb-4">LLM Generation Parameters</h4>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label for="alias-ctx-size" class="label text-xs">Context Size</label>
+                                    <div class="md:col-span-2">
+                                        <label for="alias-ctx-size" class="label text-xs">Fixed Context Size</label>
                                         <div class="flex items-center gap-2">
                                             <input id="alias-ctx-size" v-model="form.ctx_size" type="number" class="input-field" placeholder="e.g., 8192">
                                             <button type="button" @click="fetchCtxSize" class="btn btn-secondary p-2" title="Auto-detect max context size from binding" :disabled="isFetchingCtxSize">
@@ -94,6 +94,7 @@
                                                 <IconSparkles v-else class="w-5 h-5"/>
                                             </button>
                                         </div>
+                                        <p class="text-[10px] text-gray-500 mt-1 uppercase font-bold tracking-tight">This value is forced for all users. Leave empty to use binding default.</p>
                                     </div>
                                     <div><label for="alias-temp" class="label text-xs">Temperature</label><input id="alias-temp" v-model="form.temperature" type="number" step="0.01" class="input-field" placeholder="e.g., 0.7"></div>
                                     <div><label for="alias-top-k" class="label text-xs">Top K</label><input id="alias-top-k" v-model="form.top_k" type="number" class="input-field" placeholder="e.g., 50"></div>
@@ -172,19 +173,10 @@
                             
                              <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
                                 <span class="flex-grow flex flex-col">
-                                    <span class="text-sm font-medium">
-                                        <template v-if="bindingType === 'llm'">Lock Context Size</template>
-                                        <template v-else>Allow User Overrides</template>
-                                    </span>
-                                    <span class="text-sm text-gray-500 dark:text-gray-400">
-                                        <template v-if="bindingType === 'llm'">If enabled, users cannot override the context size for this model.</template>
-                                        <template v-else>If enabled, users can change these generation parameters for their own use.</template>
-                                    </span>
+                                    <span class="text-sm font-medium">Allow User Overrides</span>
+                                    <span class="text-sm text-gray-500 dark:text-gray-400">If enabled, users can change generation parameters (excluding context size) for their own use.</span>
                                 </span>
-                                <button v-if="bindingType === 'llm'" @click="form.ctx_size_locked = !form.ctx_size_locked" type="button" :class="[form.ctx_size_locked ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
-                                    <span :class="[form.ctx_size_locked ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
-                                </button>
-                                <button v-else @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <button @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.allow_parameters_override ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>

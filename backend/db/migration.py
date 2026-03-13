@@ -828,6 +828,18 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'chat_active' in added_cols:
              connection.execute(text("UPDATE users SET chat_active = 1 WHERE chat_active IS NULL"))
              connection.commit()
+
+        if 'discussion_sorting_mode' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN discussion_sorting_mode VARCHAR DEFAULT 'alpha' NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
+        if 'discussion_sorting_mode' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN discussion_sorting_mode VARCHAR DEFAULT 'alpha' NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
         elif 'chat_active' in user_columns_db:
              connection.execute(text("UPDATE users SET chat_active = 1 WHERE chat_active = 0"))
              connection.commit()

@@ -17,7 +17,6 @@ const { availableLLMModelsGrouped, isLoadingLollmsModels, availableLollmsModels 
 
 const form = ref({
     lollms_model_name: '',
-    llm_ctx_size: 4096,
     llm_temperature: 0.7,
     llm_top_k: 50,
     llm_top_p: 0.95,
@@ -75,15 +74,6 @@ watch(isLlmMenuOpen, (isOpen) => {
 
 const areSettingsForced = computed(() => user.value?.llm_settings_overridden ?? false);
 
-const selectedModelDetails = computed(() => {
-    if (!form.value.lollms_model_name || !availableLollmsModels.value) return null;
-    return availableLollmsModels.value.find(m => m.id === form.value.lollms_model_name);
-});
-
-const isContextSizeLocked = computed(() => {
-    return selectedModelDetails.value?.alias?.ctx_size_locked === true;
-});
-
 const activeModelName = computed({
     get: () => form.value.lollms_model_name,
     set: (name) => {
@@ -124,11 +114,7 @@ const populateForm = () => {
     if (user.value) {
         form.value = {
             lollms_model_name: user.value.lollms_model_name || '',
-            llm_ctx_size: user.value.llm_ctx_size ?? null,
             llm_temperature: user.value.llm_temperature ?? null,
-            llm_top_k: user.value.llm_top_k ?? null,
-            llm_top_p: user.value.llm_top_p ?? null,
-            llm_repeat_penalty: user.value.llm_repeat_penalty ?? null,
             llm_repeat_last_n: user.value.llm_repeat_last_n ?? null,
             put_thoughts_in_context: user.value.put_thoughts_in_context || false,
             reasoning_activation: user.value.reasoning_activation || false,
@@ -225,11 +211,6 @@ async function handleSave() {
 
                 <!-- Generation Parameters -->
                 <fieldset class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" :class="{'opacity-60': areSettingsForced}">
-                    <div>
-                        <label for="contextSize" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Context Size (tokens)</label>
-                        <input type="number" id="contextSize" v-model.number="form.llm_ctx_size" class="input-field mt-1" placeholder="e.g., 4096" :disabled="areSettingsForced || isContextSizeLocked">
-                        <p v-if="isContextSizeLocked" class="mt-1 text-xs text-red-600 dark:text-red-400">This model has a fixed context size set by the administrator.</p>
-                    </div>
                     <div :class="{'cursor-not-allowed': areSettingsForced}">
                         <label for="temperature" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Temperature</label>
                         <input type="number" id="temperature" v-model.number="form.llm_temperature" class="input-field mt-1" step="0.01" min="0" max="2" placeholder="e.g., 0.7" :disabled="areSettingsForced">

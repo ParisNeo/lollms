@@ -224,27 +224,30 @@ If no important information is found based on these strict criteria, return {"me
 
 
 def _clean_discussion_data_zone_task(task: Task, username: str, discussion_id: str):
-    task.log("Cleaning Discussion Data Zone...")
+    task.log("Running Pure Artefact migration on Data Zone...")
     discussion = get_user_discussion(username, discussion_id)
     if not discussion:
         raise ValueError("Discussion not found.")
 
     content = discussion.discussion_data_zone or ""
     if not content.strip():
-        task.log("Data zone is empty, nothing to clean.")
+        task.log("Data zone is empty.")
         return {"discussion_id": discussion_id, "new_content": ""}
 
-    # [FIX] In Pure Artefact mode, we STRIP these blocks from the data zone string 
-    # if they are found, as they should only exist in the Artefact Manager.
+    # Nuclear Cleanup: Remove ANY block delineated by '---' to ensure the Data Zone
+    # is only used for manual user input, leaving Artefacts to the layered manager.
     block_pattern = re.compile(
-        r"--- (Document|Skill|Note): (.*?) ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End \1(?:: .*?)? ---",
-        re.MULTILINE
+        r"--- .*? ---[\s\r\n]+([\s\S]*?)[\s\r\n]+--- End .*? ---",
+        re.MULTILINE | re.IGNORECASE
     )
 
-    # Remove all known artefact-like blocks from the string to eliminate duplication
     final_content = block_pattern.sub("", content).strip()
     
-    discussion.discussion_data_zone = final_content
+    # Secondary pass to remove orphaned headers/footers
+    final_content = re.sub(r"--- (Document|Skill|Note|Artefact): .*? ---\s*", "", final_content, flags=re.I)
+    final_content = re.sub(r"--- End (Document|Skill|Note|Artefact)(?:: .*?)? ---\s*", "", final_content, flags=re.I)
+
+    discussion.discussion_data_zone = final_content.strip()
     discussion.commit()
     
     task.set_progress(100)

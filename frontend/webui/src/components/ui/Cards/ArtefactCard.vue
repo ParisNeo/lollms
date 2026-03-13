@@ -167,7 +167,8 @@ async function toggleLoad() {
         await discussionsStore.unloadArtefactFromContext({
             discussionId: discussionsStore.currentDiscussionId,
             artefactTitle: props.artefactGroup.title,
-            version: selectedVersion.value
+            version: selectedVersion.value,
+            artefactType: currentType.value // Ensure correct category for text removal
         });
     } else {
         await discussionsStore.loadArtefactToContext({
