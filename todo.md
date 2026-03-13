@@ -218,3 +218,4 @@ Add image rag
 Add pdf convertion to images
 By default add metadata to the chunks
 Import folder instead of just import file
+Fix the repetition problem in the answer. the answer is always returned twice!
