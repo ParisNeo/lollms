@@ -2,15 +2,18 @@
 import { computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
+import { storeToRefs } from 'pinia';
 import GenericModal from './GenericModal.vue';
 
 // Icons
-import IconToken from '../../assets/icons/IconToken.vue';
-import IconInfo from '../../assets/icons/IconInfo.vue';
-import IconHistory from '../../assets/icons/IconClock.vue'; // Using clock for history
-import IconFolder from '../../assets/icons/IconFolder.vue';
-import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
+import IconThinking from '../../assets/icons/IconThinking.vue';
+import IconDataZone from '../../assets/icons/IconDataZone.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
+import IconMessage from '../../assets/icons/IconMessage.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconInfo from '../../assets/icons/IconInfo.vue';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
@@ -24,26 +27,106 @@ const IMAGE_TOKEN_COST = 256;
 
 const systemBreakdown = computed(() => status.value?.zones?.system_context?.breakdown || {});
 const historyBreakdown = computed(() => status.value?.zones?.message_history?.breakdown || {});
+const globalImages = computed(() => status.value?.zones?.discussion_images?.tokens || 0);
 
 const usagePercent = computed(() => status.value?.percent || 0);
 
 /**
- * Helper to generate a flat list for the visual progress bar
+ * Helper to generate a flat list for the visual progress bar and cards
+ * SYNCED with ChatInput.vue colors and labels
  */
-const progressParts = computed(() => {
+const contextParts = computed(() => {
     if (!status.value) return [];
-    const b = systemBreakdown.value;
-    const h = historyBreakdown.value;
+    const sys = systemBreakdown.value;
+    const history = historyBreakdown.value;
     
-    return [
-        { label: 'System', val: b.system_prompt?.tokens, color: 'bg-indigo-500' },
-        { label: 'Memory', val: b.memory?.tokens, color: 'bg-teal-500' },
-        { label: 'Instructions', val: b.user_data_zone?.tokens + b.discussion_data_zone?.tokens, color: 'bg-amber-500' },
-        { label: 'Artefacts', val: b.artefacts?.tokens, color: 'bg-blue-500' },
-        { label: 'History', val: h.text_tokens, color: 'bg-green-500' },
-        { label: 'Images', val: h.image_tokens + (status.value.zones.discussion_images?.tokens || 0), color: 'bg-cyan-500' },
-        { label: 'Scratchpad', val: b.scratchpad?.tokens, color: 'bg-orange-400' },
-    ].filter(p => p.val > 0);
+    const parts = [];
+
+    // 1. Directives (Indigo): System Prompt + Pruning Summaries
+    const directiveTokens = (sys.system_prompt?.tokens || 0) + (sys.pruning_summary?.tokens || 0);
+    if (directiveTokens > 0) parts.push({ 
+        label: 'Directives', 
+        val: directiveTokens, 
+        color: 'bg-indigo-600', 
+        text: 'text-indigo-600', 
+        border: 'border-indigo-200 dark:border-indigo-900/50', 
+        bg: 'bg-indigo-50/30 dark:bg-indigo-900/10',
+        icon: IconCpuChip 
+    });
+
+    // 2. Memory Bank (Teal): Long-term facts
+    const memoryTokens = sys.memory?.tokens || 0;
+    if (memoryTokens > 0) parts.push({ 
+        label: 'Memory Bank', 
+        val: memoryTokens, 
+        color: 'bg-teal-500', 
+        text: 'text-teal-600', 
+        border: 'border-teal-200 dark:border-teal-900/50', 
+        bg: 'bg-teal-50/30 dark:bg-teal-900/10',
+        icon: IconThinking 
+    });
+
+    // 3. Context Zones (Amber): User Prefs + Discussion Zone + Personality data
+    const zoneTokens = (sys.user_data_zone?.tokens || 0) + (sys.discussion_data_zone?.tokens || 0) + (sys.personality_data_zone?.tokens || 0);
+    if (zoneTokens > 0) parts.push({ 
+        label: 'Context Zones', 
+        val: zoneTokens, 
+        color: 'bg-amber-500', 
+        text: 'text-amber-600', 
+        border: 'border-amber-200 dark:border-amber-900/50', 
+        bg: 'bg-amber-50/30 dark:bg-amber-900/10',
+        icon: IconDataZone 
+    });
+
+    // 4. Workspace Artefacts (Blue): Active documents in workspace
+    const artefactTokens = sys.artefacts?.tokens || 0;
+    if (artefactTokens > 0) parts.push({ 
+        label: 'Workspace Files', 
+        val: artefactTokens, 
+        color: 'bg-blue-600', 
+        text: 'text-blue-600', 
+        border: 'border-blue-200 dark:border-blue-900/50', 
+        bg: 'bg-blue-50/30 dark:bg-blue-900/10',
+        icon: IconFileText 
+    });
+
+    // 5. Conversation History (Emerald): Previous conversation text
+    const historyTextTokens = history.text_tokens || 0;
+    if (historyTextTokens > 0) parts.push({ 
+        label: 'Chat History', 
+        val: historyTextTokens, 
+        color: 'bg-emerald-600', 
+        text: 'text-emerald-600', 
+        border: 'border-emerald-200 dark:border-emerald-900/50', 
+        bg: 'bg-emerald-50/30 dark:bg-emerald-900/10',
+        icon: IconMessage 
+    });
+
+    // 6. Visual Data (Rose): Message attachments + Global images
+    const totalImageTokens = (history.image_tokens || 0) + globalImages.value;
+    if (totalImageTokens > 0) parts.push({ 
+        label: 'Visual Data', 
+        val: totalImageTokens, 
+        color: 'bg-rose-500', 
+        text: 'text-rose-600', 
+        border: 'border-rose-200 dark:border-rose-900/50', 
+        bg: 'bg-rose-50/30 dark:bg-rose-900/10',
+        icon: IconPhoto 
+    });
+
+    // 7. Agentic Scratchpad (Slate): Plan and thoughts
+    const scratchpadTokens = sys.scratchpad?.tokens || 0;
+    if (scratchpadTokens > 0) parts.push({ 
+        label: 'Agent Scratchpad', 
+        val: scratchpadTokens, 
+        color: 'bg-slate-500', 
+        text: 'text-slate-600', 
+        border: 'border-slate-200 dark:border-slate-900/50', 
+        bg: 'bg-slate-50/30 dark:bg-slate-900/10',
+        icon: IconSparkles 
+    });
+
+    return parts;
 });
 
 function formatTokens(val) {
@@ -56,27 +139,27 @@ function formatTokens(val) {
         <template #body>
             <div class="space-y-6" v-if="status">
                 
-                <!-- Visual Summary Card -->
+                <!-- ── Visual Summary Card ── -->
                 <div class="p-6 bg-white dark:bg-gray-800 rounded-3xl border dark:border-gray-700 shadow-xl overflow-hidden relative">
                     <div class="flex justify-between items-end mb-6">
                         <div class="space-y-1">
-                            <h3 class="text-2xl font-black tracking-tighter dark:text-white">
+                            <h3 class="text-3xl font-black tracking-tighter dark:text-white">
                                 {{ formatTokens(status.current_tokens) }} 
                                 <span class="text-gray-400 font-medium text-lg">/ {{ formatTokens(status.max_tokens) }}</span>
                             </h3>
                             <p class="text-[10px] font-black uppercase tracking-widest text-blue-500">Total Context Allocation</p>
                         </div>
                         <div class="text-right">
-                            <span class="text-4xl font-black italic opacity-20" :class="usagePercent > 80 ? 'text-red-500 opacity-100' : ''">
+                            <span class="text-5xl font-black italic opacity-20 transition-all duration-500" :class="usagePercent > 80 ? 'text-red-500 opacity-100 scale-110' : ''">
                                 {{ usagePercent.toFixed(0) }}%
                             </span>
                         </div>
                     </div>
 
-                    <!-- Layered Progress Bar -->
-                    <div class="h-6 w-full bg-gray-100 dark:bg-gray-900 rounded-xl overflow-hidden flex border-2 border-gray-100 dark:border-gray-700">
-                        <div v-for="part in progressParts" :key="part.label"
-                             :class="[part.color, 'h-full transition-all duration-1000 border-r border-black/5 last:border-0']"
+                    <!-- Multi-colored Segmented Progress Bar (Synced with Input Bar) -->
+                    <div class="h-7 w-full bg-gray-100 dark:bg-gray-900 rounded-full overflow-hidden flex border-2 border-gray-100 dark:border-gray-700 shadow-inner">
+                        <div v-for="part in contextParts" :key="part.label"
+                             :class="[part.color, 'h-full transition-all duration-1000 border-r border-black/10 last:border-0 shadow-lg']"
                              :style="{ width: `${(part.val / status.max_tokens) * 100}%` }"
                              :title="`${part.label}: ${part.val} tokens`"
                         ></div>
@@ -89,86 +172,70 @@ function formatTokens(val) {
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- ── Diagnostic Grid ── -->
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    <div v-for="part in contextParts" :key="part.label" 
+                         class="p-4 rounded-2xl border transition-all hover:shadow-md flex flex-col justify-between"
+                         :class="[part.border, part.bg]">
+                        
+                        <div class="flex items-center justify-between mb-4">
+                            <div class="p-2 rounded-lg bg-white dark:bg-gray-900 shadow-sm" :class="part.text">
+                                <component :is="part.icon" class="w-4 h-4" />
+                            </div>
+                            <span class="text-[10px] font-black uppercase tracking-widest opacity-60">
+                                {{ Math.round((part.val / status.max_tokens) * 100) }}%
+                            </span>
+                        </div>
+
+                        <div>
+                            <p class="text-[9px] font-black uppercase tracking-widest opacity-50 mb-1">{{ part.label }}</p>
+                            <div class="flex items-baseline gap-1.5">
+                                <span class="text-2xl font-black" :class="part.text">{{ formatTokens(part.val) }}</span>
+                                <span class="text-[10px] font-bold opacity-40">tok</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Breakdown Details ── -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
                     
-                    <!-- 1. Directives & Knowledge -->
-                    <div class="space-y-3">
-                        <h4 class="px-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Directives & Knowledge</h4>
-                        <div class="space-y-2">
-                            <div class="stat-row bg-indigo-50/30 dark:bg-indigo-900/10 border-indigo-100 dark:border-indigo-800">
-                                <span class="label">System Prompt</span>
-                                <span class="value">{{ formatTokens(systemBreakdown.system_prompt?.tokens) }}</span>
-                            </div>
-                            <div class="stat-row bg-teal-50/30 dark:bg-teal-900/10 border-teal-100 dark:border-teal-800">
-                                <span class="label">User Memory Bank</span>
-                                <span class="value">{{ formatTokens(systemBreakdown.memory?.tokens) }}</span>
-                            </div>
-                            <div class="stat-row bg-amber-50/30 dark:bg-amber-900/10 border-amber-100 dark:border-amber-800">
-                                <span class="label">Task & Prefs (Zones)</span>
-                                <span class="value">{{ formatTokens(systemBreakdown.user_data_zone?.tokens + systemBreakdown.discussion_data_zone?.tokens) }}</span>
-                            </div>
-                            <div v-if="systemBreakdown.pruning_summary?.tokens" class="stat-row bg-rose-50/30 dark:bg-rose-900/10 border-rose-100 dark:border-rose-800">
-                                <span class="label">Compression Summary</span>
-                                <span class="value">{{ formatTokens(systemBreakdown.pruning_summary?.tokens) }}</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 2. Active Workspace (Artefacts) -->
-                    <div class="space-y-3">
-                        <h4 class="px-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Workspace Artefacts</h4>
-                        <div class="p-4 bg-blue-50/30 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800 rounded-2xl">
-                            <div class="flex justify-between items-center mb-4">
-                                <span class="text-sm font-bold text-blue-700 dark:text-blue-300">Active Files</span>
-                                <span class="font-mono font-bold text-blue-600">{{ formatTokens(systemBreakdown.artefacts?.tokens) }} tok</span>
-                            </div>
-                            <div class="space-y-3">
-                                <div v-for="(data, type) in systemBreakdown.artefacts?.types" :key="type" class="flex items-center gap-3">
-                                    <div class="w-2 h-2 rounded-full bg-blue-400"></div>
-                                    <span class="text-xs capitalize flex-grow font-medium text-gray-600 dark:text-gray-400">{{ type }}s ({{ data.count }})</span>
-                                    <div class="h-1.5 w-20 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                                        <div class="h-full bg-blue-500" :style="{ width: `${(data.tokens / systemBreakdown.artefacts.tokens) * 100}%` }"></div>
+                    <!-- File Type Specifics -->
+                    <div v-if="systemBreakdown.artefacts?.tokens" class="space-y-3">
+                        <h4 class="px-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">File Type Distribution</h4>
+                        <div class="p-5 bg-white dark:bg-gray-800/50 border dark:border-gray-700 rounded-3xl shadow-sm">
+                            <div class="space-y-4">
+                                <div v-for="(data, type) in systemBreakdown.artefacts?.types" :key="type" class="space-y-1">
+                                    <div class="flex items-center justify-between text-[10px] font-bold uppercase tracking-tight">
+                                        <span class="text-gray-500">{{ type }}s ({{ data.count }})</span>
+                                        <span class="text-blue-500 font-mono">{{ formatTokens(data.tokens) }} tok</span>
                                     </div>
-                                    <span class="text-[10px] font-mono text-gray-500 w-10 text-right">{{ formatTokens(data.tokens) }}</span>
+                                    <div class="h-2 w-full bg-gray-100 dark:bg-gray-900 rounded-full overflow-hidden">
+                                        <div class="h-full bg-blue-600 rounded-full transition-all duration-1000" 
+                                             :style="{ width: `${(data.tokens / systemBreakdown.artefacts.tokens) * 100}%` }">
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- 3. Message History -->
-                    <div class="space-y-3 md:col-span-2">
-                        <h4 class="px-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Conversation History</h4>
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            <div class="p-4 bg-green-50/30 dark:bg-green-900/10 border border-green-100 dark:border-green-800 rounded-2xl flex flex-col items-center text-center">
-                                <IconHistory class="w-5 h-5 text-green-600 mb-2" />
-                                <span class="text-[10px] font-black uppercase text-gray-400 mb-1">Messages</span>
-                                <span class="text-xl font-black text-green-700 dark:text-green-400">{{ historyBreakdown.message_count }}</span>
+                    <!-- History Stats -->
+                    <div class="space-y-3">
+                        <h4 class="px-2 text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Conversation Metadata</h4>
+                        <div class="grid grid-cols-2 gap-3 h-full">
+                            <div class="p-4 bg-white dark:bg-gray-800/50 border dark:border-gray-700 rounded-3xl flex flex-col justify-center items-center text-center group">
+                                <span class="text-3xl font-black text-emerald-600 dark:text-emerald-500 group-hover:scale-110 transition-transform">
+                                    {{ historyBreakdown.message_count || 0 }}
+                                </span>
+                                <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 mt-2">Total Turns</span>
                             </div>
-                            <div class="p-4 bg-green-50/30 dark:bg-green-900/10 border border-green-100 dark:border-green-800 rounded-2xl flex flex-col items-center text-center">
-                                <IconFileText class="w-5 h-5 text-green-600 mb-2" />
-                                <span class="text-[10px] font-black uppercase text-gray-400 mb-1">Text Data</span>
-                                <span class="text-xl font-black text-green-700 dark:text-green-400">{{ formatTokens(historyBreakdown.text_tokens) }}</span>
+                            <div class="p-4 bg-white dark:bg-gray-800/50 border dark:border-gray-700 rounded-3xl flex flex-col justify-center items-center text-center group">
+                                <span class="text-3xl font-black text-rose-600 dark:text-rose-500 group-hover:scale-110 transition-transform">
+                                    {{ IMAGE_TOKEN_COST }}
+                                </span>
+                                <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 mt-2">Tok / Image</span>
                             </div>
-                            <div class="p-4 bg-cyan-50/30 dark:bg-cyan-900/10 border border-cyan-100 dark:border-cyan-800 rounded-2xl flex flex-col items-center text-center">
-                                <IconPhoto class="w-5 h-5 text-cyan-600 mb-2" />
-                                <span class="text-[10px] font-black uppercase text-gray-400 mb-1">Vision Tokens</span>
-                                <span class="text-xl font-black text-cyan-700 dark:text-cyan-400">{{ formatTokens(historyBreakdown.image_tokens + (status.zones.discussion_images?.tokens || 0)) }}</span>
-                                <p class="text-[8px] text-gray-400 mt-1 uppercase tracking-widest">{{ IMAGE_TOKEN_COST }} tok per image</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 4. Transient Data (Scratchpad) -->
-                    <div v-if="systemBreakdown.scratchpad?.tokens" class="space-y-3 md:col-span-2">
-                        <div class="p-4 bg-orange-50/30 dark:bg-orange-900/10 border border-orange-100 dark:border-orange-800 rounded-2xl flex items-center justify-between">
-                            <div class="flex items-center gap-3">
-                                <div class="p-2 bg-orange-500 text-white rounded-lg"><IconSparkles class="w-4 h-4" /></div>
-                                <div>
-                                    <h5 class="text-sm font-bold text-orange-700 dark:text-orange-400 leading-none">Agentic Scratchpad</h5>
-                                    <p class="text-[10px] text-gray-500 mt-1 uppercase tracking-widest">Volatile Tool Results & Thoughts</p>
-                                </div>
-                            </div>
-                            <span class="text-xl font-black font-mono text-orange-600">{{ formatTokens(systemBreakdown.scratchpad.tokens) }}</span>
                         </div>
                     </div>
 
@@ -178,20 +245,22 @@ function formatTokens(val) {
         <template #footer>
             <div class="w-full flex justify-between px-4">
                 <p class="text-[10px] text-gray-400 italic self-center">Values are calculated in real-time before each generation turn.</p>
-                <button @click="uiStore.closeModal('contextViewer')" class="btn btn-primary px-8">Close Analysis</button>
+                <button @click="uiStore.closeModal('contextViewer')" class="btn btn-primary px-8 py-2.5 rounded-xl shadow-lg shadow-blue-500/20">Close Analysis</button>
             </div>
         </template>
     </GenericModal>
 </template>
 
 <style scoped>
-.stat-row {
-    @apply flex items-center justify-between p-3 rounded-xl border transition-all;
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
+
+.animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
 }
-.stat-row .label {
-    @apply text-xs font-bold text-gray-700 dark:text-gray-300;
-}
-.stat-row .value {
-    @apply font-mono text-xs font-black text-blue-500;
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 </style>

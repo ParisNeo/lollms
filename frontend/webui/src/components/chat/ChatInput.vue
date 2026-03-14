@@ -674,15 +674,17 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
         </div>
 
         <!-- Context Bar / Feature Badges Row -->
-        <div v-if="showHeaderRow" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700 overflow-x-auto no-scrollbar">
+        <!-- Fixed: Removed overflow-x-auto to prevent clipping the tooltip, added relative z-40 -->
+        <div v-if="showHeaderRow" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700 relative z-40">
              <div class="max-w-4xl mx-auto flex items-center gap-3">
                 <template v-if="showContextBar">
                     <div @click="uiStore.openModal('contextViewer')" 
                          class="flex-grow flex items-center gap-3 cursor-pointer group/context select-none active:scale-[0.99] transition-transform relative">
                         
                         <!-- ── [NEW] Rich Tooltip Overlay ── -->
-                        <div class="absolute bottom-full left-0 mb-3 w-72 opacity-0 translate-y-2 pointer-events-none group-hover/context:opacity-100 group-hover/context:translate-y-0 group-hover/context:pointer-events-auto transition-all duration-300 z-50">
-                            <div class="bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden p-4 space-y-3">
+                        <!-- Fixed: Increased z-index to 50 and ensured background is solid enough to read -->
+                        <div class="absolute bottom-full left-0 mb-4 w-80 opacity-0 translate-y-2 pointer-events-none group-hover/context:opacity-100 group-hover/context:translate-y-0 group-hover/context:pointer-events-auto transition-all duration-300 z-50">
+                            <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden p-4 space-y-3">
                                 <div class="flex justify-between items-center border-b dark:border-gray-800 pb-2 mb-2">
                                     <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Context Usage</span>
                                     <span class="text-xs font-mono font-bold" :class="totalPercentage > 90 ? 'text-red-500' : 'text-blue-500'">{{ Math.round(totalPercentage) }}%</span>
