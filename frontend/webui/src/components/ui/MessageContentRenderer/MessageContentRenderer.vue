@@ -841,10 +841,11 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- ── Note block ──────────────────────────────────────────────── -->
-          <div v-else-if="part.type === 'note'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60">
-            <!-- Header bar -->
-            <div class="note-header flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-800/60">
+          <details v-else-if="part.type === 'note'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60" open>
+            <!-- Header bar as Summary -->
+            <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800/60 cursor-pointer list-none select-none">
               <div class="flex items-center gap-2.5">
+                <IconChevronRight class="w-3 h-3 text-amber-500 transition-transform duration-200 summary-arrow" />
                 <!-- Notepad icon -->
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
@@ -854,18 +855,18 @@ function onMermaidReady({ svg }, partIndex) {
                   <span class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ part.title }}</span>
                 </div>
               </div>
-              <!-- Save button -->
+              <!-- Save button (stop propagation to prevent toggle on button click) -->
               <button
-                @click="saveNoteFromRenderer(part.title, part.content)"
+                @click.stop="saveNoteFromRenderer(part.title, part.content)"
                 class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-colors"
                 title="Save this note"
               >
                 <IconSave class="w-3.5 h-3.5" />
                 Save Note
               </button>
-            </div>
+            </summary>
             <!-- Note content — token-aware so code blocks get syntax highlighting -->
-            <div class="note-body px-5 py-4 bg-amber-50/40 dark:bg-amber-950/20">
+            <div class="note-body px-5 py-4 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-200 dark:border-amber-800/60">
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
                 <template v-for="(token, ti) in getTokens(part.content)" :key="`note-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
@@ -873,12 +874,13 @@ function onMermaidReady({ svg }, partIndex) {
                 </template>
               </div>
             </div>
-          </div>
+          </details>
 
           <!-- ── Skill block ──────────────────────────────────────────────── -->
-          <div v-else-if="part.type === 'skill'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60">
-            <div class="note-header flex items-center justify-between px-4 py-2.5 bg-teal-50 dark:bg-teal-900/30 border-b border-teal-200 dark:border-teal-800/60">
+          <details v-else-if="part.type === 'skill'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60" open>
+            <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800/60 cursor-pointer list-none select-none">
               <div class="flex items-center gap-2.5">
+                <IconChevronRight class="w-3 h-3 text-teal-500 transition-transform duration-200 summary-arrow" />
                 <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" />
                 <div class="flex flex-col leading-tight">
                   <span class="text-[9px] font-black uppercase tracking-widest text-teal-500 dark:text-teal-400">AI Skill Proposal</span>
@@ -886,14 +888,14 @@ function onMermaidReady({ svg }, partIndex) {
                 </div>
               </div>
               <button
-                @click="saveSkillFromRenderer(part)"
+                @click.stop="saveSkillFromRenderer(part)"
                 class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-500 hover:bg-teal-600 text-white shadow-sm transition-colors"
               >
                 <IconSave class="w-3.5 h-3.5" />
                 Validate Skill
               </button>
-            </div>
-            <div class="note-body px-5 py-4 bg-teal-50/40 dark:bg-teal-950/20">
+            </summary>
+            <div class="note-body px-5 py-4 bg-teal-50/40 dark:bg-teal-950/20 border-t border-teal-200 dark:border-teal-800/60">
                <div v-if="part.description" class="text-xs text-gray-500 dark:text-gray-400 italic mb-2">{{ part.description }}</div>
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
                 <template v-for="(token, ti) in getTokens(part.content)" :key="`skill-token-${ti}`">
@@ -902,7 +904,7 @@ function onMermaidReady({ svg }, partIndex) {
                 </template>
               </div>
             </div>
-          </div>
+          </details>
 
           <template v-else-if="part.type === 'annotate'">
             <div class="annotated-image-container relative my-4 group">
@@ -1017,6 +1019,14 @@ details[open].document-block > .document-summary { @apply border-b border-gray-2
 /* Note block */
 .note-block {
   position: relative;
+}
+
+.note-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.note-block[open] .summary-arrow {
+  transform: rotate(90deg);
 }
 .note-content :deep(p) { @apply my-1.5 leading-relaxed; }
 .note-content :deep(h1),

@@ -148,7 +148,24 @@ export const useNotesStore = defineStore('notes', () => {
         }
     }
 
+    async function emailNotes(noteIds, recipientEmail) {
+        try {
+            const response = await apiClient.post('/api/notes/email', {
+                note_ids: noteIds,
+                recipient_email: recipientEmail
+            });
+            if (!response.data.manual_mode) {
+                uiStore.addNotification(response.data.message, "success");
+            }
+            return response.data;
+        } catch (error) {
+            uiStore.addNotification("Failed to email notes.", "error");
+            throw error;
+        }
+    }
+
     return {
+        emailNotes,
         notes, groups, isLoading, activeNoteId, activeGroupId, activeNote, notesTree,
         fetchNotes, createNote, updateNote, deleteNote,
         createGroup, updateGroup, deleteGroup

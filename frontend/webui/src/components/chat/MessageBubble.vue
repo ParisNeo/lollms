@@ -459,10 +459,22 @@ const sortedSources = computed(() => {
 
 const lastEventSummary = computed(() => {
     if (!hasEvents.value) return '';
-    const lastEvent = props.message.events[props.message.events.length - 1];
+    // Find the last event that isn't a technical ID or noisy log
+    const displayEvents = props.message.events.filter(e => 
+        e.type !== 'new_message_id' && 
+        !String(e.content).includes('0 personality tool')
+    );
+    if (displayEvents.length === 0) return 'Processing...';
+
+    const lastEvent = displayEvents[displayEvents.length - 1];
     let summary = lastEvent.type.replace(/_/g, ' ');
-    if (typeof lastEvent.content === 'string' && lastEvent.content.length > 0) {
-        summary += `: ${lastEvent.content.substring(0, 40)}${lastEvent.content.length > 40 ? '...' : ''}`;
+    
+    let content = lastEvent.content;
+    // If content is a UUID or looks like a tech ID, don't show it in the summary
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    
+    if (typeof content === 'string' && content.length > 0 && !uuidRegex.test(content)) {
+        summary += `: ${content.substring(0, 40)}${content.length > 40 ? '...' : ''}`;
     }
     return summary;
 });
@@ -711,7 +723,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                         </div>
                                         <div class="flex flex-col">
                                             <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">Execution Workflow</span>
-                                            <span class="text-[10px] font-bold text-gray-600 dark:text-gray-400 line-clamp-1">{{ lastEventSummary }}</span>
+                                            <span class="text-[10px] font-bold text-gray-600 dark:text-gray-400 line-clamp-1 capitalize">{{ lastEventSummary }}</span>
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-3">

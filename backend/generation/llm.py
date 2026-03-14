@@ -1174,7 +1174,7 @@ def build_llm_generation_router(router: APIRouter):
     @router.post("/{discussion_id}/chat")
     async def chat_in_existing_discussion(
         discussion_id: str,
-        prompt: str = Form(...),
+        prompt: str = Form(""),
         image_server_paths_json: str = Form("[]"),
         parent_message_id: Optional[str] = Form(None), 
         is_resend: bool = Form(False),

@@ -113,12 +113,19 @@ export function useDiscussionGeneration(state, stores, getActions) {
         messages.value.push(tempAiMessage);
 
         // [FIX] Defensive check for attachedSkills to prevent "reading 'value' of undefined"
-        let finalPrompt = payload.prompt;
+        let finalPrompt = payload.prompt || '';
         if (state.attachedSkills && state.attachedSkills.value && state.attachedSkills.value.length > 0) {
             const skillsContext = state.attachedSkills.value.map(s => `--- Skill: ${s.name} ---\n${s.content}\n--- End Skill ---`).join('\n\n');
             finalPrompt = `${skillsContext}\n\nUser request: ${finalPrompt}`;
             // Clear skills after they are added to the prompt
             state.attachedSkills.value = [];
+        }
+
+        // [FIX] 422 Unprocessable Entity Guard: 
+        // Backend Form validation expects a non-null value for 'prompt'.
+        const totalImages = (payload.image_files?.length || 0) + (payload.image_server_paths?.length || 0);
+        if (!finalPrompt.trim() && totalImages > 0) {
+            finalPrompt = "Analyze this image";
         }
 
         const formData = new FormData();

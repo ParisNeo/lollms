@@ -2,7 +2,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
@@ -249,3 +249,66 @@ def delete_note(
     
     db.delete(note)
     db.commit()
+
+class EmailNotesRequest(BaseModel):
+    note_ids: List[str]
+    recipient_email: EmailStr
+
+@notes_router.post("/email")
+async def email_notes(
+    payload: EmailNotesRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    from backend.security import send_generic_email
+    from backend.settings import settings
+    from backend.routers.files import md2_to_html # Use existing renderer
+
+    notes = db.query(DBNote).filter(
+        DBNote.id.in_(payload.note_ids),
+        DBNote.owner_user_id == current_user.id
+    ).all()
+    
+    if not notes:
+        raise HTTPException(status_code=404, detail="No valid notes found to email.")
+
+    subject = f"Notes shared by {current_user.username}"
+    if len(notes) == 1:
+        subject = f"Note: {notes[0].title}"
+
+    # 1. Generate HTML Content
+    html_body = f"<div style='font-family: sans-serif;'>"
+    html_body += f"<h2 style='color: #2563eb;'>Notes Shared via LoLLMs</h2>"
+    
+    for note in notes:
+        html_content = md2_to_html(note.content or "")
+        html_body += f"<div style='border-top: 2px solid #e5e7eb; margin-top: 20px; padding-top: 10px;'>"
+        html_body += f"<h3 style='margin-bottom: 5px;'>{note.title}</h3>"
+        html_body += f"<div style='color: #374151;'>{html_content}</div>"
+        html_body += f"</div>"
+    
+    html_body += f"<p style='font-size: 12px; color: #9ca3af; margin-top: 30px;'>Sent from {current_user.username}'s workspace.</p>"
+    html_body += "</div>"
+
+    # 2. Handle Manual Mode
+    recovery_mode = settings.get("password_recovery_mode", "manual")
+    if recovery_mode == "manual":
+        # Create a plain-text version for the URL 'body' param
+        text_body = f"Notes Shared by {current_user.username}\n\n"
+        for note in notes:
+            text_body += f"--- {note.title} ---\n{note.content}\n\n"
+        
+        return {
+            "manual_mode": True,
+            "subject": subject,
+            "body": text_body,
+            "html": html_body, # Return HTML so UI can copy it to clipboard
+            "recipient": payload.recipient_email
+        }
+
+    # 3. Server-side Send (SMTP/Gmail)
+    try:
+        send_generic_email(payload.recipient_email, subject, html_body)
+        return {"message": f"Successfully emailed {len(notes)} note(s) to {payload.recipient_email}."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")

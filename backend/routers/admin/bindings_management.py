@@ -58,7 +58,10 @@ class ZooInstallRequest(BaseModel):
 
 def _normalize_binding_desc(name: str, desc: Dict[str, Any]) -> Dict[str, Any]:
     """Ensures binding description has consistent keys for the frontend."""
+    ASCIIColors.yellow(f"Normalization >> Processing metadata for: {name}")
+    
     if not desc:
+        ASCIIColors.warning(f"Normalization >> No metadata dict received for {name}")
         return {
             "name": name, 
             "binding_name": name, 
@@ -67,22 +70,32 @@ def _normalize_binding_desc(name: str, desc: Dict[str, Any]) -> Dict[str, Any]:
             "model_parameters": []
         }
     
-    # Ensure identifier keys exist
-    if 'binding_name' not in desc:
-        desc['binding_name'] = name
-    if 'name' not in desc:
-        desc['name'] = name
+    if not isinstance(desc, dict):
+        ASCIIColors.error(f"Normalization >> Expected dict for {name}, got {type(desc)}")
+        return { "name": name, "binding_name": name, "title": name, "input_parameters": [], "model_parameters": [] }
+
+    # Standardize Identifiers
+    desc['binding_name'] = desc.get('binding_name', name)
+    desc['name'] = desc.get('name', name)
+    desc['title'] = desc.get('title', name.replace('_', ' ').title())
         
-    # Ensure UI title exists
-    if 'title' not in desc:
-        desc['title'] = desc.get('name', name).replace('_', ' ').title()
-        
-    # Standardize parameter keys
-    if 'input_parameters' not in desc:
-        desc['input_parameters'] = desc.get('global_input_parameters', [])
-        
-    if 'model_parameters' not in desc:
-        desc['model_parameters'] = desc.get('model_input_parameters', [])
+    # [CRITICAL FIX] Robust Parameter Mapping
+    # Standardize both Global and Model parameters across all naming conventions
+    if not desc.get('input_parameters'):
+        if desc.get('global_input_parameters'):
+            ASCIIColors.info(f"Normalization >> Mapped global_input_parameters for {name}")
+            desc['input_parameters'] = desc['global_input_parameters']
+        elif desc.get('parameters'):
+            ASCIIColors.info(f"Normalization >> Mapped generic parameters for {name}")
+            desc['input_parameters'] = desc['parameters']
+        else:
+            desc['input_parameters'] = []
+            
+    if not desc.get('model_parameters'):
+        if desc.get('model_input_parameters'):
+            desc['model_parameters'] = desc['model_input_parameters']
+        else:
+            desc['model_parameters'] = []
         
     return desc
 
@@ -309,11 +322,20 @@ def _generate_model_icon_task(task: Task, username: str, prompt: str):
 @bindings_management_router.get("/bindings/available_types", response_model=List[Dict])
 async def get_available_binding_types():
     try:
+        ASCIIColors.yellow("Admin >> Cataloging all LLM binding types...")
         names = list_bindings("llm")
         desc_list = []
         for name in names:
-            raw = get_binding_desc(name, "llm")
-            desc_list.append(_normalize_binding_desc(name, raw))
+            try:
+                raw = get_binding_desc(name, "llm")
+                normalized = _normalize_binding_desc(name, raw)
+                desc_list.append(normalized)
+            except Exception as ex:
+                # Isolate individual binding failures so one broken module doesn't crash the list
+                ASCIIColors.warning(f"Admin >> Failed to probe metadata for '{name}': {ex}")
+                desc_list.append({ "name": name, "binding_name": name, "title": name.replace('_', ' ').title(), "input_parameters": [], "model_parameters": [] })
+        
+        ASCIIColors.success(f"Admin >> Successfully standardized {len(desc_list)} binding definitions.")
         return desc_list
     except Exception as e:
         trace_exception(e)

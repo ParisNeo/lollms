@@ -1,12 +1,16 @@
 <script setup>
-import { ref, computed } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
+import { useAdminStore } from '../../stores/admin';
+import { useDataStore } from '../../stores/data';
 import GenericModal from './GenericModal.vue';
 import { useRouter } from 'vue-router';
+import { parsedMarkdown } from '../../services/markdownParser';
 
 // Icons
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconCircle from '../../assets/icons/IconCircle.vue';
 import IconArrowRight from '../../assets/icons/IconArrowRight.vue';
 import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue'; 
@@ -20,9 +24,17 @@ import IconShieldCheck from '../../assets/icons/IconCheckCircle.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import IconDatabase from '../../assets/icons/IconDatabase.vue';
 import IconMcp from '../../assets/icons/IconMcp.vue';
+import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
+import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 
 const uiStore = useUiStore();
 const authStore = useAuthStore();
+const adminStore = useAdminStore();
+const dataStore = useDataStore();
 const router = useRouter();
 
 const isAdmin = computed(() => authStore.isAdmin);
@@ -34,15 +46,22 @@ const changelog = computed(() => modalData.value?.changelog);
 const modalName = 'whatsNext';
 const currentStep = ref(1);
 
+// --- Wizard Binding State ---
+const isAddingBinding = ref(false);
+const isSavingBinding = ref(false);
+const selectedBindingType = ref(null);
+const bindingForm = ref({ alias: '', name: '', config: {} });
+const isKeyVisible = ref({});
 
 // --- Steps Definition ---
 const adminSteps = [
-    { id: 1, title: 'Mission & Terms' },
-    { id: 2, title: 'Step 1: The Engine (Bindings)' },
-    { id: 3, title: 'Step 2: The Brain (Personalities)' },
-    { id: 4, title: 'Step 3: The Context' },
-    { id: 5, title: 'Step 4: Connect & Serve' },
-    { id: 6, title: 'Ready to Go' }
+    { id: 1, title: 'Mission & Terms', category: 'welcome' },
+    { id: 2, title: 'Step 1: Text Generation (LLM)', category: 'llm' },
+    { id: 3, title: 'Step 2: Image Generation (TTI)', category: 'tti' },
+    { id: 4, title: 'Step 3: Speech to Text (STT)', category: 'stt' },
+    { id: 5, title: 'Step 4: Text to Speech (TTS)', category: 'tts' },
+    { id: 6, title: 'Step 5: The Brain (Personalities)', category: 'personalities' },
+    { id: 7, title: 'Ready to Go', category: 'finish' }
 ];
 
 const userSteps = [
@@ -57,8 +76,119 @@ const steps = computed(() => isAdmin.value ? adminSteps : userSteps);
 const totalSteps = computed(() => steps.value.length);
 const isLastStep = computed(() => currentStep.value === totalSteps.value);
 
+// --- Binding Helpers ---
+const currentCategory = computed(() => steps.value[currentStep.value - 1]?.category);
+
+const availableTypes = computed(() => {
+    if (currentCategory.value === 'llm') return adminStore.availableBindingTypes;
+    if (currentCategory.value === 'tti') return adminStore.availableTtiBindingTypes;
+    if (currentCategory.value === 'stt') return adminStore.availableSttBindingTypes;
+    if (currentCategory.value === 'tts') return adminStore.availableTtsBindingTypes;
+    return [];
+});
+
+const configuredBindings = computed(() => {
+    if (currentCategory.value === 'llm') return adminStore.bindings;
+    if (currentCategory.value === 'tti') return adminStore.ttiBindings;
+    if (currentCategory.value === 'stt') return adminStore.sttBindings;
+    if (currentCategory.value === 'tts') return adminStore.ttsBindings;
+    return [];
+});
+
+const activeTypeDesc = computed(() => {
+    if (!selectedBindingType.value) return null;
+    return availableTypes.value.find(b => (b.binding_name || b.name) === selectedBindingType.value);
+});
+
+// Unified parameter resolver to handle different backend naming conventions
+const allFormParameters = computed(() => {
+    const type = activeTypeDesc.value;
+    if (!type) return [];
+    // Standardize across different binding versions/types
+    return type.input_parameters || type.global_input_parameters || type.parameters || [];
+});
+
+// Helper to parse comma-separated options for select inputs
+function parseOptions(options) {
+    if (typeof options === 'string') return options.split(',').map(o => o.trim()).filter(o => o);
+    if (Array.isArray(options)) return options;
+    return [];
+}
+
+// Watch for category changes to reset form
+watch(currentStep, () => {
+    isAddingBinding.value = false;
+    selectedBindingType.value = null;
+    bindingForm.value = { alias: '', name: '', config: {} };
+    isKeyVisible.value = {};
+    
+    // Auto-fetch data for the current category
+    if (isAdmin.value) {
+        if (currentCategory.value === 'llm') { adminStore.fetchBindings(); adminStore.fetchAvailableBindingTypes(); }
+        if (currentCategory.value === 'tti') { adminStore.fetchTtiBindings(); adminStore.fetchAvailableTtiBindingTypes(); }
+        if (currentCategory.value === 'stt') { adminStore.fetchSttBindings(); adminStore.fetchAvailableSttBindingTypes(); }
+        if (currentCategory.value === 'tts') { adminStore.fetchTtsBindings(); adminStore.fetchAvailableTtsBindingTypes(); }
+    }
+});
+
+function handleStartAdd() {
+    isAddingBinding.value = true;
+    selectedBindingType.value = null;
+}
+
+function handleSelectType(type) {
+    selectedBindingType.value = type.binding_name || type.name;
+    bindingForm.value.name = selectedBindingType.value;
+    bindingForm.value.alias = `${selectedBindingType.value}_config`;
+    
+    // Initialize config with proper default values based on types
+    const config = {};
+    const params = type.input_parameters || type.global_input_parameters || type.parameters || [];
+    params.forEach(p => {
+        if (p.type === 'bool') {
+            config[p.name] = p.default !== undefined ? p.default : false;
+        } else if (p.type === 'int' || p.type === 'float') {
+            config[p.name] = p.default !== undefined ? p.default : 0;
+        } else {
+            config[p.name] = p.default !== undefined ? p.default : '';
+        }
+    });
+    bindingForm.value.config = config;
+}
+
+async function handleSaveBinding() {
+    if (!bindingForm.value.alias || !bindingForm.value.name) return;
+    isSavingBinding.value = true;
+    try {
+        const cat = currentCategory.value;
+        if (cat === 'llm') await adminStore.addBinding(bindingForm.value);
+        if (cat === 'tti') await adminStore.addTtiBinding(bindingForm.value);
+        if (cat === 'stt') await adminStore.addSttBinding(bindingForm.value);
+        if (cat === 'tts') await adminStore.addTtsBinding(bindingForm.value);
+        
+        isAddingBinding.value = false;
+        uiStore.addNotification(`${cat.toUpperCase()} Binding added!`, 'success');
+    } finally {
+        isSavingBinding.value = false;
+    }
+}
+
+async function handleDeleteBinding(id) {
+    const cat = currentCategory.value;
+    if (cat === 'llm') await adminStore.deleteBinding(id);
+    if (cat === 'tti') await adminStore.deleteTtiBinding(id);
+    if (cat === 'stt') await adminStore.deleteSttBinding(id);
+    if (cat === 'tts') await adminStore.deleteTtsBinding(id);
+}
+
 // --- Navigation ---
 function nextStep() {
+    // Validation: Require at least one LLM binding to move past step 2
+    if (isAdmin.value && currentStep.value === 2 && configuredBindings.value.length === 0) {
+        uiStore.addNotification('Please configure at least one LLM binding to continue.', 'warning');
+        return;
+    }
+
     if (currentStep.value < totalSteps.value) {
         currentStep.value++;
     } else {
@@ -214,45 +344,162 @@ async function finalizeSetup() {
             </div>
         </div>
 
-        <!-- ==================== ADMIN TRACK (Steps 2-6) ==================== -->
+        <!-- ==================== ADMIN TRACK (Steps 2-7) ==================== -->
         <template v-if="isAdmin">
             
-            <!-- Step 2: Bindings -->
-            <div v-if="currentStep === 2" class="space-y-8 animate-fade-in px-4">
-                <div class="text-center">
-                    <div class="inline-flex p-4 bg-blue-100 dark:bg-blue-900/30 rounded-full text-blue-600 mb-4 shadow-sm">
-                        <IconCpuChip class="w-12 h-12" />
+            <!-- Dynamic Binding Steps (LLM, TTI, STT, TTS) -->
+            <div v-if="[2,3,4,5].includes(currentStep)" class="space-y-6 animate-fade-in h-full flex flex-col">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <div class="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30 text-blue-600">
+                            <IconCpuChip v-if="currentCategory === 'llm'" class="w-6 h-6" />
+                            <IconPhoto v-else-if="currentCategory === 'tti'" class="w-6 h-6" />
+                            <IconMicrophone v-else class="w-6 h-6" />
+                        </div>
+                        <div>
+                            <h3 class="text-lg font-bold">Configure {{ currentCategory.toUpperCase() }} Engine</h3>
+                            <p class="text-xs text-gray-500">Add at least one provider to enable these features.</p>
+                        </div>
                     </div>
-                    <p class="text-lg text-gray-700 dark:text-gray-300 max-w-2xl mx-auto">
-                        LoLLMs is an interface; it needs an "engine" to work. <br><strong>Bindings</strong> connect LoLLMs to AI providers like Ollama, OpenAI, or Local files.
-                    </p>
+                    <button v-if="!isAddingBinding" @click="handleStartAdd" class="btn btn-primary btn-sm flex items-center gap-2">
+                        <IconPlus class="w-4 h-4" /> Add Provider
+                    </button>
                 </div>
-                
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div class="p-4 border rounded-xl dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-sm">
-                        <span class="font-bold text-lg mb-1 block text-blue-600 dark:text-blue-400">LLM Binding (Required)</span>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Handles text generation/chat. Configure <strong>Ollama</strong>, <strong>OpenAI</strong>, <strong>HuggingFace</strong>, or local <strong>GGUF</strong> models here.</p>
-                    </div>
-                    <div class="p-4 border rounded-xl dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-sm">
-                        <span class="font-bold text-lg mb-1 block text-purple-600 dark:text-purple-400">TTI Binding</span>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Handles image generation. Connect to <strong>Stable Diffusion</strong>, <strong>DALL-E</strong>, or <strong>Midjourney</strong>.</p>
-                    </div>
-                    <div class="p-4 border rounded-xl dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-sm">
-                        <span class="font-bold text-lg mb-1 block text-green-600 dark:text-green-400">RAG Binding</span>
-                        <p class="text-sm text-gray-600 dark:text-gray-400">Connect a Vector Database (using SafeStore) to let AI read your documents.</p>
-                    </div>
-                    <div class="p-4 border rounded-xl dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-800 transition shadow-sm">
-                        <span class="font-bold text-lg mb-1 block text-pink-600 dark:text-pink-400">Audio Bindings</span>
-                        <p class="text-sm text-gray-600 dark:text-gray-400"><strong>TTS</strong> (Text-to-Speech) and <strong>STT</strong> (Speech-to-Text) for voice interaction.</p>
-                    </div>
+
+                <!-- ADDING FLOW -->
+                <div v-if="isAddingBinding" class="flex-grow flex flex-col gap-4 border rounded-2xl p-6 bg-gray-50 dark:bg-gray-900 shadow-inner overflow-hidden">
+                    
+                    <!-- 1. Select Type -->
+                    <template v-if="!selectedBindingType">
+                        <div class="flex items-center justify-between mb-2">
+                             <h4 class="text-sm font-black uppercase text-gray-400 tracking-widest">Select Binding Type</h4>
+                             <button @click="isAddingBinding = false" class="text-xs text-gray-500 hover:text-red-500">Cancel</button>
+                        </div>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 overflow-y-auto custom-scrollbar pr-2">
+                            <button v-for="type in availableTypes" :key="type.name" 
+                                    @click="handleSelectType(type)"
+                                    class="p-4 text-left border-2 rounded-xl bg-white dark:bg-gray-800 hover:border-blue-500 transition-all group">
+                                <div class="font-bold text-sm mb-1 group-hover:text-blue-500">{{ type.title || type.name }}</div>
+                                <p class="text-[10px] text-gray-500 line-clamp-2">{{ type.description || 'No description' }}</p>
+                            </button>
+                        </div>
+                    </template>
+
+                    <!-- 2. Configure Form -->
+                    <template v-else>
+                         <div class="flex items-center justify-between mb-2 border-b dark:border-gray-700 pb-2">
+                             <div class="flex items-center gap-2">
+                                <button @click="selectedBindingType = null" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg">
+                                    <IconArrowLeft class="w-4 h-4" />
+                                </button>
+                                <span class="font-bold text-sm text-blue-600">{{ activeTypeDesc?.title || selectedBindingType }}</span>
+                             </div>
+                             <h4 class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Configure Parameters</h4>
+                        </div>
+
+                        <div class="flex-grow overflow-y-auto custom-scrollbar space-y-4 pr-2">
+                            <div>
+                                <label class="label text-xs">Friendly Alias</label>
+                                <input v-model="bindingForm.alias" class="input-field" placeholder="e.g. My Local Ollama">
+                                <p class="text-[9px] text-gray-400 mt-1 uppercase font-bold">Internal identifier for this configuration</p>
+                            </div>
+
+                            <!-- Description of the binding -->
+                            <div v-if="activeTypeDesc?.description" class="text-xs text-gray-500 bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700 prose-sm dark:prose-invert" v-html="parsedMarkdown(activeTypeDesc.description)"></div>
+
+                            <!-- Dynamic Parameters -->
+                            <div v-for="param in allFormParameters" :key="param.name" class="space-y-1">
+                                <label class="block text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                                    {{ param.name.replace(/_/g, ' ') }}
+                                    <span v-if="param.mandatory" class="text-red-500 ml-1">*</span>
+                                </label>
+                                
+                                <!-- Dropdown/Select -->
+                                <select v-if="param.options && param.options.length > 0" v-model="bindingForm.config[param.name]" class="input-field text-sm">
+                                    <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
+                                </select>
+
+                                <!-- Toggle/Boolean -->
+                                <div v-else-if="param.type === 'bool'" class="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
+                                    <span class="text-[10px] text-gray-500 pr-4">{{ param.description }}</span>
+                                    <button @click="bindingForm.config[param.name] = !bindingForm.config[param.name]" type="button" :class="[bindingForm.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors']">
+                                        <span :class="[bindingForm.config[param.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition']"></span>
+                                    </button>
+                                </div>
+
+                                <!-- Text/Number/Password -->
+                                <div v-else class="relative">
+                                    <input 
+                                        :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'"
+                                        v-model="bindingForm.config[param.name]" 
+                                        class="input-field text-sm" 
+                                        :placeholder="param.description || 'Enter value...'"
+                                    >
+                                    <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-blue-500 transition-colors">
+                                        <IconEyeOff v-if="isKeyVisible[param.name]" class="w-4 h-4" /><IconEye v-else class="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions / Commands in Wizard -->
+                        <div v-if="activeTypeDesc?.commands?.length > 0" class="mt-4 pt-4 border-t dark:border-gray-700">
+                            <h5 class="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-3">Quick Actions</h5>
+                            <div class="space-y-2">
+                                <button v-for="cmd in activeTypeDesc.commands" :key="cmd.name" 
+                                        @click="adminStore.executeBindingCommand(null, cmd.name, bindingForm.config)"
+                                        class="w-full flex items-center justify-between p-2 rounded-lg bg-white dark:bg-gray-800 border dark:border-gray-700 hover:bg-gray-100 transition-colors group">
+                                    <div class="flex items-center gap-2">
+                                        <IconTerminal class="w-4 h-4 text-gray-400 group-hover:text-blue-500" />
+                                        <span class="text-xs font-bold">{{ cmd.title || cmd.name }}</span>
+                                    </div>
+                                    <IconPlayCircle class="w-4 h-4 text-blue-500" />
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="pt-4 flex justify-end gap-2">
+                             <button @click="selectedBindingType = null" class="btn btn-secondary btn-sm">Back</button>
+                             <button @click="handleSaveBinding" class="btn btn-primary btn-sm px-6" :disabled="isSavingBinding">
+                                 <IconAnimateSpin v-if="isSavingBinding" class="w-4 h-4 mr-2 animate-spin" />
+                                 Save Configuration
+                             </button>
+                        </div>
+                    </template>
                 </div>
-                <div class="bg-red-50 dark:bg-red-900/20 border-l-4 border-red-500 p-4 text-sm text-red-700 dark:text-red-300 rounded-r-lg">
-                    <strong>Critical Action:</strong> Go to <code>Settings > Bindings</code> immediately after this wizard to configure at least one LLM.
+
+                <!-- LIST VIEW -->
+                <div v-else class="flex-grow flex flex-col gap-3 overflow-y-auto custom-scrollbar">
+                    <div v-if="configuredBindings.length === 0" class="flex-grow flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-10 opacity-60">
+                        <IconCircle class="w-12 h-12 mb-4 text-gray-300" />
+                        <p class="text-sm font-bold text-gray-500 uppercase tracking-widest">No Active Providers</p>
+                        <p class="text-xs text-gray-400 mt-1">Click "Add Provider" above to get started.</p>
+                    </div>
+                    
+                    <div v-for="b in configuredBindings" :key="b.id" class="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 shadow-sm group">
+                        <div class="flex items-center gap-4">
+                            <div class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-blue-500">
+                                <IconServer class="w-5 h-5" />
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm">{{ b.alias }}</h4>
+                                <p class="text-[10px] text-gray-500 uppercase font-black tracking-widest">{{ b.name }}</p>
+                            </div>
+                        </div>
+                        <button @click="handleDeleteBinding(b.id)" class="p-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <IconTrash class="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    <div v-if="currentCategory === 'llm' && configuredBindings.length > 0" class="mt-auto p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800 flex items-center gap-3">
+                         <IconCheckCircle class="w-5 h-5 text-green-500 flex-shrink-0" />
+                         <span class="text-xs text-blue-800 dark:text-blue-300">LLM Engine ready. You can add more bindings later in Admin Settings.</span>
+                    </div>
                 </div>
             </div>
 
-            <!-- Step 3: Personalities -->
-            <div v-if="currentStep === 3" class="space-y-8 animate-fade-in px-4">
+            <!-- Step 6: Personalities (Informational) -->
+            <div v-if="currentStep === 6" class="space-y-8 animate-fade-in px-4">
                  <div class="text-center">
                     <div class="inline-flex p-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-full text-yellow-600 mb-4 shadow-sm">
                         <IconUserCircle class="w-12 h-12" />
@@ -370,8 +617,8 @@ async function finalizeSetup() {
                 </div>
             </div>
 
-             <!-- Step 6: Finish -->
-            <div v-if="currentStep === 6" class="space-y-8 animate-fade-in text-center px-4">
+             <!-- Step 7: Finish -->
+            <div v-if="currentStep === 7" class="space-y-8 animate-fade-in text-center px-4">
                  <h3 class="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-500 to-emerald-700">System Ready</h3>
                  <p class="text-gray-600 dark:text-gray-300">
                      You are now the administrator of your own AI infrastructure.

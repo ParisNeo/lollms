@@ -46,13 +46,8 @@ const filteredSkills = computed(() => {
 });
 
 function editSkill(skill) {
-    if (discussionsStore.currentDiscussionId) {
-        // Automatically add/open the skill in the current discussion workspace
-        discussionsStore.addSkillAsArtefact(skill);
-        uiStore.isDataZoneVisible = true;
-    } else {
-        uiStore.openModal('skillEditor', { skill });
-    }
+    // Open the editor modal to allow reading/updating without force-adding to context
+    uiStore.openModal('skillEditor', { skill });
 }
 
 async function deleteSkill(skill) {

@@ -437,7 +437,9 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
         else:
             print("Outlook integration is only supported on Windows.")
     else:
-        print(f"WARNING: Email sending is set to '{recovery_mode}'. No email sending configured or manual mode active.")
+        error_msg = f"Email sending is set to '{recovery_mode}'. No email configuration found or manual mode is active."
+        print(f"WARNING: {error_msg}")
+        raise ValueError(error_msg)
 
 def send_password_reset_email(to_email: str, reset_link: str, username: str):
     """Prepares and sends a password reset email using the configured method."""

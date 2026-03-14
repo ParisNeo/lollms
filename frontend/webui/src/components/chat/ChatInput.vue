@@ -156,38 +156,44 @@ const getPercentage = (tokens) => maxTokens.value > 0 ? (tokens / maxTokens.valu
 const contextParts = computed(() => {
     if (!activeDiscussionContextStatus.value) return [];
     
-    const sys = activeDiscussionContextStatus.value.zones.system_context?.breakdown || {};
-    const history = activeDiscussionContextStatus.value.zones.message_history?.breakdown || {};
-    const globalImages = activeDiscussionContextStatus.value.zones.discussion_images?.tokens || 0;
+    // Safety check for zone existence
+    const zones = activeDiscussionContextStatus.value.zones || {};
+    const sys = zones.system_context?.breakdown || {};
+    const history = zones.message_history?.breakdown || {};
+    const globalImages = zones.discussion_images?.tokens || 0;
     
     const parts = [];
 
-    // 1. Directives (Indigo)
+    // 1. Directives (Indigo): System Prompt + Pruning Summaries
     const directiveTokens = (sys.system_prompt?.tokens || 0) + (sys.pruning_summary?.tokens || 0);
-    if (directiveTokens > 0) parts.push({ label: 'S', value: directiveTokens, title: 'Directives', colorClass: 'bg-indigo-500' });
+    if (directiveTokens > 0) parts.push({ label: 'Directives', value: directiveTokens, colorClass: 'bg-indigo-600' });
 
-    // 2. Memory (Teal)
-    if (sys.memory?.tokens > 0) parts.push({ label: 'M', value: sys.memory.tokens, title: 'Memory', colorClass: 'bg-teal-500' });
+    // 2. Memory (Teal): Long-term facts
+    const memoryTokens = sys.memory?.tokens || 0;
+    if (memoryTokens > 0) parts.push({ label: 'Memory Bank', value: memoryTokens, colorClass: 'bg-teal-500' });
 
-    // 3. Dynamic Data Zones (Amber)
+    // 3. Dynamic Data Zones (Amber): User Prefs + Discussion Zone + Personality data
     const zoneTokens = (sys.user_data_zone?.tokens || 0) + (sys.discussion_data_zone?.tokens || 0) + (sys.personality_data_zone?.tokens || 0);
-    if (zoneTokens > 0) parts.push({ label: 'Z', value: zoneTokens, title: 'Data Zones', colorClass: 'bg-amber-500' });
+    if (zoneTokens > 0) parts.push({ label: 'Context Zones', value: zoneTokens, colorClass: 'bg-amber-500' });
 
-    // 4. Workspace Artefacts (Blue)
-    if (sys.artefacts?.tokens > 0) parts.push({ label: 'A', value: sys.artefacts.tokens, title: 'Artefacts', colorClass: 'bg-blue-500' });
+    // 4. Workspace Artefacts (Blue): Active documents in workspace
+    const artefactTokens = sys.artefacts?.tokens || 0;
+    if (artefactTokens > 0) parts.push({ label: 'Workspace Files', value: artefactTokens, colorClass: 'bg-blue-600' });
 
-    // 5. Message Text History (Green)
-    if (history.text_tokens > 0) parts.push({ label: 'H', value: history.text_tokens, title: 'History', colorClass: 'bg-green-500' });
+    // 5. Message Text History (Emerald): Previous conversation text
+    const historyTextTokens = history.text_tokens || 0;
+    if (historyTextTokens > 0) parts.push({ label: 'Conversation History', value: historyTextTokens, colorClass: 'bg-emerald-600' });
 
-    // 6. All Images (Cyan) - Message images + Global images
+    // 6. All Images (Rose): Message attachments + Global images
     const totalImageTokens = (history.image_tokens || 0) + globalImages;
-    if (totalImageTokens > 0) parts.push({ label: 'I', value: totalImageTokens, title: 'Images', colorClass: 'bg-cyan-500' });
+    if (totalImageTokens > 0) parts.push({ label: 'Visual Data', value: totalImageTokens, colorClass: 'bg-rose-500' });
 
-    // 7. Agentic Scratchpad (Orange)
-    if (sys.scratchpad?.tokens > 0) parts.push({ label: 'P', value: sys.scratchpad.tokens, title: 'Scratchpad', colorClass: 'bg-orange-400' });
+    // 7. Agentic Scratchpad (Slate): Plan and thoughts
+    const scratchpadTokens = sys.scratchpad?.tokens || 0;
+    if (scratchpadTokens > 0) parts.push({ label: 'Agent Scratchpad', value: scratchpadTokens, colorClass: 'bg-slate-500' });
 
-    // 8. Live User Input (Purple)
-    if (inputTokenCount.value > 0) parts.push({ label: 'U', value: inputTokenCount.value, title: 'Your Input', colorClass: 'bg-purple-500' });
+    // 8. Live User Input (Violet): The text you are currently typing
+    if (inputTokenCount.value > 0) parts.push({ label: 'Current Message Draft', value: inputTokenCount.value, colorClass: 'bg-violet-600' });
 
     return parts;
 });
@@ -672,18 +678,49 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
              <div class="max-w-4xl mx-auto flex items-center gap-3">
                 <template v-if="showContextBar">
                     <div @click="uiStore.openModal('contextViewer')" 
-                         class="flex-grow flex items-center gap-3 cursor-pointer group/context select-none active:scale-[0.99] transition-transform">
+                         class="flex-grow flex items-center gap-3 cursor-pointer group/context select-none active:scale-[0.99] transition-transform relative">
+                        
+                        <!-- ── [NEW] Rich Tooltip Overlay ── -->
+                        <div class="absolute bottom-full left-0 mb-3 w-72 opacity-0 translate-y-2 pointer-events-none group-hover/context:opacity-100 group-hover/context:translate-y-0 group-hover/context:pointer-events-auto transition-all duration-300 z-50">
+                            <div class="bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden p-4 space-y-3">
+                                <div class="flex justify-between items-center border-b dark:border-gray-800 pb-2 mb-2">
+                                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Context Usage</span>
+                                    <span class="text-xs font-mono font-bold" :class="totalPercentage > 90 ? 'text-red-500' : 'text-blue-500'">{{ Math.round(totalPercentage) }}%</span>
+                                </div>
+                                <div class="space-y-2.5">
+                                    <div v-for="part in contextParts" :key="part.label" class="flex items-center justify-between group/item">
+                                        <div class="flex items-center gap-2">
+                                            <div class="w-2.5 h-2.5 rounded-full shadow-sm" :class="part.colorClass"></div>
+                                            <span class="text-[11px] font-bold text-gray-700 dark:text-gray-300">{{ part.label }}</span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <span class="text-[10px] font-mono text-gray-500 dark:text-gray-400">{{ part.value.toLocaleString() }}</span>
+                                            <span class="text-[9px] text-gray-400 w-8 text-right">{{ Math.round(getPercentage(part.value)) }}%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="pt-2 border-t dark:border-gray-800 flex justify-between items-center text-[9px] font-black uppercase text-gray-400 tracking-tighter">
+                                    <span>Total Used</span>
+                                    <span class="font-mono text-gray-600 dark:text-gray-200">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
+                                </div>
+                            </div>
+                            <!-- Tooltip Arrow -->
+                            <div class="absolute left-6 top-full -mt-1 w-3 h-3 bg-white dark:bg-gray-900 border-r border-b border-gray-200 dark:border-gray-700 transform rotate-45"></div>
+                        </div>
+
                         <div class="flex items-center gap-1 text-gray-500 flex-shrink-0 group-hover/context:text-blue-500 transition-colors">
                             <IconToken class="w-3.5 h-3.5" />
                             <span class="text-[10px] font-black uppercase tracking-tight hidden sm:inline">Context</span>
                         </div>
-                        <div :class="['flex-grow h-2 rounded-full overflow-hidden flex border dark:border-gray-800 transition-all', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'bg-gray-200 dark:bg-gray-700 group-hover/context:ring-blue-400/50', progressBorderColorClass]">
+
+                        <!-- Progress Bar with improved contrast and segment dividers -->
+                        <div :class="['flex-grow h-2.5 rounded-full overflow-hidden flex border dark:border-gray-800 transition-all shadow-inner', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'bg-gray-200 dark:bg-gray-700 group-hover/context:ring-blue-400/50', progressBorderColorClass]">
                             <div v-for="part in contextParts" :key="part.label" 
-                                :class="[totalPercentage >= 100 ? 'bg-red-600' : part.colorClass, 'h-full transition-all duration-500 ease-out']" 
+                                :class="[totalPercentage >= 100 ? 'bg-red-600' : part.colorClass, 'h-full transition-all duration-500 ease-out border-r border-black/5 last:border-0']" 
                                 :style="{ width: `${getPercentage(part.value)}%` }" 
-                                :title="`${part.title}: ${part.value} tokens`"
                             ></div>
                         </div>
+
                         <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap flex-shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors">
                             <span class="font-bold">{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
                         </div>

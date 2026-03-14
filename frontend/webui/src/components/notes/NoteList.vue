@@ -20,6 +20,9 @@ const notesStore = useNotesStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
+const isSelectionMode = ref(false);
+const selectedNoteIds = ref(new Set());
+
 const notesTree = computed(() => notesStore.notesTree);
 
 // Filter logic
@@ -48,13 +51,8 @@ const filteredTree = computed(() => {
 });
 
 function handleNoteClick(note) {
-    if (discussionsStore.currentDiscussionId) {
-        // Automatically add/open the note in the current discussion workspace
-        discussionsStore.addNoteAsArtefact(note);
-        uiStore.isDataZoneVisible = true;
-    } else {
-        uiStore.openModal('noteEditor', { note });
-    }
+    // Open the editor modal to allow reading/updating without force-adding to context
+    uiStore.openModal('noteEditor', { note });
 }
 
 function handleNewSubgroup(parentGroup) {
@@ -93,10 +91,32 @@ async function handleImportNote(note) {
     }
     await discussionsStore.addNoteAsArtefact(note);
 }
+
+function toggleSelection(noteId) {
+    if (selectedNoteIds.value.has(noteId)) selectedNoteIds.value.delete(noteId);
+    else selectedNoteIds.value.add(noteId);
+}
+
+function handleBulkEmail() {
+    if (selectedNoteIds.value.size === 0) return;
+    uiStore.openModal('emailNotes', { noteIds: Array.from(selectedNoteIds.value) });
+}
 </script>
 
 <template>
   <div class="space-y-1">
+      <!-- Selection Toolbar -->
+      <div v-if="notesStore.notes.length > 0" class="flex items-center justify-between px-2 py-1 mb-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+          <button @click="isSelectionMode = !isSelectionMode" class="text-[10px] font-black uppercase tracking-widest" :class="isSelectionMode ? 'text-blue-600' : 'text-gray-500'">
+              {{ isSelectionMode ? 'Cancel Selection' : 'Select Multiple' }}
+          </button>
+          <div v-if="isSelectionMode && selectedNoteIds.size > 0" class="flex gap-2">
+              <button @click="handleBulkEmail" class="btn btn-primary btn-xs flex items-center gap-1">
+                  <IconMail class="w-3 h-3" /> Email ({{ selectedNoteIds.size }})
+              </button>
+          </div>
+      </div>
+
       <NoteGroupItem 
         v-for="group in filteredTree.groups" 
         :key="group.id" 
@@ -108,6 +128,9 @@ async function handleImportNote(note) {
         @note-click="handleNoteClick"
         @delete-note="handleDeleteNote"
         @import-note="handleImportNote"
+        :selection-mode="isSelectionMode"
+        :selected-ids="selectedNoteIds"
+        @toggle-select="toggleSelection"
       />
       
       <div v-if="filteredTree.ungrouped && filteredTree.ungrouped.length > 0">
@@ -115,7 +138,11 @@ async function handleImportNote(note) {
 
           <div v-for="note in filteredTree.ungrouped" :key="note.id"
                class="group flex items-center gap-3 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors mb-1"
-               @click="handleNoteClick(note)">
+               @click="isSelectionMode ? toggleSelection(note.id) : handleNoteClick(note)">
+              
+              <div v-if="isSelectionMode" class="flex-shrink-0">
+                  <input type="checkbox" :checked="selectedNoteIds.has(note.id)" class="rounded border-gray-300">
+              </div>
 
               <div class="flex items-center gap-2 min-w-0 flex-grow">
                   <div class="p-1.5 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 flex-shrink-0 border border-amber-100 dark:border-amber-800">
@@ -142,6 +169,9 @@ async function handleImportNote(note) {
                       </button>
                       <button @click="uiStore.openModal('shareResource', { id: note.id, name: note.title, type: 'note' })" class="menu-item">
                           <IconShare class="w-4 h-4 mr-2"/> Share with Friend
+                      </button>
+                      <button @click="uiStore.openModal('emailNotes', { noteIds: [note.id] })" class="menu-item">
+                          <IconMail class="w-4 h-4 mr-2"/> Email Note
                       </button>
                       <div class="menu-divider"></div>
                       <button @click="handleDeleteNote(note)" class="menu-item text-red-500 font-bold">

@@ -73,10 +73,12 @@ const NotebookWizardModal = defineAsyncComponent(() => import('./NotebookWizardM
 const AdminCreateUserModal = defineAsyncComponent(() => import('./AdminCreateUserModal.vue'));
 const CreateArtefactModal = defineAsyncComponent(() => import('./CreateArtefactModal.vue'));
 const SkillEditorModal = defineAsyncComponent(() => import('./SkillEditorModal.vue'));
+const EmailNotesModal = defineAsyncComponent(() => import('./EmailNotesModal.vue'));
 </script>
 
 <template>
   <div id="modal-container">
+    <EmailNotesModal v-if="activeModal === 'emailNotes'" />
     <CreateFirstAdminModal v-if="activeModal === 'firstAdminSetup'" />
     <LoginModal v-if="activeModal === 'login'" />
     <RegisterModal v-if="activeModal === 'register'" />

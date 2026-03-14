@@ -62,21 +62,41 @@ const isEditMode = computed(() => editingBinding.value !== null);
 
 const selectedBindingType = computed(() => {
     if (!form.value.name) return null;
-    return availableBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
+    
+    // [FIX] Flexible Lookup: Normalize names to handle underscore/dash differences 
+    // between DB records and newly fetched metadata.
+    const target = form.value.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const found = availableBindingTypes.value.find(b => {
+        const name = (b.binding_name || b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return name === target;
+    });
+
+    console.log(`[AdminBinding] Lookup for type '${form.value.name}' found:`, found);
+    if (!found) {
+        console.warn(`[AdminBinding] No metadata match for '${form.value.name}'. Total Types: ${availableBindingTypes.value.length}`);
+    }
+    return found;
 });
 
 const allFormParameters = computed(() => {
-    if (!selectedBindingType.value) return [];
+    if (!selectedBindingType.value) {
+        return [];
+    }
     
-    // 1. Get Global Parameters Definition
-    const paramsFromDesc = selectedBindingType.value.input_parameters || [];
+    // 1. Get Global Parameters Definition (handling various backend naming conventions)
+    const paramsFromDesc = selectedBindingType.value.input_parameters || 
+                           selectedBindingType.value.global_input_parameters || 
+                           selectedBindingType.value.parameters || [];
+    
+    console.log(`[AdminBinding] allFormParameters found ${paramsFromDesc.length} keys for ${selectedBindingType.value.name}`);
     const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
     
-    // 2. Get Model Parameters to Exclude
-    const modelParams = selectedBindingType.value.model_parameters || [];
+    // 2. Get Model Parameters to Exclude (these belong in the alias/model manager)
+    const modelParams = selectedBindingType.value.model_parameters || 
+                        selectedBindingType.value.model_input_parameters || [];
     const modelParamNames = new Set(modelParams.map(p => p.name));
     
-    // 3. Find Extra Config keys (not in global desc), BUT exclude model params and specific keys
+    // 3. Find Extra Config keys (already in DB but missing from desc)
     const paramsFromConfig = Object.keys(form.value.config || {})
         .filter(key => 
             !paramNamesFromDesc.has(key) && 
@@ -88,7 +108,7 @@ const allFormParameters = computed(() => {
         .map(key => ({
             name: key,
             type: typeof form.value.config[key] === 'boolean' ? 'bool' : (typeof form.value.config[key] === 'number' ? 'float' : 'str'),
-            description: `(Parameter not in binding description)`,
+            description: `(Configuration key not found in metadata)`,
             mandatory: false,
         }));
         
@@ -102,15 +122,33 @@ const allFormParameters = computed(() => {
 });
 
 watch(() => form.value.name, (newName, oldName) => {
-    if (newName !== oldName && !isEditMode.value) {
-        const bindingDesc = availableBindingTypes.value.find(b => (b.binding_name || b.name) === newName);
-        const newConfig = {};
-        if (bindingDesc && bindingDesc.input_parameters) {
-            bindingDesc.input_parameters.forEach(param => {
-                newConfig[param.name] = param.default;
+    // [FIX] Improved Watcher: Only run logic if we are NOT in edit mode
+    // (Edit mode is now handled by the improved showEditForm function)
+    if (newName && !isEditMode.value && (newName !== oldName || Object.keys(form.value.config).length === 0)) {
+        
+        const bindingDesc = availableBindingTypes.value.find(b => {
+            const target = newName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const current = (b.binding_name || b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+            return current === target;
+        });
+
+        if (bindingDesc) {
+            const newConfig = {};
+            const params = (bindingDesc.input_parameters || 
+                            bindingDesc.global_input_parameters || 
+                            bindingDesc.parameters || []);
+
+            params.forEach(param => {
+                if (param.type === 'bool') {
+                    newConfig[param.name] = param.default !== undefined ? param.default : false;
+                } else if (param.type === 'int' || param.type === 'float') {
+                    newConfig[param.name] = param.default !== undefined ? param.default : 0;
+                } else {
+                    newConfig[param.name] = param.default !== undefined ? param.default : '';
+                }
             });
+            form.value.config = newConfig;
         }
-        form.value.config = newConfig;
     }
 });
 
@@ -144,11 +182,36 @@ function showAddForm() {
 }
 
 function showEditForm(binding) {
+    console.log("[AdminBinding] Opening Edit Form for:", binding.alias);
+    
     editingBinding.value = binding;
-    form.value = JSON.parse(JSON.stringify(binding));
-    if (!form.value.config) {
-        form.value.config = {};
+    // 1. Load the basic data from DB
+    const baseForm = JSON.parse(JSON.stringify(binding));
+    if (!baseForm.config) baseForm.config = {};
+
+    // 2. [CRITICAL FIX] Sync Config with Metadata Defaults
+    // This ensures that even if the DB record is old/empty, 
+    // the UI sees the keys defined in the YAML metadata (like service_key).
+    const bindingMetadata = availableBindingTypes.value.find(b => 
+        (b.binding_name || b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') === 
+        (baseForm.name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
+    );
+
+    if (bindingMetadata) {
+        const params = (bindingMetadata.input_parameters || 
+                        bindingMetadata.global_input_parameters || 
+                        bindingMetadata.parameters || []);
+        
+        params.forEach(p => {
+            // Only fill if the key is missing from the DB record
+            if (baseForm.config[p.name] === undefined) {
+                console.log(`[AdminBinding] Initializing missing key from metadata: ${p.name}`);
+                baseForm.config[p.name] = p.default !== undefined ? p.default : (p.type === 'bool' ? false : '');
+            }
+        });
     }
+
+    form.value = baseForm;
     isKeyVisible.value = {};
     
     const bindingType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);

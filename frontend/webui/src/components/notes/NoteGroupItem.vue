@@ -17,10 +17,12 @@ const props = defineProps({
     level: {
         type: Number,
         default: 0
-    }
+    },
+    selectionMode: Boolean,
+    selectedIds: Object
 });
 
-const emit = defineEmits(['new-subgroup', 'edit-group', 'delete-group', 'note-click', 'delete-note', 'import-note']);
+const emit = defineEmits(['new-subgroup', 'edit-group', 'delete-group', 'note-click', 'delete-note', 'import-note', 'toggle-select']);
 
 const isOpen = ref(false);
 const activeNoteMenuId = ref(null);
@@ -68,20 +70,27 @@ function toggle() {
                 :key="child.id" 
                 :group="child" 
                 :level="level + 1"
+                :selection-mode="selectionMode"
+                :selected-ids="selectedIds"
                 @new-subgroup="emit('new-subgroup', $event)"
                 @edit-group="emit('edit-group', $event)"
                 @delete-group="emit('delete-group', $event)"
                 @note-click="emit('note-click', $event)"
                 @delete-note="emit('delete-note', $event)"
                 @import-note="emit('import-note', $event)"
+                @toggle-select="emit('toggle-select', $event)"
             />
             
             <!-- Notes in this group -->
             <div v-for="note in group.notes" :key="note.id" 
                  class="discussion-item-flat group ml-2"
                  :class="{ 'selected': activeNoteMenuId === note.id }"
-                 @click="emit('note-click', note)">
+                 @click="selectionMode ? emit('toggle-select', note.id) : emit('note-click', note)">
                 
+                <div v-if="selectionMode" class="flex-shrink-0 mr-2">
+                    <input type="checkbox" :checked="selectedIds.has(note.id)" class="rounded border-gray-300">
+                </div>
+
                 <div class="flex items-center gap-3 min-w-0 flex-grow">
                     <IconPencil class="w-4 h-4 flex-shrink-0 text-amber-500" />
                     <p class="discussion-title">{{ note.title || 'Untitled' }}</p>
@@ -103,6 +112,9 @@ function toggle() {
                             </button>
                             <button @click="uiStore.openModal('shareResource', { id: note.id, name: note.title, type: 'note' }); closeNoteMenu()" class="menu-item">
                                 <IconUserCircle class="w-4 h-4 mr-3 text-gray-400"/> Share with Friend
+                            </button>
+                            <button @click="uiStore.openModal('emailNotes', { noteIds: [note.id] }); closeNoteMenu()" class="menu-item">
+                                <IconMail class="w-4 h-4 mr-3 text-blue-500"/> Email Note
                             </button>
                             <div class="menu-divider"></div>
                             <button @click="emit('delete-note', note); closeNoteMenu()" class="menu-item danger-item">
