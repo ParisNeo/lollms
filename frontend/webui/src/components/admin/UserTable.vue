@@ -246,8 +246,13 @@ onMounted(() => {
                                 </div>
                             </td>
                             <td class="table-cell text-sm text-center font-mono text-gray-500 dark:text-gray-400">
-                                <div class="flex items-center justify-center gap-1" :title="`${user.connection_count} active connections`">
-                                    <IconLink class="w-4 h-4"/> {{ user.connection_count }}
+                                <div class="flex flex-col items-center justify-center">
+                                    <div class="flex items-center gap-1 font-bold text-blue-500" :title="`${user.connection_count} active connections`">
+                                        <IconLink class="w-3.5 h-3.5"/> {{ user.connection_count }}
+                                    </div>
+                                    <div class="text-[10px] opacity-60 font-medium" :title="`${user.total_logins} total logins recorded`">
+                                        Total: {{ user.total_logins }}
+                                    </div>
                                 </div>
                             </td>
                             <td class="table-cell text-sm text-gray-500 dark:text-gray-400">{{ formatLastSeen(user.last_activity_at) }}</td>

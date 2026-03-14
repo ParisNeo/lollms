@@ -43,6 +43,7 @@ class User(Base):
     receive_notification_emails = Column(Boolean, default=True, nullable=False, server_default='1')
     is_searchable = Column(Boolean, default=True, nullable=False, index=True, server_default='1')
     first_login_done = Column(Boolean, default=False, nullable=False, server_default='0')
+    total_logins = Column(Integer, default=0, nullable=False, server_default='0')
     
     data_zone = Column(Text, nullable=True)
     user_personal_info = Column(Text, nullable=True)

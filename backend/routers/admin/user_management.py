@@ -157,6 +157,7 @@ async def admin_get_all_users(
                 "last_activity_at": safe_datetime(user.last_activity_at),
                 "is_online": is_online,
                 "connection_count": connection_count,
+                "total_logins": getattr(user, "total_logins", 0),
                 "api_key_count": api_key_count,
                 "task_count": task_count,
                 "generation_count": 0

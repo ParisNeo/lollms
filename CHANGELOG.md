@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-14 16:21]
+
+- feat: add email notification preferences and enhance admin user management
+
 ## [2026-03-13 03:32]
 
 - feat: enhance discussion artifacts, update user schema, and refresh UI

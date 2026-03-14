@@ -6,7 +6,7 @@ import datetime
 import random
 import struct
 import threading
-from typing import Dict, List, Set, Optional
+from typing import Dict, List, Set, Optional, Any
 from fastapi import WebSocket
 from ascii_colors import trace_exception, ASCIIColors
 from .db import session as db_session_module
@@ -24,7 +24,7 @@ class ConnectionManager:
         self.admin_user_ids: Set[int] = set()
         self._loop: asyncio.AbstractEventLoop = None
         self.cleanup_tasks: Dict[int, asyncio.Task] = {} # {user_id: Task}
-        self.is_ready = False # Guard for startup sync storms
+        self.is_ready = True # Guard for startup sync storms
         
         # Hub Client State
         self.hub_writer: Optional[asyncio.StreamWriter] = None
@@ -36,11 +36,18 @@ class ConnectionManager:
     def set_loop(self, loop: asyncio.AbstractEventLoop):
         self._loop = loop
 
-    async def connect(self, user_id: int, websocket: WebSocket):
+    async def connect(self, user_id_raw: Any, websocket: WebSocket):
         await websocket.accept()
         session_id = str(uuid.uuid4())
         websocket.session_id = session_id
         
+        # Ensure user_id is a clean integer for DB lookups
+        try:
+            user_id = int(user_id_raw)
+        except (ValueError, TypeError):
+            ASCIIColors.error(f"Invalid user_id type received in WebSocket connect: {user_id_raw}")
+            return
+
         if user_id in self.cleanup_tasks:
             ASCIIColors.info(f"User {user_id} reconnected. Cancelling session cleanup.")
             self.cleanup_tasks[user_id].cancel()
@@ -53,14 +60,20 @@ class ConnectionManager:
         db = None
         try:
             db = db_session_module.SessionLocal()
+            
+            # Record active connection
             new_connection = WebSocketConnection(user_id=user_id, session_id=session_id)
             db.add(new_connection)
             
             connecting_user = db.query(DBUser).filter(DBUser.id == user_id).first()
             if connecting_user:
+                # Historical tracking: Increment total logins
+                connecting_user.total_logins += 1
+                
                 if connecting_user.is_admin:
                     self.register_admin(user_id)
 
+                # Commit early to ensure connection and login count are saved
                 db.commit()
 
                 # --- CLIENT WARMUP WITH PROGRESS STREAMING ---

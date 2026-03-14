@@ -220,4 +220,4 @@ By default add metadata to the chunks
 Import folder instead of just import file
 Fix the repetition problem in the answer. the answer is always returned twice!
 User joined is the current date!! It should be the first time the user joined the system!!
-Some users have 0 connections but ni reality they did connect multiple times!
+

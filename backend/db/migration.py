@@ -673,6 +673,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
 
+        if 'total_logins' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN total_logins INTEGER DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
         # New RAG fields migration
         new_rag_cols = {
             "default_rag_chunk_size": "INTEGER DEFAULT 1024",
