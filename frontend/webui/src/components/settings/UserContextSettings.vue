@@ -2,6 +2,7 @@
 import { computed, ref, watch, nextTick, onMounted } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
+import { useUiStore } from '../../stores/ui';
 import { storeToRefs } from 'pinia';
 import LanguageSelector from '../ui/LanguageSelector.vue';
 
@@ -25,6 +26,7 @@ import IconClock from '../../assets/icons/IconClock.vue';
 import IconSettings from '../../assets/icons/IconSettings.vue';
 import IconObservation from '../../assets/icons/IconObservation.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
+
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
