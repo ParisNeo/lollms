@@ -1556,9 +1556,7 @@ def build_llm_generation_router(router: APIRouter):
                     nonlocal first_chunk_time
                     if stop_event.is_set(): return False
 
-                    # Normalize msg_type (could be Enum or Int depending on source)
                     mtype_val = msg_type.value if hasattr(msg_type, 'value') else msg_type
-
                     tip = discussion_obj.get_message(discussion_obj.active_branch_id)
                     current_content_len = len(tip.content) if tip else 0
 
@@ -1567,38 +1565,49 @@ def build_llm_generation_router(router: APIRouter):
                         ttft = (first_chunk_time - start_time) * 1000
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "ttft", "content": round(ttft, 2)}) + "\n")
 
-                    # Mapping based on the provided MSG_TYPE Enum values
+                    # Handle Real-time Artefact Events (Note, Skill, Widget starts)
+                    if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
+                        # Relay the start events (note_start, skill_start, etc.) directly to UI
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(params)) + "\n")
+                        return True
+
+                    # Handle Real-time Artefact Persistence Events (fired as soon as </tag> is parsed)
+                    if mtype_val == MSG_TYPE.MSG_TYPE_ARTEFACTS_STATE_CHANGED.value and params and "artefact" in params:
+                        payload = {
+                            "type": "artefact_event",
+                            "data": params # Contains {artefact: dict, is_new: bool}
+                        }
+                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
+                        return True
+
                     payload_map = {
                         MSG_TYPE.MSG_TYPE_NEW_MESSAGE.value: {"type": "new_message_id", "content": chunk},
                         MSG_TYPE.MSG_TYPE_CHUNK.value: {"type": "chunk", "content": chunk},
                         MSG_TYPE.MSG_TYPE_CONTENT.value: {"type": "chunk", "content": chunk}, 
                         MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK.value: {"type": "thought", "content": chunk},
-                        MSG_TYPE.MSG_TYPE_THOUGHT_CONTENT.value: {"type": "thought", "content": chunk},
                         MSG_TYPE.MSG_TYPE_STEP_START.value: {"type": "step_start", "content": chunk, "id": (params or {}).get("id"), "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_STEP_PROGRESS.value: {"type": "step_progress", "content": chunk, "id": (params or {}).get("id"), "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_STEP_END.value: {"type": "step_end", "content": chunk, "id": (params or {}).get("id"), "status": "done", "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_TOOL_CALL.value: {"type": "tool_call", "content": params if params else {"name": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_TOOL_OUTPUT.value: {"type": "tool_output", "content": params if params else {"output": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_REASONING.value: {"type": "thought", "content": chunk, "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_SCRATCHPAD.value: {"type": "scratchpad", "content": chunk, "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_INFO.value: {"type": "info", "content": chunk, "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_WARNING.value: {"type": "warning", "content": chunk, "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_ERROR.value: {"type": "error", "content": chunk, "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_EXCEPTION.value: {"type": "error", "content": chunk, "offset": current_content_len},
-                        MSG_TYPE.MSG_TYPE_SOURCES_LIST.value: {"type": "sources", "content": params if params else chunk}
+                        MSG_TYPE.MSG_TYPE_SOURCES_LIST.value: {"type": "sources", "content": params if params else chunk},
+                        # Secondary Content Streams
+                        38: {"type": "artefact_chunk", "content": params},
+                        39: {"type": "artefact_done", "content": params},
+                        40: {"type": "note_chunk", "content": params},
+                        41: {"type": "note_done", "content": params},
+                        42: {"type": "skill_chunk", "content": params},
+                        43: {"type": "skill_done", "content": params},
+                        44: {"type": "widget_chunk", "content": params},
+                        45: {"type": "widget_done", "content": params}
                     }
 
                     payload = payload_map.get(mtype_val)
-                    
-                    # [FIX] Check for custom event types sent within a chunk's meta
-                    if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
-                        payload = params # Use the structured event provided in meta
-
                     if payload:
-                        if payload['type'] not in ["chunk", "thought", "sources"]:
+                        # Only append meaningful user-facing events to the persistent log
+                        # new_message_id is technical plumbing and should be ignored by the history
+                        if payload['type'] not in ["chunk", "thought", "sources", "new_message_id"]:
                             all_events.append(payload)
                         
-                        # Send the clean structured payload for real-time status bar/timeline updates
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
                     return True
 
@@ -1663,7 +1672,12 @@ def build_llm_generation_router(router: APIRouter):
                             tools=agentic_tools,
                             enable_image_generation=owner_db_user.image_generation_enabled,
                             enable_image_editing=owner_db_user.image_editing_enabled,
-                            auto_activate_artefacts=True
+                            auto_activate_artefacts=True,
+                            # NEW lollms_discussion params
+                            enable_inline_widgets=owner_db_user.inline_widgets_enabled,
+                            enable_notes=owner_db_user.note_generation_enabled,
+                            enable_skills=owner_db_user.skills_building_enabled,
+                            enable_silent_artefact_explanation=True
                         )
                     finally:
                         # Ensure the discussion is committed even if interrupted by the stop signal

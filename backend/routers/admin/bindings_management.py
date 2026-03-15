@@ -57,17 +57,23 @@ class ZooInstallRequest(BaseModel):
 
 def _normalize_binding_desc(name: str, desc: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
     """Ensures binding description has consistent keys for the frontend."""
+    ASCIIColors.debug(f"[AdminBinding] Normalizing {binding_type} binding: {name}")
     if not desc:
+        ASCIIColors.warning(f"[AdminBinding] No initial descriptor for {name}. Attempting secondary fetch...")
         # Static Fallback: If probing the class failed, try to read the YAML directly
         # This is critical for fresh installs where dependencies aren't yet available
         try:
-            
             desc = get_binding_desc(name, binding_type)
-        except Exception:
+            if desc:
+                ASCIIColors.success(f"[AdminBinding] Secondary fetch (YAML) succeeded for {name}")
+            else:
+                ASCIIColors.error(f"[AdminBinding] Secondary fetch returned None for {name}")
+        except Exception as e:
+            ASCIIColors.error(f"[AdminBinding] Secondary fetch crashed for {name}: {e}")
             pass
 
     if not desc:
-        ASCIIColors.warning(f"Normalization >> No metadata found for {name}")
+        ASCIIColors.warning(f"Normalization >> No metadata found for {name} after all attempts.")
         return {
             "name": name, 
             "binding_name": name, 
@@ -106,8 +112,9 @@ def _normalize_binding_desc(name: str, desc: Dict[str, Any], binding_type: str =
     return desc
 
 def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
+    ASCIIColors.debug(f"[AdminBinding] Processing config for {binding_name}...")
     raw_desc = get_binding_desc(binding_name, binding_type)
-    binding_desc = _normalize_binding_desc(binding_name, raw_desc)
+    binding_desc = _normalize_binding_desc(binding_name, raw_desc, binding_type)
     
     if "error" in binding_desc:
         ASCIIColors.warning(f"Could not load description for binding {binding_name}: {binding_desc.get('error')}")
@@ -115,6 +122,8 @@ def _process_binding_config(binding_name: str, config: Dict[str, Any], binding_t
 
     all_params = binding_desc.get("input_parameters", []) + binding_desc.get("model_parameters", [])
     param_types = {p["name"]: p["type"] for p in all_params}
+    
+    ASCIIColors.debug(f"[AdminBinding] Expected params for {binding_name}: {list(param_types.keys())}")
     
     processed_config = {}
     for key, value in config.items():
@@ -328,15 +337,20 @@ def _generate_model_icon_task(task: Task, username: str, prompt: str):
 @bindings_management_router.get("/bindings/available_types", response_model=List[Dict])
 async def get_available_binding_types():
     try:
+        ASCIIColors.info("[AdminBinding] Listing available LLM binding types...")
         names = list_bindings("llm")
+        ASCIIColors.debug(f"[AdminBinding] Found {len(names)} LLM bindings: {names}")
         desc_list = []
         for name in names:
             try:
                 raw = get_binding_desc(name, "llm")
                 normalized = _normalize_binding_desc(name, raw, "llm")
                 desc_list.append(normalized)
-            except Exception:
+            except Exception as e:
+                ASCIIColors.warning(f"[AdminBinding] Error fetching desc for {name}: {e}")
                 desc_list.append(_normalize_binding_desc(name, None, "llm"))
+        
+        ASCIIColors.success(f"[AdminBinding] Returning {len(desc_list)} normalized LLM descriptors.")
         return desc_list
     except Exception as e:
         trace_exception(e)
@@ -500,11 +514,12 @@ async def install_llm_from_zoo(binding_id: int, payload: ZooInstallRequest, curr
 @bindings_management_router.get("/tti-bindings/available_types", response_model=List[Dict])
 async def get_available_tti_binding_types():
     try:
+        ASCIIColors.info("[AdminBinding] Listing available TTI binding types...")
         names = list_bindings("tti")
         desc_list = []
         for name in names:
             raw = get_binding_desc(name, "tti")
-            desc_list.append(_normalize_binding_desc(name, raw))
+            desc_list.append(_normalize_binding_desc(name, raw, "tti"))
         return desc_list
     except Exception as e:
         trace_exception(e)

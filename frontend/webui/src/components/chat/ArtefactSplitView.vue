@@ -159,17 +159,18 @@ const isFetching = ref(false);
         }
     }, { immediate: true, deep: true });
 
-async function handleSave() {
+async function handleSave(forceType = null) {
     if (isLiveUpdating.value) return;
     isSaving.value = true;
     try {
         await discussionsStore.updateArtefact({
             discussionId: discussionsStore.currentDiscussionId,
             artefactTitle: title.value,
-            newContent: dbContent.value, // Use the local editable ref
-            updateInPlace: false // Creates new version
+            newContent: dbContent.value,
+            newType: forceType || undefined, // Allow changing to 'note' or 'skill'
+            updateInPlace: false
         });
-        uiStore.addNotification("New version saved.", "success");
+        uiStore.addNotification(forceType ? `Saved as ${forceType}.` : "New version saved.", "success");
     } finally {
         isSaving.value = false;
     }
@@ -214,27 +215,33 @@ function download() {
         <div class="flex-1 flex flex-col min-w-0">
         <div class="p-3 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-800 shadow-sm">
             <div class="flex items-center gap-3 min-w-0">
-                <!-- Dynamic Icon based on Type -->
+                <!-- Type-Specific Dynamic Icon & Color -->
                 <div class="p-2 rounded-lg" :class="{
-                    'bg-blue-100 text-blue-600': (artefactGroup?.versions[0]?.artefact_type || 'document') === 'document' || artefactGroup?.versions[0]?.artefact_type === 'file',
-                    'bg-purple-100 text-purple-600': artefactGroup?.versions[0]?.artefact_type === 'code',
                     'bg-amber-100 text-amber-600': artefactGroup?.versions[0]?.artefact_type === 'note',
-                    'bg-emerald-100 text-emerald-600': artefactGroup?.versions[0]?.artefact_type === 'skill'
+                    'bg-emerald-100 text-emerald-600': artefactGroup?.versions[0]?.artefact_type === 'skill',
+                    'bg-blue-100 text-blue-600': ['document', 'file'].includes(artefactGroup?.versions[0]?.artefact_type),
+                    'bg-purple-100 text-purple-600': artefactGroup?.versions[0]?.artefact_type === 'code'
                 }">
-                    <IconCode v-if="artefactGroup?.versions[0]?.artefact_type === 'code'" class="w-4 h-4" />
-                    <IconPencil v-else-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
+                    <IconPencil v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
                     <IconSparkles v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" class="w-4 h-4" />
+                    <IconCode v-else-if="artefactGroup?.versions[0]?.artefact_type === 'code'" class="w-4 h-4" />
                     <IconFileText v-else class="w-4 h-4" />
                 </div>
                 
                 <div class="flex flex-col min-w-0">
-                    <span class="text-[9px] font-black uppercase text-gray-400 tracking-widest">
+                    <span class="text-[9px] font-black uppercase tracking-widest" :class="{
+                        'text-amber-500': artefactGroup?.versions[0]?.artefact_type === 'note',
+                        'text-emerald-500': artefactGroup?.versions[0]?.artefact_type === 'skill',
+                        'text-purple-500': artefactGroup?.versions[0]?.artefact_type === 'code',
+                        'text-gray-400': !['note', 'skill', 'code'].includes(artefactGroup?.versions[0]?.artefact_type)
+                    }">
                         {{ 
-                          artefactGroup?.versions[0]?.artefact_type === 'note' ? 'Research Note' :
-                          artefactGroup?.versions[0]?.artefact_type === 'skill' ? 'AI Capability' :
-                          artefactGroup?.versions[0]?.artefact_type === 'file' ? 'External Document' :
-                          'Document'
-                        }} Workspace
+                          artefactGroup?.versions[0]?.artefact_type === 'note' ? 'RESEARCH NOTE' :
+                          artefactGroup?.versions[0]?.artefact_type === 'skill' ? 'AI CAPABILITY' :
+                          artefactGroup?.versions[0]?.artefact_type === 'code' ? 'CODE SNIPPET' :
+                          artefactGroup?.versions[0]?.artefact_type === 'file' ? 'EXTERNAL DOCUMENT' :
+                          'DOCUMENT'
+                        }} WORKSPACE
                     </span>
                     <span class="font-bold text-sm truncate dark:text-gray-100">{{ title }}</span>
                 </div>
@@ -278,11 +285,43 @@ function download() {
                 <IconArrowDownTray class="w-4 h-4" />
             </button>
 
-            <button @click="handleSave" class="btn btn-primary btn-sm h-8 flex items-center gap-2" :disabled="isSaving || isLiveUpdating">
-                <IconRefresh v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
-                <IconPencil v-else class="w-3.5 h-3.5" />
-                <span>Save v{{ artefactGroup?.versions[0].version + 1 }}</span>
-            </button>
+            <!-- Action Buttons based on Type -->
+            <div class="flex gap-1">
+                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'document'" 
+                        @click="handleSave('note')" class="btn btn-secondary btn-sm h-8" :disabled="isSaving || isLiveUpdating">
+                    Save as Note
+                </button>
+                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'document'" 
+                        @click="handleSave('skill')" class="btn btn-secondary btn-sm h-8" :disabled="isSaving || isLiveUpdating">
+                    Save as Skill
+                </button>
+                
+            <div class="flex gap-1">
+                <button v-if="artefactGroup?.versions[0]?.type === 'note'" @click="handleSave" class="btn btn-warning btn-sm h-8 flex items-center gap-2">
+                    <IconSave class="w-3.5 h-3.5" />
+                    Update Note
+                </button>
+                <button v-else-if="artefactGroup?.versions[0]?.type === 'skill'" @click="handleSave" class="btn btn-success btn-sm h-8 flex items-center gap-2">
+                    <IconCheckCircle class="w-3.5 h-3.5" />
+                    Update Skill
+                </button>
+            <div class="flex gap-1">
+                <button v-if="artefactGroup?.versions[0]?.type === 'note'" @click="handleSave" class="btn btn-warning btn-sm h-8 flex items-center gap-2">
+                    <IconSave class="w-3.5 h-3.5" />
+                    Update Note
+                </button>
+                <button v-else-if="artefactGroup?.versions[0]?.type === 'skill'" @click="handleSave" class="btn btn-success btn-sm h-8 flex items-center gap-2">
+                    <IconCheckCircle class="w-3.5 h-3.5" />
+                    Update Skill
+                </button>
+                <button v-else @click="handleSave" class="btn btn-primary btn-sm h-8 flex items-center gap-2" :disabled="isSaving || isLiveUpdating">
+                    <IconRefresh v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
+                    <IconPencil v-else class="w-3.5 h-3.5" />
+                    <span>Save v{{ artefactGroup?.versions[0].version + 1 }}</span>
+                </button>
+            </div>
+            </div>
+            </div>
         </div>
         <div class="flex-1 relative bg-white dark:bg-gray-950">
             <div v-if="isFetching" class="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm flex items-center justify-center">

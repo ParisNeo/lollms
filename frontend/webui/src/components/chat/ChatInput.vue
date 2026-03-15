@@ -2,6 +2,8 @@
 // ... existing imports ...
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router'; 
+import { keymap } from '@codemirror/view';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
@@ -90,6 +92,8 @@ const userPromptSearchTerm = ref('');
 const inputTokenCount = ref(0);
 let tokenizeInputDebounceTimer = null;
 const isDraggingOver = ref(false);
+const isAdvancedEditor = ref(false);
+const textareaRef = ref(null);
 
 const isWebSearchActive = ref(false); 
 const stagedImages = ref([]); 
@@ -126,8 +130,21 @@ watch(user, (newUser) => {
 }, { immediate: true });
 
 const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
-const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
-const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
+const isSttActive = computed(() => {
+    return !!user.value?.stt_binding_model_name && 
+           user.value.stt_binding_model_name.includes('/') && 
+           dataStore.availableSttModels.length > 0;
+});
+const isTtsActive = computed(() => {
+    return !!user.value?.tts_binding_model_name && 
+           user.value.tts_binding_model_name.includes('/') && 
+           dataStore.availableTtsModels.length > 0;
+});
+const isTtiConfigured = computed(() => {
+    return !!user.value?.tti_binding_model_name && 
+           user.value.tti_binding_model_name.includes('/') && 
+           dataStore.availableTtiModels.length > 0;
+});
 const isGoogleSearchConfigured = computed(() => !!user.value?.google_api_key && !!user.value?.google_cse_id);
 
 const canEnableHerd = computed(() => {
@@ -476,15 +493,27 @@ const activeFeatures = computed(() => {
         features.push({ 
             id: 'notes', 
             icon: IconFileText, 
-            label: 'Notes', 
-            colorClass: 'text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/20 border-gray-200 dark:border-gray-800', 
-            title: 'Note Generation Enabled.',
-            modalTitle: 'Note Generation',
-            modalDescription: 'Allows the AI to create structured notes.',
+            label: 'Note Building', 
+            colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800', 
+            title: 'Note Building Enabled.',
+            modalTitle: 'Note Building',
+            modalDescription: 'Allows the AI to create structured research notes saved directly to your library.',
             systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
         });
     }
-    if (user.value?.tts_binding_model_name || user.value?.stt_binding_model_name) {
+    if (user.value?.note_generation_enabled) {
+        features.push({ 
+            id: 'notes', 
+            icon: IconFileText, 
+            label: 'Note Building', 
+            colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800', 
+            title: 'Note Building Enabled.',
+            modalTitle: 'Note Building',
+            modalDescription: 'Allows the AI to create structured research notes saved directly to your library.',
+            systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
+        });
+    }
+    if (isTtsActive.value || isSttActive.value) {
         features.push({ 
             id: 'audio', 
             icon: IconMicrophone, 
@@ -492,7 +521,7 @@ const activeFeatures = computed(() => {
             colorClass: 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/20 border-cyan-200 dark:border-cyan-800', 
             title: 'Audio Features Enabled.',
             modalTitle: 'Audio Features',
-            modalDescription: 'Speech-to-Text (STT) and/or Text-to-Speech (TTS) are configured.',
+            modalDescription: 'Speech-to-Text (STT) and/or Text-to-Speech (TTS) are configured and active.',
             systemPrompt: '(Handled by audio processing modules, no text prompt injection)'
         });
     }
@@ -646,6 +675,10 @@ async function handleSendMessage() {
     if (generationInProgress.value) return;
     const text = messageText.value.trim();
     if (!text && attachedFiles.value.length === 0 && stagedImages.value.length === 0) return;
+    
+    // Reset editor mode and height after sending
+    isAdvancedEditor.value = false;
+    if (textareaRef.value) textareaRef.value.style.height = 'auto';
     const imagesToUpload = stagedImages.value.map(item => item.file);
     const localPreviews = stagedImages.value.map(item => item.previewUrl);
     messageText.value = '';
@@ -654,7 +687,62 @@ async function handleSendMessage() {
     try { await discussionsStore.sendMessage({ prompt: text, image_server_paths: [], localImageUrls: localPreviews, image_files: imagesToUpload, webSearchEnabled: isWebSearchActive.value }); } catch(err) { console.error("SendMessage failed:", err); uiStore.addNotification('Failed to send message.', 'error'); messageText.value = text; imagesToUpload.forEach((file, i) => { stagedImages.value.push({ file, previewUrl: localPreviews[i] }); }); }
 }
 
-function handleKeyDown(event) { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendMessage(); } }
+async function handleKeyDown(event) { 
+    if (event.key === 'Enter') {
+        if (event.shiftKey) {
+            // Shift+Enter triggers Advanced Editor
+            event.preventDefault();
+            
+            // Add the newline manually before switching modes
+            const cursorPos = event.target.selectionStart;
+            const textBefore = messageText.value.substring(0, cursorPos);
+            const textAfter = messageText.value.substring(event.target.selectionEnd);
+            messageText.value = textBefore + '\n' + textAfter;
+            
+            isAdvancedEditor.value = true;
+            
+            // We use nextTick to wait for CodeMirror to mount, then focus it
+            await nextTick();
+            textareaRef.value?.focus();
+        } else {
+            // Regular Enter sends message
+            event.preventDefault();
+            handleSendMessage();
+        }
+    }
+}
+
+const adjustTextareaHeight = () => {
+    const el = textareaRef.value;
+    if (el) {
+        el.style.height = 'auto';
+        el.style.height = (el.scrollHeight) + 'px';
+    }
+};
+
+const advancedEditorExtensions = computed(() => {
+    return [
+        keymap.of([{
+            key: "Enter",
+            run: () => {
+                handleSendMessage();
+                return true;
+            }
+        }, {
+            key: "Shift-Enter",
+            run: (view) => {
+                // Allow new lines with Shift+Enter in advanced mode
+                return false; 
+            }
+        }, {
+            key: "Escape",
+            run: () => {
+                isAdvancedEditor.value = false;
+                return true;
+            }
+        }])
+    ];
+});
 async function fetchInputTokenCount(text) { if (!text.trim()) { inputTokenCount.value = 0; return; } try { const response = await apiClient.post('/api/discussions/tokenize', { text }); inputTokenCount.value = response.data.tokens; } catch (error) {} }
 function handleStopGeneration() { discussionsStore.stopGeneration(); }
 
@@ -946,7 +1034,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 </button>
 
                                 <!-- Group: Generation -->
-                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Generation</div>
+                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Creative Generation</div>
 
                                 <!-- Image Generation Toggle -->
                                 <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
@@ -955,28 +1043,6 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                         <span>Image Gen</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.image_generation_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                
-                                <!-- Image Editing Toggle -->
-                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_editing_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconPencil class="w-4 h-4 text-indigo-500" />
-                                        <span>Image Edit</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.image_editing_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                
-                                <!-- Image Annotation Toggle -->
-                                <button @click.stop="toggleUserPref('image_annotation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <div class="w-4 h-4 flex-shrink-0 flex items-center justify-center">
-                                            <IconObservation class="w-full h-full text-pink-600" />
-                                        </div>
-                                        <span>Annotate</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.image_annotation_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
@@ -990,21 +1056,33 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
-                                <!-- Note Generation Toggle -->
+                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Building & Learning</div>
+
+                                <!-- Widget Building Toggle -->
+                                <button @click.stop="toggleUserPref('inline_widgets_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
+                                    <span class="flex items-center gap-2">
+                                        <IconCpuChip class="w-4 h-4 text-indigo-500" />
+                                        <span>Widget Building</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.inline_widgets_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Note Building Toggle -->
                                 <button @click.stop="toggleUserPref('note_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
-                                        <IconFileText class="w-4 h-4 text-gray-500" />
-                                        <span>Notes Gen</span>
+                                        <IconFileText class="w-4 h-4 text-amber-500" />
+                                        <span>Note Building</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.note_generation_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
-                                <!-- Skill Builder Toggle -->
+                                <!-- Skill Building Toggle -->
                                 <button @click.stop="toggleUserPref('skills_building_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
                                     <span class="flex items-center gap-2">
                                         <IconPencil class="w-4 h-4 text-sky-500" />
-                                        <span>Skill Builder</span>
+                                        <span>Skill Building</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.skills_building_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
@@ -1075,19 +1153,38 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
                 </div>
 
-                <div class="flex-grow min-w-0 relative">
+                <div class="flex-grow min-w-0 relative flex flex-col">
+                    <!-- Standard Auto-Growing Textarea -->
                     <textarea 
+                        v-if="!isAdvancedEditor"
                         ref="textareaRef"
                         v-model="messageText" 
                         @keydown="handleKeyDown" 
+                        @input="adjustTextareaHeight"
                         @paste="handlePaste" 
                         rows="1" 
-                        class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-64 overflow-y-auto text-sm leading-relaxed" 
+                        class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-64 overflow-y-auto text-sm leading-relaxed transition-all duration-100" 
                         :class="{ 'opacity-0 pointer-events-none': generationInProgress }"
-                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message...'" 
+                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message... (Shift+Enter for Advanced Editor)'" 
                     ></textarea>
+
+                    <!-- Advanced Editor (CodeMirror) -->
+                    <div v-else class="w-full border-b dark:border-gray-700 animate-in fade-in zoom-in-95 duration-200">
+                        <div class="flex items-center justify-between px-3 py-1 bg-gray-100 dark:bg-gray-800 text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                            <span>Advanced Editor</span>
+                            <button @click="isAdvancedEditor = false" class="hover:text-red-500">Close</button>
+                        </div>
+                        <CodeMirrorEditor 
+                            v-model="messageText"
+                            :autofocus="true"
+                            :isChatMode="true"
+                            @submit="handleSendMessage"
+                            editorClass="max-h-96 min-h-[120px]"
+                            placeholder="Type your structured content... (Enter to send, Shift+Enter for new line)"
+                        />
+                    </div>
                     
-                    <div v-if="generationInProgress || currentActiveTask" class="absolute inset-0 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none">
+                    <div v-if="generationInProgress || currentActiveTask" class="absolute inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none">
                          <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500" /> 
                          <span v-if="currentActiveTask">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>
                          <span v-else>{{ generationState.details || 'Thinking...' }}</span>
@@ -1095,7 +1192,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                 </div>
 
                 <div class="flex items-center gap-1 pb-1 pr-1">
-                    <button v-if="isSttConfigured" 
+                    <button v-if="isSttActive" 
                             @click="toggleRecording" 
                             class="w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 active:scale-95" 
                             :class="{

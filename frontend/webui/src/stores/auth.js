@@ -498,7 +498,8 @@ export const useAuthStore = defineStore('auth', () => {
             'note_generation': 'note_generation_enabled',
             'skills_building': 'skills_building_enabled',
             'skills_library': 'skills_library_enabled',
-            'web_search': 'web_search_enabled'
+            'web_search': 'web_search_enabled',
+            'inline_widgets': 'inline_widgets_enabled'
         };
         return map[opt];
     }
@@ -523,52 +524,53 @@ export const useAuthStore = defineStore('auth', () => {
             if (!isActualChange) return; // Exit immediately to prevent recursion
         }
 
-        // 1. Optimistic Update
-        if (user.value) {
-            user.value = { ...user.value, ...preferences };
-        }
-
         // --- NEW LOGIC: Handle Personality Requirements ---
         const { useDataStore } = await import('./data');
         const dataStore = useDataStore();
         const uiStore = useUiStore();
 
-        // 1. If switching personality, enable its required options
-        if (preferences.active_personality_id) {
-            const personality = dataStore.getPersonalityById(preferences.active_personality_id);
-            if (personality && personality.required_context_options) {
-                personality.required_context_options.forEach(opt => {
-                    const prefKey = optionToPrefKey(opt);
-                    if (prefKey) preferences[prefKey] = true;
-                });
-            }
-        }
+        // Determine the personality we are evaluating (either the one we are switching to, or the current one)
+        const isChangingPersonality = preferences.active_personality_id !== undefined;
+        let targetId = isChangingPersonality ? preferences.active_personality_id : user.value?.active_personality_id;
 
-        // 2. If changing context settings, verify against current active personality
-        // Determine the effective personality ID (new one if changing, else current)
-        const targetPersonalityId = preferences.active_personality_id !== undefined 
-            ? preferences.active_personality_id 
-            : user.value?.active_personality_id;
-
-        if (targetPersonalityId) {
-            const personality = dataStore.getPersonalityById(targetPersonalityId);
-            if (personality && personality.required_context_options) {
-                let revertToDefault = false;
-                personality.required_context_options.forEach(opt => {
-                    const prefKey = optionToPrefKey(opt);
-                    // Check if this specific option is being explicitly disabled in this update
-                    if (prefKey && preferences[prefKey] === false) {
-                        revertToDefault = true;
-                    }
-                });
+        if (targetId) {
+            const personality = dataStore.getPersonalityById(targetId);
+            if (personality && personality.required_context_options && personality.required_context_options.length > 0) {
                 
-                if (revertToDefault) {
-                    preferences.active_personality_id = null; // Reset to default
-                    if (notify) uiStore.addNotification(`Reverted to default personality because a required option was disabled.`, 'warning');
+                // SCENARIO 1: User is trying to disable a requirement of the CURRENT personality
+                if (!isChangingPersonality) {
+                    const violatingRequirement = personality.required_context_options.some(opt => {
+                        const key = optionToPrefKey(opt);
+                        return key && preferences[key] === false;
+                    });
+
+                    if (violatingRequirement) {
+                        // To allow the user to turn off the feature, we MUST drop the personality requirement
+                        preferences.active_personality_id = null;
+                        targetId = null; // Requirements no longer apply for this session
+                        if (notify) uiStore.addNotification('Reset to default personality to allow disabling required features.', 'info');
+                    }
+                }
+
+                // SCENARIO 2: If we are still using a personality (or just switched to one), force its rules
+                if (targetId) {
+                    const activePers = dataStore.getPersonalityById(targetId);
+                    activePers.required_context_options.forEach(opt => {
+                        const key = optionToPrefKey(opt);
+                        if (key) {
+                            // Force to true in the outgoing payload
+                            preferences[key] = true;
+                        }
+                    });
                 }
             }
         }
         // --- END NEW LOGIC ---
+
+        // 1. Optimistic Update (Moved here to prevent "blinking" UI states)
+        if (user.value) {
+            user.value = { ...user.value, ...preferences };
+        }
 
         const response = await apiClient.put('/api/auth/me', preferences);
         if (user.value) {

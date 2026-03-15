@@ -134,6 +134,7 @@ class MessageOutput(BaseModel):
     branch_id: Optional[str] = None
     branches: Optional[List[str]] = None
     vision_support: bool = True
+    metadata: Optional[Dict[str, Any]] = None
     
     @field_validator('user_grade', mode='before')
     def provide_default_grade(cls, value):

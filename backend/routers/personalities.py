@@ -80,9 +80,9 @@ def _generate_personality_task(task: Task, username: str, prompt: str):
                     "type": "array",
                     "items": {
                         "type": "string",
-                        "enum": ["image_generation", "image_editing", "slide_maker", "note_generation", "memory"]
+                        "enum": ["image_generation", "image_editing", "slide_maker", "note_generation", "memory", "inline_widgets"]
                     },
-                    "description": "List of mandatory context features required for this personality. Select 'image_generation' if the personality is visual/artist, 'memory' if it needs long-term memory, etc."
+                    "description": "List of mandatory context features required for this personality. Select 'image_generation' if the personality is visual/artist, 'memory' if it needs long-term memory, 'inline_widgets' if the personality creates interactive UI components, etc."
                 }
             },
             "required": ["name", "prompt_text"],

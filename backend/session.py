@@ -259,6 +259,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             image_generation_system_prompt=db_user.image_generation_system_prompt,
             image_annotation_enabled=db_user.image_annotation_enabled,
             image_editing_enabled=db_user.image_editing_enabled,
+            inline_widgets_enabled=db_user.inline_widgets_enabled,
             slide_maker_enabled=db_user.slide_maker_enabled,
             activate_generated_images=db_user.activate_generated_images,
             note_generation_enabled=db_user.note_generation_enabled,
@@ -507,9 +508,13 @@ def build_lollms_client_from_params(
 
                 if target_binding_alias:
                     binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
+                    if binding_to_use:
+                         ASCIIColors.debug(f"[ClientBuild] Using user-requested binding: {target_binding_alias}")
 
             if not binding_to_use:
                 binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+                if binding_to_use:
+                    ASCIIColors.debug(f"[ClientBuild] No user model set or binding inactive. Falling back to system default: {binding_to_use.alias}")
             
             if binding_to_use:            
                 final_alias = binding_to_use.alias
@@ -759,8 +764,10 @@ def build_lollms_client_from_params(
                 
                 try:
                     # Pass the callback directly to LollmsClient
+                    ASCIIColors.info(f"[Registry] Constructing LollmsClient for {username}...")
                     lc = LollmsClient(**registry_payload, callback=callback)
                     _global_client_registry[registry_key] = lc
+                    ASCIIColors.success(f"[Registry] Engine built successfully [Hash: {registry_key[:8]}]")
                     return lc
                 except (ValueError, Exception) as engine_err:
                     # [CRITICAL FIX] Catch binding initialization errors (like missing API keys)

@@ -43,7 +43,8 @@ const contextOptionChoices = [
     { id: 'image_editing', name: 'Image Editing' },
     { id: 'slide_maker', name: 'Slide Maker' },
     { id: 'note_generation', name: 'Note Generation' },
-    { id: 'memory', name: 'Long-Term Memory' }
+    { id: 'memory', name: 'Long-Term Memory' },
+    { id: 'inline_widgets', name: 'Widget Building' }
 ];
 
 // Helper for multi-select - passing flat array directly to fix rendering issue

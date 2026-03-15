@@ -104,6 +104,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
             id: `temp-ai-${Date.now()}`, sender: activePersonality.value?.name || 'assistant', sender_type: 'assistant',
             content: '', isStreaming: true, created_at: new Date().toISOString(),
             events: [],
+            lastEvent: null, // Track the absolute latest event for live UI
             parent_message_id: payload.is_resend ? parentId : tempUserMessage.id // Ensure temp AI message has correct parent link locally
         };
 
@@ -190,51 +191,70 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     };
                     break;
                 case 'chunk':
-                    const chunk = data.content;
-                    contentBuffer += chunk;
-                    
-                    // Ensure the state properties exist before iterating for Workspace updates
-                    const updatingArtefacts = state.activeUpdatingArtefacts?.value;
-                    const artefactBuffers = state.liveArtefactBuffers;
-
-                    if (updatingArtefacts && updatingArtefacts.size > 0 && artefactBuffers?.value) {
-                        updatingArtefacts.forEach(title => {
-                            if (artefactBuffers.value[title] === undefined) {
-                                artefactBuffers.value[title] = "";
-                            }
-                            artefactBuffers.value[title] += chunk;
-                        });
-                    }
-
+                    contentBuffer += data.content;
                     if (Date.now() - lastUpdateTimestamp > UPDATE_INTERVAL) flushBuffer();
                     break;
+
+                case 'artefact_chunk':
+                case 'note_chunk':
+                case 'skill_chunk':
+                case 'widget_chunk': {
+                    // Logic for both named types (from payload_map) and raw numeric types
+                    const { title, chunk } = data.content;
+                    if (state.liveArtefactBuffers.value[title] === undefined) {
+                        state.liveArtefactBuffers.value[title] = "";
+                    }
+                    state.liveArtefactBuffers.value[title] += chunk;
+                    break;
+                }
+
+                case 'artefact_done':
+                case 'note_done':
+                case 'skill_done':
+                case 'widget_done': {
+                    const title = data.content.title;
+                    if (state.activeUpdatingArtefacts?.value) {
+                        state.activeUpdatingArtefacts.value.delete(title);
+                    }
+                    delete state.liveArtefactBuffers.value[title];
+                    // Trigger a clean fetch of the final persistent version
+                    getActions().fetchArtefacts(currentDiscussionId.value);
+                    break;
+                }
                 case 'thought':
                     if (!messageToUpdate.thoughts) messageToUpdate.thoughts = "";
                     messageToUpdate.thoughts += data.content;
                     break;
+                case 'note_start':
+                case 'skill_start':
                 case 'artefact_update':
+                case 'inline_widget_start':
                     if (data.content && data.content.title) {
                         const title = data.content.title;
-                        
-                        // 1. SHOW ARTEFACT SPLIT VIEW: Transition focus to Workspace immediately
-                        // This prevents the 'Context Memory' view from showing during builds
-                        uiStore.activeSplitArtefactTitle = title;
-                        
-                        // 2. ENSURE SIDE PANEL: Container must be visible for Split View to render
-                        uiStore.isDataZoneVisible = true; 
+                        // For workspace items (not widgets), auto-open the split view
+                        if (data.type !== 'inline_widget_start') {
+                            uiStore.activeSplitArtefactTitle = title;
+                            uiStore.isDataZoneVisible = true; 
+                        }
 
-                        // 3. Mark as live for the typing buffer
                         if (state.activeUpdatingArtefacts?.value) {
                             state.activeUpdatingArtefacts.value.add(title);
-                            // Initialize buffer for this title if new
                             if (state.liveArtefactBuffers.value[title] === undefined) {
                                 state.liveArtefactBuffers.value[title] = "";
                             }
                         }
-
-                        // 4. Refresh metadata so the chip appears as "Active" (Loaded)
                         getActions().fetchArtefacts(currentDiscussionId.value);
-                        getActions().fetchContextStatus(currentDiscussionId.value);
+                    }
+                    break;
+                case 'artefact_event':
+                    // Real-time persistence event from library
+                    if (data.data?.artefact) {
+                        // Immediately update the local artefacts list
+                        getActions().fetchArtefacts(currentDiscussionId.value);
+                        // If it's a new note/skill, notify user
+                        if (data.data.is_new && data.data.artefact.type !== 'document') {
+                            uiStore.addNotification(`${data.data.artefact.type.toUpperCase()} saved to workspace.`, 'success', 2000);
+                        }
                     }
                     break;
                 case 'artefact_update_done':
@@ -257,6 +277,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     // Use backend offset if provided, otherwise fallback to local cursor
                     if (data.offset === undefined) data.offset = messageToUpdate.content.length;
                     messageToUpdate.events.push(data);
+                    messageToUpdate.lastEvent = data;
                     break;
                 case 'info':
                     generationState.value = { status: 'info', details: data.content };
@@ -354,6 +375,16 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
                     if (aiMsgIndex !== -1 && finalData.ai_message) {
                         const processedAiMsg = processSingleMessage(finalData.ai_message);
+                        
+                        // [FIX] Deep sync of inline_widgets metadata
+                        // This ensures the renderer can find the HTML source by UUID.
+                        if (finalData.ai_message.metadata?.inline_widgets) {
+                            processedAiMsg.metadata = {
+                                ...(processedAiMsg.metadata || {}),
+                                inline_widgets: [...finalData.ai_message.metadata.inline_widgets]
+                            };
+                        }
+
                         messages.value.splice(aiMsgIndex, 1, processedAiMsg);
                         
                         // Ensure active branch points to the AI message (the new leaf)

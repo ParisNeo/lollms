@@ -56,6 +56,7 @@ class UserCreateAdmin(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: bool = False
     image_editing_enabled: bool = False
+    inline_widgets_enabled: bool = True
     slide_maker_enabled: bool = False
     activate_generated_images: bool = False
     max_image_width: Optional[int] = -1
@@ -281,6 +282,7 @@ class UserAuthDetails(BaseModel):
     image_generation_system_prompt: Optional[str] = None
     image_annotation_enabled: bool = False
     image_editing_enabled: bool = False
+    inline_widgets_enabled: bool = True
     slide_maker_enabled: bool = False
     note_generation_enabled: bool = False
     activate_generated_images: bool = False

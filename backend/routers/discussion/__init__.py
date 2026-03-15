@@ -234,7 +234,8 @@ def build_discussions_router():
                     image_references=full_image_refs,
                     active_images=active_images_bools,
                     user_grade=user_grades.get(msg.id, 0),
-                    created_at=msg.created_at, branch_id=branch_tip_to_load, branches=msg_branches
+                    created_at=msg.created_at, branch_id=branch_tip_to_load, branches=msg_branches,
+                    metadata=msg_metadata
                 )
             )
 
@@ -496,7 +497,8 @@ def build_discussions_router():
                     created_at=msg_obj.created_at,
                     branch_id=discussion_obj.active_branch_id,
                     branches=msg_branches,
-                    vision_support=True
+                    vision_support=True,
+                    metadata=msg_metadata
                 )
             )
         return messages_output

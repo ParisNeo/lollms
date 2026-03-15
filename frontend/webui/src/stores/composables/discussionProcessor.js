@@ -14,8 +14,16 @@ export function processSingleMessage(msg) {
     if (!msg) return null;
     const username = authStore.user?.username;
     
-    // Consolidate metadata access
-    const metadata = msg.metadata || {};
+    // Consolidate metadata access - Handle both Object and String (from DB) formats
+    let metadata = msg.metadata || {};
+    if (typeof metadata === 'string') {
+        try {
+            metadata = JSON.parse(metadata);
+        } catch (e) {
+            metadata = {};
+        }
+    }
+
     const binding_name = msg.binding_name || metadata.binding;
     const model_name = msg.model_name || metadata.model;
     
@@ -47,10 +55,12 @@ export function processSingleMessage(msg) {
         binding_name,
         model_name,
         sender_type: senderType,
-        events: msg.events || metadata.events || [],
-        sources: msg.sources || metadata.sources || [],
+        events: msg.events || metadata.events || metadata.EVENTS || [],
+        sources: msg.sources || metadata.sources || metadata.SOURCES || [],
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
+        // Recover persistent widgets from metadata (handle case sensitivity)
+        inline_widgets: metadata.inline_widgets || metadata.INLINE_WIDGETS || [],
         vision_support: visionSupport,
         branches: msg.branches || null,
     };

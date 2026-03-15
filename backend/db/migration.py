@@ -805,6 +805,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "image_generation_system_prompt": "TEXT",
             "image_annotation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "image_editing_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "inline_widgets_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
             "reasoning_activation": "BOOLEAN DEFAULT 0",
             "reasoning_effort": "VARCHAR",
             "reasoning_summary": "BOOLEAN DEFAULT 0",

@@ -42,6 +42,7 @@ import { ref, watch, onMounted, onBeforeUnmount, nextTick, defineExpose } from '
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder as cmPlaceholder } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
+import { insertNewline } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { html } from "@codemirror/lang-html";
@@ -57,6 +58,7 @@ import MessageContentRenderer from '../MessageContentRenderer/MessageContentRend
 
 const props = defineProps({
     modelValue: { type: String, required: true },
+    isChatMode: { type: Boolean, default: false },
     editorClass: { type: [String, Object, Array], default: '' },
     toolbarClass: { type: [String, Object,Array], default: '' },
     buttonClass: { type: [String, Object, Array], default: '' },
@@ -70,7 +72,7 @@ const props = defineProps({
     readOnly: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['update:modelValue', 'ready']);
+const emit = defineEmits(['update:modelValue', 'ready', 'submit']);
 
 const discussionsStore = useDiscussionsStore();
 const editorRef = ref(null);
@@ -318,6 +320,22 @@ const initializeEditor = () => {
 
     if (props.placeholder) {
         baseExtensions.push(cmPlaceholder(props.placeholder));
+    }
+
+    if (props.isChatMode) {
+        baseExtensions.push(keymap.of([
+            {
+                key: "Enter",
+                run: (view) => {
+                    emit('submit');
+                    return true;
+                }
+            },
+            {
+                key: "Shift-Enter",
+                run: insertNewline
+            }
+        ]));
     }
 
     if (props.theme) {

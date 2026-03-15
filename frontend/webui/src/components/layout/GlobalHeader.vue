@@ -56,7 +56,7 @@ const showMainSidebarToggle = computed(() => {
 });
 
 const showDataZoneButton = computed(() => {
-    return route.name === 'Home' && mainView.value === 'chat';
+    return !!discussionsStore.currentDiscussionId;
 });
 
 const isMenuOpen = ref(false);

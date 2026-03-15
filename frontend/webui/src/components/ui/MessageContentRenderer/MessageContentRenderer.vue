@@ -32,7 +32,8 @@ import { storeToRefs } from 'pinia';
 
 const props = defineProps({
   content: { type: String, default: '' },
-  events: { type: Array, default: () => [] }, // NEW
+  events: { type: Array, default: () => [] },
+  inlineWidgets: { type: Array, default: () => [] }, // Prop for persistent widgets
   isStreaming: { type: Boolean, default: false },
   isUser: { type: Boolean, default: false },
   hasImages: { type: Boolean, default: false },
@@ -110,42 +111,45 @@ const parsedStreamingContent = computed(() => {
     if (!props.content) return '';
     let content = props.content;
 
-    // Sanitize: remove leaked internal/hallucinated tags like <tol or <tool_call> from visible text
+    // 1. Technical Tag Cleanup (remove tags but not content for simple markers)
     content = content.replace(/<(?:tol|tool_call|tool_result|thought|think)[^>]*>|<\/(?:tol|tool_call|tool_result|thought|think)>/gi, '');
     
-    const openAnnTagIndex = content.lastIndexOf('<annotate>');
-    const closeAnnTagIndex = content.lastIndexOf('</annotate>');
-    
-    if (openAnnTagIndex > -1 && openAnnTagIndex > closeAnnTagIndex) {
-        const before = content.substring(0, openAnnTagIndex);
-        const spinnerHtml = `<div class="flex items-center gap-2 my-4 p-3 bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg text-sm font-semibold text-blue-800 dark:text-blue-200">
-            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            <span>Annotating image...</span>
-        </div>`;
-        return parsedMarkdown(before) + spinnerHtml;
-    }
-    
-    // Enhanced block detection to include artefacts
-    const activeGenBlock = content.match(/<(generate_image|edit_image|generate_slides|artefact)[^>]*>(?!.*?<\/\1>)/s);
-    if (activeGenBlock) {
-         let tagType = 'Processing';
-         const tag = activeGenBlock[1];
-         if (tag === 'edit_image') tagType = 'Editing image';
-         else if (tag === 'generate_image') tagType = 'Generating image';
-         else if (tag === 'generate_slides') tagType = 'Generating slides';
-         else if (tag === 'artefact') {
-             // Extract name if possible: <artefact name="file.md">
-             const nameMatch = activeGenBlock[0].match(/name="([^"]+)"/);
-             tagType = nameMatch ? `Updating ${nameMatch[1]}` : 'Updating artefact';
-         }
+    // 2. Block Hiding (Hide tags AND everything inside them during streaming)
+    // We search for the last occurrence of a block tag that hasn't been closed yet
+    const blockTags = ['lollms_inline', 'annotate', 'generate_image', 'edit_image', 'generate_slides', 'artefact'];
+    let latestOpenIndex = -1;
+    let detectedTag = '';
 
-         const before = content.substring(0, activeGenBlock.index);
-         const colorClass = tag === 'artefact' ? 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-800/30 dark:text-blue-200' : 'bg-purple-50 border-purple-200 text-purple-800 dark:bg-purple-900/20 dark:border-purple-800/30 dark:text-purple-200';
-         
-         const spinnerHtml = `<div class="flex items-center gap-2 my-4 p-3 ${colorClass} border rounded-lg text-sm font-semibold">
+    for (const tag of blockTags) {
+        const lastOpen = content.lastIndexOf(`<${tag}`);
+        const lastClose = content.lastIndexOf(`</${tag}>`);
+        if (lastOpen > lastClose && lastOpen > latestOpenIndex) {
+            latestOpenIndex = lastOpen;
+            detectedTag = tag;
+        }
+    }
+
+    if (latestOpenIndex > -1) {
+        const before = content.substring(0, latestOpenIndex);
+        let statusMsg = 'Processing...';
+        let colorClass = 'bg-gray-50 border-gray-200 text-gray-800 dark:bg-gray-900/40 dark:border-gray-800/30 dark:text-gray-200';
+
+        if (detectedTag === 'lollms_inline') {
+            statusMsg = 'Building interactive component...';
+            colorClass = 'bg-indigo-50 border-indigo-200 text-indigo-800 dark:bg-indigo-900/40 dark:border-indigo-800/30 dark:text-indigo-200';
+        } else if (detectedTag === 'annotate') {
+            statusMsg = 'Annotating image...';
+            colorClass = 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/40 dark:border-blue-800/30 dark:text-blue-200';
+        } else if (detectedTag === 'generate_image' || detectedTag === 'edit_image') {
+            statusMsg = detectedTag === 'edit_image' ? 'Editing image...' : 'Generating image...';
+            colorClass = 'bg-purple-50 border-purple-200 text-purple-800 dark:bg-purple-900/40 dark:border-purple-800/30 dark:text-purple-200';
+        }
+
+        const spinnerHtml = `<div class="flex items-center gap-2 my-4 p-3 ${colorClass} border rounded-xl text-sm font-bold animate-in fade-in zoom-in-95 duration-300">
             <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            <span>${tagType}...</span>
+            <span>${statusMsg}</span>
         </div>`;
+        
         return parsedMarkdown(before) + spinnerHtml;
     }
 
@@ -154,7 +158,8 @@ const parsedStreamingContent = computed(() => {
 
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_event\b([^>]*)\/>)/;
+        // [FIX] Unified regex for special blocks - capture widget id attribute
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)/;
         match = regex.exec(rawBlock);
     }
     
@@ -234,14 +239,26 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
     }
     else if (match[10]) {
-        // [NEW] Inline Event Marker
-        const attrStr = match[11];
-        const idMatch = attrStr.match(/id="([^"]*)"/);
-        const eventId = idMatch ? idMatch[1] : null;
+        // [FIXED] Enhanced Interactive Widget Anchor Logic
+        const raw = match[10];
+        let widgetId = match[11]; 
         
-        // Find the event in the message's event list
-        const eventData = props.events?.find(e => e.id === eventId);
-        return { type: 'inline_event', event: eventData, raw: match[10] };
+        // Secondary extraction if group 11 is empty but tag is present
+        if (!widgetId && raw.includes('id=')) {
+            const idMatch = raw.match(/id=["']([^"']+)["']/);
+            if (idMatch) widgetId = idMatch[1];
+        }
+        
+        if (raw.includes('<lollms_widget')) {
+            const widgetData = props.inlineWidgets?.find(w => w.id === widgetId);
+            if (!widgetData) {
+                console.warn(`[WidgetRenderer] No source found in metadata for ID: ${widgetId}`);
+            }
+            return { type: 'interactive_widget', widget: widgetData, raw };
+        }
+        
+        const eventData = props.events?.find(e => e.id === widgetId);
+        return { type: 'inline_event', event: eventData, raw };
     }
 
     return { type: 'content', content: rawBlock };
@@ -271,7 +288,8 @@ const messageParts = computed(() => {
     // 1. Define all detectable patterns
     const patterns = [
         { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
-        { type: 'tool', regex: /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))/g },
+        // [FIX] Synchronized regex to ensure Widget ID (group 11) is captured for the renderer
+        { type: 'tool', regex: /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)/g },
         { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g }
     ];
 
@@ -842,6 +860,13 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- ── Note block ──────────────────────────────────────────────── -->
           <details v-else-if="part.type === 'note'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60" open>
+            <!-- [NEW] Live Status Pulse for secondary stream -->
+            <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
+                <span class="flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                </span>
+            </div>
             <!-- Header bar as Summary -->
             <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800/60 cursor-pointer list-none select-none">
               <div class="flex items-center gap-2.5">
@@ -868,7 +893,7 @@ function onMermaidReady({ svg }, partIndex) {
             <!-- Note content — token-aware so code blocks get syntax highlighting -->
             <div class="note-body px-5 py-4 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-200 dark:border-amber-800/60">
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
-                <template v-for="(token, ti) in getTokens(part.content)" :key="`note-token-${ti}`">
+                <template v-for="(token, ti) in getTokens(discussionsStore.liveArtefactBuffers[part.title] || part.content)" :key="`note-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
                   <div v-else v-html="parsedMarkdown(token.raw)"></div>
                 </template>
@@ -878,6 +903,13 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- ── Skill block ──────────────────────────────────────────────── -->
           <details v-else-if="part.type === 'skill'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60" open>
+            <!-- [NEW] Live Status Pulse -->
+            <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
+                <span class="flex h-2 w-2">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
+                </span>
+            </div>
             <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800/60 cursor-pointer list-none select-none">
               <div class="flex items-center gap-2.5">
                 <IconChevronRight class="w-3 h-3 text-teal-500 transition-transform duration-200 summary-arrow" />
@@ -895,10 +927,10 @@ function onMermaidReady({ svg }, partIndex) {
                 Validate Skill
               </button>
             </summary>
-            <div class="note-body px-5 py-4 bg-teal-50/40 dark:bg-teal-950/20 border-t border-teal-200 dark:border-teal-800/60">
+            <div class="note-body px-5 py-4 bg-teal-50/40 dark:bg-amber-950/20 border-t border-teal-200 dark:border-teal-800/60">
                <div v-if="part.description" class="text-xs text-gray-500 dark:text-gray-400 italic mb-2">{{ part.description }}</div>
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
-                <template v-for="(token, ti) in getTokens(part.content)" :key="`skill-token-${ti}`">
+                <template v-for="(token, ti) in getTokens(discussionsStore.liveArtefactBuffers[part.title] || part.content)" :key="`skill-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
                   <div v-else v-html="parsedMarkdown(token.raw)"></div>
                 </template>
@@ -919,7 +951,46 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </template>
 
+          <!-- ── Interactive Teaching Widget ───────────────────────────── -->
+          <div v-else-if="part.type === 'interactive_widget' && part.widget" class="my-6">
+              <div class="rounded-2xl border-2 border-blue-500/20 bg-white dark:bg-gray-900 shadow-xl overflow-hidden">
+                  <div class="px-4 py-2 bg-blue-500/5 border-b dark:border-gray-800 flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                          <IconCpuChip class="w-4 h-4 text-blue-500" />
+                          <span class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest">{{ part.widget.title }}</span>
+                      </div>
+                      <span class="text-[10px] font-black text-gray-400 uppercase tracking-tighter">{{ part.widget.type }} Engine</span>
+                  </div>
+                  <div class="aspect-video w-full">
+                      <!-- [FIX] Use live buffer if widget is currently being streamed -->
+                      <iframe 
+                        :srcdoc="discussionsStore.liveArtefactBuffers[part.widget?.title] || part.widget?.source" 
+                        class="w-full h-full border-0" 
+                        sandbox="allow-scripts allow-same-origin allow-forms"
+                      ></iframe>
+                  </div>
+              </div>
+          </div>
+
         </template>
+
+        <!-- ── [NEW] Live Active Event Indicator ──────────────────────── -->
+        <div v-if="isStreaming && $attrs.message?.lastEvent" class="mt-4 animate-in fade-in slide-in-from-bottom-1">
+             <div class="flex items-center gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100/50 dark:border-blue-800/30">
+                  <div class="relative flex-shrink-0">
+                      <IconAnimateSpin class="w-5 h-5 text-blue-500 animate-spin" />
+                      <div class="absolute inset-0 flex items-center justify-center">
+                          <component :is="getEventIcon($attrs.message.lastEvent.type)" class="w-2.5 h-2.5 text-blue-600" />
+                      </div>
+                  </div>
+                  <div class="flex flex-col min-w-0">
+                      <span class="text-[9px] font-black uppercase tracking-widest text-blue-500/60 leading-none mb-1">Active Step</span>
+                      <span class="text-xs font-bold text-gray-700 dark:text-gray-300 truncate">
+                          {{ $attrs.message.lastEvent.content?.name || $attrs.message.lastEvent.content || 'Thinking...' }}
+                      </span>
+                  </div>
+             </div>
+        </div>
       </template>
     </div>
 

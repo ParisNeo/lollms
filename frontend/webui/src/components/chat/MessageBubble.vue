@@ -98,6 +98,13 @@ const { imageGenerationTasks } = storeToRefs(tasksStore);
 
 // Auto-expand timeline if the message is currently streaming/generating
 const isEventsCollapsed = ref(!props.message.isStreaming);
+
+// [NEW] Keep timeline expanded and scrolling during generation
+watch(() => props.message.events?.length, () => {
+    if (props.message.isStreaming) {
+        isEventsCollapsed.value = false;
+    }
+});
 const isEditing = ref(false);
 const editedContent = ref('');
 const codeMirrorView = ref(null);
@@ -114,7 +121,11 @@ const selectedViewIndices = ref({});
 
 const areActionsDisabled = computed(() => discussionsStore.generationInProgress);
 const user = computed(() => authStore.user);
-const isTtsActive = computed(() => !!user.value?.tts_binding_model_name);
+const isTtsActive = computed(() => {
+    return !!user.value?.tts_binding_model_name && 
+           user.value.tts_binding_model_name.includes('/') && 
+           dataStore.availableTtsModels.length > 0;
+});
 const messageTtsState = computed(() => ttsState.value[props.message.id] || {});
 
 const isCurrentUser = computed(() => props.message.sender_type === 'user' && props.message.sender === authStore.user?.username);
@@ -459,24 +470,34 @@ const sortedSources = computed(() => {
 
 const lastEventSummary = computed(() => {
     if (!hasEvents.value) return '';
-    // Find the last event that isn't a technical ID or noisy log
-    const displayEvents = props.message.events.filter(e => 
-        e.type !== 'new_message_id' && 
-        !String(e.content).includes('0 personality tool')
-    );
-    if (displayEvents.length === 0) return 'Processing...';
+    
+    // Filter for descriptive events that signify progress to a user
+    const displayEvents = props.message.events.filter(e => {
+        const type = e.type?.toLowerCase();
+        const content = String(e.content || '');
+        // Ignore technical plumbing and empty steps
+        return type !== 'new_message_id' && 
+               !content.includes('0 personality tool') &&
+               content.trim().length > 0;
+    });
+
+    if (displayEvents.length === 0) {
+        return props.message.isStreaming ? 'Generating response...' : 'Task completed';
+    }
 
     const lastEvent = displayEvents[displayEvents.length - 1];
-    let summary = lastEvent.type.replace(/_/g, ' ');
     
-    let content = lastEvent.content;
-    // If content is a UUID or looks like a tech ID, don't show it in the summary
-    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-    
-    if (typeof content === 'string' && content.length > 0 && !uuidRegex.test(content)) {
-        summary += `: ${content.substring(0, 40)}${content.length > 40 ? '...' : ''}`;
+    // Prioritize specific 'content' (like "Searching Arxiv...") over the event type label
+    if (typeof lastEvent.content === 'string' && lastEvent.content.length > 2) {
+        // Suppress UUIDs in the summary bar
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        if (!uuidRegex.test(lastEvent.content)) {
+            return lastEvent.content.substring(0, 50) + (lastEvent.content.length > 50 ? '...' : '');
+        }
     }
-    return summary;
+
+    // Fallback to stylized event type
+    return lastEvent.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 });
 const eventIconMap = {
   'thought': IconThinking,
@@ -628,6 +649,34 @@ function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.
 function handleExportCode() { discussionsStore.exportMessageCodeToZip({ content: props.message.content, title: discussionsStore.activeDiscussion?.title || 'discussion' }); }
 function handleBuildNewDiscussion(event) { event.stopPropagation(); discussionsStore.createDiscussionFromMessage({ discussionId: discussionsStore.currentDiscussionId, messageId: props.message.id }); }
 
+function handleShowMetadata() {
+    // Parse metadata if it's currently a string (coming from some DB paths)
+    let meta = props.message.metadata;
+    if (typeof meta === 'string') {
+        try {
+            meta = JSON.parse(meta);
+        } catch (e) {
+            meta = { error: "Failed to parse metadata string", raw: meta };
+        }
+    }
+
+    uiStore.openModal('interactiveOutput', {
+        title: `Developer Tools: Message Metadata`,
+        results: {
+            "Message State": {
+                "id": props.message.id,
+                "sender": props.message.sender,
+                "sender_type": props.message.sender_type,
+                "token_count": props.message.token_count,
+                "created_at": props.message.created_at
+            },
+            "Raw Metadata": meta,
+            "Internal Events": props.message.events,
+            "Sources": props.message.sources
+        }
+    });
+}
+
 function handleBranchOrRegenerate() {
     discussionsStore.initiateBranch(props.message);
 }
@@ -704,6 +753,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                         <MessageContentRenderer
                             :content="message.content"
                             :sources="message.sources"
+                            :inline-widgets="message.inline_widgets"
                             :is-streaming="message.isStreaming"
                             :is-user="isCurrentUser"
                             :has-images="allImages.length > 0"
@@ -722,7 +772,10 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                             <IconCog class="w-3.5 h-3.5" :class="{'animate-spin': message.isStreaming}" />
                                         </div>
                                         <div class="flex flex-col">
-                                            <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">Execution Workflow</span>
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">Execution Workflow</span>
+                                                <span v-if="message.isStreaming" class="flex h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse"></span>
+                                            </div>
                                             <span class="text-[10px] font-bold text-gray-600 dark:text-gray-400 line-clamp-1 capitalize">{{ lastEventSummary }}</span>
                                         </div>
                                     </div>
@@ -964,6 +1017,11 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     </div>
                     <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
                         <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <!-- Debug Metadata Button -->
+                            <button @click="handleShowMetadata" title="View Message Metadata" class="action-btn !text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/30">
+                                <IconCode class="w-4 h-4" />
+                            </button>
+
                             <button v-if="isTtsActive && isAi" @click="handleSpeak" :title="messageTtsState.isLoading ? 'Generating...' : 'Speak'" class="action-btn" :disabled="messageTtsState.isLoading">
                                 <IconAnimateSpin v-if="messageTtsState.isLoading" class="w-4 h-4 animate-spin" />
                                 <IconSpeakerWave v-else class="w-4 h-4" />
@@ -973,6 +1031,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                     {{ format.label }}
                                 </button>
                             </DropdownMenu>
+                            
                             <button v-if="containsCode" :disabled="areActionsDisabled" @click="handleExportCode" title="Export Code" class="action-btn"><IconCode class="w-4 h-4" /></button>
                             <button :disabled="areActionsDisabled" @click="copyContent" title="Copy" class="action-btn"><IconCopy /></button>
                             <button :disabled="areActionsDisabled" @click="toggleEdit" title="Edit" class="action-btn"><IconPencil /></button>

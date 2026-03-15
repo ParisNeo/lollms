@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-15 23:27]
+
+- feat: add image annotation support and refine discussion message schema
+
 ## [2026-03-15 15:08]
 
 - Refactor binding description retrieval to use `lollms_client` helper

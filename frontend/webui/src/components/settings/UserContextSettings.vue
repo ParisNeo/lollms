@@ -50,6 +50,7 @@ const imageGenerationEnabled = ref(false);
 const imageGenerationSystemPrompt = ref('');
 const imageAnnotationEnabled = ref(false);
 const imageEditingEnabled = ref(false);
+const inlineWidgetsEnabled = ref(true);
 const slideMakerEnabled = ref(false);
 const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
@@ -137,9 +138,10 @@ function populateForm() {
     forceAiResponseLanguage.value = !!user.value.force_ai_response_language;
     imageGenerationEnabled.value = !!user.value.image_generation_enabled;
     imageGenerationSystemPrompt.value = user.value.image_generation_system_prompt || '';
-    imageAnnotationEnabled.value = !!user.value.image_annotation_enabled;
-    imageEditingEnabled.value = !!user.value.image_editing_enabled;
-    slideMakerEnabled.value = !!user.value.slide_maker_enabled;
+    image_annotation_enabled.value = !!user.value.image_annotation_enabled;
+    image_editing_enabled.value = !!user.value.image_editing_enabled;
+    inlineWidgetsEnabled.value = user.value.inline_widgets_enabled ?? true;
+    slide_maker_enabled.value = !!user.value.slide_maker_enabled;
     activateGeneratedImages.value = !!user.value.activate_generated_images;
     noteGenerationEnabled.value = !!user.value.note_generation_enabled;
     memoryEnabled.value = !!user.value.memory_enabled;
@@ -564,12 +566,15 @@ async function handleSaveChanges() {
         <!-- Media Generation Features -->
         <div class="p-6 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl space-y-6">
             <div class="flex items-center justify-between">
-                <h3 class="font-black uppercase tracking-widest text-gray-400">Media & Document Creation</h3>
-                <div class="flex gap-2">
-                    <label class="feature-tag" :class="{'active': imageGenerationEnabled}"><input type="checkbox" v-model="imageGenerationEnabled"><span>ImgGen</span></label>
-                    <label class="feature-tag" :class="{'active': imageEditingEnabled}"><input type="checkbox" v-model="imageEditingEnabled"><span>ImgEdit</span></label>
-                    <label class="feature-tag" :class="{'active': slideMakerEnabled}"><input type="checkbox" v-model="slideMakerEnabled"><span>Slides</span></label>
-                    <label class="feature-tag" :class="{'active': noteGenerationEnabled}"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
+                <h3 class="font-black uppercase tracking-widest text-gray-400">Creation & Learning Tools</h3>
+                <div class="flex flex-wrap gap-2 justify-end">
+                    <label class="feature-tag" :class="{'active': imageGenerationEnabled}" title="Generate images from text"><input type="checkbox" v-model="imageGenerationEnabled"><span>ImgGen</span></label>
+                    <label class="feature-tag" :class="{'active': imageEditingEnabled}" title="Modify existing images"><input type="checkbox" v-model="imageEditingEnabled"><span>ImgEdit</span></label>
+                    <label class="feature-tag" :class="{'active': slideMakerEnabled}" title="Generate presentations"><input type="checkbox" v-model="slideMakerEnabled"><span>Slides</span></label>
+                    <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
+                    <label class="feature-tag" :class="{'active': inlineWidgetsEnabled}" title="Build interactive widgets"><input type="checkbox" v-model="inlineWidgetsEnabled"><span>Widgets</span></label>
+                    <label class="feature-tag" :class="{'active': noteGenerationEnabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
+                    <label class="feature-tag" :class="{'active': skillsBuildingEnabled}" title="Save conversation as reusable skills"><input type="checkbox" v-model="skillsBuildingEnabled"><span>Skills</span></label>
                 </div>
             </div>
 
