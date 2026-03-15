@@ -56,41 +56,61 @@ class BindingCommandRequest(BaseModel):
 class ZooInstallRequest(BaseModel):
     index: int
 
-def _normalize_binding_desc(name: str, desc: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_binding_desc(name: str, desc: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
     """Ensures binding description has consistent keys for the frontend."""
-    ASCIIColors.yellow(f"Normalization >> Processing metadata for: {name}")
-    
     if not desc:
-        ASCIIColors.warning(f"Normalization >> No metadata dict received for {name}")
+        # Static Fallback: If probing the class failed, try to read the YAML directly
+        # This is critical for fresh installs where dependencies aren't yet available
+        try:
+            from lollms_client import get_bindings_path
+            path = get_bindings_path() / binding_type / name / "description.yaml"
+            if path.exists():
+                import yaml
+                with open(path, 'r', encoding='utf-8') as f:
+                    cfg = yaml.safe_load(f)
+                    if cfg:
+                        desc = {
+                            "name": name,
+                            "binding_name": name,
+                            "title": name.replace('_', ' ').title(),
+                            "input_parameters": cfg.get('global_input_parameters', []),
+                            "model_parameters": cfg.get('model_input_parameters', []),
+                            "description": cfg.get('description', '')
+                        }
+        except Exception:
+            pass
+
+    if not desc:
+        ASCIIColors.warning(f"Normalization >> No metadata found for {name}")
         return {
             "name": name, 
             "binding_name": name, 
             "title": name.replace('_', ' ').title(),
             "input_parameters": [], 
-            "model_parameters": []
+            "model_parameters": [],
+            "description": "Metadata extraction failed for this binding. Please ensure its dependencies are installed."
         }
     
     if not isinstance(desc, dict):
-        ASCIIColors.error(f"Normalization >> Expected dict for {name}, got {type(desc)}")
         return { "name": name, "binding_name": name, "title": name, "input_parameters": [], "model_parameters": [] }
 
     # Standardize Identifiers
     desc['binding_name'] = desc.get('binding_name', name)
     desc['name'] = desc.get('name', name)
-    desc['title'] = desc.get('title', name.replace('_', ' ').title())
+    desc['title'] = desc.get('title', desc.get('name', name).replace('_', ' ').title())
         
-    # [CRITICAL FIX] Robust Parameter Mapping
-    # Standardize both Global and Model parameters across all naming conventions
+    # Standardize Global Parameters
     if not desc.get('input_parameters'):
         if desc.get('global_input_parameters'):
-            ASCIIColors.info(f"Normalization >> Mapped global_input_parameters for {name}")
             desc['input_parameters'] = desc['global_input_parameters']
         elif desc.get('parameters'):
-            ASCIIColors.info(f"Normalization >> Mapped generic parameters for {name}")
             desc['input_parameters'] = desc['parameters']
+        elif desc.get('config'): 
+            desc['input_parameters'] = desc['config']
         else:
             desc['input_parameters'] = []
             
+    # Standardize Model Parameters
     if not desc.get('model_parameters'):
         if desc.get('model_input_parameters'):
             desc['model_parameters'] = desc['model_input_parameters']
@@ -322,20 +342,15 @@ def _generate_model_icon_task(task: Task, username: str, prompt: str):
 @bindings_management_router.get("/bindings/available_types", response_model=List[Dict])
 async def get_available_binding_types():
     try:
-        ASCIIColors.yellow("Admin >> Cataloging all LLM binding types...")
         names = list_bindings("llm")
         desc_list = []
         for name in names:
             try:
                 raw = get_binding_desc(name, "llm")
-                normalized = _normalize_binding_desc(name, raw)
+                normalized = _normalize_binding_desc(name, raw, "llm")
                 desc_list.append(normalized)
-            except Exception as ex:
-                # Isolate individual binding failures so one broken module doesn't crash the list
-                ASCIIColors.warning(f"Admin >> Failed to probe metadata for '{name}': {ex}")
-                desc_list.append({ "name": name, "binding_name": name, "title": name.replace('_', ' ').title(), "input_parameters": [], "model_parameters": [] })
-        
-        ASCIIColors.success(f"Admin >> Successfully standardized {len(desc_list)} binding definitions.")
+            except Exception:
+                desc_list.append(_normalize_binding_desc(name, None, "llm"))
         return desc_list
     except Exception as e:
         trace_exception(e)

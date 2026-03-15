@@ -103,9 +103,39 @@ const activeTypeDesc = computed(() => {
 // Unified parameter resolver to handle different backend naming conventions
 const allFormParameters = computed(() => {
     const type = activeTypeDesc.value;
-    if (!type) return [];
-    // Standardize across different binding versions/types
-    return type.input_parameters || type.global_input_parameters || type.parameters || [];
+    if (!type) {
+        // [FIX] Return existing config keys even if metadata is not yet loaded
+        // This is critical for Setup Wizard resume on fresh installs
+        return Object.keys(bindingForm.value.config || {}).map(key => ({
+            name: key,
+            type: typeof bindingForm.value.config[key] === 'boolean' ? 'bool' : 'str',
+            description: '(Persisted key)',
+            mandatory: false
+        }));
+    }
+    
+    // 1. Get standard global parameters
+    const params = type.input_parameters || type.global_input_parameters || type.parameters || [];
+    
+    // 2. Identify model-specific parameters to exclude them from the Wizard global view
+    const modelParams = type.model_parameters || type.model_input_parameters || [];
+    const modelParamNames = new Set(modelParams.map(p => p.name));
+    
+    // 3. Merge with any extra config keys found in the current object
+    const descParamNames = new Set(params.map(p => p.name));
+    const extras = Object.keys(bindingForm.value.config || {})
+        .filter(k => !descParamNames.has(k) && !modelParamNames.has(k) && k !== 'model_name')
+        .map(k => ({
+            name: k,
+            type: typeof bindingForm.value.config[k] === 'boolean' ? 'bool' : 'str',
+            description: '(Configuration key)',
+            mandatory: false
+        }));
+
+    return [
+        ...params.filter(p => !modelParamNames.has(p.name)),
+        ...extras
+    ];
 });
 
 // Helper to parse comma-separated options for select inputs

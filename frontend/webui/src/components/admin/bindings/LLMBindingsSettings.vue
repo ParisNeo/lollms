@@ -79,24 +79,23 @@ const selectedBindingType = computed(() => {
 });
 
 const allFormParameters = computed(() => {
-    if (!selectedBindingType.value) {
-        return [];
-    }
+    // 1. Get Global Parameters Definition from Metadata
+    const paramsFromDesc = selectedBindingType.value ? (
+        selectedBindingType.value.input_parameters || 
+        selectedBindingType.value.global_input_parameters || 
+        selectedBindingType.value.parameters || []
+    ) : [];
     
-    // 1. Get Global Parameters Definition (handling various backend naming conventions)
-    const paramsFromDesc = selectedBindingType.value.input_parameters || 
-                           selectedBindingType.value.global_input_parameters || 
-                           selectedBindingType.value.parameters || [];
-    
-    console.log(`[AdminBinding] allFormParameters found ${paramsFromDesc.length} keys for ${selectedBindingType.value.name}`);
     const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
     
-    // 2. Get Model Parameters to Exclude (these belong in the alias/model manager)
-    const modelParams = selectedBindingType.value.model_parameters || 
-                        selectedBindingType.value.model_input_parameters || [];
+    // 2. Get Model Parameters to Exclude
+    const modelParams = selectedBindingType.value ? (
+        selectedBindingType.value.model_parameters || 
+        selectedBindingType.value.model_input_parameters || []
+    ) : [];
     const modelParamNames = new Set(modelParams.map(p => p.name));
     
-    // 3. Find Extra Config keys (already in DB but missing from desc)
+    // 3. Find Extra Config keys (important for new installs where metadata probing might fail)
     const paramsFromConfig = Object.keys(form.value.config || {})
         .filter(key => 
             !paramNamesFromDesc.has(key) && 
@@ -108,11 +107,11 @@ const allFormParameters = computed(() => {
         .map(key => ({
             name: key,
             type: typeof form.value.config[key] === 'boolean' ? 'bool' : (typeof form.value.config[key] === 'number' ? 'float' : 'str'),
-            description: `(Configuration key not found in metadata)`,
+            description: `(Persisted configuration key)`,
             mandatory: false,
         }));
         
-    // 4. Return Globals + Extras (Filtered)
+    // 4. Return Globals + Extras
     const filteredGlobals = paramsFromDesc.filter(p => !modelParamNames.has(p.name) && p.name !== 'model_name');
 
     return [
