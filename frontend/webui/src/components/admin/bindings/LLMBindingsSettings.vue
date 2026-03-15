@@ -171,6 +171,14 @@ onMounted(() => {
     adminStore.fetchGlobalSettings();
 });
 
+// [NEW] Watcher to handle metadata arrival while the Edit Form is already open
+watch(availableBindingTypes, (newTypes) => {
+    if (isEditMode.value && newTypes.length > 0) {
+        console.log("[AdminBinding] Catalog arrived. Re-syncing active form...");
+        syncConfigWithMetadata();
+    }
+});
+
 function showAddForm() {
     editingBinding.value = null;
     form.value = getInitialFormState();
@@ -181,37 +189,42 @@ function showAddForm() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+// [NEW] Centralized function to sync DB record with Binding Metadata
+function syncConfigWithMetadata() {
+    if (!form.value.name) return;
+
+    const targetName = form.value.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const metadata = availableBindingTypes.value.find(b => {
+        const currentName = (b.binding_name || b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        return currentName === targetName;
+    });
+
+    if (metadata) {
+        console.log(`[AdminBinding] Metadata found for ${form.value.name}. Syncing keys...`);
+        const params = (metadata.input_parameters || 
+                        metadata.global_input_parameters || 
+                        metadata.parameters || []);
+        
+        params.forEach(p => {
+            if (form.value.config[p.name] === undefined) {
+                form.value.config[p.name] = p.default !== undefined ? p.default : (p.type === 'bool' ? false : '');
+            }
+        });
+    } else {
+        console.warn(`[AdminBinding] Metadata not found yet for ${form.value.name}. Catalog size: ${availableBindingTypes.value.length}`);
+    }
+}
+
 function showEditForm(binding) {
     console.log("[AdminBinding] Opening Edit Form for:", binding.alias);
     
     editingBinding.value = binding;
-    // 1. Load the basic data from DB
-    const baseForm = JSON.parse(JSON.stringify(binding));
-    if (!baseForm.config) baseForm.config = {};
+    form.value = JSON.parse(JSON.stringify(binding));
+    if (!form.value.config) form.value.config = {};
 
-    // 2. [CRITICAL FIX] Sync Config with Metadata Defaults
-    // This ensures that even if the DB record is old/empty, 
-    // the UI sees the keys defined in the YAML metadata (like service_key).
-    const bindingMetadata = availableBindingTypes.value.find(b => 
-        (b.binding_name || b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '') === 
-        (baseForm.name || '').toLowerCase().replace(/[^a-z0-9]/g, '')
-    );
-
-    if (bindingMetadata) {
-        const params = (bindingMetadata.input_parameters || 
-                        bindingMetadata.global_input_parameters || 
-                        bindingMetadata.parameters || []);
-        
-        params.forEach(p => {
-            // Only fill if the key is missing from the DB record
-            if (baseForm.config[p.name] === undefined) {
-                console.log(`[AdminBinding] Initializing missing key from metadata: ${p.name}`);
-                baseForm.config[p.name] = p.default !== undefined ? p.default : (p.type === 'bool' ? false : '');
-            }
-        });
-    }
-
-    form.value = baseForm;
+    // Initial attempt to sync
+    syncConfigWithMetadata();
+    
     isKeyVisible.value = {};
     
     const bindingType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
@@ -356,8 +369,14 @@ async function executeCommand(cmd, bindingId, params) {
                         </div>
                     </div>
 
+                    <!-- Fixed: Added Loading and fallback indicators -->
                     <div v-if="selectedBindingType" class="space-y-6 border-t dark:border-gray-700 pt-6">
                         <div class="text-sm text-gray-600 dark:text-gray-400 prose dark:prose-invert max-w-none" v-html="parseMarkdown(selectedBindingType.description || '')"></div>
+                        
+                        <div v-if="allFormParameters.length === 0" class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-center italic text-gray-400 text-xs">
+                            No global configuration parameters required for this binding.
+                        </div>
+
                         <div v-for="param in allFormParameters" :key="param.name" class="space-y-1">
                             <label :for="`param-${param.name}`" class="block text-sm font-medium capitalize">
                                 {{ param.name.replace(/_/g, ' ') }}

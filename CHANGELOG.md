@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-15 01:48]
+
+- **feat(frontend): rebuild assets after LLM bindings settings update**
+
 ## [2026-03-15 01:32]
 
 - Fix degraded client fallback and ensure registry consistency on binding deletion
