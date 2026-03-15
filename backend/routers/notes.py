@@ -290,25 +290,19 @@ async def email_notes(
     html_body += f"<p style='font-size: 12px; color: #9ca3af; margin-top: 30px;'>Sent from {current_user.username}'s workspace.</p>"
     html_body += "</div>"
 
-    # 2. Handle Manual Mode
-    recovery_mode = settings.get("password_recovery_mode", "manual")
-    if recovery_mode == "manual":
-        # Create a plain-text version for the URL 'body' param
-        text_body = f"Notes Shared by {current_user.username}\n\n"
-        for note in notes:
-            text_body += f"--- {note.title} ---\n{note.content}\n\n"
-        
-        return {
-            "manual_mode": True,
-            "subject": subject,
-            "body": text_body,
-            "html": html_body, # Return HTML so UI can copy it to clipboard
-            "recipient": payload.recipient_email
-        }
-
-    # 3. Server-side Send (SMTP/Gmail)
-    try:
-        send_generic_email(payload.recipient_email, subject, html_body)
-        return {"message": f"Successfully emailed {len(notes)} note(s) to {payload.recipient_email}."}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to send email: {str(e)}")
+    # SECURITY POLICY: We never send user-generated notes directly from the LoLLMs server.
+    # This prevents the platform from being used for phishing, harassment, or as an open relay.
+    # We strictly provide the formatted content for the user to send from their own local client.
+    
+    # Create a plain-text version for the URL 'body' param
+    text_body = f"Notes Shared by {current_user.username}\n\n"
+    for note in notes:
+        text_body += f"--- {note.title} ---\n{note.content}\n\n"
+    
+    return {
+        "manual_mode": True, # Force local handling
+        "subject": subject,
+        "body": text_body,
+        "html": html_body,
+        "recipient": payload.recipient_email
+    }

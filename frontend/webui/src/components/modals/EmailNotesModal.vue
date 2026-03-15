@@ -34,11 +34,11 @@ async function handleSend(mode = 'standard') {
     try {
         const result = await notesStore.emailNotes(noteIds.value, recipientEmail.value);
         
-        if (result && (result.manual_mode || mode === 'gmail' || mode === 'copy')) {
+        if (result) {
             // 1. If user just wants to copy to clipboard
             if (mode === 'copy') {
                 await copyAsRichText(result.html);
-                uiStore.closeModal('emailNotes');
+                // DO NOT close the modal here, allowing further actions
                 return;
             }
 
@@ -46,24 +46,21 @@ async function handleSend(mode = 'standard') {
             const subject = encodeURIComponent(result.subject);
             const recipient = encodeURIComponent(result.recipient);
             
-            // Note: We leave the body empty in the URL because we'll use the clipboard 
-            // to provide high-quality Rich Text instead of messy raw text.
-
             if (mode === 'gmail') {
                 // Open Gmail tab
                 const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${recipient}&su=${subject}`;
                 window.open(gmailUrl, '_blank');
                 
-                // Copy Rich Text to clipboard automatically
+                // Copy Rich Text to clipboard automatically so they just have to paste
                 await copyAsRichText(result.html);
-                uiStore.addNotification("Gmail opened! Just press Paste (Ctrl+V) in the message body.", "info", 6000);
+                uiStore.addNotification("Gmail opened! Press Paste (Ctrl+V) in the body.", "info", 6000);
             } else {
                 // Standard Mailto (Local App like Outlook/Mail.app)
                 window.location.href = `mailto:${result.recipient}?subject=${subject}`;
                 
                 // Copy Rich Text to clipboard automatically
                 await copyAsRichText(result.html);
-                uiStore.addNotification("Opening your mail app. Press Paste (Ctrl+V) to insert the formatted notes.", "info", 6000);
+                uiStore.addNotification("Local mail app opened. Press Paste (Ctrl+V) to insert notes.", "info", 6000);
             }
         }
         
@@ -75,46 +72,69 @@ async function handleSend(mode = 'standard') {
 </script>
 
 <template>
-    <GenericModal modalName="emailNotes" title="Email Notes" maxWidthClass="max-w-md">
+    <GenericModal modalName="emailNotes" title="Export to Email" maxWidthClass="max-w-lg">
         <template #body>
-            <div class="space-y-4">
-                <p class="text-sm text-gray-500">Sending {{ noteIds.length }} note(s) as a formatted email.</p>
-                <div>
-                    <label class="label">Recipient Email</label>
-                    <div class="relative mt-1">
-                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+            <div class="space-y-5">
+                <!-- Security Note -->
+                <div class="p-4 bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-500 rounded-r-xl">
+                    <div class="flex items-center gap-2 text-amber-800 dark:text-amber-200 mb-1">
+                        <IconShieldCheck class="w-5 h-5" />
+                        <span class="text-sm font-bold uppercase tracking-tight">Security & Privacy Policy</span>
+                    </div>
+                    <p class="text-xs text-amber-700/80 dark:text-amber-300/80 leading-relaxed">
+                        To protect your account and prevent unauthorized mail delivery, LoLLMs does not send emails directly from the server.
+                        Instead, we prepare the content so you can safely send it using your own local tools or Gmail.
+                    </p>
+                </div>
+
+                <div class="space-y-1">
+                    <label class="text-[10px] font-black uppercase text-gray-400 tracking-widest px-1">Recipient Address</label>
+                    <div class="relative">
+                        <div class="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
                             <IconMail class="h-4 w-4 text-gray-400" />
                         </div>
                         <input
                             v-model="recipientEmail"
                             type="email"
-                            class="input-field pl-10"
-                            placeholder="colleague@example.com"
+                            class="input-field pl-11 !rounded-xl"
+                            placeholder="recipient@example.com"
                             required
-                            @keyup.enter="handleSend"
+                            @keyup.enter="handleSend('standard')"
                         />
                     </div>
                 </div>
+
+                <div class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border dark:border-gray-700">
+                    <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                        <b>Selected:</b> {{ noteIds.length }} note(s) will be merged into a single document.
+                    </p>
+                </div>
             </div>
         </template>
+
         <template #footer>
-            <div class="flex flex-col sm:flex-row gap-2 w-full justify-end">
-                <button @click="uiStore.closeModal('emailNotes')" class="btn btn-secondary order-4 sm:order-1">Cancel</button>
-
-                <button @click="handleSend('copy')" class="btn btn-secondary flex items-center gap-2 order-3 sm:order-2" :disabled="!recipientEmail || isSending">
-                    <IconCopy class="w-4 h-4" />
-                    Copy Formatted
+            <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between w-full gap-3 pt-2">
+                <button @click="uiStore.closeModal('emailNotes')" class="px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors">
+                    Cancel
                 </button>
 
-                <button @click="handleSend('gmail')" class="btn btn-secondary flex items-center gap-2 order-2 sm:order-3" :disabled="!recipientEmail || isSending">
-                    <img src="https://ssl.gstatic.com/ui/v1/icons/mail/images/favicon5.ico" class="w-4 h-4" alt="Gmail" />
-                    Compose in Gmail
-                </button>
+                <div class="flex flex-col sm:flex-row gap-2">
+                    <button @click="handleSend('copy')" class="btn btn-secondary flex items-center justify-center gap-2 !rounded-xl border-gray-200 shadow-sm" :disabled="!recipientEmail || isSending">
+                        <IconCopy class="w-4 h-4 text-gray-500" />
+                        <span>Copy Formatted</span>
+                    </button>
 
-                <button @click="handleSend('standard')" class="btn btn-primary order-1 sm:order-4" :disabled="!recipientEmail || isSending">
-                    <IconAnimateSpin v-if="isSending" class="w-4 h-4 mr-2 animate-spin" />
-                    {{ isSending ? 'Preparing...' : 'Send via System' }}
-                </button>
+                    <button @click="handleSend('gmail')" class="btn btn-secondary flex items-center justify-center gap-2 !rounded-xl border-gray-200 shadow-sm" :disabled="!recipientEmail || isSending">
+                        <img src="https://ssl.gstatic.com/ui/v1/icons/mail/images/favicon5.ico" class="w-4 h-4" alt="Gmail" />
+                        <span>Gmail</span>
+                    </button>
+
+                    <button @click="handleSend('standard')" class="btn btn-primary flex items-center justify-center gap-2 !rounded-xl shadow-lg" :disabled="!recipientEmail || isSending">
+                        <IconAnimateSpin v-if="isSending" class="w-4 h-4 animate-spin" />
+                        <IconShare v-else class="w-4 h-4" />
+                        <span>Open Mail App</span>
+                    </button>
+                </div>
             </div>
         </template>
     </GenericModal>

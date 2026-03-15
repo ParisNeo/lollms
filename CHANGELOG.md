@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-15 00:42]
+
+- feat: update user context settings, email notes modal, and session client initialization
+
 ## [2026-03-14 23:23]
 
 - build(frontend): rebuild production assets with updated components

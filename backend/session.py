@@ -756,14 +756,34 @@ def build_lollms_client_from_params(
                     return _global_client_registry[registry_key]
 
                 ASCIIColors.info(f"Worker {os.getpid()}: Building Engine [Hash: {registry_key[:8]}]")
-                # Pass the callback directly to LollmsClient
-                lc = LollmsClient(**registry_payload, callback=callback)
-                _global_client_registry[registry_key] = lc
-                return lc
+                
+                try:
+                    # Pass the callback directly to LollmsClient
+                    lc = LollmsClient(**registry_payload, callback=callback)
+                    _global_client_registry[registry_key] = lc
+                    return lc
+                except (ValueError, Exception) as engine_err:
+                    # [CRITICAL FIX] Catch binding initialization errors (like missing API keys)
+                    # We log the error but do NOT raise a 500 error here.
+                    # This allows the User Session to load so the user can fix the config in the UI.
+                    error_msg = str(engine_err)
+                    binding_alias_to_show = binding_to_use.alias if binding_to_use else 'N/A'
+                    
+                    ASCIIColors.warning(f"Engine Load Failed >> Binding: {binding_alias_to_show} | Error: {error_msg}")
+                    
+                    if callback:
+                        callback(f"⚠️ Configuration Issue: {error_msg}", 24, {}) # MSG_TYPE_ERROR = 24
+                    
+                    # Return a "Degraded" client - This prevents 500 errors in session loaders.
+                    # We create a shell client that doesn't actually load the broken binding.
+                    registry_payload["load_llm"] = False 
+                    degraded_lc = LollmsClient(**registry_payload)
+                    return degraded_lc
+
         except Exception as e:
             traceback.print_exc()
             binding_alias_to_show = binding_to_use.alias if binding_to_use else 'N/A'
-            raise HTTPException(status_code=500, detail=f"Could not initialize LLM Client for binding '{binding_alias_to_show}': {str(e)}")
+            raise HTTPException(status_code=500, detail=f"System error during engine registry: {str(e)}")
     finally:
         db.close()
 

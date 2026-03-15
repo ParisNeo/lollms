@@ -28,6 +28,7 @@ import IconFileText from '../../assets/icons/IconFileText.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
+const uiStore = useUiStore();
 const { user } = storeToRefs(authStore);
 const { availableLollmsModels, allPersonalities } = storeToRefs(dataStore);
 

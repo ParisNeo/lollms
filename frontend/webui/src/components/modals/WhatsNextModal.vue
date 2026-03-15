@@ -161,16 +161,40 @@ async function handleSaveBinding() {
     isSavingBinding.value = true;
     try {
         const cat = currentCategory.value;
-        if (cat === 'llm') await adminStore.addBinding(bindingForm.value);
-        if (cat === 'tti') await adminStore.addTtiBinding(bindingForm.value);
-        if (cat === 'stt') await adminStore.addSttBinding(bindingForm.value);
-        if (cat === 'tts') await adminStore.addTtsBinding(bindingForm.value);
+        let result;
+        
+        if (bindingForm.value.id) {
+            // Update existing
+            if (cat === 'llm') result = await adminStore.updateBinding(bindingForm.value.id, bindingForm.value);
+            if (cat === 'tti') result = await adminStore.updateTtiBinding(bindingForm.value.id, bindingForm.value);
+            if (cat === 'stt') result = await adminStore.updateSttBinding(bindingForm.value.id, bindingForm.value);
+            if (cat === 'tts') result = await adminStore.updateTtsBinding(bindingForm.value.id, bindingForm.value);
+        } else {
+            // Add new
+            if (cat === 'llm') result = await adminStore.addBinding(bindingForm.value);
+            if (cat === 'tti') result = await adminStore.addTtiBinding(bindingForm.value);
+            if (cat === 'stt') result = await adminStore.addSttBinding(bindingForm.value);
+            if (cat === 'tts') result = await adminStore.addTtsBinding(bindingForm.value);
+        }
         
         isAddingBinding.value = false;
-        uiStore.addNotification(`${cat.toUpperCase()} Binding added!`, 'success');
+        uiStore.addNotification(`${cat.toUpperCase()} Configuration Saved!`, 'success');
+    } catch (e) {
+        console.error("Save binding failed:", e);
     } finally {
         isSavingBinding.value = false;
     }
+}
+
+function handleEditBinding(binding) {
+    isAddingBinding.value = true;
+    selectedBindingType.value = binding.name;
+    
+    // Deep copy the existing configuration into the form
+    bindingForm.value = JSON.parse(JSON.stringify(binding));
+    
+    // If config is missing keys defined in metadata, they will be handled 
+    // by the allFormParameters computed property in the template.
 }
 
 async function handleDeleteBinding(id) {
@@ -477,7 +501,7 @@ async function finalizeSetup() {
                     </div>
                     
                     <div v-for="b in configuredBindings" :key="b.id" class="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 shadow-sm group">
-                        <div class="flex items-center gap-4">
+                        <div class="flex items-center gap-4 flex-grow cursor-pointer" @click="handleEditBinding(b)">
                             <div class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-blue-500">
                                 <IconServer class="w-5 h-5" />
                             </div>
@@ -486,9 +510,14 @@ async function finalizeSetup() {
                                 <p class="text-[10px] text-gray-500 uppercase font-black tracking-widest">{{ b.name }}</p>
                             </div>
                         </div>
-                        <button @click="handleDeleteBinding(b.id)" class="p-2 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <IconTrash class="w-5 h-5" />
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button @click="handleEditBinding(b)" class="p-2 text-gray-400 hover:text-blue-500" title="Edit Settings">
+                                <IconPencil class="w-4 h-4" />
+                            </button>
+                            <button @click="handleDeleteBinding(b.id)" class="p-2 text-gray-400 hover:text-red-500" title="Delete">
+                                <IconTrash class="w-4 h-4" />
+                            </button>
+                        </div>
                     </div>
 
                     <div v-if="currentCategory === 'llm' && configuredBindings.length > 0" class="mt-auto p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800 flex items-center gap-3">
