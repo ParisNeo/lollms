@@ -406,6 +406,12 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
     try:
         db.delete(binding_to_delete)
         db.commit()
+        
+        # Clear global registry in case this worker had a "degraded" instance cached
+        from backend.session import _global_client_registry, _registry_lock
+        with _registry_lock:
+            _global_client_registry.clear()
+            
         set_system_cache(db, "cache_available_models", None)
         manager.broadcast_sync({"type": "bindings_updated"})
         return {"message": "Binding deleted successfully."}

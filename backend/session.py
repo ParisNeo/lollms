@@ -775,9 +775,24 @@ def build_lollms_client_from_params(
                         callback(f"⚠️ Configuration Issue: {error_msg}", 24, {}) # MSG_TYPE_ERROR = 24
                     
                     # Return a "Degraded" client - This prevents 500 errors in session loaders.
-                    # We create a shell client that doesn't actually load the broken binding.
-                    registry_payload["load_llm"] = False 
-                    degraded_lc = LollmsClient(**registry_payload)
+                    # CRITICAL: We MUST remove the specific binding keys from the payload.
+                    # Otherwise, LollmsClient will still try to instantiate the broken class.
+                    degraded_payload = registry_payload.copy()
+                    
+                    # Strip LLM config
+                    degraded_payload["load_llm"] = False
+                    degraded_payload.pop("llm_binding_name", None)
+                    degraded_payload.pop("llm_binding_config", None)
+                    
+                    # Strip TTI/TTS/STT configs as well just in case they caused the crash
+                    degraded_payload["load_tti"] = False
+                    degraded_payload["load_tts"] = False
+                    degraded_payload["load_stt"] = False
+                    degraded_payload.pop("tti_binding_name", None)
+                    degraded_payload.pop("tts_binding_name", None)
+                    degraded_payload.pop("stt_binding_name", None)
+                    
+                    degraded_lc = LollmsClient(**degraded_payload)
                     return degraded_lc
 
         except Exception as e:
