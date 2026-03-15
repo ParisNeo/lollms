@@ -558,6 +558,23 @@ function saveSkillFromRenderer(part) {
     });
 }
 
+function openWidgetFullscreen(widget) {
+    if (!widget) return;
+    
+    // Capture either the live streaming buffer or the static source
+    const title = widget.title || 'Interactive Widget';
+    const source = discussionsStore.liveArtefactBuffers[title] || widget.source;
+    
+    uiStore.openModal('interactiveOutput', {
+        title: title,
+        results: {
+            [title]: {
+                "html_output": source
+            }
+        }
+    });
+}
+
 function onImageLoad(event, annotations) {
     const img = event.target;
     if (!img || img.tagName !== 'IMG') return;
@@ -952,19 +969,30 @@ function onMermaidReady({ svg }, partIndex) {
           </template>
 
           <!-- ── Interactive Teaching Widget ───────────────────────────── -->
-          <div v-else-if="part.type === 'interactive_widget' && part.widget" class="my-6">
+          <div v-if="part.type === 'interactive_widget' && part.widget" class="my-6">
               <div class="rounded-2xl border-2 border-blue-500/20 bg-white dark:bg-gray-900 shadow-xl overflow-hidden">
                   <div class="px-4 py-2 bg-blue-500/5 border-b dark:border-gray-800 flex items-center justify-between">
-                      <div class="flex items-center gap-2">
-                          <IconCpuChip class="w-4 h-4 text-blue-500" />
-                          <span class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest">{{ part.widget.title }}</span>
+                      <div class="flex items-center gap-2 min-w-0">
+                          <IconCpuChip class="w-4 h-4 text-blue-500 flex-shrink-0" />
+                          <span class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest truncate">{{ part.widget?.title || 'Loading Widget...' }}</span>
                       </div>
-                      <span class="text-[10px] font-black text-gray-400 uppercase tracking-tighter">{{ part.widget.type }} Engine</span>
+                      <div class="flex items-center gap-3 flex-shrink-0">
+                          <span class="text-[10px] font-black text-gray-400 uppercase tracking-tighter">{{ part.widget?.type || 'html' }} Engine</span>
+                          <div class="h-3 w-px bg-gray-200 dark:bg-gray-700"></div>
+                          <button 
+                            @click="openWidgetFullscreen(part.widget)"
+                            class="p-1 rounded hover:bg-blue-500/10 text-gray-400 hover:text-blue-500 transition-colors"
+                            title="Open Full Screen"
+                          >
+                              <IconMaximize class="w-4 h-4" />
+                          </button>
+                      </div>
                   </div>
                   <div class="aspect-video w-full">
-                      <!-- [FIX] Use live buffer if widget is currently being streamed -->
+                      <!-- [FIX] Use live buffer if widget is currently being streamed, with safety fallback -->
                       <iframe 
-                        :srcdoc="discussionsStore.liveArtefactBuffers[part.widget?.title] || part.widget?.source" 
+                        v-if="part.widget"
+                        :srcdoc="discussionsStore.liveArtefactBuffers[part.widget.title] || part.widget.source || ''" 
                         class="w-full h-full border-0" 
                         sandbox="allow-scripts allow-same-origin allow-forms"
                       ></iframe>

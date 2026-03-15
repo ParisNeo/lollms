@@ -146,11 +146,12 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
 
-        // --- BUFFERING LOGIC START ---
-        // We accumulate text in this buffer and only flush it to the reactive state periodically.
+        // --- BUFFERING & INTERCEPTION LOGIC START ---
         let contentBuffer = '';
+        let tagBuffer = ''; // Used to intercept tags until they are complete
+        let isInterceptingTag = false;
         let lastUpdateTimestamp = 0;
-        const UPDATE_INTERVAL = 60; // ms (approx 16fps) - Reduces UI freezing significantly
+        const UPDATE_INTERVAL = 60; 
         
         const flushBuffer = () => {
             if (contentBuffer && messageToUpdate) {
@@ -191,8 +192,42 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     };
                     break;
                 case 'chunk':
-                    contentBuffer += data.content;
-                    if (Date.now() - lastUpdateTimestamp > UPDATE_INTERVAL) flushBuffer();
+                    const chunk = data.content;
+                    
+                    // --- TAG INTERCEPTION LOGIC ---
+                    // Detect start of a special block tag
+                    if (!isInterceptingTag && chunk.includes('<')) {
+                        const knownTags = ['lollms_widget', 'note', 'skill', 'artefact', 'think', 'annotate'];
+                        if (knownTags.some(t => chunk.includes(`<${t}`))) {
+                            isInterceptingTag = true;
+                        }
+                    }
+
+                    if (isInterceptingTag) {
+                        tagBuffer += chunk;
+                        
+                        // Detect end of the tag (either self-closing or standard close)
+                        const hasStandardClose = tagBuffer.includes('</lollms_widget>') || 
+                                               tagBuffer.includes('</note>') || 
+                                               tagBuffer.includes('</skill>') ||
+                                               tagBuffer.includes('</think>') ||
+                                               tagBuffer.includes('</annotate>') ||
+                                               tagBuffer.includes('</artefact>');
+                                               
+                        const hasSelfClose = tagBuffer.includes('/>') && !tagBuffer.includes('</');
+
+                        if (hasStandardClose || hasSelfClose) {
+                            // Tag is complete, release it to the visible stream
+                            contentBuffer += tagBuffer;
+                            tagBuffer = '';
+                            isInterceptingTag = false;
+                            flushBuffer();
+                        }
+                    } else {
+                        // Normal prose
+                        contentBuffer += chunk;
+                        if (Date.now() - lastUpdateTimestamp > UPDATE_INTERVAL) flushBuffer();
+                    }
                     break;
 
                 case 'artefact_chunk':
