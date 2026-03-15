@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 from lollms_client import LollmsClient, list_bindings, get_binding_desc
-
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.config import (
@@ -62,21 +61,8 @@ def _normalize_binding_desc(name: str, desc: Dict[str, Any], binding_type: str =
         # Static Fallback: If probing the class failed, try to read the YAML directly
         # This is critical for fresh installs where dependencies aren't yet available
         try:
-            from lollms_client import get_bindings_path
-            path = get_bindings_path() / binding_type / name / "description.yaml"
-            if path.exists():
-                import yaml
-                with open(path, 'r', encoding='utf-8') as f:
-                    cfg = yaml.safe_load(f)
-                    if cfg:
-                        desc = {
-                            "name": name,
-                            "binding_name": name,
-                            "title": name.replace('_', ' ').title(),
-                            "input_parameters": cfg.get('global_input_parameters', []),
-                            "model_parameters": cfg.get('model_input_parameters', []),
-                            "description": cfg.get('description', '')
-                        }
+            
+            desc = get_binding_desc(name, binding_type)
         except Exception:
             pass
 
