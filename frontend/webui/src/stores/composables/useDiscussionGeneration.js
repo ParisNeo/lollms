@@ -148,10 +148,11 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
         // --- BUFFERING & INTERCEPTION LOGIC START ---
         let contentBuffer = '';
-        let tagBuffer = ''; // Used to intercept tags until they are complete
+        let tagBuffer = ''; 
         let isInterceptingTag = false;
+        let interceptedTagName = ''; // Track which tag we are currently hiding
         let lastUpdateTimestamp = 0;
-        const UPDATE_INTERVAL = 60; 
+        const UPDATE_INTERVAL = 40; // High frequency for smooth text
         
         const flushBuffer = () => {
             if (contentBuffer && messageToUpdate) {
@@ -194,40 +195,46 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'chunk':
                     const chunk = data.content;
                     
-                    // --- TAG INTERCEPTION LOGIC ---
-                    // Detect start of a special block tag
-                    if (!isInterceptingTag && chunk.includes('<')) {
-                        const knownTags = ['lollms_widget', 'note', 'skill', 'artefact', 'think', 'annotate'];
-                        if (knownTags.some(t => chunk.includes(`<${t}`))) {
-                            isInterceptingTag = true;
+                    // --- ENHANCED TAG INTERCEPTION LOGIC ---
+                    const knownTags = ['lollms_widget', 'note', 'skill', 'artefact', 'think', 'annotate'];
+                    
+                    // Detect if a known tag is starting in this chunk
+                    if (!isInterceptingTag) {
+                        for (const tag of knownTags) {
+                            if (chunk.includes(`<${tag}`)) {
+                                isInterceptingTag = true;
+                                interceptedTagName = tag;
+                                generationState.value = { 
+                                    status: 'thinking', 
+                                    details: `Building ${tag.replace('_', ' ')}...` 
+                                };
+                                break;
+                            }
                         }
                     }
 
                     if (isInterceptingTag) {
                         tagBuffer += chunk;
                         
-                        // Detect end of the tag
-                        // Logic: must have the closing bracket. For self-closing tags like <lollms_widget />, 
-                        // we check if the last few characters of the buffer contain '/>'
-                        const hasStandardClose = tagBuffer.includes('</lollms_widget>') || 
-                                               tagBuffer.includes('</note>') || 
-                                               tagBuffer.includes('</skill>') ||
-                                               tagBuffer.includes('</think>') ||
-                                               tagBuffer.includes('</annotate>') ||
-                                               tagBuffer.includes('</artefact>');
-                                               
-                        // Ensure we have the full ID attribute before releasing
-                        const hasSelfClose = tagBuffer.trim().endsWith('/>') && tagBuffer.includes('id=');
-
-                        if (hasStandardClose || hasSelfClose) {
-                            // Tag is complete, release it to the visible stream
+                        // Detect closure
+                        const closeTag = `</${interceptedTagName}>`;
+                        const isSelfClosing = interceptedTagName === 'lollms_widget' && tagBuffer.trim().endsWith('/>');
+                        
+                        if (tagBuffer.includes(closeTag) || isSelfClosing) {
+                            // Tag is complete, release it
                             contentBuffer += tagBuffer;
                             tagBuffer = '';
                             isInterceptingTag = false;
+                            interceptedTagName = '';
+                            
+                            generationState.value = { 
+                                status: 'streaming', 
+                                details: `Generating...` 
+                            };
                             flushBuffer();
                         }
                     } else {
-                        // Normal prose
+                        // Regular prose flushes based on interval
                         contentBuffer += chunk;
                         if (Date.now() - lastUpdateTimestamp > UPDATE_INTERVAL) flushBuffer();
                     }

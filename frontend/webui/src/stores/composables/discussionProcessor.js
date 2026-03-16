@@ -46,16 +46,27 @@ export function processSingleMessage(msg) {
     const rawWidgets = metadata.inline_widgets || metadata.INLINE_WIDGETS || [];
     const normalizedWidgets = Array.isArray(rawWidgets) ? rawWidgets.map(w => ({...w})) : [];
 
+    // Improved resolution order for events and sources
+    const events = msg.events || metadata.events || metadata.EVENTS || [];
+    let sources = Array.isArray(msg.sources) && msg.sources.length > 0 
+                 ? [...msg.sources] 
+                 : (metadata.sources || metadata.SOURCES || []);
+
+    // [FIX] Source Promotion: If top-level sources are empty, scan events for an embedded 'sources' block
+    if (Array.isArray(sources) && sources.length === 0 && Array.isArray(events)) {
+        const embeddedSourcesEvent = events.find(e => e.type === 'sources');
+        if (embeddedSourcesEvent && Array.isArray(embeddedSourcesEvent.content)) {
+            sources = embeddedSourcesEvent.content;
+        }
+    }
+
     return {
         ...msg,
         binding_name,
         model_name,
         sender_type: senderType,
-        // Improved resolution order for events and sources
-        events: msg.events || metadata.events || metadata.EVENTS || [],
-        sources: Array.isArray(msg.sources) && msg.sources.length > 0 
-                 ? msg.sources 
-                 : (metadata.sources || metadata.SOURCES || []),
+        events,
+        sources,
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
         inline_widgets: normalizedWidgets,

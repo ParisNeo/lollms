@@ -32,6 +32,7 @@ import { storeToRefs } from 'pinia';
 
 const props = defineProps({
   content: { type: String, default: '' },
+  sources: { type: Array, default: () => [] }, // Added missing sources prop
   events: { type: Array, default: () => [] },
   inlineWidgets: { type: Array, default: () => [] }, // Prop for persistent widgets
   isStreaming: { type: Boolean, default: false },
