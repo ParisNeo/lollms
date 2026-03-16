@@ -590,12 +590,30 @@ function openWidgetFullscreen(widget) {
     
     uiStore.openModal('interactiveOutput', {
         title: title,
+        fullScreen: true,
         results: {
             [title]: {
                 "html_output": source
             }
         }
     });
+}
+
+/**
+ * Creates a standalone HTML document from the widget source 
+ * and opens it in a new browser tab.
+ */
+function openWidgetInNewTab(widget) {
+    if (!widget) return;
+    const source = getWidgetContent(widget);
+    if (!source) return;
+
+    const blob = new Blob([source], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+    
+    // Revoke URL after a minute to free memory
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 function onImageLoad(event, annotations) {
@@ -1000,6 +1018,15 @@ function onMermaidReady({ svg }, partIndex) {
                       >
                           <IconMaximize class="w-4 h-4" />
                           <span>View Fullscreen</span>
+                      </button>
+
+                      <button 
+                        @click.stop="openWidgetInNewTab(part.widget)"
+                        class="btn btn-secondary btn-sm rounded-xl px-4 flex items-center gap-2"
+                        title="Open in standalone browser tab"
+                      >
+                          <IconGlobeAlt class="w-4 h-4" />
+                          <span class="hidden sm:inline">New Tab</span>
                       </button>
                   </div>
               </div>

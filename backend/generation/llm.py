@@ -1547,6 +1547,7 @@ def build_llm_generation_router(router: APIRouter):
 
         async def stream_generator() -> AsyncGenerator[str, None]:
             all_events = []
+            collected_sources = []
             
             def blocking_call():
                 start_time = time.time()
@@ -1557,6 +1558,14 @@ def build_llm_generation_router(router: APIRouter):
                     if stop_event.is_set(): return False
 
                     mtype_val = msg_type.value if hasattr(msg_type, 'value') else msg_type
+                    
+                    # Capture sources into local list for persistence
+                    if mtype_val == MSG_TYPE.MSG_TYPE_SOURCES_LIST.value and params:
+                        if isinstance(params, list):
+                            collected_sources.extend(params)
+                        else:
+                            collected_sources.append(params)
+
                     tip = discussion_obj.get_message(discussion_obj.active_branch_id)
                     current_content_len = len(tip.content) if tip else 0
 
@@ -1605,7 +1614,9 @@ def build_llm_generation_router(router: APIRouter):
                     if payload:
                         # Only append meaningful user-facing events to the persistent log
                         # new_message_id is technical plumbing and should be ignored by the history
-                        if payload['type'] not in ["chunk", "thought", "sources", "new_message_id"]:
+                        # We now INCLUDE 'sources' in the events log for debugging/audit, 
+                        # while still populating the dedicated sources metadata field.
+                        if payload['type'] not in ["chunk", "thought", "new_message_id"]:
                             all_events.append(payload)
                         
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
@@ -1697,9 +1708,22 @@ def build_llm_generation_router(router: APIRouter):
                         # Post-generation Stats
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
                         tps = (ai_msg.tokens - 1) / (time.time() - first_chunk_time) if first_chunk_time and ai_msg.tokens > 1 else 0
+                        
+                        # CRITICAL FIX: Ensure sources and events are persisted to DB
                         ai_msg.set_metadata_item('ttft', round(ttft, 2), discussion_obj)
                         ai_msg.set_metadata_item('tps', round(tps, 2), discussion_obj)
                         ai_msg.set_metadata_item('events', all_events, discussion_obj)
+                        
+                        # Use deduplicated sources for the dedicated UI list
+                        unique_sources = []
+                        seen_sources = set()
+                        for s in collected_sources:
+                            key = s.get('source') or s.get('title')
+                            if key not in seen_sources:
+                                unique_sources.append(s)
+                                seen_sources.add(key)
+                        
+                        ai_msg.set_metadata_item('sources', unique_sources, discussion_obj)
 
                     # Finalize
                     def msg_to_out(m): return None if not m else {"id": m.id, "sender": m.sender, "content": m.content, "metadata": m.metadata, "sender_type": m.sender_type, "image_references": [f"data:image/png;base64,{i}" for i in (m.images or [])]}

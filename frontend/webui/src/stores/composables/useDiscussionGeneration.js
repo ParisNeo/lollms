@@ -277,9 +277,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         const title = data.content.title;
                         const id = data.content.id || title; 
                         
+                        // Decoupled: Open Split View only, leave DataZone visibility to user
                         if (data.type !== 'inline_widget_start' && title) {
                             uiStore.activeSplitArtefactTitle = title;
-                            uiStore.isDataZoneVisible = true; 
                         }
 
                         if (id && state.activeUpdatingArtefacts?.value) {

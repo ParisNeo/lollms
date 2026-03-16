@@ -96,19 +96,30 @@ function handleClose() {
 </script>
 
 <template>
-    <GenericModal modalName="interactiveOutput" :title="title" maxWidthClass="max-w-6xl">
+    <GenericModal 
+        modalName="interactiveOutput" 
+        :title="title" 
+        :maxWidthClass="modalProps?.fullScreen ? 'max-w-full h-full !p-0' : 'max-w-6xl'"
+    >
         <template #body>
-            <div class="p-6 space-y-8 bg-gray-50 dark:bg-gray-900/50 min-h-[400px]">
+            <div 
+                class="space-y-8 bg-gray-50 dark:bg-gray-900/50 min-h-[400px]"
+                :class="modalProps?.fullScreen ? 'p-0 h-full flex flex-col' : 'p-6'"
+            >
                 
                 <div v-if="Object.keys(results).length === 0" class="flex flex-col items-center justify-center py-20 text-gray-400">
                     <IconInfo class="w-12 h-12 mb-4 opacity-20" />
                     <p class="text-lg font-medium">No results generated yet.</p>
                 </div>
 
-                <div v-else class="space-y-6">
-                    <div v-for="(nodeResult, nodeId) in results" :key="nodeId" class="result-panel">
+                <div v-else :class="modalProps?.fullScreen ? 'flex-1 flex flex-col' : 'space-y-6'">
+                    <div v-for="(nodeResult, nodeId) in results" :key="nodeId" 
+                         :class="[
+                             'result-panel',
+                             modalProps?.fullScreen ? 'flex-1 flex flex-col !rounded-none !shadow-none border-none' : ''
+                         ]">
                         <!-- Node Header -->
-                        <div class="px-4 py-3 bg-white dark:bg-gray-800 border-b dark:border-gray-700 flex items-center justify-between">
+                        <div v-if="!modalProps?.fullScreen" class="px-4 py-3 bg-white dark:bg-gray-800 border-b dark:border-gray-700 flex items-center justify-between">
                             <div class="flex items-center gap-2">
                                 <IconCheckCircle class="w-5 h-5 text-green-500" />
                                 <span class="font-bold text-sm text-gray-700 dark:text-gray-200 uppercase tracking-wider">{{ nodeId }}</span>
@@ -117,8 +128,15 @@ function handleClose() {
                         </div>
 
                         <!-- Result Content -->
-                        <div class="p-4 space-y-4">
-                            <div v-for="(value, key) in nodeResult" :key="key" class="space-y-2">
+                        <div 
+                            class="space-y-4"
+                            :class="modalProps?.fullScreen ? 'p-0 flex-1 flex flex-col' : 'p-4'"
+                        >
+                            <div v-for="(value, key) in nodeResult" :key="key" 
+                                 :class="[
+                                     'space-y-2',
+                                     modalProps?.fullScreen ? 'flex-1 flex flex-col' : ''
+                                 ]">
                                 <div class="flex items-center gap-2">
                                     <span class="text-[10px] font-black uppercase text-blue-500 tracking-widest">{{ key }}</span>
                                     <div class="h-px flex-grow bg-gray-100 dark:bg-gray-700"></div>
@@ -150,12 +168,27 @@ function handleClose() {
                                 </div>
 
                                 <!-- HTML / INTERACTIVE RENDERING -->
-                                <div v-else-if="isHtml(key, value)" class="html-result-container w-full h-[600px] border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative">
+                                <div v-else-if="isHtml(key, value)" 
+                                     :class="[
+                                         'html-result-container w-full border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative',
+                                         modalProps?.fullScreen ? 'flex-1 !h-full !rounded-none !border-none' : 'h-[600px]'
+                                     ]">
                                     <iframe :srcdoc="value" class="w-full h-full" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" referrerpolicy="no-referrer"></iframe>
                                     <!-- Actions Overlay -->
-                                    <div class="absolute top-2 right-2 flex gap-2 z-10">
+                                    <div class="absolute top-2 right-2 flex gap-2 z-10" v-if="!modalProps?.fullScreen">
                                         <button @click="openHtmlFullscreen(value)" class="p-2 bg-white/80 dark:bg-black/50 hover:bg-white dark:hover:bg-black text-gray-700 dark:text-gray-200 rounded-full shadow-sm backdrop-blur-sm transition-all border dark:border-gray-600" title="Open in New Tab">
                                             <IconMaximize class="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                    <!-- STANDALONE BUTTON: Only show in Fullscreen Modal mode -->
+                                    <div v-if="modalProps?.fullScreen && Object.values(results)[0]?.html_output" class="absolute top-4 left-4 z-10">
+                                        <button 
+                                            @click="openHtmlFullscreen(Object.values(results)[0].html_output)"
+                                            class="flex items-center gap-2 px-3 py-1 bg-blue-600/20 hover:bg-blue-600/40 text-blue-400 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all border border-blue-500/30"
+                                            title="Pop out to separate browser window"
+                                        >
+                                            <IconMaximize class="w-3.5 h-3.5" />
+                                            <span>Standalone Tab</span>
                                         </button>
                                     </div>
                                 </div>
@@ -179,7 +212,7 @@ function handleClose() {
             </div>
         </template>
 
-        <template #footer>
+        <template #footer v-if="!modalProps?.fullScreen">
             <div class="flex justify-between w-full px-4">
                 <p class="text-xs text-gray-500 self-center">Results are updated in real-time during flow execution.</p>
                 <button @click="handleClose" class="btn btn-primary px-8">Done</button>

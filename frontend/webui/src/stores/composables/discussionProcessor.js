@@ -51,8 +51,11 @@ export function processSingleMessage(msg) {
         binding_name,
         model_name,
         sender_type: senderType,
+        // Improved resolution order for events and sources
         events: msg.events || metadata.events || metadata.EVENTS || [],
-        sources: msg.sources || metadata.sources || metadata.SOURCES || [],
+        sources: Array.isArray(msg.sources) && msg.sources.length > 0 
+                 ? msg.sources 
+                 : (metadata.sources || metadata.SOURCES || []),
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
         inline_widgets: normalizedWidgets,

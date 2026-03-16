@@ -339,6 +339,14 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
     @apply relative w-full text-left p-2 rounded-lg cursor-pointer flex items-center justify-between transition-colors duration-150 hover:bg-slate-100/50 dark:hover:bg-gray-800/50; 
 }
 
+@keyframes pulse-fast {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.animate-pulse-fast {
+  animation: pulse-fast 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
 
 /* Stabilize rendering process to prevent STATUS_BREAKPOINT crashes */
 * {

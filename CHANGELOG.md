@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-16 07:24]
+
+- feat: enhance LLM streaming generation and chat discussion handling
+
 ## [2026-03-16 01:11]
 
 - chore: rebuild frontend production assets

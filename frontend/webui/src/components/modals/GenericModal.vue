@@ -67,15 +67,29 @@ onUnmounted(() => {
       leave-to-class="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
     >
       <div v-if="isVisible" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
-        <div class="modal-panel bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full flex flex-col max-h-[90vh] pointer-events-auto" :class="[maxWidthClass]">
-          <header class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-gray-100">{{ title }}</h2>
+        <div 
+          class="modal-panel bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full flex flex-col pointer-events-auto transition-all" 
+          :class="[maxWidthClass, maxWidthClass.includes('max-w-full') ? 'max-h-full h-full !rounded-none' : 'max-h-[90vh]']"
+        >
+          <header 
+            class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 flex-shrink-0"
+            :class="[maxWidthClass.includes('max-w-full') ? 'p-2 bg-gray-950/50 border-gray-800' : 'p-4']"
+          >
+            <h2 
+                class="font-semibold"
+                :class="[maxWidthClass.includes('max-w-full') ? 'text-xs text-gray-400 px-2' : 'text-lg text-gray-900 dark:text-gray-100']"
+            >
+                {{ title }}
+            </h2>
             <button v-if="showCloseButton" @click="handleClose" class="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
               <IconClose class="w-6 h-6" />
             </button>
           </header>
           
-          <main class="p-6 overflow-y-auto flex-1">
+          <main 
+            class="overflow-y-auto flex-1"
+            :class="[maxWidthClass.includes('max-w-full') ? 'p-0' : 'p-6']"
+          >
              <slot name="body">
                 <slot></slot>
              </slot>

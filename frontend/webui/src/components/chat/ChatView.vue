@@ -83,7 +83,7 @@ async function handlePaste(event) {
             <p class="text-2xl font-bold text-blue-600">Drop files to attach</p>
         </div>
         <div class="flex-1 flex flex-row h-full overflow-hidden relative">
-            <!-- Main Chat Area (Shrinks when side panel is active) -->
+            <!-- Main Chat Area -->
             <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r dark:border-gray-700">
                 <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-800/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
                     <IconAnimateSpin class="w-16 h-16 text-blue-500 animate-spin" />
@@ -96,16 +96,14 @@ async function handlePaste(event) {
                 </div>
             </div>
 
-            <!-- Side Panel Container -->
-            <!-- Priority 1: Document Workspace (Split View) -->
-            <template v-if="uiStore.activeSplitArtefactTitle">
-                <ArtefactSplitView />
-            </template>
-            
-            <!-- Priority 2: Context Explorer (Data Zone) -->
-            <template v-else-if="isDataZoneVisible">
-                <DataZone />
-            </template>
+            <!-- Side Panels Container (Decoupled Layout) -->
+            <div class="flex flex-row h-full flex-shrink-0 transition-all duration-300">
+                <!-- Workspace Slot (Split View) -->
+                <ArtefactSplitView v-if="uiStore.activeSplitArtefactTitle" />
+                
+                <!-- Context Explorer Slot (Data Zone) -->
+                <DataZone v-if="isDataZoneVisible" />
+            </div>
         </div>
     </div>
 </template>

@@ -241,36 +241,52 @@ function download() {
         ></div>
 
         <div class="flex-1 flex flex-col min-w-0">
-        <div class="p-3 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-800 shadow-sm">
-            <div class="flex items-center gap-3 min-w-0">
+        <div class="p-3 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-800 shadow-sm relative overflow-hidden">
+            <!-- ── [NEW] Generation Animation Bar ── -->
+            <div v-if="isLiveUpdating" class="absolute bottom-0 left-0 h-0.5 bg-blue-500 w-full animate-pulse-fast"></div>
+
+            <div class="flex items-center gap-3 min-w-0 z-10">
                 <!-- Type-Specific Dynamic Icon & Color -->
-                <div class="p-2 rounded-lg" :class="{
-                    'bg-amber-100 text-amber-600': artefactGroup?.versions[0]?.artefact_type === 'note',
-                    'bg-emerald-100 text-emerald-600': artefactGroup?.versions[0]?.artefact_type === 'skill',
-                    'bg-blue-100 text-blue-600': ['document', 'file'].includes(artefactGroup?.versions[0]?.artefact_type),
-                    'bg-purple-100 text-purple-600': artefactGroup?.versions[0]?.artefact_type === 'code'
-                }">
-                    <IconPencil v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
-                    <IconSparkles v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" class="w-4 h-4" />
-                    <IconCode v-else-if="artefactGroup?.versions[0]?.artefact_type === 'code'" class="w-4 h-4" />
-                    <IconFileText v-else class="w-4 h-4" />
+                <div class="relative">
+                    <div class="p-2 rounded-lg transition-all duration-300" :class="[
+                        isLiveUpdating ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-800 animate-pulse' : '',
+                        {
+                            'bg-amber-100 text-amber-600': artefactGroup?.versions[0]?.artefact_type === 'note',
+                            'bg-emerald-100 text-emerald-600': artefactGroup?.versions[0]?.artefact_type === 'skill',
+                            'bg-blue-100 text-blue-600': ['document', 'file'].includes(artefactGroup?.versions[0]?.artefact_type),
+                            'bg-purple-100 text-purple-600': artefactGroup?.versions[0]?.artefact_type === 'code'
+                        }
+                    ]">
+                        <IconPencil v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
+                        <IconSparkles v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" class="w-4 h-4" />
+                        <IconCode v-else-if="artefactGroup?.versions[0]?.artefact_type === 'code'" class="w-4 h-4" />
+                        <IconFileText v-else class="w-4 h-4" />
+                    </div>
+                    <!-- Live Dot -->
+                    <div v-if="isLiveUpdating" class="absolute -top-1 -right-1 flex h-3 w-3">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-3 w-3 bg-blue-500"></span>
+                    </div>
                 </div>
                 
                 <div class="flex flex-col min-w-0">
-                    <span class="text-[9px] font-black uppercase tracking-widest" :class="{
-                        'text-amber-500': artefactGroup?.versions[0]?.artefact_type === 'note',
-                        'text-emerald-500': artefactGroup?.versions[0]?.artefact_type === 'skill',
-                        'text-purple-500': artefactGroup?.versions[0]?.artefact_type === 'code',
-                        'text-gray-400': !['note', 'skill', 'code'].includes(artefactGroup?.versions[0]?.artefact_type)
-                    }">
-                        {{ 
-                          artefactGroup?.versions[0]?.artefact_type === 'note' ? 'RESEARCH NOTE' :
-                          artefactGroup?.versions[0]?.artefact_type === 'skill' ? 'AI CAPABILITY' :
-                          artefactGroup?.versions[0]?.artefact_type === 'code' ? 'CODE SNIPPET' :
-                          artefactGroup?.versions[0]?.artefact_type === 'file' ? 'EXTERNAL DOCUMENT' :
-                          'DOCUMENT'
-                        }} WORKSPACE
-                    </span>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[9px] font-black uppercase tracking-widest" :class="{
+                            'text-amber-500': artefactGroup?.versions[0]?.artefact_type === 'note',
+                            'text-emerald-500': artefactGroup?.versions[0]?.artefact_type === 'skill',
+                            'text-purple-500': artefactGroup?.versions[0]?.artefact_type === 'code',
+                            'text-gray-400': !['note', 'skill', 'code'].includes(artefactGroup?.versions[0]?.artefact_type)
+                        }">
+                            {{ 
+                              artefactGroup?.versions[0]?.artefact_type === 'note' ? 'RESEARCH NOTE' :
+                              artefactGroup?.versions[0]?.artefact_type === 'skill' ? 'AI CAPABILITY' :
+                              artefactGroup?.versions[0]?.artefact_type === 'code' ? 'CODE SNIPPET' :
+                              artefactGroup?.versions[0]?.artefact_type === 'file' ? 'EXTERNAL DOCUMENT' :
+                              'DOCUMENT'
+                            }} WORKSPACE
+                        </span>
+                        <span v-if="isLiveUpdating" class="text-[8px] font-bold text-blue-500 animate-pulse uppercase tracking-tighter bg-blue-100 dark:bg-blue-900/40 px-1.5 rounded">AI is writing...</span>
+                    </div>
                     <span class="font-bold text-sm truncate dark:text-gray-100">{{ title }}</span>
                 </div>
             </div>
