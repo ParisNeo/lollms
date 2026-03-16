@@ -236,6 +236,8 @@ class ArtefactUpdate(BaseModel):
     kept_images_b64: List[str] = Field(default_factory=list)
     version: Optional[int] = None
     update_in_place: bool = False
+    artefact_type: Optional[str] = None
+    artefact_type: Optional[str] = None
 
 class MessageExportPayload(BaseModel):
     format: str

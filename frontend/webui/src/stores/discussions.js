@@ -50,7 +50,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const promptLoadedArtefacts = ref(new Set());
     const attachedSkills = ref([]); // Staged skills for the next message
     const activeUpdatingArtefacts = ref(new Set()); // Files AI is currently writing to
-    const liveArtefactBuffers = ref({}); // Temporary storage for streaming content
+    const liveArtefactBuffers = ref({}); // Temporary storage for streaming content (reactive object)
     const activeDiscussionParticipants = ref({});
     const ttsState = ref({});
     const currentPlayingAudio = ref({ messageId: null, audio: null });

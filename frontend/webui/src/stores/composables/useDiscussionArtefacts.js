@@ -80,8 +80,15 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         await fetchArtefacts(discussionId);
     }
 
-    async function updateArtefact({ discussionId, artefactTitle, newContent, newImagesB64, keptImagesB64, version, updateInPlace }) {
-        const payload = { new_content: newContent, new_images_b64: newImagesB64, kept_images_b64: keptImagesB64, version, update_in_place: updateInPlace };
+    async function updateArtefact({ discussionId, artefactTitle, newContent, newImagesB64, keptImagesB64, version, updateInPlace, artefactType }) {
+        const payload = { 
+            new_content: newContent, 
+            new_images_b64: newImagesB64, 
+            kept_images_b64: keptImagesB64, 
+            version, 
+            update_in_place: updateInPlace,
+            artefact_type: artefactType
+        };
         await apiClient.put(`/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}`, payload);
         await fetchArtefacts(discussionId);
     }

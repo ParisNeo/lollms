@@ -1056,13 +1056,20 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         try:
+            # Prepare metadata overrides
+            extra_metadata = {}
+            if payload.artefact_type:
+                extra_metadata['type'] = payload.artefact_type
+
             # Use positional arguments for required fields (title, new_content)
+            # CRITICAL: We remove 'version' from this call to fix the TypeError in the library
+            # which occurs when both the router and library internal logic try to set the kwarg.
             artefact_info = discussion.update_artefact(
                 artefact_title, 
                 payload.new_content, 
                 new_images=payload.kept_images_b64 + payload.new_images_b64,
-                version=payload.version,
-                update_in_place=payload.update_in_place
+                update_in_place=payload.update_in_place,
+                **extra_metadata
             )
             discussion.commit()
 

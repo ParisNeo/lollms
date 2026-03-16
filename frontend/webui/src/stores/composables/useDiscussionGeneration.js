@@ -206,7 +206,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     if (isInterceptingTag) {
                         tagBuffer += chunk;
                         
-                        // Detect end of the tag (either self-closing or standard close)
+                        // Detect end of the tag
+                        // Logic: must have the closing bracket. For self-closing tags like <lollms_widget />, 
+                        // we check if the last few characters of the buffer contain '/>'
                         const hasStandardClose = tagBuffer.includes('</lollms_widget>') || 
                                                tagBuffer.includes('</note>') || 
                                                tagBuffer.includes('</skill>') ||
@@ -214,7 +216,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
                                                tagBuffer.includes('</annotate>') ||
                                                tagBuffer.includes('</artefact>');
                                                
-                        const hasSelfClose = tagBuffer.includes('/>') && !tagBuffer.includes('</');
+                        // Ensure we have the full ID attribute before releasing
+                        const hasSelfClose = tagBuffer.trim().endsWith('/>') && tagBuffer.includes('id=');
 
                         if (hasStandardClose || hasSelfClose) {
                             // Tag is complete, release it to the visible stream
@@ -234,12 +237,14 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'note_chunk':
                 case 'skill_chunk':
                 case 'widget_chunk': {
-                    // Logic for both named types (from payload_map) and raw numeric types
-                    const { title, chunk } = data.content;
-                    if (state.liveArtefactBuffers.value[title] === undefined) {
-                        state.liveArtefactBuffers.value[title] = "";
+                    const { id, title, chunk } = data.content;
+                    const key = id || title;
+                    if (key) {
+                        state.liveArtefactBuffers.value = {
+                            ...state.liveArtefactBuffers.value,
+                            [key]: (state.liveArtefactBuffers.value[key] || "") + chunk
+                        };
                     }
-                    state.liveArtefactBuffers.value[title] += chunk;
                     break;
                 }
 
@@ -247,12 +252,16 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'note_done':
                 case 'skill_done':
                 case 'widget_done': {
-                    const title = data.content.title;
-                    if (state.activeUpdatingArtefacts?.value) {
-                        state.activeUpdatingArtefacts.value.delete(title);
+                    const { id, title } = data.content;
+                    const key = id || title;
+                    if (key) {
+                        if (state.activeUpdatingArtefacts?.value) {
+                            state.activeUpdatingArtefacts.value.delete(key);
+                        }
+                        const nextBuffers = { ...state.liveArtefactBuffers.value };
+                        delete nextBuffers[key];
+                        state.liveArtefactBuffers.value = nextBuffers;
                     }
-                    delete state.liveArtefactBuffers.value[title];
-                    // Trigger a clean fetch of the final persistent version
                     getActions().fetchArtefacts(currentDiscussionId.value);
                     break;
                 }
@@ -264,19 +273,22 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'skill_start':
                 case 'artefact_update':
                 case 'inline_widget_start':
-                    if (data.content && data.content.title) {
+                    if (data.content) {
                         const title = data.content.title;
-                        // For workspace items (not widgets), auto-open the split view
-                        if (data.type !== 'inline_widget_start') {
+                        const id = data.content.id || title; 
+                        
+                        if (data.type !== 'inline_widget_start' && title) {
                             uiStore.activeSplitArtefactTitle = title;
                             uiStore.isDataZoneVisible = true; 
                         }
 
-                        if (state.activeUpdatingArtefacts?.value) {
-                            state.activeUpdatingArtefacts.value.add(title);
-                            if (state.liveArtefactBuffers.value[title] === undefined) {
-                                state.liveArtefactBuffers.value[title] = "";
-                            }
+                        if (id && state.activeUpdatingArtefacts?.value) {
+                            state.activeUpdatingArtefacts.value.add(id);
+                            // Force reactivity by re-assigning the buffer object
+                            state.liveArtefactBuffers.value = {
+                                ...state.liveArtefactBuffers.value,
+                                [id]: state.liveArtefactBuffers.value[id] || ""
+                            };
                         }
                         getActions().fetchArtefacts(currentDiscussionId.value);
                     }
@@ -409,17 +421,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
                     const aiMsgIndex = messages.value.findIndex(m => m.id === tempAiMessage.id);
                     if (aiMsgIndex !== -1 && finalData.ai_message) {
+                        // Simply use the processor. It handles deep mapping of widgets correctly.
                         const processedAiMsg = processSingleMessage(finalData.ai_message);
-                        
-                        // [FIX] Deep sync of inline_widgets metadata
-                        // This ensures the renderer can find the HTML source by UUID.
-                        if (finalData.ai_message.metadata?.inline_widgets) {
-                            processedAiMsg.metadata = {
-                                ...(processedAiMsg.metadata || {}),
-                                inline_widgets: [...finalData.ai_message.metadata.inline_widgets]
-                            };
-                        }
-
                         messages.value.splice(aiMsgIndex, 1, processedAiMsg);
                         
                         // Ensure active branch points to the AI message (the new leaf)

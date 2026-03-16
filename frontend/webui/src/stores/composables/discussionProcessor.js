@@ -36,19 +36,15 @@ export function processSingleMessage(msg) {
     // --- Sender Type Correction Logic ---
     let senderType = msg.sender_type;
     if (!senderType) {
-        // This is a fallback for older messages that might not have sender_type
         const allPersonalityNames = new Set(dataStore.allPersonalities.map(p => p.name));
-        if (msg.sender === username) {
-            senderType = 'user';
-        } else if (allPersonalityNames.has(msg.sender)) {
-            senderType = 'assistant';
-        } else {
-            // If it's not the current user and not a known personality,
-            // it's most likely another user in a shared discussion.
-            senderType = 'user';
-        }
+        if (msg.sender === username) senderType = 'user';
+        else if (allPersonalityNames.has(msg.sender)) senderType = 'assistant';
+        else senderType = 'user';
     }
-    // --- End Correction Logic ---
+
+    // Consolidate Widgets with deep copy to avoid reference issues
+    const rawWidgets = metadata.inline_widgets || metadata.INLINE_WIDGETS || [];
+    const normalizedWidgets = Array.isArray(rawWidgets) ? rawWidgets.map(w => ({...w})) : [];
 
     return {
         ...msg,
@@ -59,8 +55,7 @@ export function processSingleMessage(msg) {
         sources: msg.sources || metadata.sources || metadata.SOURCES || [],
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
-        // Recover persistent widgets from metadata (handle case sensitivity)
-        inline_widgets: metadata.inline_widgets || metadata.INLINE_WIDGETS || [],
+        inline_widgets: normalizedWidgets,
         vision_support: visionSupport,
         branches: msg.branches || null,
     };

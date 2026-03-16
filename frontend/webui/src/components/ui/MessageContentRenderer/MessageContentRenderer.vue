@@ -48,7 +48,7 @@ const tasksStore = useTasksStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const { tasks } = storeToRefs(tasksStore);
-const { activeAiTasks } = storeToRefs(discussionsStore);
+const { activeAiTasks, liveArtefactBuffers } = storeToRefs(discussionsStore);
 
 const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
@@ -558,12 +558,35 @@ function saveSkillFromRenderer(part) {
     });
 }
 
+/**
+ * Safely retrieves content for a widget, preferring the live stream buffer.
+ */
+function getWidgetContent(widget) {
+    try {
+        if (!widget) return '';
+        
+        // 1. Check live streaming buffer first
+        const buffers = liveArtefactBuffers?.value;
+        if (buffers && typeof buffers === 'object') {
+            // Try lookup by ID first (most reliable), then title
+            const key = widget.id || widget.title;
+            if (key && buffers[key] !== undefined) return buffers[key];
+        }
+        
+        // 2. Check static source from message metadata
+        // Models may output code under 'source', 'content', 'html' or 'code'
+        return widget.source || widget.content || widget.html || widget.code || '';
+    } catch (error) {
+        console.warn("[WidgetRenderer] Recovered from lookup error:", error);
+        return widget?.source || widget?.content || widget?.html || widget?.code || '';
+    }
+}
+
 function openWidgetFullscreen(widget) {
     if (!widget) return;
     
-    // Capture either the live streaming buffer or the static source
     const title = widget.title || 'Interactive Widget';
-    const source = discussionsStore.liveArtefactBuffers[title] || widget.source;
+    const source = getWidgetContent(widget);
     
     uiStore.openModal('interactiveOutput', {
         title: title,
@@ -606,27 +629,6 @@ function onImageLoad(event, annotations) {
     requestAnimationFrame(tryDrawing);
 }
 
-function handleContentClick(event) {
-    const btn = event.target.closest('.citation-btn');
-    if (btn) {
-        const index = parseInt(btn.dataset.index);
-        if (index) {
-            // Find the source object for this index
-            const source = props.sources?.find(s => s.index === index) || props.sources?.[index - 1];
-            if (source) {
-                // Open the modal directly for better accessibility from the text
-                uiStore.openModal('sourceViewer', {
-                    title: source.title || source.name || `Source [${index}]`,
-                    content: source.content || source.chunk_text || source.text || '',
-                    source: source.source || source.url || '',
-                    score: source.relevance_score || source.score || 0,
-                    metadata: source.metadata || {}
-                });
-            }
-        }
-    }
-}
-
 function handleSourceClick(source, idx) {
     // Open modal directly when clicking items in the bottom list
     uiStore.openModal('sourceViewer', {
@@ -660,7 +662,7 @@ function onMermaidReady({ svg }, partIndex) {
 </script>
 
 <template>
-  <div ref="messageContentRef" @click="handleContentClick">
+  <div ref="messageContentRef">
     <div v-if="content || (isUser && !hasImages)" class="message-prose">
       <template v-if="messageParts.length > 0">
         <template v-for="part in messageParts" :key="part.id">
@@ -970,29 +972,29 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- ── Interactive Teaching Widget ───────────────────────────── -->
           <div v-if="part.type === 'interactive_widget' && part.widget" class="my-6">
-              <div class="rounded-2xl border-2 border-blue-500/20 bg-white dark:bg-gray-900 shadow-xl overflow-hidden">
+              <div class="rounded-2xl border-2 border-blue-500/20 bg-white dark:bg-gray-900 shadow-xl overflow-hidden transition-all hover:shadow-2xl">
                   <div class="px-4 py-2 bg-blue-500/5 border-b dark:border-gray-800 flex items-center justify-between">
                       <div class="flex items-center gap-2 min-w-0">
                           <IconCpuChip class="w-4 h-4 text-blue-500 flex-shrink-0" />
-                          <span class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest truncate">{{ part.widget?.title || 'Loading Widget...' }}</span>
+                          <span class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest truncate">{{ part.widget.title }}</span>
                       </div>
                       <div class="flex items-center gap-3 flex-shrink-0">
-                          <span class="text-[10px] font-black text-gray-400 uppercase tracking-tighter">{{ part.widget?.type || 'html' }} Engine</span>
+                          <span class="text-[10px] font-black text-blue-500/60 dark:text-blue-400/60 uppercase tracking-tighter">{{ part.widget.type }} Engine</span>
                           <div class="h-3 w-px bg-gray-200 dark:bg-gray-700"></div>
                           <button 
                             @click="openWidgetFullscreen(part.widget)"
-                            class="p-1 rounded hover:bg-blue-500/10 text-gray-400 hover:text-blue-500 transition-colors"
+                            class="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all active:scale-90 flex items-center justify-center group/max shadow-md"
                             title="Open Full Screen"
                           >
-                              <IconMaximize class="w-4 h-4" />
+                              <IconMaximize class="w-4 h-4 group-hover/max:scale-110 transition-transform" />
                           </button>
                       </div>
                   </div>
-                  <div class="aspect-video w-full">
-                      <!-- [FIX] Use live buffer if widget is currently being streamed, with safety fallback -->
+                  <div class="aspect-video w-full bg-gray-50 dark:bg-gray-950">
+                      <!-- Removed part.widget.title requirement to ensure rendering even if metadata is incomplete -->
                       <iframe 
-                        v-if="part.widget"
-                        :srcdoc="discussionsStore.liveArtefactBuffers[part.widget.title] || part.widget.source || ''" 
+                        v-if="part.widget && liveArtefactBuffers"
+                        :srcdoc="getWidgetContent(part.widget)" 
                         class="w-full h-full border-0" 
                         sandbox="allow-scripts allow-same-origin allow-forms"
                       ></iframe>

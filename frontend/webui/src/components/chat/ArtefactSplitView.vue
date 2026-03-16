@@ -2,6 +2,8 @@
 import { computed, ref, watch, onMounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
+import { useNotesStore } from '../../stores/notes';
+import { useSkillsStore } from '../../stores/skills';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
@@ -16,6 +18,8 @@ import { useAuthStore } from '../../stores/auth';
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
+const notesStore = useNotesStore();
+const skillsStore = useSkillsStore();
 
 const title = computed(() => uiStore.activeSplitArtefactTitle);
 const isFullscreen = ref(false);
@@ -167,7 +171,7 @@ async function handleSave(forceType = null) {
             discussionId: discussionsStore.currentDiscussionId,
             artefactTitle: title.value,
             newContent: dbContent.value,
-            newType: forceType || undefined, // Allow changing to 'note' or 'skill'
+            artefactType: forceType || undefined, // Correct property name for store compatibility
             updateInPlace: false
         });
         uiStore.addNotification(forceType ? `Saved as ${forceType}.` : "New version saved.", "success");
@@ -188,6 +192,30 @@ async function handleUndo() {
     
     selectedVersion.value = prevVersion;
     await loadVersion(prevVersion);
+}
+
+async function handlePushToLibrary(type) {
+    if (!content.value) return;
+    
+    try {
+        if (type === 'note') {
+            await notesStore.createNote({
+                title: title.value,
+                content: content.value
+            });
+            uiStore.addNotification("Saved to global Notes library.", "success");
+        } else if (type === 'skill') {
+            await skillsStore.createSkill({
+                name: title.value,
+                content: content.value,
+                category: 'Imported',
+                description: `Created from workspace artefact: ${title.value}`
+            });
+            uiStore.addNotification("Saved to global Skills library.", "success");
+        }
+    } catch (e) {
+        console.error("Library export failed:", e);
+    }
 }
 
 function download() {
@@ -285,42 +313,52 @@ function download() {
                 <IconArrowDownTray class="w-4 h-4" />
             </button>
 
+            <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
+
+            <!-- Global Library Export -->
+            <DropdownMenu title="Push to Library" icon="folder" button-class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-blue-500 transition-colors" collection="ui">
+                <button @click="handlePushToLibrary('note')" class="menu-item">
+                    <IconPencil class="w-4 h-4 mr-3 text-amber-500" />
+                    <span>Save as Global Note</span>
+                </button>
+                <button @click="handlePushToLibrary('skill')" class="menu-item">
+                    <IconSparkles class="w-4 h-4 mr-3 text-emerald-500" />
+                    <span>Save as Global Skill</span>
+                </button>
+            </DropdownMenu>
+
             <!-- Action Buttons based on Type -->
             <div class="flex gap-1">
-                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'document'" 
-                        @click="handleSave('note')" class="btn btn-secondary btn-sm h-8" :disabled="isSaving || isLiveUpdating">
-                    Save as Note
+                <!-- Conversion Actions -->
+                <template v-if="['document', 'file', 'code'].includes(artefactGroup?.versions[0]?.artefact_type)">
+                    <button @click="handleSave('note')" class="btn btn-secondary btn-sm h-8" :disabled="isSaving || isLiveUpdating">
+                        Save as Note
+                    </button>
+                    <button @click="handleSave('skill')" class="btn btn-secondary btn-sm h-8" :disabled="isSaving || isLiveUpdating">
+                        Save as Skill
+                    </button>
+                </template>
+                <button v-else-if="['note', 'skill'].includes(artefactGroup?.versions[0]?.artefact_type)" 
+                        @click="handleSave('document')" class="btn btn-secondary btn-sm h-8" :disabled="isSaving || isLiveUpdating">
+                    Save as File
                 </button>
-                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'document'" 
-                        @click="handleSave('skill')" class="btn btn-secondary btn-sm h-8" :disabled="isSaving || isLiveUpdating">
-                    Save as Skill
-                </button>
+
+                <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
                 
-            <div class="flex gap-1">
-                <button v-if="artefactGroup?.versions[0]?.type === 'note'" @click="handleSave" class="btn btn-warning btn-sm h-8 flex items-center gap-2">
+                <!-- Explicit Update Actions -->
+                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" @click="handleSave()" class="btn btn-warning btn-sm h-8 flex items-center gap-2" :disabled="isSaving || isLiveUpdating">
                     <IconSave class="w-3.5 h-3.5" />
                     Update Note
                 </button>
-                <button v-else-if="artefactGroup?.versions[0]?.type === 'skill'" @click="handleSave" class="btn btn-success btn-sm h-8 flex items-center gap-2">
+                <button v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" @click="handleSave()" class="btn btn-success btn-sm h-8 flex items-center gap-2" :disabled="isSaving || isLiveUpdating">
                     <IconCheckCircle class="w-3.5 h-3.5" />
                     Update Skill
                 </button>
-            <div class="flex gap-1">
-                <button v-if="artefactGroup?.versions[0]?.type === 'note'" @click="handleSave" class="btn btn-warning btn-sm h-8 flex items-center gap-2">
-                    <IconSave class="w-3.5 h-3.5" />
-                    Update Note
-                </button>
-                <button v-else-if="artefactGroup?.versions[0]?.type === 'skill'" @click="handleSave" class="btn btn-success btn-sm h-8 flex items-center gap-2">
-                    <IconCheckCircle class="w-3.5 h-3.5" />
-                    Update Skill
-                </button>
-                <button v-else @click="handleSave" class="btn btn-primary btn-sm h-8 flex items-center gap-2" :disabled="isSaving || isLiveUpdating">
+                <button v-else @click="handleSave()" class="btn btn-primary btn-sm h-8 flex items-center gap-2" :disabled="isSaving || isLiveUpdating">
                     <IconRefresh v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
                     <IconPencil v-else class="w-3.5 h-3.5" />
-                    <span>Save v{{ artefactGroup?.versions[0].version + 1 }}</span>
+                    <span>Save v{{ (artefactGroup?.versions[0]?.version || 0) + 1 }}</span>
                 </button>
-            </div>
-            </div>
             </div>
         </div>
         <div class="flex-1 relative bg-white dark:bg-gray-950">
