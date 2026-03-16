@@ -380,7 +380,44 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     // Consolidation: Wikipedia, Github, StackOverflow, and Youtube imports are now handled in useDiscussionArtefacts.js
-            
+
+    // Event Bus Listener: Handle artefact/note/skill/widget completion
+    on('artefact_done', (data) => {
+        const discussionId = data.discussion_id;
+        if (discussionId !== currentDiscussionId.value) return;
+
+        const { id, title } = data.content;
+        const key = id || title;
+        if (key) {
+            if (activeUpdatingArtefacts.value) {
+                activeUpdatingArtefacts.value.delete(key);
+            }
+            // Use object spread for reactive re-assignment
+            const nextBuffers = { ...liveArtefactBuffers.value };
+            delete nextBuffers[key];
+            liveArtefactBuffers.value = nextBuffers;
+        }
+        // Crucial: Fetch final content so it's ready for the fullscreen viewer
+        getActions().fetchArtefacts(currentDiscussionId.value);
+    });
+
+    on('note_done', (data) => {
+        const discussionId = data.discussion_id;
+        if (discussionId !== currentDiscussionId.value) return;
+        getActions().fetchArtefacts(currentDiscussionId.value);
+    });
+
+    on('skill_done', (data) => {
+        const discussionId = data.discussion_id;
+        if (discussionId !== currentDiscussionId.value) return;
+        getActions().fetchArtefacts(currentDiscussionId.value);
+    });
+
+    on('widget_done', (data) => {
+        const discussionId = data.discussion_id;
+        if (discussionId !== currentDiscussionId.value) return;
+        getActions().fetchArtefacts(currentDiscussionId.value);
+    });
     
     function attachSkill(skill) {
         if (!attachedSkills.value.find(s => s.id === skill.id)) {

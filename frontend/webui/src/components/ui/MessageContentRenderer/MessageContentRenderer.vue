@@ -970,34 +970,37 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </template>
 
-          <!-- ── Interactive Teaching Widget ───────────────────────────── -->
+          <!-- ── Interactive Teaching Widget (Launcher Mode) ─────────── -->
           <div v-if="part.type === 'interactive_widget' && part.widget" class="my-6">
-              <div class="rounded-2xl border-2 border-blue-500/20 bg-white dark:bg-gray-900 shadow-xl overflow-hidden transition-all hover:shadow-2xl">
-                  <div class="px-4 py-2 bg-blue-500/5 border-b dark:border-gray-800 flex items-center justify-between">
-                      <div class="flex items-center gap-2 min-w-0">
-                          <IconCpuChip class="w-4 h-4 text-blue-500 flex-shrink-0" />
-                          <span class="text-xs font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest truncate">{{ part.widget.title }}</span>
-                      </div>
-                      <div class="flex items-center gap-3 flex-shrink-0">
-                          <span class="text-[10px] font-black text-blue-500/60 dark:text-blue-400/60 uppercase tracking-tighter">{{ part.widget.type }} Engine</span>
-                          <div class="h-3 w-px bg-gray-200 dark:bg-gray-700"></div>
-                          <button 
-                            @click="openWidgetFullscreen(part.widget)"
-                            class="p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-all active:scale-90 flex items-center justify-center group/max shadow-md"
-                            title="Open Full Screen"
-                          >
-                              <IconMaximize class="w-4 h-4 group-hover/max:scale-110 transition-transform" />
-                          </button>
-                      </div>
+              <div 
+                @click="openWidgetFullscreen(part.widget)"
+                class="group/widget cursor-pointer rounded-2xl border-2 border-blue-500/20 bg-blue-50/30 dark:bg-blue-900/10 hover:bg-blue-500/10 hover:border-blue-500/40 transition-all shadow-md hover:shadow-xl p-6 flex flex-col items-center gap-4"
+              >
+                  <div class="p-4 rounded-full bg-blue-600 text-white shadow-lg group-hover/widget:scale-110 group-hover/widget:bg-blue-500 transition-all duration-300">
+                      <IconCpuChip class="w-8 h-8" />
                   </div>
-                  <div class="aspect-video w-full bg-gray-50 dark:bg-gray-950">
-                      <!-- Removed part.widget.title requirement to ensure rendering even if metadata is incomplete -->
-                      <iframe 
-                        v-if="part.widget && liveArtefactBuffers"
-                        :srcdoc="getWidgetContent(part.widget)" 
-                        class="w-full h-full border-0" 
-                        sandbox="allow-scripts allow-same-origin allow-forms"
-                      ></iframe>
+                  
+                  <div class="text-center">
+                      <h4 class="text-base font-black text-blue-700 dark:text-blue-300 uppercase tracking-widest mb-1">
+                          {{ part.widget.title || 'Interactive Widget' }}
+                      </h4>
+                      <p class="text-xs text-gray-500 dark:text-gray-400 font-medium">
+                          Click to launch visualization engine
+                      </p>
+                  </div>
+
+                  <div class="flex items-center gap-3 mt-2">
+                      <div class="flex items-center gap-2 px-3 py-1 bg-white/80 dark:bg-gray-800/80 rounded-full border border-blue-200 dark:border-blue-800 shadow-sm">
+                          <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                          <span class="text-[10px] font-black text-gray-500 uppercase tracking-tighter">{{ part.widget.type || 'HTML' }} Ready</span>
+                      </div>
+                      
+                      <button 
+                        class="btn btn-primary btn-sm rounded-xl px-6 flex items-center gap-2"
+                      >
+                          <IconMaximize class="w-4 h-4" />
+                          <span>View Fullscreen</span>
+                      </button>
                   </div>
               </div>
           </div>
