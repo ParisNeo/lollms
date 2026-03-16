@@ -16,7 +16,7 @@ bcrypt==4.0.1
 
 # --- LoLLMs Client Library and Common Backends ---
 lollms-client==1.12.6
-ascii_colors==0.11.20
+ascii_colors==0.11.21
 pipmaster==1.1.1
 
 # Dependencies for specific lollms_client backends (based on your config examples):
