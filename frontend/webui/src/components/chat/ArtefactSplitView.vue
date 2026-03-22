@@ -12,6 +12,7 @@ import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconMinimize from '../../assets/icons/IconMinimize.vue';
+import IconError from '../../assets/icons/IconError.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import { useAuthStore } from '../../stores/auth';
 
@@ -50,8 +51,10 @@ const isLiveUpdating = computed(() => {
 const artefactGroup = computed(() => {
     if (!title.value) return null;
     const all = discussionsStore.activeDiscussionArtefacts || [];
+    console.log('[ArtefactSplitView] Checking artefacts for title:', title.value, 'available:', all.map(a => `${a.title}(v${a.version})`));
     // Sort versions DESC (newest first)
     const versions = all.filter(a => a.title === title.value).sort((a,b) => b.version - a.version);
+    console.log('[ArtefactSplitView] Found versions:', versions.length, versions.map(v => ({v: v.version, is_loaded: v.is_loaded, size: v.content_size})));
     return versions.length > 0 ? { title: title.value, versions } : null;
 });
 
@@ -83,26 +86,85 @@ function startResize(event) {
 onMounted(() => {
     const saved = localStorage.getItem('lollms_artefactWidth');
     if (saved) dataZoneWidth.value = parseInt(saved, 10);
+    
+    // Force reload on mount if we have a title but no content yet
+    if (title.value && !dbContent.value && artefactGroup.value) {
+        console.log('[ArtefactSplitView] Force loading on mount');
+        const latestVersion = artefactGroup.value.versions[0]?.version;
+        if (latestVersion) {
+            loadVersion(latestVersion);
+        }
+    }
 });
 
 const selectedVersion = ref(null);
 const dbContent = ref('');
 const isSaving = ref(false);
 const isFetching = ref(false);
+const loadError = ref(null);
 
-    // Combined logic: Show the live stream if AI is writing, otherwise show DB content
-    const content = computed({
-        get: () => {
-            // Priority 1: Live streaming buffer (when AI is currently generating/patching)
-            if (isLiveUpdating.value && discussionsStore.liveArtefactBuffers && discussionsStore.liveArtefactBuffers[title.value]) {
-                return discussionsStore.liveArtefactBuffers[title.value];
-            }
-            // Priority 2: Persistent content from DB
-            return dbContent.value;
-        },
-        set: (val) => {
-            dbContent.value = val;
+
+    // Detect content type for syntax highlighting based on artefact type and title
+    const detectedContentType = computed(() => {
+        const artType = artefactGroup.value?.versions[0]?.artefact_type;
+        const title = artefactGroup.value?.title || '';
+        
+        // Try to detect from file extension first (regardless of artefact_type)
+        const ext = title.split('.').pop()?.toLowerCase();
+        const extMap = {
+            // Web
+            'html': 'html', 'htm': 'html', 'css': 'css', 'scss': 'scss', 'sass': 'sass',
+            'less': 'less', 'vue': 'vue', 'jsx': 'jsx', 'tsx': 'tsx',
+            // Programming
+            'py': 'python', 'js': 'javascript', 'ts': 'typescript', 'java': 'java',
+            'kt': 'kotlin', 'go': 'go', 'rs': 'rust', 'swift': 'swift',
+            'cpp': 'cpp', 'c': 'c', 'h': 'c', 'hpp': 'cpp', 'cs': 'csharp',
+            'php': 'php', 'rb': 'ruby', 'r': 'r', 'm': 'objective-c', 'mm': 'objective-cpp',
+            'scala': 'scala', 'groovy': 'groovy', 'clj': 'clojure', 'ex': 'elixir',
+            'elm': 'elm', 'erl': 'erlang', 'fs': 'fsharp', 'hs': 'haskell',
+            'lua': 'lua', 'ml': 'ocaml', 'pas': 'pascal', 'pl': 'perl',
+            'ps1': 'powershell', 'sh': 'bash', 'bash': 'bash', 'zsh': 'bash',
+            'sql': 'sql', 'v': 'verilog', 'vhdl': 'vhdl', 'asm': 'asm',
+            // Data/Markup
+            'json': 'json', 'xml': 'xml', 'yaml': 'yaml', 'yml': 'yaml',
+            'toml': 'toml', 'ini': 'ini', 'csv': 'csv', 'tsv': 'tsv',
+            'md': 'markdown', 'mdx': 'markdown', 'rst': 'restructuredtext',
+            'tex': 'latex', 'latex': 'latex', 'txt': 'plaintext',
+            // Config
+            'dockerfile': 'dockerfile', 'makefile': 'makefile', 'cmake': 'cmake',
+            'gradle': 'gradle', 'maven': 'xml', 'pom': 'xml',
+            // Other
+            'svg': 'svg', 'graphql': 'graphql', 'proto': 'protobuf',
+        };
+        
+        // Return detected type from extension if found
+        if (extMap[ext]) {
+            return extMap[ext];
         }
+        
+        // Fallback to artefact_type based detection
+        // For skills and notes, content is typically markdown
+        if (artType === 'skill' || artType === 'note') {
+            return 'markdown';
+        }
+        
+        return 'plaintext';
+    });
+
+    // Language for CodeMirror editor (for edit mode)
+    const detectedLanguage = computed(() => {
+        const type = detectedContentType.value;
+        // Map content types to CodeMirror language modes
+        const cmLangMap = {
+            'python': 'python',
+            'javascript': 'javascript',
+            'typescript': 'javascript',
+            'html': 'html',
+            'css': 'html', // CodeMirror uses html mode for css in some configs, or we could add css
+            'json': 'javascript',
+            'markdown': 'markdown',
+        };
+        return cmLangMap[type] || 'markdown';
     });
 
     async function loadVersion(v) {
@@ -112,18 +174,54 @@ const isFetching = ref(false);
             const data = await discussionsStore.fetchArtefactContent({
                 discussionId: discussionsStore.currentDiscussionId,
                 artefactTitle: title.value,
-                version: v
+                version: v,
+                strategy: 'raw'
             });
             
-            if (data && data.content !== undefined) {
+            console.log('[ArtefactSplitView] fetchArtefactContent response:', data);
+            
+            // Handle different response formats
+            let rawContent = '';
+            
+            if (typeof data === 'string') {
+                // Direct string response
+                rawContent = data;
+            } else if (data && typeof data === 'object') {
+                // Object response with content field
+                rawContent = data.content ?? '';
+            }
+            
+            // Detect if we got the Vue app's HTML (error) vs actual artefact HTML content
+            const isVueAppHtml = rawContent.includes('id="app"') && 
+                                (rawContent.includes('/ui_assets/') || rawContent.includes('index-'));
+            
+            if (isVueAppHtml) {
+                console.error('[ArtefactSplitView] Received Vue app HTML instead of artefact content. Backend API routing issue.');
+                loadError.value = 'API routing error: Static file handler intercepted the request. Please report this issue.';
+                dbContent.value = '';
+                return;
+            }
+            
+            // Valid HTML content from artefact - keep it as-is
+            loadError.value = null;
+            
+            if (rawContent) {
                 // Strip out library-injected context markers to keep the Workspace view "Pure"
-                let cleaned = data.content.trim();
+                let cleaned = rawContent.trim();
                 const headerPattern = /^--- (Document|Skill|Note|Artefact): .*? ---/i;
                 const footerPattern = /--- End (Document|Skill|Note|Artefact)(?:: .*?)? ---$/i;
                 
                 cleaned = cleaned.replace(headerPattern, '').replace(footerPattern, '').trim();
                 dbContent.value = cleaned;
+                
+                console.log('[ArtefactSplitView] Content loaded, length:', cleaned.length);
+            } else {
+                console.warn('[ArtefactSplitView] Empty content received');
+                dbContent.value = '';
             }
+        } catch (err) {
+            console.error('[ArtefactSplitView] Failed to load artefact content:', err);
+            dbContent.value = '';
         } finally {
             isFetching.value = false;
         }
@@ -155,7 +253,14 @@ const isFetching = ref(false);
             }
 
             // Default to the latest version (at index 0 due to our DESC sorting)
-            const latestVersion = newGroup.versions[0].version;
+            const latestVersion = newGroup.versions[0]?.version;
+            
+            // If no versions exist yet (new file), just clear and ready for editing
+            if (!latestVersion) {
+                dbContent.value = '';
+                selectedVersion.value = 1;
+                return;
+            }
             
             // Sync the dropdown state and fetch the actual text content
             selectedVersion.value = latestVersion;
@@ -229,17 +334,9 @@ function download() {
 
 <template>
     <div 
-        class="h-full flex flex-row bg-white dark:bg-gray-900 border-l dark:border-gray-700 shadow-2xl z-20 transition-[width] duration-75"
+        class="h-full flex flex-col bg-white dark:bg-gray-950"
         :class="{'fixed inset-0 !w-full z-[100]': isFullscreen}"
-        :style="isFullscreen ? {} : { width: `${dataZoneWidth}px` }"
     >
-        <!-- Resize Handle -->
-        <div 
-            v-if="!isFullscreen"
-            @mousedown.prevent="startResize"
-            class="w-1.5 h-full cursor-col-resize hover:bg-blue-500/30 transition-colors flex-shrink-0"
-        ></div>
-
         <div class="flex-1 flex flex-col min-w-0">
         <div class="p-3 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-800 shadow-sm relative overflow-hidden">
             <!-- ── [NEW] Generation Animation Bar ── -->
@@ -292,11 +389,8 @@ function download() {
             </div>
             <div class="flex items-center gap-1">
                 <button @click="isFullscreen = !isFullscreen" class="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-500 transition-colors" :title="isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'">
-                    <IconMinimize v-if="isFullscreen" class="w-4 h-4" />
-                    <IconMaximize v-else class="w-4 h-4" />
-                </button>
-                <button @click="uiStore.activeSplitArtefactTitle = null" class="p-2 hover:bg-red-500 hover:text-white rounded-full transition-all">
-                    <IconXMark class="w-5 h-5"/>
+                    <IconMinimize v-if="isFullscreen" class="w-5 h-5" />
+                    <IconMaximize v-else class="w-5 h-5" />
                 </button>
             </div>
         </div>
@@ -381,7 +475,25 @@ function download() {
             <div v-if="isFetching" class="absolute inset-0 z-10 bg-white/50 dark:bg-gray-900/50 backdrop-blur-sm flex items-center justify-center">
                 <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
             </div>
-            <CodeMirrorEditor v-model="content" class="absolute inset-0 h-full" initialMode="view" :renderable="true" />
+            <div v-else-if="loadError" class="absolute inset-0 flex flex-col items-center justify-center text-red-400 p-6 text-center">
+                <IconError class="w-12 h-12 mb-4 opacity-50" />
+                <p class="text-sm font-medium">{{ loadError }}</p>
+                <button @click="loadVersion(selectedVersion)" class="mt-4 btn btn-secondary btn-sm">Retry</button>
+            </div>
+            <div v-else-if="!dbContent" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
+                <IconPencil class="w-12 h-12 mb-4 opacity-30" />
+                <p class="text-sm font-medium">This file is empty</p>
+                <p class="text-xs mt-1 opacity-60">Start typing to add content</p>
+            </div>
+            <CodeMirrorEditor 
+                v-else
+                v-model="dbContent" 
+                class="absolute inset-0 h-full" 
+                :initialMode="'edit'"
+                :renderable="true"
+                :contentType="detectedContentType"
+                :language="detectedLanguage"
+            />
         </div>
         </div>
     </div>

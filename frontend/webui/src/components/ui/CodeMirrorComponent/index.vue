@@ -23,7 +23,7 @@
                     <span>Rendering...</span>
                 </div>
                 <div v-show="!isRendering" class="p-2 overflow-y-auto h-full">
-                    <MessageContentRenderer :content="modelValue" :key="modelValue" />
+                    <MessageContentRenderer :content="renderedContent" :key="renderedContent" />
                 </div>
             </div>
         </div>
@@ -38,7 +38,7 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, onBeforeUnmount, nextTick, defineExpose } from 'vue';
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick, defineExpose } from 'vue';
 import { basicSetup } from "codemirror";
 import { EditorView, keymap, placeholder as cmPlaceholder } from "@codemirror/view";
 import { EditorState, Compartment } from "@codemirror/state";
@@ -70,19 +70,30 @@ const props = defineProps({
     renderable: { type: Boolean, default: false },
     initialMode: { type: String, default: 'edit', validator: (val) => ['edit', 'view'].includes(val) },
     readOnly: { type: Boolean, default: false },
+    contentType: { type: String, default: null }, // Optional: 'python', 'html', 'javascript', etc. for render mode wrapping
 });
 
 const emit = defineEmits(['update:modelValue', 'ready', 'submit']);
 
 const discussionsStore = useDiscussionsStore();
 const editorRef = ref(null);
-const editorView = ref(null);
+let editorView = null; // Raw instance, not ref
 let updatingFromSelf = false;
 const currentMode = ref(props.initialMode);
 const isWrappingEnabled = ref(true);
 let wrappingCompartment = new Compartment();
 let readOnlyCompartment = new Compartment();
 const isRendering = ref(false);
+
+// Computed property for rendered content - wraps in code block if contentType is specified
+const renderedContent = computed(() => {
+    // If contentType is specified and we're not already in markdown, wrap in code block
+    if (props.contentType && props.language !== 'markdown') {
+        return `\`\`\`${props.contentType}\n${props.modelValue}\n\`\`\``;
+    }
+    // Otherwise return raw content (for markdown or when no contentType specified)
+    return props.modelValue;
+});
 
 defineExpose({ editorView });
 
@@ -300,8 +311,9 @@ const handleExport = (format) => discussionsStore.exportRawContent({ content: pr
 
 // --- LIFECYCLE ---
 const initializeEditor = () => {
-    if (editorView.value) {
-        editorView.value.destroy();
+    if (editorView) {
+        editorView.destroy();
+        editorView = null;
     }
 
     const baseExtensions = [
@@ -312,7 +324,8 @@ const initializeEditor = () => {
         readOnlyCompartment.of(props.readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
         EditorView.updateListener.of((update) => {
             if (update.docChanged && !updatingFromSelf) {
-                emit('update:modelValue', update.state.doc.toString());
+                const newContent = update.state.doc.toString();
+                emit('update:modelValue', newContent);
             }
         }),
         EditorView.contentAttributes.of({ 'aria-label': 'Markdown editor content' })
@@ -344,43 +357,60 @@ const initializeEditor = () => {
     
     const finalExtensions = [...baseExtensions, ...props.extensions];
 
+    // Only set initial doc if it's not undefined/null
+    const initialDoc = props.modelValue ?? '';
+    
     const state = EditorState.create({
-        doc: props.modelValue,
+        doc: initialDoc,
         extensions: finalExtensions,
     });
-    editorView.value = new EditorView({ state, parent: editorRef.value });
+    
+    editorView = new EditorView({ state, parent: editorRef.value });
 
     if (props.autofocus) {
         nextTick(() => {
-            editorView.value?.focus();
+            editorView?.focus();
         });
     }
 
-    emit('ready', { view: editorView.value, state: editorView.value.state });
+    emit('ready', { view: editorView, state: editorView.state });
 };
 
 watch(() => props.readOnly, (isReadOnly) => {
-    if (editorView.value) {
-        editorView.value.dispatch({
+    if (editorView) {
+        editorView.dispatch({
             effects: readOnlyCompartment.reconfigure(isReadOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [])
         });
     }
 });
 
+// More selective sync: only update if content actually differs AND we're not currently editing
 watch(() => props.modelValue, (newValue) => {
-    if (editorView.value && newValue !== editorView.value.state.doc.toString()) {
+    // Skip if editor destroyed or value matches current content
+    if (!editorView) return;
+    
+    const currentContent = editorView.state.doc.toString();
+    const safeNewValue = newValue ?? '';
+    
+    // Only sync if external value differs from editor content
+    if (safeNewValue !== currentContent) {
         updatingFromSelf = true;
-        editorView.value.dispatch({
-            changes: { from: 0, to: editorView.value.state.doc.length, insert: newValue }
+        editorView.dispatch({
+            changes: { from: 0, to: editorView.state.doc.length, insert: safeNewValue }
         });
-        nextTick(() => { updatingFromSelf = false; });
+        updatingFromSelf = false;
     }
-});
+}, { flush: 'sync' });
 
 watch(() => props.theme, initializeEditor);
 watch(() => props.language, initializeEditor);
 onMounted(initializeEditor);
-onBeforeUnmount(() => editorView.value?.destroy());
+onBeforeUnmount(() => {
+    if (editorView) {
+        editorView.destroy();
+        editorView = null;
+    }
+});
 </script>
 
 <style>

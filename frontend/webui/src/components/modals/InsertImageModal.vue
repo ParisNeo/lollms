@@ -13,6 +13,9 @@ const svgCode = ref('');
 const fileInput = ref(null);
 const isLoading = ref(false);
 
+const modalData = computed(() => uiStore.modalData(MODAL_NAME));
+const isSystemAsset = computed(() => !!modalData.value?.isSystemAsset);
+
 function resetState() {
     activeTab.value = 'url';
     imageUrl.value = '';
@@ -23,7 +26,7 @@ function resetState() {
     isLoading.value = false;
 }
 
-function handleFileSelect(event) {
+async function handleFileSelect(event) {
     const file = event.target.files[0];
     if (!file) return;
 
@@ -33,6 +36,24 @@ function handleFileSelect(event) {
     }
 
     isLoading.value = true;
+
+    // Handle System Asset Upload (Fun Facts)
+    if (isSystemAsset.value) {
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const response = await (await import('../../services/api')).default.post('/api/assets/fun-facts/upload', formData);
+            emit('insert', response.data.url);
+            uiStore.closeModal(MODAL_NAME);
+            resetState();
+        } catch (e) {
+            uiStore.addNotification('System asset upload failed.', 'error');
+            isLoading.value = false;
+        }
+        return;
+    }
+
+    // Standard User Data URI insert
     const reader = new FileReader();
     reader.onload = (e) => {
         emit('insert', e.target.result);

@@ -26,8 +26,11 @@ const props = defineProps({
 
 defineEmits(['set-mode']);
 
-const charCount = computed(() => props.modelValue.length);
-const wordCount = computed(() => props.modelValue.trim() ? props.modelValue.trim().split(/\s+/).length : 0);
+const charCount = computed(() => (props.modelValue || '').length);
+const wordCount = computed(() => {
+    const text = props.modelValue || '';
+    return text.trim() ? text.trim().split(/\s+/).length : 0;
+});
 </script>
 
 <style scoped>

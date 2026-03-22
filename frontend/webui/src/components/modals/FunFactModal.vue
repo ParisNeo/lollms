@@ -4,6 +4,7 @@ import { useUiStore } from '../../stores/ui';
 import apiClient from '../../services/api';
 import GenericModal from './GenericModal.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
+import WysiwygEditor from '../ui/WysiwygEditor.vue';
 
 const uiStore = useUiStore();
 
@@ -77,8 +78,13 @@ async function handleSubmit() {
                     </select>
                 </div>
                 <div>
-                    <label for="fact-content" class="block text-sm font-medium">Content (Markdown Supported)</label>
-                    <textarea id="fact-content" v-model="form.content" rows="6" class="input-field mt-1" placeholder="Enter the fun fact here..." required></textarea>
+                    <label for="fact-content" class="block text-sm font-medium mb-2">Content (HTML/Rich Text)</label>
+                    <div class="border dark:border-gray-700 rounded-xl overflow-hidden bg-white dark:bg-gray-900">
+                        <WysiwygEditor 
+                            v-model="form.content" 
+                            :isSystemAsset="true" 
+                        />
+                    </div>
                 </div>
 
                 <!-- Markdown Syntax Help -->

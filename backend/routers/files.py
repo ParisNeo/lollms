@@ -72,6 +72,57 @@ files_router = APIRouter(prefix="/api/files", tags=["Files"])
 upload_router = APIRouter(prefix="/api/upload", tags=["Files"])
 assets_router = APIRouter(prefix="/assets", tags=["Files"])
 
+@assets_router.post("/fun-facts/upload")
+async def upload_fun_fact_asset(
+    file: UploadFile = File(...),
+    current_admin: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Securely uploads an image for fun facts into the public assets folder."""
+    if not current_admin.is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators can upload system assets.")
+
+    # 1. Validate File Type
+    allowed_types = ["image/jpeg", "image/png", "image/gif", "image/webp", "image/svg+xml"]
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Unsupported image type.")
+
+    # 2. Setup Secure Paths
+    from backend.config import APP_DATA_DIR
+    base_dir = (APP_DATA_DIR / "assets" / "fun_facts").resolve()
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    # 3. Sanitize filename and prevent collisions
+    ext = Path(file.filename).suffix.lower()
+    unique_name = f"{uuid.uuid4().hex}{ext}"
+    final_path = (base_dir / unique_name).resolve()
+
+    # 4. Security Check: Path Traversal
+    if not str(final_path).startswith(str(base_dir)):
+        raise HTTPException(status_code=400, detail="Security violation: Invalid path.")
+
+    # 5. Save file
+    try:
+        with open(final_path, "wb") as f:
+            shutil.copyfileobj(file.file, f)
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail="Failed to write file to disk.")
+
+    # Return the relative URL used by the frontend to render the image
+    return {"url": f"/api/files/public/fun-facts/{unique_name}"}
+
+@files_router.get("/public/fun-facts/{filename}")
+async def get_public_fun_fact_image(filename: str):
+    """Serves fun fact assets publicly."""
+    from backend.config import APP_DATA_DIR
+    base_dir = (APP_DATA_DIR / "assets" / "fun_facts").resolve()
+    file_path = (base_dir / filename).resolve()
+    
+    if not str(file_path).startswith(str(base_dir)) or not file_path.exists():
+        raise HTTPException(status_code=404, detail="Asset not found.")
+        
+    return FileResponse(file_path)
+
 def _process_msg_attachment(att_bytes: bytes, att_name: str, images: List[str], extract_images: bool = True) -> Optional[str]:
     """Helper to process a single attachment from an MSG file."""
     att_ext = Path(att_name).suffix.lower()

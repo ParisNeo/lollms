@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-21 16:22]
+
+- feat: enhance artefact management and chat interface with file upload improvements
+
 ## [2026-03-16 07:24]
 
 - feat: enhance LLM streaming generation and chat discussion handling

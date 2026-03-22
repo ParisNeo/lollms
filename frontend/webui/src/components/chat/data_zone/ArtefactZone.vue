@@ -120,6 +120,16 @@ async function handleDrop(event) {
         })));
     }
 }
+
+function openArtefactInWorkspace(group) {
+    if (!group || !group.versions || group.versions.length === 0) return;
+    
+    // Open the artefact in the workspace editor
+    uiStore.isDataZoneVisible = true;
+    uiStore.dataZoneTab = 'workspace';
+    uiStore.activeSplitArtefactTitle = group.title;
+}
+
 </script>
 
 <template>
@@ -131,21 +141,29 @@ async function handleDrop(event) {
             <p class="text-sm font-bold text-blue-600">Drop to Add</p>
         </div>
 
-        <div class="flex justify-between items-center mb-4 flex-shrink-0 px-2">
-            <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Artefacts</h2>
-            <button 
-                @click="handleDownloadAll" 
-                class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-colors"
-            >
-                <IconArrowDownTray class="w-4 h-4" />
-                <span>Download All</span>
-            </button>
+        <div class="flex justify-between items-center p-3 mb-2 flex-shrink-0 bg-gray-50 dark:bg-gray-800/50 rounded-lg border dark:border-gray-700">
+            <div class="flex items-center gap-2">
+                <IconPlus class="w-4 h-4 text-emerald-500 cursor-pointer" @click="handleCreateArtefact" />
+                <span class="text-xs font-bold uppercase tracking-widest text-gray-500">Repository</span>
+            </div>
+            <div class="flex gap-1">
+                 <button @click="triggerArtefactFileUpload" class="p-1.5 hover:text-blue-500 transition-colors" title="Upload Files"><IconArrowUpTray class="w-4 h-4" /></button>
+                 <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 transition-colors" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
+                 <button @click="handleRefreshArtefacts" class="p-1.5 hover:text-blue-500 transition-colors" title="Refresh List"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" /></button>
+            </div>
         </div>
         <div v-if="!isArtefactsCollapsed" class="flex-grow overflow-y-auto custom-scrollbar">
             <div v-if="isLoadingArtefacts" class="text-center py-10"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
             <div v-else-if="groupedArtefacts.length === 0" class="text-center py-10 text-gray-400 text-[10px] uppercase font-bold tracking-widest opacity-50">Empty</div>
             <div v-else class="space-y-1">
-                <ArtefactCard v-for="group in groupedArtefacts" :key="group.title" :artefact-group="group" />
+                <div 
+                    v-for="group in groupedArtefacts" 
+                    :key="group.title"
+                    @click="openArtefactInWorkspace(group)"
+                    class="cursor-pointer"
+                >
+                    <ArtefactCard :artefact-group="group" />
+                </div>
             </div>
         </div>
     </div>

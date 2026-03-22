@@ -117,9 +117,16 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function fetchArtefactContent({ discussionId, artefactTitle, version }) {
-        const response = await apiClient.get(`/api/discussions/${discussionId}/artefact`, {
-            params: { artefact_title: artefactTitle, version: version }
+    async function fetchArtefactContent({ discussionId, artefactTitle, version = null, strategy = 'raw' }) {
+        // Backend route: GET /{discussion_id}/artefacts/{artefact_title:path}/content
+        // CRITICAL: Double-encode to prevent static file handlers from intercepting .html, .js, etc.
+        // First encode normally, then encode the % signs to prevent dot interpretation
+        const encodedTitle = encodeURIComponent(artefactTitle)
+            .replace(/\./g, '%2E')  // Encode dots explicitly to prevent static file matching
+            .replace(/%/g, '%25');  // Double-encode for path safety
+        
+        const response = await apiClient.get(`/api/discussions/${discussionId}/artefacts/${encodedTitle}/content`, {
+            params: { version, strategy }
         });
         return response.data;
     }

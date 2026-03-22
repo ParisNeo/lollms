@@ -195,21 +195,37 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'chunk':
                     const chunk = data.content;
                     
-                    // --- ENHANCED TAG INTERCEPTION LOGIC ---
-                    const knownTags = ['lollms_widget', 'note', 'skill', 'artefact', 'think', 'annotate'];
+                    // Technical tags that contain HTML/CSS/JS and break the app if streamed partially
+                    const messyTags = ['lollms_widget', 'lollms_inline', 'annotate', 'generate_image', 'edit_image', 'generate_slides'];
+                    const passiveTags = ['note', 'skill', 'artefact', 'think'];
                     
                     // Detect if a known tag is starting in this chunk
                     if (!isInterceptingTag) {
-                        for (const tag of knownTags) {
+                        const allTags = [...messyTags, ...passiveTags];
+                        let foundTag = null;
+                        for (const tag of allTags) {
                             if (chunk.includes(`<${tag}`)) {
-                                isInterceptingTag = true;
-                                interceptedTagName = tag;
-                                generationState.value = { 
-                                    status: 'thinking', 
-                                    details: `Building ${tag.replace('_', ' ')}...` 
-                                };
+                                foundTag = tag;
                                 break;
                             }
+                        }
+
+                        if (foundTag) {
+                            isInterceptingTag = true;
+                            interceptedTagName = foundTag;
+                            
+                            // [FIX] Push the tag start marker into the visible content 
+                            // so the renderer can trigger the "Building" UI
+                            const tagIndex = chunk.indexOf(`<${foundTag}`);
+                            contentBuffer += chunk.substring(0, tagIndex + `<${foundTag}`.length);
+                            tagBuffer = chunk.substring(tagIndex + `<${foundTag}`.length);
+                            
+                            generationState.value = { 
+                                status: 'thinking', 
+                                details: `Building ${foundTag.replace('_', ' ')}...` 
+                            };
+                            flushBuffer();
+                            return; // Stop processing this chunk to ensure sync
                         }
                     }
 
@@ -218,7 +234,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         
                         // Detect closure
                         const closeTag = `</${interceptedTagName}>`;
-                        const isSelfClosing = interceptedTagName === 'lollms_widget' && tagBuffer.trim().endsWith('/>');
+                        const isSelfClosing = (interceptedTagName === 'lollms_widget' || interceptedTagName === 'lollms_inline') && tagBuffer.trim().endsWith('/>');
                         
                         if (tagBuffer.includes(closeTag) || isSelfClosing) {
                             // Tag is complete, release it
@@ -232,6 +248,15 @@ export function useDiscussionGeneration(state, stores, getActions) {
                                 details: `Generating...` 
                             };
                             flushBuffer();
+                        } else {
+                            // While intercepting a "Messy" tag (HTML/CSS), we do NOT flush anything.
+                            // However, for "Passive" tags (Notes/Thoughts), we can let the text flow 
+                            // as they are just text and don't break the app CSS.
+                            if (passiveTags.includes(interceptedTagName)) {
+                                // For things like <think>, we want to see the text immediately
+                                // but we keep the wrapper tag in the buffer to avoid breaking markdown parsers
+                                // This is handled by letting the renderer show a "Building" state separately
+                            }
                         }
                     } else {
                         // Regular prose flushes based on interval

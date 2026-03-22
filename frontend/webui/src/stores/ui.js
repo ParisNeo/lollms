@@ -43,6 +43,7 @@ export const useUiStore = defineStore('ui', {
     keywords: [],
     isDataZoneVisible: false,
     isDataZoneExpanded: false,
+    dataZoneTab: 'context', // 'context', 'files', 'workspace'
     generatePersonalityModalProps: {
         prompt: '',
         customEnhancePrompt: ''

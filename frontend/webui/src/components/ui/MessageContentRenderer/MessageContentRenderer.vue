@@ -112,12 +112,8 @@ const parsedStreamingContent = computed(() => {
     if (!props.content) return '';
     let content = props.content;
 
-    // 1. Technical Tag Cleanup (remove tags but not content for simple markers)
-    content = content.replace(/<(?:tol|tool_call|tool_result|thought|think)[^>]*>|<\/(?:tol|tool_call|tool_result|thought|think)>/gi, '');
-    
-    // 2. Block Hiding (Hide tags AND everything inside them during streaming)
-    // We search for the last occurrence of a block tag that hasn't been closed yet
-    const blockTags = ['lollms_inline', 'annotate', 'generate_image', 'edit_image', 'generate_slides', 'artefact'];
+    // Detect technical unclosed blocks
+    const blockTags = ['lollms_inline', 'lollms_widget', 'annotate', 'generate_image', 'edit_image', 'generate_slides', 'artefact'];
     let latestOpenIndex = -1;
     let detectedTag = '';
 
@@ -130,25 +126,59 @@ const parsedStreamingContent = computed(() => {
         }
     }
 
+    // 1. Technical Tag Cleanup for passive tags (allow thoughts to stream normally)
+    content = content.replace(/<(?:tol|tool_call|tool_result|thought|think)[^>]*>|<\/(?:tol|tool_call|tool_result|thought|think)>/gi, '');
+
     if (latestOpenIndex > -1) {
         const before = content.substring(0, latestOpenIndex);
-        let statusMsg = 'Processing...';
-        let colorClass = 'bg-gray-50 border-gray-200 text-gray-800 dark:bg-gray-900/40 dark:border-gray-800/30 dark:text-gray-200';
+        let statusMsg = 'Constructing...';
+        let subMsg = 'Orchestrating code and styles';
+        let colorClass = 'text-blue-600 bg-blue-50/50 border-blue-200 dark:text-blue-400 dark:bg-blue-900/20 dark:border-blue-800/50';
 
-        if (detectedTag === 'lollms_inline') {
-            statusMsg = 'Building interactive component...';
-            colorClass = 'bg-indigo-50 border-indigo-200 text-indigo-800 dark:bg-indigo-900/40 dark:border-indigo-800/30 dark:text-indigo-200';
-        } else if (detectedTag === 'annotate') {
-            statusMsg = 'Annotating image...';
-            colorClass = 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/40 dark:border-blue-800/30 dark:text-blue-200';
+        if (detectedTag.includes('lollms')) {
+            statusMsg = 'Building Interactive Widget';
+            subMsg = 'Compiling logic and visual interface';
+            colorClass = 'text-indigo-600 bg-indigo-50/50 border-indigo-200 dark:text-indigo-400 dark:bg-indigo-900/20 dark:border-indigo-800/50';
         } else if (detectedTag === 'generate_image' || detectedTag === 'edit_image') {
-            statusMsg = detectedTag === 'edit_image' ? 'Editing image...' : 'Generating image...';
-            colorClass = 'bg-purple-50 border-purple-200 text-purple-800 dark:bg-purple-900/40 dark:border-purple-800/30 dark:text-purple-200';
+            statusMsg = 'Processing Visual Engine';
+            subMsg = 'Sampling latent space for your request';
+            colorClass = 'text-purple-600 bg-purple-50/50 border-purple-200 dark:text-purple-400 dark:bg-purple-900/20 dark:border-purple-800/50';
         }
 
-        const spinnerHtml = `<div class="flex items-center gap-2 my-4 p-3 ${colorClass} border rounded-xl text-sm font-bold animate-in fade-in zoom-in-95 duration-300">
-            <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-            <span>${statusMsg}</span>
+        // High-Fidelity Construction Animation
+        const spinnerHtml = `
+        <div class="my-8 p-6 rounded-[2rem] border-2 border-dashed ${colorClass} flex flex-col items-center justify-center gap-4 text-center shadow-2xl shadow-blue-500/5 animate-in fade-in zoom-in-95 duration-700 relative overflow-hidden">
+            <!-- Background Glow -->
+            <div class="absolute inset-0 opacity-10 bg-gradient-to-br from-transparent via-current to-transparent animate-pulse"></div>
+            
+            <div class="relative h-16 w-16 mb-2">
+                <!-- Outer Ring -->
+                <svg class="absolute inset-0 animate-[spin_3s_linear_infinite] opacity-20" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="45" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="10 20" />
+                </svg>
+                
+                <!-- 3D Layer Stack Icon -->
+                <div class="absolute inset-0 flex items-center justify-center scale-150">
+                    <svg class="h-8 w-8 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path class="animate-[bounce_2s_infinite]" d="M12 2L2 7l10 5 10-5-10-5z" />
+                        <path class="animate-[bounce_2s_infinite_0.2s] opacity-70" d="M2 12l10 5 10-5" />
+                        <path class="animate-[bounce_2s_infinite_0.4s] opacity-40" d="M2 17l10 5 10-5" />
+                    </svg>
+                </div>
+            </div>
+
+            <div class="flex flex-col gap-1 relative z-10">
+                <span class="text-base font-black uppercase tracking-[0.2em]">${statusMsg}</span>
+                <div class="flex items-center justify-center gap-2">
+                    <span class="h-1 w-1 rounded-full bg-current animate-ping"></span>
+                    <span class="text-[11px] font-bold opacity-60 tracking-tight">${subMsg}...</span>
+                </div>
+            </div>
+            
+            <!-- Progress Subtext -->
+            <div class="mt-2 px-4 py-1.5 rounded-full bg-white/10 dark:bg-black/10 border border-current/10 text-[9px] font-black uppercase tracking-widest opacity-40">
+                Protecting Core Styles
+            </div>
         </div>`;
         
         return parsedMarkdown(before) + spinnerHtml;
@@ -989,46 +1019,62 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </template>
 
-          <!-- ── Interactive Teaching Widget (Launcher Mode) ─────────── -->
-          <div v-if="part.type === 'interactive_widget' && part.widget" class="my-6">
-              <div 
-                @click="openWidgetFullscreen(part.widget)"
-                class="group/widget cursor-pointer rounded-2xl border-2 border-blue-500/20 bg-blue-50/30 dark:bg-blue-900/10 hover:bg-blue-500/10 hover:border-blue-500/40 transition-all shadow-md hover:shadow-xl p-6 flex flex-col items-center gap-4"
-              >
-                  <div class="p-4 rounded-full bg-blue-600 text-white shadow-lg group-hover/widget:scale-110 group-hover/widget:bg-blue-500 transition-all duration-300">
-                      <IconCpuChip class="w-8 h-8" />
+          <!-- ── Interactive Teaching Widget (Inline Preview Mode) ─────────── -->
+          <div v-if="part.type === 'interactive_widget' && part.widget" class="my-8 group/widget-container">
+              <div class="rounded-3xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-2xl transition-all hover:border-blue-500/30">
+                  
+                  <!-- Preview Header -->
+                  <div class="px-5 py-3 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
+                      <div class="flex items-center gap-3 min-w-0">
+                          <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600">
+                              <IconCpuChip class="w-4 h-4" />
+                          </div>
+                          <div class="flex flex-col min-w-0">
+                              <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 leading-none mb-1">Interactive Preview</span>
+                              <h4 class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{{ part.widget.title || 'Untitled Widget' }}</h4>
+                          </div>
+                      </div>
+
+                      <div class="flex items-center gap-1.5">
+                          <button 
+                            @click="openWidgetFullscreen(part.widget)"
+                            class="p-2 rounded-xl hover:bg-blue-500 hover:text-white text-gray-400 transition-all"
+                            title="Full Screen View"
+                          >
+                              <IconMaximize class="w-4 h-4" />
+                          </button>
+                          <button 
+                            @click="openWidgetInNewTab(part.widget)"
+                            class="p-2 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-all"
+                            title="Open in New Tab"
+                          >
+                              <IconGlobeAlt class="w-4 h-4" />
+                          </button>
+                      </div>
                   </div>
                   
-                  <div class="text-center">
-                      <h4 class="text-base font-black text-blue-700 dark:text-blue-300 uppercase tracking-widest mb-1">
-                          {{ part.widget.title || 'Interactive Widget' }}
-                      </h4>
-                      <p class="text-xs text-gray-500 dark:text-gray-400 font-medium">
-                          Click to launch visualization engine
-                      </p>
+                  <!-- Inline Iframe Viewport -->
+                  <div class="relative w-full h-[450px] bg-white group-hover/widget-container:ring-4 group-hover/widget-container:ring-blue-500/5 transition-all">
+                      <iframe 
+                        :srcdoc="getWidgetContent(part.widget)" 
+                        class="w-full h-full border-none" 
+                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
+                        referrerpolicy="no-referrer"
+                      ></iframe>
+                      
+                      <!-- Interaction Shield (Optional: helpful if scrolling the chat is difficult) -->
+                      <div class="absolute inset-0 pointer-events-none border-t border-gray-100 dark:border-gray-800 opacity-10"></div>
                   </div>
 
-                  <div class="flex items-center gap-3 mt-2">
-                      <div class="flex items-center gap-2 px-3 py-1 bg-white/80 dark:bg-gray-800/80 rounded-full border border-blue-200 dark:border-blue-800 shadow-sm">
-                          <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
-                          <span class="text-[10px] font-black text-gray-500 uppercase tracking-tighter">{{ part.widget.type || 'HTML' }} Ready</span>
-                      </div>
-                      
-                      <button 
-                        class="btn btn-primary btn-sm rounded-xl px-6 flex items-center gap-2"
-                      >
-                          <IconMaximize class="w-4 h-4" />
-                          <span>View Fullscreen</span>
-                      </button>
-
-                      <button 
-                        @click.stop="openWidgetInNewTab(part.widget)"
-                        class="btn btn-secondary btn-sm rounded-xl px-4 flex items-center gap-2"
-                        title="Open in standalone browser tab"
-                      >
-                          <IconGlobeAlt class="w-4 h-4" />
-                          <span class="hidden sm:inline">New Tab</span>
-                      </button>
+                  <!-- Footer / Status -->
+                  <div class="px-5 py-2 bg-gray-50/30 dark:bg-gray-900/20 flex items-center justify-between">
+                       <div class="flex items-center gap-2">
+                          <div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
+                          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Live Sandbox Active</span>
+                       </div>
+                       <button @click="openWidgetFullscreen(part.widget)" class="text-[10px] font-black text-blue-500 uppercase tracking-widest hover:underline">
+                           Expand Visualizer &rarr;
+                       </button>
                   </div>
               </div>
           </div>

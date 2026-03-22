@@ -595,13 +595,19 @@ function viewLoadedContextItem(item) {
 function viewAttachedFile(file) {
     if (!activeDiscussion.value) return;
     
-    // 1. Set the document to display in Split View
+    // 1. Ensure Data Zone is visible FIRST
+    uiStore.isDataZoneVisible = true;
+    
+    // 2. CRITICAL: Switch to workspace tab
+    uiStore.dataZoneTab = 'workspace';
+    
+    // 3. Set the document title LAST (triggers the watcher in ArtefactSplitView)
     uiStore.activeSplitArtefactTitle = file.title;
     
-    // 2. Ensure Data Zone is visible for Split View logic
-    uiStore.isDataZoneVisible = true; 
-    
-    uiStore.addNotification(`Opening workspace: ${file.title}`, 'info', 1500);
+    // Force a small delay to allow reactivity to propagate before showing notification
+    setTimeout(() => {
+        uiStore.addNotification(`Opening workspace: ${file.title}`, 'info', 1500);
+    }, 100);
 }
 async function toggleArtefactLoad(file) { 
     if (!activeDiscussion.value) return; 

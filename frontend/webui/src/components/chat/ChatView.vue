@@ -1,16 +1,14 @@
 <!-- [UPDATE] frontend/webui/src/components/chat/ChatView.vue -->
 <script setup>
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { storeToRefs } from 'pinia';
 import MessageArea from './MessageArea.vue';
 import ChatInput from './ChatInput.vue';
-import ArtefactSplitView from './ArtefactSplitView.vue';
+import DataZone from './data_zone/DataZone.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import useEventBus from '../../services/eventBus';
-
-const DataZone = defineAsyncComponent(() => import('./data_zone/DataZone.vue'));
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
@@ -84,10 +82,11 @@ async function handlePaste(event) {
         </div>
         <div class="flex-1 flex flex-row h-full overflow-hidden relative">
             <!-- Main Chat Area -->
-            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r dark:border-gray-700">
+            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r dark:border-gray-700 transition-all duration-300"
+                 :class="{ 'border-r-0': isDataZoneVisible }">
                 <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-800/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
                     <IconAnimateSpin class="w-16 h-16 text-blue-500 animate-spin" />
-                    <p class="mt-4 text-lg font-semibold text-gray-600 dark:text-gray-300">Loading Discussion...</p>
+                    <p class="mt-4 text-lg font-semibold text-gray-600 dark:text-gray-400">Loading Discussion...</p>
                 </div>
                 
                 <div v-show="!isLoadingMessages" class="flex-1 flex flex-col min-h-0 h-full">
@@ -96,14 +95,17 @@ async function handlePaste(event) {
                 </div>
             </div>
 
-            <!-- Side Panels Container (Decoupled Layout) -->
-            <div class="flex flex-row h-full flex-shrink-0 transition-all duration-300">
-                <!-- Workspace Slot (Split View) -->
-                <ArtefactSplitView v-if="uiStore.activeSplitArtefactTitle" />
-                
-                <!-- Context Explorer Slot (Data Zone) -->
+            <!-- Unified Sidebar (Knowledge & Workspace) -->
+            <Transition
+                enter-active-class="transition-all duration-300 ease-out"
+                enter-from-class="opacity-0 translate-x-full w-0"
+                enter-to-class="opacity-100 translate-x-0"
+                leave-active-class="transition-all duration-200 ease-in"
+                leave-from-class="opacity-100 translate-x-0"
+                leave-to-class="opacity-0 translate-x-full w-0"
+            >
                 <DataZone v-if="isDataZoneVisible" />
-            </div>
+            </Transition>
         </div>
     </div>
 </template>

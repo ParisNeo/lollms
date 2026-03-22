@@ -34,6 +34,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  isSystemAsset: {
+    type: Boolean,
+    default: false
+  }
 });
 
 const emit = defineEmits(['update:modelValue']);
@@ -62,6 +66,49 @@ const editor = useEditor({
   editorProps: {
     attributes: {
       class: 'prose dark:prose-invert prose-sm sm:prose-base lg:prose-lg xl:prose-2xl m-5 focus:outline-none min-h-[200px]',
+    },
+    // Handles images pasted from clipboard (e.g. Snipping Tool, Copy Image)
+    handlePaste(view, event) {
+        const items = (event.clipboardData || window.clipboardData).items;
+        let handled = false;
+
+        for (const item of items) {
+            if (item.type.indexOf('image') !== -1) {
+                const file = item.getAsFile();
+                const reader = new FileReader();
+
+                reader.onload = (e) => {
+                    const { schema } = view.state;
+                    const node = schema.nodes.image.create({ src: e.target.result });
+                    const transaction = view.state.tr.replaceSelectionWith(node);
+                    view.dispatch(transaction);
+                };
+
+                reader.readAsDataURL(file);
+                handled = true;
+            }
+        }
+        return handled;
+    },
+    // Handles images dragged and dropped into the editor
+    handleDrop(view, event, slice, moved) {
+        if (!moved && event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]) {
+            const file = event.dataTransfer.files[0];
+            
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const { schema } = view.state;
+                    const coordinates = view.posAtCoords({ left: event.clientX, top: event.clientY });
+                    const node = schema.nodes.image.create({ src: e.target.result });
+                    const transaction = view.state.tr.insert(coordinates.pos, node);
+                    view.dispatch(transaction);
+                };
+                reader.readAsDataURL(file);
+                return true; // handled
+            }
+        }
+        return false;
     },
   },
 });
@@ -103,8 +150,7 @@ function insertImage(src) {
 }
 
 function openInsertImageModal() {
-    uiStore.openModal('insertImage');
-    // The modal will emit an event that the parent (this component) will listen for.
+    uiStore.openModal('insertImage', { isSystemAsset: props.isSystemAsset });
 }
 
 const setLink = () => {

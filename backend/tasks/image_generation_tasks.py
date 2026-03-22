@@ -561,6 +561,9 @@ def _image_studio_enhance_prompt_task(task: Task, username: str, request_data: d
         task.log("AI response received.")
         task.set_progress(80)
 
+        if isinstance(raw_response,dict):
+            raise Exception(f"Generation failed:{raw_response}")
+
         json_match = raw_response[raw_response.find('{'):raw_response.rfind('}') + 1]
         response_data = {}
         

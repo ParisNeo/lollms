@@ -1113,14 +1113,52 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to create artefact from context: {e}")
 
-    @router.get("/{discussion_id}/artefact", response_model=ArtefactInfo)
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/content")
     async def get_discussion_artefact_content(
+        discussion_id: str,
+        artefact_title: str,
+        version: Optional[int] = Query(None),
+        strategy: str = Query("raw"),  # 'raw' or 'formatted'
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Get the raw content of a specific artefact version.
+        Path-style route to avoid conflicts with SPA catch-all.
+        """
+        from urllib.parse import unquote
+        
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        
+        # URL decode the title (handles spaces and special chars)
+        decoded_title = unquote(artefact_title)
+        
+        artefact = discussion.get_artefact(title=decoded_title, version=version)
+        if not artefact:
+            raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found")
+
+        # Return raw content as plain text for the workspace editor
+        content = artefact.get('content', '')
+        
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(
+            content=content,
+            media_type="text/plain; charset=utf-8",
+            headers={"X-Artefact-Title": decoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
+        )
+
+    # Keep the old endpoint for backward compatibility (returns JSON with metadata)
+    @router.get("/{discussion_id}/artefact", response_model=ArtefactInfo)
+    async def get_discussion_artefact_info(
         discussion_id: str,
         artefact_title: str = Query(...),
         version: Optional[int] = Query(None),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
+        """
+        Get artefact metadata (JSON). Use /content endpoint for raw content.
+        """
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         artefact = discussion.get_artefact(title=artefact_title, version=version)
 
