@@ -130,6 +130,51 @@ watch(user, (newUser) => {
 }, { immediate: true });
 
 const attachedFiles = computed(() => activeDiscussionArtefacts.value || []);
+
+// Group artefacts by title, showing latest version by default with version selector
+const groupedAttachedFiles = computed(() => {
+    const groups = {};
+    
+    // Group all files by title
+    (activeDiscussionArtefacts.value || []).forEach(file => {
+        if (!groups[file.title]) {
+            groups[file.title] = {
+                title: file.title,
+                artefact_type: file.artefact_type,
+                versions: [],
+                latest: null,
+                isAnyLoaded: false,
+                selectedVersion: file.version,
+                selectedFile: null
+            };
+        }
+        groups[file.title].versions.push(file);
+        if (file.is_loaded) {
+            groups[file.title].isAnyLoaded = true;
+        }
+    });
+    
+    // Sort versions and determine latest
+    Object.values(groups).forEach(group => {
+        // Sort by version desc (highest first)
+        group.versions.sort((a, b) => b.version - a.version);
+        group.latest = group.versions[0];
+        // Default to latest version selected
+        group.selectedVersion = group.latest.version;
+        group.selectedFile = group.latest;
+    });
+    
+    return Object.values(groups);
+});
+
+function onVersionSelect(title, version) {
+    const group = groupedAttachedFiles.value.find(g => g.title === title);
+    if (group) {
+        group.selectedVersion = parseInt(version);
+        group.selectedFile = group.versions.find(v => v.version === parseInt(version));
+    }
+}
+
 const isSttActive = computed(() => {
     return !!user.value?.stt_binding_model_name && 
            user.value.stt_binding_model_name.includes('/') && 
@@ -857,38 +902,53 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     </div>
                 </div>
 
-                <!-- Unified Artefact Chips (Versioning + Type Aware) -->
-                <div v-for="file in attachedFiles" :key="file.title" 
+                <!-- Unified Artefact Chips (Grouped by Title with Version Selector) -->
+                <div v-for="group in groupedAttachedFiles" :key="group.title" 
                      class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold border-2 transition-all duration-200 shadow-sm group/file"
                      :class="[
-                        file.is_loaded 
-                            ? (file.artefact_type === 'note' ? 'border-amber-500 bg-amber-50 text-amber-700 dark:border-amber-900/30' : 
-                               file.artefact_type === 'skill' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-900/30' :
+                        group.isAnyLoaded
+                            ? (group.artefact_type === 'note' ? 'border-amber-500 bg-amber-50 text-amber-700 dark:border-amber-900/30' : 
+                               group.artefact_type === 'skill' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-900/30' :
                                'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-900/30')
                             : 'border-gray-300 bg-gray-50 dark:bg-gray-800 text-gray-400 opacity-50'
                      ]">
                     
                     <!-- Icon based on registered custom types -->
-                    <IconPencil v-if="file.artefact_type === 'note'" class="w-4 h-4 text-amber-600" />
-                    <IconSparkles v-else-if="file.artefact_type === 'skill'" class="w-4 h-4 text-emerald-600" />
+                    <IconPencil v-if="group.artefact_type === 'note'" class="w-4 h-4 text-amber-600" />
+                    <IconSparkles v-else-if="group.artefact_type === 'skill'" class="w-4 h-4 text-emerald-600" />
                     <IconFileText v-else class="w-4 h-4 text-blue-600" />
 
-                    <!-- Title (Opens Split View Workspace) -->
-                    <span @click.stop="viewAttachedFile(file)" class="truncate max-w-[200px] cursor-pointer hover:underline decoration-2" :title="`Open Workspace: ${file.title} (v${file.version})` ">
-                        {{ file.title }}
-                        <span class="opacity-60 text-[9px] ml-1">v{{ file.version }}</span>
+                    <!-- Title -->
+                    <span @click.stop="viewAttachedFile(group.latest)" class="truncate max-w-[150px] cursor-pointer hover:underline decoration-2" :title="`Open Workspace: ${group.title}`">
+                        {{ group.title }}
                     </span>
+
+                    <!-- Version Selector (if multiple versions) -->
+                    <div v-if="group.versions.length > 1" class="relative flex items-center">
+                        <select 
+                            v-model="group.selectedVersion"
+                            @click.stop
+                            @change="onVersionSelect(group.title, $event.target.value)"
+                            class="bg-transparent border-none text-[9px] font-mono font-bold text-inherit focus:ring-0 p-0 pr-3 cursor-pointer opacity-80 hover:opacity-100 appearance-none"
+                        >
+                            <option v-for="v in group.versions" :key="v.version" :value="v.version" class="text-gray-800 dark:text-gray-200">
+                                v{{ v.version }}
+                            </option>
+                        </select>
+                        <span class="text-[8px] pointer-events-none opacity-60 ml-0.5 -mr-0.5">▼</span>
+                    </div>
+                    <span v-else class="text-[9px] font-mono opacity-60">v{{ group.latest.version }}</span>
 
                     <div class="h-3 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
-                    <!-- Load/Unload Toggle -->
-                    <button @click.stop="toggleArtefactLoad(file)" :title="file.is_loaded ? 'Exclude from context' : 'Include in context'" class="hover:scale-110 transition-transform">
-                        <IconCheckCircle v-if="file.is_loaded" class="w-4 h-4 text-green-500"/>
+                    <!-- Load/Unload Toggle (applies to selected version) -->
+                    <button @click.stop="toggleArtefactLoad(group.selectedFile || group.latest)" :title="(group.selectedFile || group.latest).is_loaded ? 'Exclude from context' : 'Include in context'" class="hover:scale-110 transition-transform">
+                        <IconCheckCircle v-if="(group.selectedFile || group.latest).is_loaded" class="w-4 h-4 text-green-500"/>
                         <IconCircle v-else class="w-4 h-4" />
                     </button>
 
                     <!-- Remove Button -->
-                    <button @click.stop="removeArtefact(file)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Permanently delete">
+                    <button @click.stop="removeArtefact(group.latest)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Permanently delete">
                         <IconXMark class="w-3.5 h-3.5" />
                     </button>
                 </div>

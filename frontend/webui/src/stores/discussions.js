@@ -263,6 +263,19 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     // Register the missing function in the actions registry
     _actions.removeContextItem = removeContextItem;
 
+    // Wrap createNewDiscussion to hide data zone when starting a new discussion
+    const originalCreateNewDiscussion = _actions.createNewDiscussion;
+    if (originalCreateNewDiscussion) {
+        _actions.createNewDiscussion = async function(...args) {
+            // Hide the data zone and workspace when starting a new discussion
+            uiStore.isDataZoneVisible = false;
+            uiStore.activeSplitArtefactTitle = null;
+            uiStore.dataZoneTab = 'context';
+            
+            return await originalCreateNewDiscussion.apply(this, args);
+        };
+    }
+
     async function generateTTSForMessage(messageId, text) {
         if (ttsState.value[messageId]?.isLoading) return;
     
