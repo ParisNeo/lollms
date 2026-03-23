@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-22 22:17]
+
+- chore(deps): bump lollms-client from 1.12.6 to 1.12.9
+
 ## [2026-03-22 22:15]
 
 - Rebuild frontend assets after discussions store and chat input updates
