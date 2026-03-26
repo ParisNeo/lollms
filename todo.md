@@ -222,3 +222,5 @@ Fix the repetition problem in the answer. the answer is always returned twice!
 User joined is the current date!! It should be the first time the user joined the system!!
 Connect the server settings view: frontend/webui/src/components/admin/HttpsSettings.vue
 
+Add the possibility to create frames to be filled by the user. (add it to lollms_client)
+Widgets MUST contain html/css/js code and only html/css/js code)
