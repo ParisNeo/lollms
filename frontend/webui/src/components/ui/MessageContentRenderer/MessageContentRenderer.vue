@@ -21,9 +21,11 @@ import IconClock from '../../../assets/icons/IconClock.vue';
 import IconSave from '../../../assets/icons/IconSave.vue';
 import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
 import IconCog from '../../../assets/icons/IconCog.vue';
+import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
+import IconStepStart from '../../../assets/icons/IconStepStart.vue';
+import IconStepEnd from '../../../assets/icons/IconStepEnd.vue';
 import IconInfo from '../../../assets/icons/IconInfo.vue';
 import IconError from '../../../assets/icons/IconError.vue';
-import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
 
 import { useTasksStore } from '../../../stores/tasks';
 import { useDiscussionsStore } from '../../../stores/discussions';
@@ -126,62 +128,21 @@ const parsedStreamingContent = computed(() => {
         }
     }
 
-    // 1. Technical Tag Cleanup for passive tags (allow thoughts to stream normally)
+    // 1. Technical Tag Cleanup for passive tags - keep inline for clean stream
     content = content.replace(/<(?:tol|tool_call|tool_result|thought|think)[^>]*>|<\/(?:tol|tool_call|tool_result|thought|think)>/gi, '');
 
     if (latestOpenIndex > -1) {
         const before = content.substring(0, latestOpenIndex);
         let statusMsg = 'Constructing...';
-        let subMsg = 'Orchestrating code and styles';
-        let colorClass = 'text-blue-600 bg-blue-50/50 border-blue-200 dark:text-blue-400 dark:bg-blue-900/20 dark:border-blue-800/50';
-
-        if (detectedTag.includes('lollms')) {
-            statusMsg = 'Building Interactive Widget';
-            subMsg = 'Compiling logic and visual interface';
-            colorClass = 'text-indigo-600 bg-indigo-50/50 border-indigo-200 dark:text-indigo-400 dark:bg-indigo-900/20 dark:border-indigo-800/50';
-        } else if (detectedTag === 'generate_image' || detectedTag === 'edit_image') {
-            statusMsg = 'Processing Visual Engine';
-            subMsg = 'Sampling latent space for your request';
-            colorClass = 'text-purple-600 bg-purple-50/50 border-purple-200 dark:text-purple-400 dark:bg-purple-900/20 dark:border-purple-800/50';
-        }
-
-        // High-Fidelity Construction Animation
-        const spinnerHtml = `
-        <div class="my-8 p-6 rounded-[2rem] border-2 border-dashed ${colorClass} flex flex-col items-center justify-center gap-4 text-center shadow-2xl shadow-blue-500/5 animate-in fade-in zoom-in-95 duration-700 relative overflow-hidden">
-            <!-- Background Glow -->
-            <div class="absolute inset-0 opacity-10 bg-gradient-to-br from-transparent via-current to-transparent animate-pulse"></div>
-            
-            <div class="relative h-16 w-16 mb-2">
-                <!-- Outer Ring -->
-                <svg class="absolute inset-0 animate-[spin_3s_linear_infinite] opacity-20" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="45" stroke="currentColor" stroke-width="2" fill="none" stroke-dasharray="10 20" />
-                </svg>
-                
-                <!-- 3D Layer Stack Icon -->
-                <div class="absolute inset-0 flex items-center justify-center scale-150">
-                    <svg class="h-8 w-8 text-current" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path class="animate-[bounce_2s_infinite]" d="M12 2L2 7l10 5 10-5-10-5z" />
-                        <path class="animate-[bounce_2s_infinite_0.2s] opacity-70" d="M2 12l10 5 10-5" />
-                        <path class="animate-[bounce_2s_infinite_0.4s] opacity-40" d="M2 17l10 5 10-5" />
-                    </svg>
-                </div>
-            </div>
-
-            <div class="flex flex-col gap-1 relative z-10">
-                <span class="text-base font-black uppercase tracking-[0.2em]">${statusMsg}</span>
-                <div class="flex items-center justify-center gap-2">
-                    <span class="h-1 w-1 rounded-full bg-current animate-ping"></span>
-                    <span class="text-[11px] font-bold opacity-60 tracking-tight">${subMsg}...</span>
-                </div>
-            </div>
-            
-            <!-- Progress Subtext -->
-            <div class="mt-2 px-4 py-1.5 rounded-full bg-white/10 dark:bg-black/10 border border-current/10 text-[9px] font-black uppercase tracking-widest opacity-40">
-                Protecting Core Styles
-            </div>
-        </div>`;
         
-        return parsedMarkdown(before) + spinnerHtml;
+        if (detectedTag.includes('lollms')) statusMsg = 'Building Widget...';
+        else if (detectedTag === 'generate_image') statusMsg = 'Generating Image...';
+        else if (detectedTag === 'edit_image') statusMsg = 'Editing Image...';
+
+        // Simple inline indicator that doesn't break text flow
+        const indicator = `\n\n> ⏳ **${statusMsg}**\n\n`;
+        
+        return parsedMarkdown(before) + indicator;
     }
 
     return parsedMarkdown(content);
@@ -305,10 +266,18 @@ const hashString = (str) => {
     return hash.toString(36);
 };
 
-const initEvents = computed(() => {
-    // Only show events that happened before or at the start of text (offset <= 0 or missing)
-    return (props.events || []).filter(e => !e.offset || e.offset <= 0);
-});
+// Event icon resolver for system events
+const getEventIcon = (eventType) => {
+    const iconMap = {
+        'tool_call': IconWrenchScrewdriver,
+        'step_start': IconStepStart,
+        'step_end': IconStepEnd,
+        'thinking': IconThinking,
+        'info': IconInfo,
+        'warning': IconCog, // fallback
+    };
+    return iconMap[eventType] || IconCog;
+};
 
 const messageParts = computed(() => {
     if (!props.content) return [];
@@ -336,9 +305,19 @@ const messageParts = computed(() => {
         }
     });
 
-    // 3. Extract elements from out-of-band Events (Tool calls, System steps)
-    // REMOVED: System events are now rendered exclusively in the top timeline block,
-    // not interleaved in the messageParts loop. This prevents redundancy.
+    // 3. Extract elements from out-of-band Events with position tracking
+    (props.events || []).forEach((event, idx) => {
+        // Distinguish between tool calls (inline_event) and system steps (system_event)
+        const eventType = event.type === 'tool_call' || event.tool ? 'inline_event' : 'system_event';
+        const position = event.offset !== undefined ? Math.min(event.offset, content.length) : content.length;
+        allElements.push({ 
+            start: position, 
+            end: position, 
+            type: eventType, 
+            event,
+            id: event.id || `evt-${idx}`
+        });
+    });
 
     // 4. Sort and Resolve overlaps
     allElements.sort((a, b) => (a.start - b.start) || (b.end - a.end));
@@ -715,45 +694,6 @@ function onMermaidReady({ svg }, partIndex) {
     <div v-if="content || (isUser && !hasImages)" class="message-prose">
       <template v-if="messageParts.length > 0">
         <template v-for="part in messageParts" :key="part.id">
-          
-          <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
-
-          <!-- ── Initialization Logs (Only events with offset 0) ──────────────── -->
-          <div v-if="initEvents.length > 0" class="mb-4">
-              <details class="group timeline-details overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50/20 dark:bg-gray-900/10">
-                  <summary class="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors list-none select-none">
-                      <div class="flex items-center gap-2">
-                          <IconCog class="w-3.5 h-3.5 text-gray-400" />
-                          <span class="text-[10px] font-black uppercase tracking-widest text-gray-500">System Initialization</span>
-                      </div>
-                      <IconChevronRight class="w-3 h-3 text-gray-400 group-open:rotate-90 transition-transform" />
-                  </summary>
-                  <div class="p-3 border-t dark:border-gray-700 bg-white dark:bg-gray-950/20 space-y-3">
-                      <div v-for="event in initEvents" :key="event.id" class="flex flex-col gap-1">
-                          <div class="text-[10px] font-bold text-gray-600 dark:text-gray-400">{{ event.content?.name || event.content }}</div>
-                          <StepDetail :data="event.content" :level="0" />
-                      </div>
-                  </div>
-              </details>
-          </div>
-
-          <div v-if="part.type === 'system_event'" class="my-3 ml-2">
-              <details class="group/event overflow-hidden rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50/10 dark:bg-gray-900/10 transition-all hover:border-blue-500/20 shadow-sm">
-                  <summary class="flex items-center justify-between px-3 py-1.5 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors list-none select-none">
-                      <div class="flex items-center gap-2.5">
-                          <component :is="getEventIcon(part.event.type)" class="w-3.5 h-3.5 text-gray-400 group-open/event:text-blue-500 transition-colors" />
-                          <span class="text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                              {{ part.event.tool ? part.event.tool.replace('_', ' ') : part.event.content }}
-                          </span>
-                      </div>
-                      <IconChevronRight class="w-3 h-3 text-gray-300 group-open/event:rotate-90 transition-transform" />
-                  </summary>
-                  <div class="p-3 border-t dark:border-gray-800 bg-white dark:bg-gray-950/20">
-                      <StepDetail :data="part.event.content" :level="0" />
-                  </div>
-              </details>
-          </div>
-
           <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
           <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm mermaid-wrapper">
             <MermaidViewer 
@@ -763,34 +703,50 @@ function onMermaidReady({ svg }, partIndex) {
             />
           </div>
 
-          <!-- ── Inline Event Marker (Expandable Tool Block) ────────────── -->
-          <div v-if="part.type === 'inline_event' && part.event" class="my-6 animate-in fade-in slide-in-from-left-2">
-              <details class="group/inline w-full border dark:border-gray-700 rounded-2xl bg-gray-50/30 dark:bg-gray-900/20 overflow-hidden transition-all hover:border-blue-500/30">
-                  <summary class="flex items-center justify-between p-3.5 cursor-pointer list-none select-none">
-                      <div class="flex items-center gap-4">
-                          <div class="p-2.5 rounded-xl bg-white dark:bg-gray-900 shadow-sm text-blue-500 group-open/inline:text-emerald-500 transition-colors">
-                              <IconWrenchScrewdriver v-if="part.event.type === 'tool_call'" class="w-5 h-5" />
-                              <IconCheckCircle v-else class="w-5 h-5" />
-                          </div>
-                          <div class="flex flex-col">
-                              <span class="text-[10px] font-black uppercase tracking-[0.2em] text-gray-400">Action performed</span>
-                              <span class="text-sm font-bold text-gray-800 dark:text-gray-200">
-                                  {{ part.event.tool ? part.event.tool.replace('_', ' ') : 'System Step' }}
-                              </span>
-                          </div>
+          <!-- ── Inline Event Marker (Collapsible Tool Block) ───────────── -->
+          <details v-if="part.type === 'inline_event' && part.event" 
+                   class="my-4 group/event rounded-xl border border-blue-200 dark:border-blue-800/50 bg-gradient-to-br from-blue-50/80 to-blue-100/40 dark:from-blue-900/20 dark:to-blue-950/30 overflow-hidden animate-in fade-in slide-in-from-left-2">
+              <summary class="flex items-center justify-between p-3.5 cursor-pointer list-none select-none hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors">
+                  <div class="flex items-center gap-3">
+                      <div class="p-2 rounded-lg bg-white dark:bg-gray-900 shadow-sm transition-colors group-open/event:text-emerald-500">
+                          <IconWrenchScrewdriver v-if="part.event.type === 'tool_call'" class="w-4 h-4 text-blue-500 group-open/event:text-emerald-500" />
+                          <IconCheckCircle v-else class="w-4 h-4 text-blue-500" />
                       </div>
-                      <div class="flex items-center gap-3">
-                          <span class="text-[10px] font-black text-gray-400 group-open/inline:hidden uppercase tracking-widest">Show Result</span>
-                          <IconChevronRight class="w-4 h-4 text-gray-400 group-open/inline:rotate-90 transition-transform" />
+                      <div class="flex flex-col">
+                          <span class="text-[10px] font-black uppercase tracking-widest text-blue-400 dark:text-blue-500">Action Performed</span>
+                          <span class="text-sm font-bold text-gray-800 dark:text-gray-200">
+                              {{ part.event.tool ? part.event.tool.replace(/_/g, ' ') : 'System Step' }}
+                          </span>
                       </div>
-                  </summary>
-                  
-                  <div class="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-950/40">
-                      <!-- Render the tool parameters and output beautifully -->
-                      <StepDetail :data="part.event.content" :level="0" />
                   </div>
-              </details>
-          </div>
+                  <div class="flex items-center gap-2">
+                      <span class="text-[10px] font-bold text-gray-400 group-open/event:hidden uppercase tracking-widest">Show Details</span>
+                      <IconChevronRight class="w-4 h-4 text-gray-400 group-open/event:rotate-90 transition-transform duration-200" />
+                  </div>
+              </summary>
+              
+              <div class="p-4 border-t border-blue-200/50 dark:border-blue-800/30 bg-white/60 dark:bg-gray-950/40">
+                  <!-- Render the tool parameters and output using StepDetail -->
+                  <StepDetail :data="part.event.content" :level="0" />
+              </div>
+          </details>
+
+          <!-- ── System Events (Compact Collapsible) ──────────────────── -->
+          <details v-if="part.type === 'system_event'" 
+                   class="my-3 group/sys rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 overflow-hidden">
+              <summary class="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors list-none select-none">
+                  <div class="flex items-center gap-2.5">
+                      <component :is="getEventIcon(part.event.type)" class="w-3.5 h-3.5 text-gray-400 group-open/sys:text-blue-500 transition-colors" />
+                      <span class="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider truncate">
+                          {{ part.event.tool ? part.event.tool.replace(/_/g, ' ') : part.event.content }}
+                      </span>
+                  </div>
+                  <IconChevronRight class="w-3 h-3 text-gray-300 group-open/sys:rotate-90 transition-transform" />
+              </summary>
+              <div class="p-3 border-t dark:border-gray-700 bg-white dark:bg-gray-950/40">
+                  <StepDetail :data="part.event.content" :level="0" />
+              </div>
+          </details>
 
           <div v-if="part.type === 'content'" class="content-token-container">
             <template v-for="(token, tokenIndex) in (getTokens(part.content) || [])" :key="token.uid || `token-${tokenIndex}`">
