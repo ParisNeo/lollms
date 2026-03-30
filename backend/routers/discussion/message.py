@@ -90,7 +90,34 @@ class RegenerateImageRequest(BaseModel):
 class ToggleImageRequest(BaseModel):
     active: Optional[bool] = None
 
+class FormSubmitRequest(BaseModel):
+    answers: Dict[str, Any]
+
 def build_message_router(router: APIRouter):
+    @router.post("/{discussion_id}/forms/{form_id}/submit")
+    async def submit_form_data(
+        discussion_id: str,
+        form_id: str,
+        payload: FormSubmitRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Submits user answers for an interactive form created by the LLM.
+        This resumes the generation loop if it was waiting.
+        """
+        discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        try:
+            # Proxies to lollms_discussion.submit_form_response
+            result = discussion_obj.submit_form_response(form_id, payload.answers)
+            return {"status": "success", "message": "Form submitted successfully", "result": result}
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail="Internal error processing form submission.")
+
     @router.put("/{discussion_id}/messages/{message_id}/grade", response_model=MessageOutput)
     async def grade_discussion_message(discussion_id: str, message_id: str, grade_update: MessageGradeUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         username = current_user.username

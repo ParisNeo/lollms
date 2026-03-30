@@ -42,7 +42,14 @@ export function useDiscussionCore(state, stores, getActions) {
     }
 
     async function selectDiscussion(discussionId, branchId = null, forceReload = false) {
-        if (!forceReload && currentDiscussionId.value === discussionId) {
+        /**
+         * Loads a discussion and sets the active view to a specific branch/leaf.
+         */
+        const isSameDiscussion = currentDiscussionId.value === discussionId;
+        
+        // If we are already on this discussion, only proceed if we are jumping 
+        // to a specific branch or explicitly forced.
+        if (isSameDiscussion && !branchId && !forceReload) {
             return;
         }
 

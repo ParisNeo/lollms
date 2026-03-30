@@ -63,19 +63,21 @@ const isEditMode = computed(() => editingBinding.value !== null);
 const selectedBindingType = computed(() => {
     if (!form.value.name) return null;
     
-    // [FIX] Flexible Lookup: Normalize names to handle underscore/dash differences 
-    // between DB records and newly fetched metadata.
-    const target = form.value.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const rawTarget = form.value.name.toLowerCase();
+    const cleanTarget = rawTarget.replace(/[^a-z0-9]/g, '');
+    
     const found = availableBindingTypes.value.find(b => {
-        const name = (b.binding_name || b.name || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        return name === target;
+        const bName = (b.binding_name || '').toLowerCase();
+        const bShortName = (b.name || '').toLowerCase();
+        
+        // Match exact, match cleaned, or match partial (e.g. 'ollama' vs 'ollama_binding')
+        return bName === rawTarget || 
+               bShortName === rawTarget ||
+               bName.replace(/[^a-z0-9]/g, '') === cleanTarget ||
+               bShortName.replace(/[^a-z0-9]/g, '') === cleanTarget;
     });
 
-    console.log(`[AdminBinding] Lookup for type '${form.value.name}' found:`, found);
-    if (!found) {
-        console.warn(`[AdminBinding] No metadata match for '${form.value.name}'. Total Types: ${availableBindingTypes.value.length}`);
-    }
-    return found;
+    return found || null;
 });
 
 const allFormParameters = computed(() => {
@@ -221,7 +223,11 @@ function showEditForm(binding) {
     form.value = JSON.parse(JSON.stringify(binding));
     if (!form.value.config) form.value.config = {};
 
-    // Initial attempt to sync
+    // Ensure we have metadata before syncing
+    if (availableBindingTypes.value.length === 0) {
+        adminStore.fetchAvailableBindingTypes(true);
+    }
+    
     syncConfigWithMetadata();
     
     isKeyVisible.value = {};
@@ -370,9 +376,15 @@ async function executeCommand(cmd, bindingId, params) {
 
                     <!-- Fixed: Added Loading and fallback indicators -->
                     <div v-if="selectedBindingType" class="space-y-6 border-t dark:border-gray-700 pt-6">
-                        <div class="text-sm text-gray-600 dark:text-gray-400 prose dark:prose-invert max-w-none" v-html="parseMarkdown(selectedBindingType.description || '')"></div>
+                        <!-- Degraded Warning -->
+                        <div v-if="selectedBindingType.is_degraded" class="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-amber-700 dark:text-amber-400 text-sm flex gap-3">
+                            <span class="text-lg">⚠️</span>
+                            <div v-html="parseMarkdown(selectedBindingType.description || '')"></div>
+                        </div>
+
+                        <div v-else class="text-sm text-gray-600 dark:text-gray-400 prose dark:prose-invert max-w-none" v-html="parseMarkdown(selectedBindingType.description || '')"></div>
                         
-                        <div v-if="allFormParameters.length === 0" class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-center italic text-gray-400 text-xs">
+                        <div v-if="allFormParameters.length === 0 && !selectedBindingType.is_degraded" class="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg text-center italic text-gray-400 text-xs">
                             No global configuration parameters required for this binding.
                         </div>
 

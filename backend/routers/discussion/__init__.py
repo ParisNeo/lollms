@@ -163,17 +163,23 @@ def build_discussions_router():
 
     @router.get("/{discussion_id}", response_model=List[MessageOutput])
     async def get_messages_for_discussion(discussion_id: str, branch_id: Optional[str] = Query(None), current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[MessageOutput]:
+        """
+        Retrieves messages for a specific branch of a discussion.
+        Calculates sibling branches across the entire discussion history for navigation.
+        """
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
+        # 1. Determine which leaf node defines the branch we are viewing
         branch_tip_to_load = branch_id or discussion_obj.active_branch_id
-        # Limit the initial fetch to the last 50 messages to protect browser memory
+        
+        # 2. Get the linear sequence of messages for this branch
         messages_in_branch = discussion_obj.get_branch(branch_tip_to_load)
-        if len(messages_in_branch) > 50:
-            messages_in_branch = messages_in_branch[-50:]
+        
+        # Protective limit for browser stability
+        if len(messages_in_branch) > 100:
+            messages_in_branch = messages_in_branch[-100:]
 
-        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
-        user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
-
+        # 3. Map children for the entire discussion to detect siblings correctly
         all_messages_in_discussion = discussion_obj.get_all_messages_flat()
         children_map = {}
         for msg_obj in all_messages_in_discussion:
@@ -182,6 +188,9 @@ def build_discussions_router():
                     children_map[msg_obj.parent_id] = []
                 children_map[msg_obj.parent_id].append(msg_obj.id)
 
+        # 4. Load user-specific interaction data
+        db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
+        user_grades = {g.message_id: g.grade for g in db.query(UserMessageGrade).filter_by(user_id=db_user.id, discussion_id=discussion_id).all()}
 
         messages_output = []
         for msg in messages_in_branch:
@@ -222,9 +231,11 @@ def build_discussions_router():
             if 'query_history' in msg_metadata and len(json.dumps(msg_metadata['query_history'])) > 10000:
                 msg_metadata['query_history'] = "[Too many queries to list in history]"
 
+            # Sibling Logic: If this message's parent has more than one child, this is a branch point.
+            # We provide all sibling IDs to the frontend for the navigation UI.
             msg_branches = None
-            if msg.id in children_map and len(children_map[msg.id]) > 1:
-                msg_branches = children_map[msg.id]
+            if msg.parent_id and msg.parent_id in children_map and len(children_map[msg.parent_id]) > 1:
+                msg_branches = children_map[msg.parent_id]
 
             messages_output.append(
                 MessageOutput(
@@ -234,7 +245,9 @@ def build_discussions_router():
                     image_references=full_image_refs,
                     active_images=active_images_bools,
                     user_grade=user_grades.get(msg.id, 0),
-                    created_at=msg.created_at, branch_id=branch_tip_to_load, branches=msg_branches,
+                    created_at=msg.created_at, 
+                    branch_id=branch_tip_to_load, 
+                    branches=msg_branches,
                     metadata=msg_metadata
                 )
             )

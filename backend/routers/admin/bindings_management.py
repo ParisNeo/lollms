@@ -58,35 +58,34 @@ class ZooInstallRequest(BaseModel):
 def _normalize_binding_desc(name: str, desc: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
     """Ensures binding description has consistent keys for the frontend."""
     ASCIIColors.debug(f"[AdminBinding] Normalizing {binding_type} binding: {name}")
-    if not desc:
-        ASCIIColors.warning(f"[AdminBinding] No initial descriptor for {name}. Attempting secondary fetch...")
-        # Static Fallback: If probing the class failed, try to read the YAML directly
-        # This is critical for fresh installs where dependencies aren't yet available
-        try:
-            desc = get_binding_desc(name, binding_type)
-            if desc:
-                ASCIIColors.success(f"[AdminBinding] Secondary fetch (YAML) succeeded for {name}")
-            else:
-                ASCIIColors.error(f"[AdminBinding] Secondary fetch returned None for {name}")
-        except Exception as e:
-            ASCIIColors.error(f"[AdminBinding] Secondary fetch crashed for {name}: {e}")
-            pass
-
-    if not desc:
-        ASCIIColors.warning(f"Normalization >> No metadata found for {name} after all attempts.")
-        return {
-            "name": name, 
-            "binding_name": name, 
-            "title": name.replace('_', ' ').title(),
-            "input_parameters": [], 
-            "model_parameters": [],
-            "description": "Metadata extraction failed for this binding. Please ensure its dependencies are installed."
-        }
     
-    if not isinstance(desc, dict):
-        return { "name": name, "binding_name": name, "title": name, "input_parameters": [], "model_parameters": [] }
+    # Base object that ensures UI components don't crash
+    base_info = {
+        "name": name,
+        "binding_name": name,
+        "title": name.replace('_', ' ').title(),
+        "input_parameters": [],
+        "model_parameters": [],
+        "commands": [],
+        "description": "",
+        "is_degraded": False
+    }
 
-    # Standardize Identifiers
+    if not desc or not isinstance(desc, dict):
+        base_info["is_degraded"] = True
+        base_info["description"] = "⚠️ Metadata extraction failed. This usually happens when binding dependencies are missing."
+        return base_info
+
+    # If the descriptor contains an error string (returned by lollms_client on import failure)
+    if "error" in desc:
+        base_info["is_degraded"] = True
+        base_info["description"] = f"⚠️ **Binding Error**: {desc['error']}\n\nConfigurations may be unavailable until dependencies are fixed."
+        # Even if errored, try to keep the name/title if they were successfully parsed
+        base_info["name"] = desc.get("name", name)
+        base_info["binding_name"] = desc.get("binding_name", name)
+        return base_info
+
+    # Merge successful metadata
     desc['binding_name'] = desc.get('binding_name', name)
     desc['name'] = desc.get('name', name)
     desc['title'] = desc.get('title', desc.get('name', name).replace('_', ' ').title())

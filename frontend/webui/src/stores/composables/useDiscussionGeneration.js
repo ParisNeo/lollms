@@ -297,26 +297,61 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     getActions().fetchArtefacts(currentDiscussionId.value);
                     break;
                 }
+                case 'form_ready':
+                    if (messageToUpdate) {
+                        if (!messageToUpdate.forms) messageToUpdate.forms = [];
+                        
+                        // We do not set an offset because the renderer will look for 
+                        // <lollms_form_anchor id="FORM_ID"> in the text to mount it.
+                        const formWithOffset = { 
+                            ...data.content, 
+                            id: data.content.id || data.content.form_id 
+                        };
+                        messageToUpdate.forms.push(formWithOffset);
+                        generationState.value = { status: 'waiting_for_user', details: `Form Ready: ${data.content.title}` };
+                    }
+                    break;
+                case 'form_submitted':
+                    if (messageToUpdate && messageToUpdate.forms) {
+                        const idx = messageToUpdate.forms.findIndex(f => f.id === data.content.form_id);
+                        if (idx !== -1) {
+                            messageToUpdate.forms[idx].submitted = true;
+                            messageToUpdate.forms[idx].answers = data.content.answers;
+                        }
+                    }
+                    break;
                 case 'thought':
                     if (!messageToUpdate.thoughts) messageToUpdate.thoughts = "";
                     messageToUpdate.thoughts += data.content;
                     break;
                 case 'note_start':
                 case 'skill_start':
+                case 'form_start':
                 case 'artefact_update':
                 case 'inline_widget_start':
-                    if (data.content) {
+                    if (data.content && messageToUpdate) {
                         const title = data.content.title;
                         const id = data.content.id || title; 
                         
-                        // Decoupled: Open Split View only, leave DataZone visibility to user
-                        if (data.type !== 'inline_widget_start' && title) {
+                        // 1. Inject an inline building anchor into the message text
+                        // This allows the renderer to show a spinner EXACTLY where the tag was opened
+                        const typeMap = {
+                            'note_start': 'Note',
+                            'skill_start': 'Skill',
+                            'form_start': 'Form',
+                            'artefact_update': 'Artefact',
+                            'inline_widget_start': 'Widget'
+                        };
+                        const label = typeMap[data.type] || 'Component';
+                        messageToUpdate.content += `\n<lollms_building type="${data.type}" label="${label}" title="${title}" id="${id}" />\n`;
+
+                        // 2. UI Side-effects (Split view / Live Tracking)
+                        if (data.type !== 'inline_widget_start' && data.type !== 'form_start' && title) {
                             uiStore.activeSplitArtefactTitle = title;
                         }
 
                         if (id && state.activeUpdatingArtefacts?.value) {
                             state.activeUpdatingArtefacts.value.add(id);
-                            // Force reactivity by re-assigning the buffer object
                             state.liveArtefactBuffers.value = {
                                 ...state.liveArtefactBuffers.value,
                                 [id]: state.liveArtefactBuffers.value[id] || ""
@@ -555,9 +590,12 @@ export function useDiscussionGeneration(state, stores, getActions) {
             generationState.value = { status: 'idle', details: '' };
             activeGenerationAbortController = null;
             
-            if (currentDiscussionId.value) {
+            if (currentDiscussionId.value && messageToUpdate) {
+                // Final Cleanup: Strip all <lollms_building /> tags. 
+                // We keep <lollms_form_anchor /> and <lollms_widget /> as they are necessary for rendering.
+                messageToUpdate.content = messageToUpdate.content.replace(/<lollms_building[^>]*\/>/g, '').trim();
+                
                 await getActions().refreshDataZones(currentDiscussionId.value);
-                // CRITICAL FIX: Synchronize the new branch structure after generation finishes
                 await getActions().refreshActiveDiscussionMessages();
             }
             await getActions().loadDiscussions();
@@ -583,11 +621,16 @@ export function useDiscussionGeneration(state, stores, getActions) {
     }
 
     async function initiateBranch(message) {
+        /**
+         * Orchestrates a new conversation fork from a specific point in time.
+         * Sets the discussion pointer to the selected parent and triggers regeneration.
+         */
         if (!state.activeDiscussion.value || generationInProgress.value || !message) return;
         
         let targetMessage = message;
         
-        // Handle Assistant Message: Automatically find parent (User Message) to regenerate
+        // 1. If user clicks "Regenerate" on an AI message, we actually branch from the 
+        // User prompt that triggered it.
         if (targetMessage.sender_type !== 'user') {
             if (targetMessage.parent_message_id) {
                 const parent = messages.value.find(m => m.id === targetMessage.parent_message_id);
@@ -598,7 +641,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     return;
                 }
             } else {
-                // Fallback: Search backwards in list if parent_id is missing (legacy/broken state)
+                // Fallback for edge cases (fragmented local history)
                 const idx = messages.value.findIndex(m => m.id === targetMessage.id);
                 let found = false;
                 for (let i = idx - 1; i >= 0; i--) {
@@ -615,14 +658,23 @@ export function useDiscussionGeneration(state, stores, getActions) {
             }
         }
         
-        // At this point targetMessage MUST be a USER message
+        // At this point, targetMessage is guaranteed to be a 'user' message.
         
         try {
+            // 2. Synchronize the backend pointer to the selected fork point
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: targetMessage.id });
-            const promptIndex = messages.value.findIndex(m => m.id === targetMessage.id);
-            if (promptIndex > -1) messages.value = messages.value.slice(0, promptIndex + 1);
-            else { await getActions().selectDiscussion(currentDiscussionId.value); return; }
             
+            // 3. Update local UI state: truncate everything after the branched prompt
+            const promptIndex = messages.value.findIndex(m => m.id === targetMessage.id);
+            if (promptIndex > -1) {
+                messages.value = messages.value.slice(0, promptIndex + 1);
+            } else {
+                // If the message wasn't in our current view, reload the whole branch
+                await getActions().selectDiscussion(currentDiscussionId.value, targetMessage.id); 
+                return; 
+            }
+            
+            // 4. Trigger the new generation sequence
             await sendMessage({
                 prompt: targetMessage.content,
                 image_server_paths: targetMessage.server_image_paths || [],

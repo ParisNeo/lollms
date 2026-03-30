@@ -1480,6 +1480,11 @@ def build_llm_generation_router(router: APIRouter):
         # Feature Specific Instructions
         if owner_db_user.image_annotation_enabled: preamble_parts.append("## Image Annotation: Use <annotate>[JSON]</annotate> for bounding boxes/points.")
         if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use <note title=\"Title\">...</note> for structured data.")
+        
+        # [FIX] Local import to break circular dependency and ensure settings instance is available
+        from backend.settings import settings
+        if settings.get("enable_forms", True):
+             preamble_parts.append("## Interactive Forms: If you need multiple details from the user, use <lollms_form title=\"Title\"><field name=\"id\" label=\"Label\" type=\"text\"/></lollms_form>. Generation will pause until user submits.")
         if getattr(owner_db_user, 'skills_building_enabled', False):
             preamble_parts.append("## Skill Building: If the user asks to save this as a skill, learn a new trick, or remember a pattern, wrap the detailed documentation or code pattern in `<skill title=\"Clear Name\" description=\"What this teaches/provides\" category=\"programming/language/feature\">content</skill>`. Make sure the category uses forward slashes.")
 
@@ -1607,7 +1612,9 @@ def build_llm_generation_router(router: APIRouter):
                         42: {"type": "skill_chunk", "content": params},
                         43: {"type": "skill_done", "content": params},
                         44: {"type": "widget_chunk", "content": params},
-                        45: {"type": "widget_done", "content": params}
+                        45: {"type": "widget_done", "content": params},
+                        46: {"type": "form_ready", "content": params},
+                        47: {"type": "form_submitted", "content": params}
                     }
 
                     payload = payload_map.get(mtype_val)

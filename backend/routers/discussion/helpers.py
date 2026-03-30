@@ -50,7 +50,11 @@ async def get_discussion_and_owner_for_request(
         raise HTTPException(status_code=403, detail=f"You need '{required_permission}' permission for this discussion.")
     
     owner_username = shared_link.owner.username
-    shared_discussion_obj = get_user_discussion(owner_username, discussion_id)
+    # When retrieving for shared interactions, ensure we pass the current user's client
+    # to support correct tokenization and branching based on THEIR active model settings.
+    lc = get_user_lollms_client(current_user.username)
+    shared_discussion_obj = get_user_discussion(owner_username, discussion_id, lollms_client=lc)
+    
     if not shared_discussion_obj:
         raise HTTPException(status_code=404, detail="The shared discussion was deleted.")
     

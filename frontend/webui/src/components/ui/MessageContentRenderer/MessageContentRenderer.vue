@@ -5,6 +5,7 @@ import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection
 import CodeBlock from './CodeBlock.vue';
 import MermaidViewer from '../../modals/InteractiveMermaid.vue';
 import StepDetail from '../../chat/StepDetail.vue';
+import InteractiveForm from '../../chat/InteractiveForm.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 import IconFileText from '../../../assets/icons/IconFileText.vue';
 import AuthenticatedImage from '../AuthenticatedImage.vue';
@@ -34,9 +35,10 @@ import { storeToRefs } from 'pinia';
 
 const props = defineProps({
   content: { type: String, default: '' },
-  sources: { type: Array, default: () => [] }, // Added missing sources prop
+  sources: { type: Array, default: () => [] },
+  forms: { type: Array, default: () => [] },
   events: { type: Array, default: () => [] },
-  inlineWidgets: { type: Array, default: () => [] }, // Prop for persistent widgets
+  inlineWidgets: { type: Array, default: () => [] },
   isStreaming: { type: Boolean, default: false },
   isUser: { type: Boolean, default: false },
   hasImages: { type: Boolean, default: false },
@@ -150,8 +152,8 @@ const parsedStreamingContent = computed(() => {
 
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        // [FIX] Unified regex for special blocks - capture widget id attribute
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)/;
+        // [FIX] Broadened regex to catch ALL lollms anchors including building, widgets, and form anchors
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/;
         match = regex.exec(rawBlock);
     }
     
@@ -230,6 +232,27 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         
         return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
     }
+    else if (match[12]) {
+        // --- Building Indicator Anchor ---
+        const raw = match[12];
+        const label = raw.match(/label=["']([^"']+)["']/)?.[1] || 'Component';
+        const title = raw.match(/title=["']([^"']+)["']/)?.[1] || '';
+        const id = raw.match(/id=["']([^"']+)["']/)?.[1];
+        
+        // If the component is already "Done" (in metadata/widgets/forms), hide the spinner
+        const isDone = (props.forms?.some(f => f.id === id)) || 
+                       (props.inlineWidgets?.some(w => w.id === id)) ||
+                       (discussionsStore.activeDiscussionArtefacts?.some(a => a.title === title));
+                       
+        return { type: 'building_indicator', label, title, isDone, id, raw };
+    }
+    else if (match[13]) {
+        // --- Form Anchor (Permanent mount point) ---
+        const raw = match[13];
+        const id = match[14];
+        const formData = props.forms?.find(f => f.id === id);
+        return { type: 'form_ready', form: formData, id, raw };
+    }
     else if (match[10]) {
         // [FIXED] Enhanced Interactive Widget Anchor Logic
         const raw = match[10];
@@ -288,8 +311,8 @@ const messageParts = computed(() => {
     // 1. Define all detectable patterns
     const patterns = [
         { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
-        // [FIX] Synchronized regex to ensure Widget ID (group 11) is captured for the renderer
-        { type: 'tool', regex: /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)/g },
+        // [FIX] Synchronized regex to include building and form anchors for correct component mapping
+        { type: 'tool', regex: /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/g },
         { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g }
     ];
 
@@ -309,14 +332,33 @@ const messageParts = computed(() => {
     (props.events || []).forEach((event, idx) => {
         // Distinguish between tool calls (inline_event) and system steps (system_event)
         const eventType = event.type === 'tool_call' || event.tool ? 'inline_event' : 'system_event';
+        
+        // Use form_ready type if the event explicitly mentions it
+        const finalType = (event.type === 'form_ready') ? 'form_ready' : eventType;
+        
         const position = event.offset !== undefined ? Math.min(event.offset, content.length) : content.length;
         allElements.push({ 
             start: position, 
             end: position, 
-            type: eventType, 
+            type: finalType, 
             event,
             id: event.id || `evt-${idx}`
         });
+    });
+
+    // 3b. Specifically handle Forms that might not be in events but are in message.forms
+    (props.forms || []).forEach((form, idx) => {
+        // If the form isn't already represented in allElements by ID (from an event)
+        if (!allElements.find(el => el.id === form.id)) {
+            const position = form.offset !== undefined ? Math.min(form.offset, content.length) : content.length;
+            allElements.push({
+                start: position,
+                end: position,
+                type: 'form_ready',
+                form: form,
+                id: form.id || `form-${idx}`
+            });
+        }
     });
 
     // 4. Sort and Resolve overlaps
@@ -975,9 +1017,35 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </template>
 
+          <!-- ── Building / Progress Indicator ───────────────────────────── -->
+          <div v-if="part.type === 'building_indicator' && !part.isDone" 
+               class="my-4 flex items-center gap-3 p-4 rounded-2xl bg-blue-50/30 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 animate-in fade-in slide-in-from-left-2">
+              <div class="relative flex-shrink-0">
+                  <IconAnimateSpin class="w-6 h-6 text-blue-500 animate-spin" />
+                  <div class="absolute inset-0 flex items-center justify-center">
+                      <IconPlus class="w-3 h-3 text-blue-600" />
+                  </div>
+              </div>
+              <div class="flex flex-col min-w-0">
+                  <span class="text-[10px] font-black uppercase tracking-widest text-blue-500/60 leading-none mb-1">In Progress</span>
+                  <span class="text-sm font-bold text-gray-700 dark:text-gray-300 truncate">
+                      Building {{ part.label }}: <span class="text-blue-600 dark:text-blue-400">{{ part.title }}</span>
+                  </span>
+              </div>
+          </div>
+
+          <!-- ── Interactive Form ────────────────────────────────────────── -->
+          <template v-if="part.type === 'form_ready'">
+             <!-- If form data isn't in this part yet (still streaming), find it in the message.forms -->
+             <InteractiveForm 
+                v-if="part.form || ($attrs.message?.forms?.find(f => f.id === part.id))"
+                :form="part.form || $attrs.message.forms.find(f => f.id === part.id)" 
+                :discussion-id="discussionsStore.currentDiscussionId"
+             />
+          </template>
+
           <!-- ── Interactive Teaching Widget (Inline Preview Mode) ─────────── -->
-          <div v-if="part.type === 'interactive_widget' && part.widget" class="my-8 group/widget-container">
-              <div class="rounded-3xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-2xl transition-all hover:border-blue-500/30">
+          <div v-if="part.type === 'interactive_widget' && part.widget" class="my-8 group/widget-container">              <div class="rounded-3xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-2xl transition-all hover:border-blue-500/30">
                   
                   <!-- Preview Header -->
                   <div class="px-5 py-3 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">

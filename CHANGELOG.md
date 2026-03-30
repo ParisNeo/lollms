@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-26 22:04]
+
+- fix(admin): update bindings management and refresh frontend build
+
 ## [2026-03-26 00:59]
 
 - """Generate commit message from summarized changes."""
