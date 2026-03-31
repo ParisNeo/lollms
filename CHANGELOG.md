@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-03-31 16:27]
+
+- build(deps): bump lollms-client from 1.12.14 to 1.13.0
+
 ## [2026-03-31 01:02]
 
 - feat(user-context): add user context settings and memory features
