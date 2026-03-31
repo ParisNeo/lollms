@@ -224,3 +224,5 @@ Connect the server settings view: frontend/webui/src/components/admin/HttpsSetti
 
 Add the possibility to create frames to be filled by the user. (add it to lollms_client)
 Widgets MUST contain html/css/js code and only html/css/js code)
+
+Save settings in user context is always disabled
