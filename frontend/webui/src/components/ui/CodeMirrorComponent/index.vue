@@ -77,7 +77,7 @@ const emit = defineEmits(['update:modelValue', 'ready', 'submit']);
 
 const discussionsStore = useDiscussionsStore();
 const editorRef = ref(null);
-let editorView = null; // Raw instance, not ref
+const editorView = ref(null); // Changed from raw variable to ref
 let updatingFromSelf = false;
 const currentMode = ref(props.initialMode);
 const isWrappingEnabled = ref(true);
@@ -365,7 +365,8 @@ const initializeEditor = () => {
         extensions: finalExtensions,
     });
     
-    editorView = new EditorView({ state, parent: editorRef.value });
+    // Assign to .value
+    editorView.value = new EditorView({ state, parent: editorRef.value });
 
     if (props.autofocus) {
         nextTick(() => {
@@ -387,16 +388,16 @@ watch(() => props.readOnly, (isReadOnly) => {
 // More selective sync: only update if content actually differs AND we're not currently editing
 watch(() => props.modelValue, (newValue) => {
     // Skip if editor destroyed or value matches current content
-    if (!editorView) return;
+    if (!editorView.value) return;
     
-    const currentContent = editorView.state.doc.toString();
+    const currentContent = editorView.value.state.doc.toString();
     const safeNewValue = newValue ?? '';
     
     // Only sync if external value differs from editor content
     if (safeNewValue !== currentContent) {
         updatingFromSelf = true;
-        editorView.dispatch({
-            changes: { from: 0, to: editorView.state.doc.length, insert: safeNewValue }
+        editorView.value.dispatch({
+            changes: { from: 0, to: editorView.value.state.doc.length, insert: safeNewValue }
         });
         updatingFromSelf = false;
     }
@@ -406,9 +407,9 @@ watch(() => props.theme, initializeEditor);
 watch(() => props.language, initializeEditor);
 onMounted(initializeEditor);
 onBeforeUnmount(() => {
-    if (editorView) {
-        editorView.destroy();
-        editorView = null;
+    if (editorView.value) {
+        editorView.value.destroy();
+        editorView.value = null;
     }
 });
 </script>

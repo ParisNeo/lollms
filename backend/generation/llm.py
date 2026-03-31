@@ -1619,10 +1619,11 @@ def build_llm_generation_router(router: APIRouter):
 
                     payload = payload_map.get(mtype_val)
                     if payload:
+                        # Inject discussion context for secondary streams to trigger frontend refreshes
+                        if mtype_val >= 38: # All knowledge/form/widget events
+                            payload['discussion_id'] = discussion_id
+
                         # Only append meaningful user-facing events to the persistent log
-                        # new_message_id is technical plumbing and should be ignored by the history
-                        # We now INCLUDE 'sources' in the events log for debugging/audit, 
-                        # while still populating the dedicated sources metadata field.
                         if payload['type'] not in ["chunk", "thought", "new_message_id"]:
                             all_events.append(payload)
                         
@@ -1691,10 +1692,11 @@ def build_llm_generation_router(router: APIRouter):
                             enable_image_generation=owner_db_user.image_generation_enabled,
                             enable_image_editing=owner_db_user.image_editing_enabled,
                             auto_activate_artefacts=True,
-                            # NEW lollms_discussion params
+                            # lollms_discussion specification compliance
                             enable_inline_widgets=owner_db_user.inline_widgets_enabled,
                             enable_notes=owner_db_user.note_generation_enabled,
                             enable_skills=owner_db_user.skills_building_enabled,
+                            enable_forms=owner_db_user.form_building_enabled,
                             enable_silent_artefact_explanation=True
                         )
                     finally:

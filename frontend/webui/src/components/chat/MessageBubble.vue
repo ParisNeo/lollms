@@ -754,6 +754,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             :content="message.content"
                             :sources="message.sources"
                             :forms="message.forms"
+                            :events="message.events"
                             :inline-widgets="message.inline_widgets"
                             :is-streaming="message.isStreaming"
                             :is-user="isCurrentUser"

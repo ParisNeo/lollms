@@ -2,8 +2,10 @@
 import { ref, reactive, onMounted } from 'vue';
 import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
+import { useDiscussionsStore } from '../../stores/discussions';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const props = defineProps({
     form: { type: Object, required: true },
@@ -11,6 +13,7 @@ const props = defineProps({
 });
 
 const uiStore = useUiStore();
+const discussionsStore = useDiscussionsStore();
 const answers = reactive({});
 const isSubmitting = ref(false);
 const isDone = ref(!!props.form.submitted);
@@ -23,16 +26,34 @@ onMounted(() => {
         else if (field.type === 'checkbox_group') answers[field.name] = [];
         else if (field.type === 'rating') answers[field.name] = field.min || 1;
     });
+
+    if (props.form.submitted && props.form.answers) {
+        Object.assign(answers, props.form.answers);
+    }
 });
 
 async function submitForm() {
     isSubmitting.value = true;
     try {
-        await apiClient.post(`/api/discussions/${props.discussionId}/forms/${props.form.id}/submit`, {
+        const formId = props.form.id || props.form.form_id;
+        await apiClient.post(`/api/discussions/${props.discussionId}/forms/${formId}/submit`, {
             answers: { ...answers }
         });
         isDone.value = true;
         uiStore.addNotification("Response submitted.", "success");
+        
+        // Format answers to send back to the AI
+        const formattedAnswers = Object.entries(answers)
+            .map(([k, v]) => `- **${k}**: ${v}`)
+            .join('\n');
+            
+        const formTitle = props.form.title || 'Form';
+        
+        // Trigger the AI to process the submitted form
+        discussionsStore.sendMessage({
+            prompt: `I have submitted the form "${formTitle}". Here are my answers:\n${formattedAnswers}`
+        });
+
     } catch (e) {
         uiStore.addNotification("Failed to submit form.", "error");
     } finally {

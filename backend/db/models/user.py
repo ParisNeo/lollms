@@ -76,6 +76,7 @@ class User(Base):
     auto_memory_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     skills_library_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     skills_building_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+    form_building_enabled = Column(Boolean, default=True, nullable=False, server_default='1')
 
     reasoning_activation = Column(Boolean, default=False, nullable=True, server_default='0')
     reasoning_effort = Column(String, nullable=True)

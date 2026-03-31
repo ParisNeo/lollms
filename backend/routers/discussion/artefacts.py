@@ -109,21 +109,28 @@ class StackOverflowImportRequest(BaseModel):
     language: str = "en"
     auto_load: bool = True
 
-def _map_artefact_for_ui(art: dict) -> dict:
+def _map_artefact_for_ui(art: dict, discussion_id: str = None) -> dict:
     """
     Standardizes Artefact metadata for the UI.
     Maps internal library keys ('type', 'active') to public API keys ('artefact_type', 'is_loaded').
     """
     mapped = {k: v for k, v in art.items() if k not in ['content', 'images']}
     
-    # CRITICAL: Always prioritize internal library 'type' if present
-    mapped['artefact_type'] = art.get('type', art.get('artefact_type', 'document'))
-    mapped['is_loaded'] = art.get('active', art.get('is_loaded', False))
+    # Ensure discussion_id is preserved
+    if 'discussion_id' not in mapped and discussion_id:
+        mapped['discussion_id'] = discussion_id
+
+    # Map library internal 'type' to UI 'artefact_type'
+    mapped['artefact_type'] = art.get('type', 'document')
     
-    if isinstance(mapped.get('created_at'), datetime):
-        mapped['created_at'] = mapped['created_at'].isoformat()
-    if isinstance(mapped.get('updated_at'), datetime):
-        mapped['updated_at'] = mapped['updated_at'].isoformat()
+    # Map library 'active' (boolean) to UI 'is_loaded'
+    mapped['is_loaded'] = bool(art.get('active', False))
+    
+    # Handle serialization of dates
+    for date_key in ['created_at', 'updated_at']:
+        if isinstance(mapped.get(date_key), datetime):
+            mapped[date_key] = mapped[date_key].isoformat()
+            
     return mapped
 
 def build_artefacts_router(router: APIRouter):
@@ -183,7 +190,7 @@ def build_artefacts_router(router: APIRouter):
         
         # Fetch raw artefacts from the manager and use centralized mapper
         raw_artefacts = discussion.list_artefacts()
-        return [_map_artefact_for_ui(art) for art in raw_artefacts]
+        return [_map_artefact_for_ui(art, discussion_id) for art in raw_artefacts]
 
     @router.post("/{discussion_id}/artefacts", response_model=ArtefactUploadResponse)
     async def add_discussion_artefact(
@@ -374,35 +381,19 @@ def build_artefacts_router(router: APIRouter):
                     except UnicodeDecodeError:
                         content = content_bytes.decode('latin-1', errors='replace')
 
-            # Refactored to use the LollmsDiscussion versioned Artefact system
-            # Check if artefact already exists to avoid duplicate entries with same name
-            existing = discussion.get_artefact(title=title)
-            
             # Determine type: Code stays code, everything else is a 'file' (custom registered type)
             target_type = "code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "file"
 
-            if existing:
-                # Use positional arguments for title and new_content
-                # Enforce 'active' from the auto_load query parameter
-                artefact_info = discussion.update_artefact(
-                    title,
-                    content,
-                    new_images=images,
-                    author=current_user.username,
-                    active=auto_load,
-                    artefact_type=target_type # Explicitly specifying registered custom type
-                )
-            else:
-                # Use positional arguments for title and content
-                # Enforce 'active' from the auto_load query parameter
-                artefact_info = discussion.add_artefact(
-                    title,
-                    content,
-                    images=images,
-                    author=current_user.username,
-                    active=auto_load,
-                    artefact_type=target_type # Explicitly specifying registered custom type
-                )
+            # Use the library's internal management system
+            # update_artefact handles the logic of checking existence and versioning internally
+            artefact_info = discussion.update_artefact(
+                title,
+                content,
+                new_images=images,
+                author=current_user.username,
+                active=auto_load,
+                artefact_type=target_type
+            )
             
             discussion.commit()
 
@@ -496,9 +487,13 @@ def build_artefacts_router(router: APIRouter):
                 if page_id != "-1":
                     content = pages[page_id].get("extract", "")
                     full_md = f"# {item.title}\nSource: {item.url}\n\n{content}"
-                    art_info = discussion.add_artefact(f"{item.title}.md", full_md, author=current_user.username)
-                    if request.auto_load:
-                        discussion.load_artefact_into_data_zone(title=art_info['title'], version=art_info['version'])
+                    # Use update_artefact to handle creation/versioning and activation in one go
+                    discussion.update_artefact(
+                        f"{item.title}.md", 
+                        full_md, 
+                        author=current_user.username,
+                        active=request.auto_load
+                    )
             
             discussion.commit()
             
@@ -593,8 +588,13 @@ def build_artefacts_router(router: APIRouter):
                 else:
                     content = f"# {paper.title} (Abstract)\nAuthors: {', '.join([a.name for a in paper.authors])}\nSource: {paper.entry_id}\n\n{paper.summary}"
                 
-                # Specify active state directly in add_artefact
-                art_info = discussion.add_artefact(f"Arxiv_{item.id}.md", content, author=current_user.username, active=request.auto_load)
+                # Use update_artefact for unified management
+                discussion.update_artefact(
+                    f"Arxiv_{item.id}.md", 
+                    content, 
+                    author=current_user.username, 
+                    active=request.auto_load
+                )
             
             discussion.commit()
             
@@ -708,8 +708,13 @@ def build_artefacts_router(router: APIRouter):
             # Ensure safe filename
             safe_title = re.sub(r'[^A-Za-z0-9_.-]', '_', title) + ".md"
             
-            # Specify active state directly in add_artefact
-            art_info = discussion.add_artefact(safe_title, content, author=current_user.username, active=request.auto_load)
+            # Use update_artefact for unified management
+            discussion.update_artefact(
+                safe_title, 
+                content, 
+                author=current_user.username, 
+                active=request.auto_load
+            )
             
             discussion.commit()
             
@@ -805,8 +810,13 @@ def build_artefacts_router(router: APIRouter):
                 
             title = f"SO_{q_id}.md"
             
-            # Specify active state directly in add_artefact
-            art_info = discussion.add_artefact(title, content, author=current_user.username, active=request.auto_load)
+            # Use update_artefact for unified management
+            discussion.update_artefact(
+                title, 
+                content, 
+                author=current_user.username, 
+                active=request.auto_load
+            )
             
             discussion.commit()
             
@@ -928,12 +938,13 @@ def build_artefacts_router(router: APIRouter):
             lang_label = target_transcript.language if hasattr(target_transcript, 'language') else (requested_lang or 'unknown')
             full_content = f"# YouTube Transcript ({lang_label})\nSource: {request.video_url}\n\n" + "\n".join(lines)
             
-            # 6. Save
+            # 6. Save using the internal manager
             artefact_name = f"Youtube_Transcript_{video_id}.md"
-            artefact_info = discussion.add_artefact(
+            discussion.update_artefact(
                 artefact_name,
                 full_content,
-                author=current_user.username
+                author=current_user.username,
+                active=request.auto_load
             )
             
             # Activation is already handled by the 'active' parameter logic (default is True in add_artefact)
@@ -966,78 +977,40 @@ def build_artefacts_router(router: APIRouter):
     async def create_manual_artefact(
         discussion_id: str,
         payload: ArtefactCreateManual,
-        artefact_type: str = Query(None), # Let payload take precedence
+        artefact_type: str = Query(None),
         auto_load: bool = Query(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
-        existing = discussion.get_artefact(title=payload.title)
-        
         try:
-            # Determine final type (priority: Query Param > Payload Hint > Default)
-            # We explicitly check for 'note' or 'skill' strings from the Query param first.
+            # Type resolution logic
             raw_type = (artefact_type or "").lower()
-            
-            if "note" in raw_type:
-                final_type = "note"
-            elif "skill" in raw_type:
-                final_type = "skill"
+            if "note" in raw_type: final_type = "note"
+            elif "skill" in raw_type: final_type = "skill"
             else:
-                # Fallback to extension-based detection if no explicit type provided
                 ext = payload.title.split('.')[-1].lower() if '.' in payload.title else ""
-                if ext in ['py', 'js', 'ts', 'html', 'css', 'sql', 'cpp', 'c', 'sh']:
-                    final_type = "code"
-                else:
-                    final_type = "document"
+                final_type = "code" if ext in ['py', 'js', 'ts', 'html', 'css', 'sql', 'cpp', 'c', 'sh'] else "document"
 
-            if existing:
-                # Use positional arguments for required fields (title, new_content) to ensure compatibility
-                artefact_info = discussion.update_artefact(
-                    payload.title, 
-                    payload.content, 
-                    new_images=payload.images_b64, 
-                    author=current_user.username,
-                    active=True,
-                    artefact_type=final_type
-                )
-            else:
-                # Use positional arguments for required fields (title, content) to ensure compatibility
-                artefact_info = discussion.add_artefact(
-                    payload.title, 
-                    payload.content, 
-                    images=payload.images_b64, 
-                    author=current_user.username,
-                    active=True,
-                    artefact_type=final_type
-                )
+            # Use update_artefact to handle both initial creation and new versioning
+            artefact_info = discussion.update_artefact(
+                payload.title, 
+                payload.content, 
+                new_images=payload.images_b64, 
+                author=current_user.username,
+                active=auto_load,
+                artefact_type=final_type
+            )
             
-            # NOTE: We do NOT modify discussion.discussion_data_zone string here.
-            # Artefacts are managed by the library's internal list.
-            
-            # Removed legacy load_artefact_into_data_zone call to prevent content duplication
-            # The artefact is already 'active=True' in the ArtefactManager
             discussion.commit()
             
-            if isinstance(artefact_info.get('created_at'), datetime):
-                artefact_info['created_at'] = artefact_info['created_at'].isoformat()
-            if isinstance(artefact_info.get('updated_at'), datetime):
-                artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
-            
-            # Return updated context info
-            artefacts = discussion.list_artefacts()
-            for art in artefacts:
-                if isinstance(art.get('created_at'), datetime): art['created_at'] = art['created_at'].isoformat()
-                if isinstance(art.get('updated_at'), datetime): art['updated_at'] = art['updated_at'].isoformat()
-
-            lc = get_user_lollms_client(current_user.username)
-            token_count = len(lc.tokenize(discussion.discussion_data_zone))
+            # Fetch latest synchronized state
+            raw_artefacts = discussion.list_artefacts()
             all_images_info = discussion.get_discussion_images()
 
-            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
-                "artefacts": artefacts,
+                "artefacts": [_map_artefact_for_ui(art, discussion_id) for art in raw_artefacts],
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
@@ -1098,18 +1071,16 @@ def build_artefacts_router(router: APIRouter):
         if not content or not content.strip():
             raise HTTPException(status_code=400, detail="Data zone is empty.")
         try:
-            if discussion.get_artefact(title=request.title):
-                # Use positional arguments for required fields
-                artefact_info = discussion.update_artefact(request.title, content, author=current_user.username)
-            else:
-                # Use positional arguments for required fields
-                artefact_info = discussion.add_artefact(request.title, content, author=current_user.username)
+            # Use update_artefact for consistent versioned storage of the context snapshot
+            artefact_info = discussion.update_artefact(
+                request.title, 
+                content, 
+                author=current_user.username,
+                active=True,
+                artefact_type="document"
+            )
             discussion.commit()
-            if isinstance(artefact_info.get('created_at'), datetime):
-                artefact_info['created_at'] = artefact_info['created_at'].isoformat()
-            if isinstance(artefact_info.get('updated_at'), datetime):
-                artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
-            return artefact_info
+            return _map_artefact_for_ui(artefact_info, discussion_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to create artefact from context: {e}")
 

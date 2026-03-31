@@ -232,6 +232,19 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         
         return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
     }
+    else if (match[10]) {
+        // [FIXED] Group 10 is the lollms_widget tag
+        const raw = match[10];
+        const widgetId = match[11]; 
+        
+        const widgetData = props.inlineWidgets?.find(w => w.id === widgetId);
+        // If widget source is missing (desync), return a placeholder so the layout doesn't collapse
+        return { 
+            type: 'interactive_widget', 
+            widget: widgetData || { id: widgetId, title: 'Loading Widget...', is_loading: true }, 
+            raw 
+        };
+    }
     else if (match[12]) {
         // --- Building Indicator Anchor ---
         const raw = match[12];
@@ -239,8 +252,7 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         const title = raw.match(/title=["']([^"']+)["']/)?.[1] || '';
         const id = raw.match(/id=["']([^"']+)["']/)?.[1];
         
-        // If the component is already "Done" (in metadata/widgets/forms), hide the spinner
-        const isDone = (props.forms?.some(f => f.id === id)) || 
+        const isDone = (props.forms?.some(f => f.id === id || f.form_id === id)) || 
                        (props.inlineWidgets?.some(w => w.id === id)) ||
                        (discussionsStore.activeDiscussionArtefacts?.some(a => a.title === title));
                        
@@ -250,30 +262,24 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         // --- Form Anchor (Permanent mount point) ---
         const raw = match[13];
         const id = match[14];
-        const formData = props.forms?.find(f => f.id === id);
-        return { type: 'form_ready', form: formData, id, raw };
-    }
-    else if (match[10]) {
-        // [FIXED] Enhanced Interactive Widget Anchor Logic
-        const raw = match[10];
-        let widgetId = match[11]; 
+        let formData = props.forms?.find(f => f.id === id);
         
-        // Secondary extraction if group 11 is empty but tag is present
-        if (!widgetId && raw.includes('id=')) {
-            const idMatch = raw.match(/id=["']([^"']+)["']/);
-            if (idMatch) widgetId = idMatch[1];
-        }
-        
-        if (raw.includes('<lollms_widget')) {
-            const widgetData = props.inlineWidgets?.find(w => w.id === widgetId);
-            if (!widgetData) {
-                console.warn(`[WidgetRenderer] No source found in metadata for ID: ${widgetId}`);
+        if (!formData && props.events) {
+            const formEvent = props.events.find(e => e.type === 'form_ready' && e.content && (e.content.form_id === id || e.content.id === id || (e.content.form && e.content.form.id === id)));
+            if (formEvent) {
+                formData = JSON.parse(JSON.stringify(formEvent.content.form || formEvent.content));
             }
-            return { type: 'interactive_widget', widget: widgetData, raw };
         }
         
-        const eventData = props.events?.find(e => e.id === widgetId);
-        return { type: 'inline_event', event: eventData, raw };
+        if (formData && props.events) {
+            const submissionEvent = props.events.find(e => e.type === 'form_submitted' && e.content && e.content.form_id === id);
+            if (submissionEvent) {
+                formData.submitted = true;
+                formData.answers = submissionEvent.content.answers;
+            }
+        }
+        
+        return { type: 'form_ready', form: formData, id, raw };
     }
 
     return { type: 'content', content: rawBlock };
@@ -330,33 +336,32 @@ const messageParts = computed(() => {
 
     // 3. Extract elements from out-of-band Events with position tracking
     (props.events || []).forEach((event, idx) => {
-        // Distinguish between tool calls (inline_event) and system steps (system_event)
-        const eventType = event.type === 'tool_call' || event.tool ? 'inline_event' : 'system_event';
-        
-        // Use form_ready type if the event explicitly mentions it
-        const finalType = (event.type === 'form_ready') ? 'form_ready' : eventType;
-        
-        const position = event.offset !== undefined ? Math.min(event.offset, content.length) : content.length;
-        allElements.push({ 
-            start: position, 
-            end: position, 
-            type: finalType, 
-            event,
-            id: event.id || `evt-${idx}`
-        });
+        if (event.type === 'form_ready') {
+            // Force forms to the very end if no specific offset is provided to ensure they appear
+            const position = event.offset !== undefined ? Math.min(event.offset, content.length) : content.length + 1;
+            const formId = event.id || event.content?.id || event.content?.form_id || (event.content?.form?.id) || `evt-${idx}`;
+            allElements.push({ 
+                start: position, 
+                end: position, 
+                type: 'form_ready', 
+                event,
+                id: formId
+            });
+        }
     });
 
     // 3b. Specifically handle Forms that might not be in events but are in message.forms
     (props.forms || []).forEach((form, idx) => {
+        const formId = form.id || `form-${idx}`;
         // If the form isn't already represented in allElements by ID (from an event)
-        if (!allElements.find(el => el.id === form.id)) {
-            const position = form.offset !== undefined ? Math.min(form.offset, content.length) : content.length;
+        if (!allElements.find(el => el.id === formId)) {
+            const position = form.offset !== undefined ? Math.min(form.offset, content.length) : content.length + 1;
             allElements.push({
                 start: position,
                 end: position,
                 type: 'form_ready',
                 form: form,
-                id: form.id || `form-${idx}`
+                id: formId
             });
         }
     });
@@ -368,14 +373,24 @@ const messageParts = computed(() => {
     let lastEnd = 0;
 
     for (const el of allElements) {
-        if (el.start >= lastEnd || el.type === 'system_event') {
+        if (el.start >= lastEnd || el.type === 'form_ready') {
             activeElements.push(el);
-            lastEnd = el.end;
+            lastEnd = Math.max(lastEnd, el.end);
         }
     }
 
     // 4. Assemble final parts with strictly stable start-index IDs
     let cursor = 0;
+    const renderedFormIds = new Set();
+
+    // Identify explicitly anchored forms to prevent duplication
+    activeElements.forEach(el => {
+        if (el.type === 'tool' && el.match && el.match[13]) {
+            const id = el.match[14];
+            if (id) renderedFormIds.add(id);
+        }
+    });
+
     activeElements.forEach(el => {
         // Add preceding text
         if (el.start > cursor) {
@@ -383,9 +398,7 @@ const messageParts = computed(() => {
             parts.push({ type: 'content', content: text, id: `text-${cursor}` });
         }
 
-        if (el.type === 'system_event') {
-            parts.push({ type: 'system_event', event: el.event, id: `event-${el.event.id || el.start}` });
-        } else if (el.type === 'code') {
+        if (el.type === 'code') {
             const lang = (el.match[2] || 'plaintext').trim();
             const inner = el.match[3];
             if (lang.toLowerCase() === 'mermaid') {
@@ -395,6 +408,7 @@ const messageParts = computed(() => {
             }
         } else if (el.type === 'tool') {
             const parsed = parseSpecialBlock(el.raw, el.match);
+            if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
             parts.push({ ...parsed, id: `${parsed.type}-${el.start}` });
         } else if (el.type === 'block_doc') {
             const subType = el.match[1].toLowerCase();
@@ -406,6 +420,25 @@ const messageParts = computed(() => {
                 raw: el.raw,
                 id: `block-${subType}-${el.start}`
             });
+        } else if (el.type === 'form_ready') {
+            let actualForm = el.form;
+            let formId = el.id;
+            if (!actualForm && el.event && el.event.content) {
+                actualForm = JSON.parse(JSON.stringify(el.event.content.form || el.event.content));
+                formId = el.event.content.form_id || actualForm.id || el.id;
+            }
+            
+            if (!renderedFormIds.has(formId)) {
+                if (actualForm && props.events) {
+                    const submissionEvent = props.events.find(e => e.type === 'form_submitted' && e.content && e.content.form_id === formId);
+                    if (submissionEvent) {
+                        actualForm.submitted = true;
+                        actualForm.answers = submissionEvent.content.answers;
+                    }
+                }
+                parts.push({ type: 'form_ready', form: actualForm, id: formId });
+                renderedFormIds.add(formId);
+            }
         }
         cursor =  Math.max(cursor,el.end);
     });
@@ -745,52 +778,7 @@ function onMermaidReady({ svg }, partIndex) {
             />
           </div>
 
-          <!-- ── Inline Event Marker (Collapsible Tool Block) ───────────── -->
-          <details v-if="part.type === 'inline_event' && part.event" 
-                   class="my-4 group/event rounded-xl border border-blue-200 dark:border-blue-800/50 bg-gradient-to-br from-blue-50/80 to-blue-100/40 dark:from-blue-900/20 dark:to-blue-950/30 overflow-hidden animate-in fade-in slide-in-from-left-2">
-              <summary class="flex items-center justify-between p-3.5 cursor-pointer list-none select-none hover:bg-blue-100/50 dark:hover:bg-blue-900/40 transition-colors">
-                  <div class="flex items-center gap-3">
-                      <div class="p-2 rounded-lg bg-white dark:bg-gray-900 shadow-sm transition-colors group-open/event:text-emerald-500">
-                          <IconWrenchScrewdriver v-if="part.event.type === 'tool_call'" class="w-4 h-4 text-blue-500 group-open/event:text-emerald-500" />
-                          <IconCheckCircle v-else class="w-4 h-4 text-blue-500" />
-                      </div>
-                      <div class="flex flex-col">
-                          <span class="text-[10px] font-black uppercase tracking-widest text-blue-400 dark:text-blue-500">Action Performed</span>
-                          <span class="text-sm font-bold text-gray-800 dark:text-gray-200">
-                              {{ part.event.tool ? part.event.tool.replace(/_/g, ' ') : 'System Step' }}
-                          </span>
-                      </div>
-                  </div>
-                  <div class="flex items-center gap-2">
-                      <span class="text-[10px] font-bold text-gray-400 group-open/event:hidden uppercase tracking-widest">Show Details</span>
-                      <IconChevronRight class="w-4 h-4 text-gray-400 group-open/event:rotate-90 transition-transform duration-200" />
-                  </div>
-              </summary>
-              
-              <div class="p-4 border-t border-blue-200/50 dark:border-blue-800/30 bg-white/60 dark:bg-gray-950/40">
-                  <!-- Render the tool parameters and output using StepDetail -->
-                  <StepDetail :data="part.event.content" :level="0" />
-              </div>
-          </details>
-
-          <!-- ── System Events (Compact Collapsible) ──────────────────── -->
-          <details v-if="part.type === 'system_event'" 
-                   class="my-3 group/sys rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/30 overflow-hidden">
-              <summary class="flex items-center justify-between px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors list-none select-none">
-                  <div class="flex items-center gap-2.5">
-                      <component :is="getEventIcon(part.event.type)" class="w-3.5 h-3.5 text-gray-400 group-open/sys:text-blue-500 transition-colors" />
-                      <span class="text-xs font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wider truncate">
-                          {{ part.event.tool ? part.event.tool.replace(/_/g, ' ') : part.event.content }}
-                      </span>
-                  </div>
-                  <IconChevronRight class="w-3 h-3 text-gray-300 group-open/sys:rotate-90 transition-transform" />
-              </summary>
-              <div class="p-3 border-t dark:border-gray-700 bg-white dark:bg-gray-950/40">
-                  <StepDetail :data="part.event.content" :level="0" />
-              </div>
-          </details>
-
-          <div v-if="part.type === 'content'" class="content-token-container">
+          <div v-else-if="part.type === 'content'" class="content-token-container">
             <template v-for="(token, tokenIndex) in (getTokens(part.content) || [])" :key="token.uid || `token-${tokenIndex}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
               
@@ -1018,7 +1006,7 @@ function onMermaidReady({ svg }, partIndex) {
           </template>
 
           <!-- ── Building / Progress Indicator ───────────────────────────── -->
-          <div v-if="part.type === 'building_indicator' && !part.isDone" 
+          <div v-else-if="part.type === 'building_indicator' && !part.isDone" 
                class="my-4 flex items-center gap-3 p-4 rounded-2xl bg-blue-50/30 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 animate-in fade-in slide-in-from-left-2">
               <div class="relative flex-shrink-0">
                   <IconAnimateSpin class="w-6 h-6 text-blue-500 animate-spin" />
@@ -1035,69 +1023,76 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- ── Interactive Form ────────────────────────────────────────── -->
-          <template v-if="part.type === 'form_ready'">
+          <template v-else-if="part.type === 'form_ready'">
              <!-- If form data isn't in this part yet (still streaming), find it in the message.forms -->
              <InteractiveForm 
-                v-if="part.form || ($attrs.message?.forms?.find(f => f.id === part.id))"
-                :form="part.form || $attrs.message.forms.find(f => f.id === part.id)" 
+                v-if="part.form || (forms && forms.find(f => f.id === part.id))"
+                :form="part.form || forms.find(f => f.id === part.id)" 
                 :discussion-id="discussionsStore.currentDiscussionId"
              />
           </template>
 
           <!-- ── Interactive Teaching Widget (Inline Preview Mode) ─────────── -->
-          <div v-if="part.type === 'interactive_widget' && part.widget" class="my-8 group/widget-container">              <div class="rounded-3xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-2xl transition-all hover:border-blue-500/30">
+          <div v-else-if="part.type === 'interactive_widget' && part.widget" 
+               class="my-4 group/widget-container clear-both isolation-auto">
+              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-xl transition-all hover:border-blue-500/20">
                   
                   <!-- Preview Header -->
-                  <div class="px-5 py-3 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
+                  <div class="px-4 py-2.5 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
                       <div class="flex items-center gap-3 min-w-0">
                           <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600">
-                              <IconCpuChip class="w-4 h-4" />
+                              <IconAnimateSpin v-if="part.widget.is_loading" class="w-4 h-4 animate-spin" />
+                              <IconCpuChip v-else class="w-4 h-4" />
                           </div>
                           <div class="flex flex-col min-w-0">
-                              <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 leading-none mb-1">Interactive Preview</span>
-                              <h4 class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{{ part.widget.title || 'Untitled Widget' }}</h4>
+                              <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 leading-none mb-1">Sandbox Preview</span>
+                              <h4 class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{{ part.widget.title || 'Interactive Component' }}</h4>
                           </div>
                       </div>
 
-                      <div class="flex items-center gap-1.5">
+                      <div v-if="!part.widget.is_loading" class="flex items-center gap-1">
                           <button 
                             @click="openWidgetFullscreen(part.widget)"
-                            class="p-2 rounded-xl hover:bg-blue-500 hover:text-white text-gray-400 transition-all"
+                            class="p-1.5 rounded-lg hover:bg-blue-500 hover:text-white text-gray-400 transition-all"
                             title="Full Screen View"
                           >
-                              <IconMaximize class="w-4 h-4" />
+                              <IconMaximize class="w-3.5 h-3.5" />
                           </button>
                           <button 
                             @click="openWidgetInNewTab(part.widget)"
-                            class="p-2 rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-all"
+                            class="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-all"
                             title="Open in New Tab"
                           >
-                              <IconGlobeAlt class="w-4 h-4" />
+                              <IconGlobeAlt class="w-3.5 h-3.5" />
                           </button>
                       </div>
                   </div>
                   
                   <!-- Inline Iframe Viewport -->
-                  <div class="relative w-full h-[450px] bg-white group-hover/widget-container:ring-4 group-hover/widget-container:ring-blue-500/5 transition-all">
+                  <div class="relative w-full h-[400px] bg-white transition-all overflow-hidden">
                       <iframe 
+                        v-if="!part.widget.is_loading"
                         :srcdoc="getWidgetContent(part.widget)" 
-                        class="w-full h-full border-none" 
+                        class="w-full h-full border-none pointer-events-auto" 
                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>
                       
-                      <!-- Interaction Shield (Optional: helpful if scrolling the chat is difficult) -->
-                      <div class="absolute inset-0 pointer-events-none border-t border-gray-100 dark:border-gray-800 opacity-10"></div>
+                      <!-- Loading Placeholder -->
+                      <div v-else class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/50 dark:bg-gray-900/50">
+                         <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin mb-3 opacity-30" />
+                         <p class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Awaiting source data...</p>
+                      </div>
                   </div>
 
                   <!-- Footer / Status -->
-                  <div class="px-5 py-2 bg-gray-50/30 dark:bg-gray-900/20 flex items-center justify-between">
+                  <div class="px-4 py-2 bg-gray-50/30 dark:bg-gray-900/20 flex items-center justify-between border-t dark:border-gray-800">
                        <div class="flex items-center gap-2">
-                          <div class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></div>
-                          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Live Sandbox Active</span>
+                          <div class="w-1.5 h-1.5 rounded-full" :class="part.widget.is_loading ? 'bg-gray-400' : 'bg-green-500 animate-pulse'"></div>
+                          <span class="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">{{ part.widget.is_loading ? 'Preparing Environment' : 'Sandbox Ready' }}</span>
                        </div>
-                       <button @click="openWidgetFullscreen(part.widget)" class="text-[10px] font-black text-blue-500 uppercase tracking-widest hover:underline">
-                           Expand Visualizer &rarr;
+                       <button v-if="!part.widget.is_loading" @click="openWidgetFullscreen(part.widget)" class="text-[9px] font-black text-blue-500 uppercase tracking-widest hover:underline">
+                           Launch Visualizer &rarr;
                        </button>
                   </div>
               </div>

@@ -10,6 +10,7 @@ import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
+import IconCopy from '../../assets/icons/IconCopy.vue';
 
 const uiStore = useUiStore();
 const modalProps = computed(() => uiStore.modalData('interactiveOutput'));
@@ -202,8 +203,19 @@ function handleClose() {
                                 </div>
 
                                 <!-- GENERIC / JSON FALLBACK -->
-                                <div v-else class="p-3 bg-gray-100 dark:bg-gray-950 rounded font-mono text-xs overflow-x-auto border dark:border-gray-800">
-                                    <pre class="text-gray-600 dark:text-gray-400">{{ JSON.stringify(value, null, 2) }}</pre>
+                                <div v-else class="relative group/json">
+                                    <div class="absolute top-2 right-2 opacity-0 group-hover/json:opacity-100 transition-opacity z-10">
+                                        <button 
+                                            @click="copyToClipboard(JSON.stringify(value, null, 2))"
+                                            class="p-1.5 bg-white dark:bg-gray-800 rounded-md shadow-sm border dark:border-gray-600 text-gray-500 hover:text-blue-500 transition-colors"
+                                            title="Copy Data"
+                                        >
+                                            <IconCopy class="w-4 h-4" />
+                                        </button>
+                                    </div>
+                                    <div class="p-3 bg-gray-100 dark:bg-gray-950 rounded font-mono text-xs overflow-x-auto border dark:border-gray-800">
+                                        <pre class="text-gray-600 dark:text-gray-400">{{ JSON.stringify(value, null, 2) }}</pre>
+                                    </div>
                                 </div>
                             </div>
                         </div>

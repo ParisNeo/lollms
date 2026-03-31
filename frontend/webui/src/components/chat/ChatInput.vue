@@ -1154,6 +1154,16 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 
+                                <!-- Form Building Toggle -->
+                                <button @click.stop="toggleUserPref('form_building_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
+                                    <span class="flex items-center gap-2">
+                                        <IconPlus class="w-4 h-4 text-blue-500" />
+                                        <span>Form Building</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.form_building_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
                                 <!-- Settings Link -->
                                 <div class="my-1 border-t border-gray-100 dark:border-gray-700 mt-2"></div>
                                 <button @click="navigateToContextSettings" class="menu-item flex justify-between items-center group/item">

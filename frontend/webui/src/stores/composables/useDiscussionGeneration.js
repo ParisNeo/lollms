@@ -192,6 +192,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         details: `ttft: ${data.content}ms - generating...` 
                     };
                     break;
+
+                case 'artefact_chunk':
                 case 'chunk':
                     const chunk = data.content;
                     
@@ -301,13 +303,18 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     if (messageToUpdate) {
                         if (!messageToUpdate.forms) messageToUpdate.forms = [];
                         
-                        // We do not set an offset because the renderer will look for 
-                        // <lollms_form_anchor id="FORM_ID"> in the text to mount it.
+                        const formId = data.content.id || data.content.form_id;
                         const formWithOffset = { 
                             ...data.content, 
-                            id: data.content.id || data.content.form_id 
+                            id: formId
                         };
                         messageToUpdate.forms.push(formWithOffset);
+                        
+                        // Inject a permanent anchor so the form survives the cleanup of <lollms_building />
+                        if (!messageToUpdate.content.includes(`id="${formId}"`)) {
+                             messageToUpdate.content += `\n<lollms_form_anchor id="${formId}" />\n`;
+                        }
+
                         generationState.value = { status: 'waiting_for_user', details: `Form Ready: ${data.content.title}` };
                     }
                     break;
@@ -324,6 +331,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     if (!messageToUpdate.thoughts) messageToUpdate.thoughts = "";
                     messageToUpdate.thoughts += data.content;
                     break;
+                case 'artefact_chunk':
                 case 'note_start':
                 case 'skill_start':
                 case 'form_start':
@@ -333,31 +341,49 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         const title = data.content.title;
                         const id = data.content.id || title; 
                         
-                        // 1. Inject an inline building anchor into the message text
-                        // This allows the renderer to show a spinner EXACTLY where the tag was opened
-                        const typeMap = {
-                            'note_start': 'Note',
-                            'skill_start': 'Skill',
-                            'form_start': 'Form',
-                            'artefact_update': 'Artefact',
-                            'inline_widget_start': 'Widget'
-                        };
-                        const label = typeMap[data.type] || 'Component';
-                        messageToUpdate.content += `\n<lollms_building type="${data.type}" label="${label}" title="${title}" id="${id}" />\n`;
+                        // If this is the first chunk of a new artefact, or an explicit start event
+                        // and we haven't injected an anchor for it yet.
+                        const anchorTag = `id="${id}"`;
+                        if (!messageToUpdate.content.includes(anchorTag)) {
+                            // 1. Inject an inline building anchor into the message text
+                            const typeMap = {
+                                'note_start': 'Note',
+                                'skill_start': 'Skill',
+                                'form_start': 'Form',
+                                'artefact_update': 'Artefact',
+                                'inline_widget_start': 'Widget',
+                                'artefact_chunk': 'Document'
+                            };
+                            const label = typeMap[data.type] || 'Component';
+                            messageToUpdate.content += `\n<lollms_building type="${data.type}" label="${label}" title="${title}" id="${id}" />\n`;
 
-                        // 2. UI Side-effects (Split view / Live Tracking)
-                        if (data.type !== 'inline_widget_start' && data.type !== 'form_start' && title) {
-                            uiStore.activeSplitArtefactTitle = title;
+                            // 2. UI Side-effects (Split view / Live Tracking)
+                            if (data.type !== 'inline_widget_start' && data.type !== 'form_start' && title) {
+                                uiStore.activeSplitArtefactTitle = title;
+                            }
+
+                            if (id && state.activeUpdatingArtefacts?.value) {
+                                state.activeUpdatingArtefacts.value.add(id);
+                            }
+                            
+                            // Initialize buffer if needed (for start events, chunks are handled separately below)
+                            if (id && state.liveArtefactBuffers.value[id] === undefined) {
+                                state.liveArtefactBuffers.value = {
+                                    ...state.liveArtefactBuffers.value,
+                                    [id]: ""
+                                };
+                            }
+                            getActions().fetchArtefacts(currentDiscussionId.value);
                         }
-
-                        if (id && state.activeUpdatingArtefacts?.value) {
-                            state.activeUpdatingArtefacts.value.add(id);
+                        
+                        // FALLTHROUGH: If it's a chunk, we still need to process the 'chunk' property
+                        if (data.type === 'artefact_chunk' && data.content.chunk) {
+                            const key = id || title;
                             state.liveArtefactBuffers.value = {
                                 ...state.liveArtefactBuffers.value,
-                                [id]: state.liveArtefactBuffers.value[id] || ""
+                                [key]: (state.liveArtefactBuffers.value[key] || "") + data.content.chunk
                             };
                         }
-                        getActions().fetchArtefacts(currentDiscussionId.value);
                     }
                     break;
                 case 'artefact_event':

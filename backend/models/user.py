@@ -69,6 +69,7 @@ class UserCreateAdmin(BaseModel):
     auto_memory_enabled: bool = False
     skills_library_enabled: bool = False
     skills_building_enabled: bool = False
+    form_building_enabled: bool = True
     herd_mode_enabled: bool = False
     herd_rounds: int = 2
     
@@ -292,6 +293,7 @@ class UserAuthDetails(BaseModel):
     auto_memory_enabled: bool = False
     skills_library_enabled: bool = False
     skills_building_enabled: bool = False
+    form_building_enabled: bool = True
 
     # Herd Mode Settings
     herd_mode_enabled: bool = False
@@ -410,6 +412,7 @@ class UserUpdate(BaseModel):
     auto_memory_enabled: Optional[bool] = None
     skills_library_enabled: Optional[bool] = None
     skills_building_enabled: Optional[bool] = None
+    form_building_enabled: Optional[bool] = None
 
     # Herd Mode Settings
     herd_mode_enabled: Optional[bool] = None

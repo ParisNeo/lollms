@@ -22,7 +22,7 @@ FALLBACK_FACTS = [
     {"content": "The platform allows you to use your own local AI models privately.", "category": "Privacy", "color": "#10B981"},
     {"content": "You can organize chats into nested groups for complex projects.", "category": "Features", "color": "#F59E0B"},
     {"content": "LoLLMs supports RAG, enabling AI to 'read' your local PDFs and documents.", "category": "Knowledge", "color": "#EF4444"},
-    {"content": "The Personality Zoo contains hundreds of AI behaviors created by the community.", "category": "Community", "color": "#8B5CF6"},
+    {"content": "The Personality Zoo contains hundreds of AI behaviors created by the community. And you can build your own personas or let lollms help you build them.", "category": "Community", "color": "#8B5CF6"},
     {"content": "ParisNeo created LoLLMs to provide a unified interface for all AI technologies.", "category": "History", "color": "#EC4899"}
 ]
 

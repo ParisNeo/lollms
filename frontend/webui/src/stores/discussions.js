@@ -414,22 +414,21 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         getActions().fetchArtefacts(currentDiscussionId.value);
     });
 
-    on('note_done', (data) => {
-        const discussionId = data.discussion_id;
-        if (discussionId !== currentDiscussionId.value) return;
-        getActions().fetchArtefacts(currentDiscussionId.value);
-    });
-
-    on('skill_done', (data) => {
-        const discussionId = data.discussion_id;
-        if (discussionId !== currentDiscussionId.value) return;
-        getActions().fetchArtefacts(currentDiscussionId.value);
-    });
-
-    on('widget_done', (data) => {
-        const discussionId = data.discussion_id;
-        if (discussionId !== currentDiscussionId.value) return;
-        getActions().fetchArtefacts(currentDiscussionId.value);
+    // --- Unified Knowledge Base Listeners ---
+    // These trigger the sidebar refresh when AI finishes writing any document type
+    const KNOWLEDGE_DONE_EVENTS = ['artefact_done', 'note_done', 'skill_done', 'widget_done', 'artefact_update_done'];
+    
+    KNOWLEDGE_DONE_EVENTS.forEach(eventName => {
+        on(eventName, (data) => {
+            // Fallback to active discussion if ID is missing in the raw payload
+            const discussionId = data.discussion_id || currentDiscussionId.value;
+            
+            if (discussionId && discussionId === currentDiscussionId.value) {
+                console.log(`[DiscussionStore] Received ${eventName}, refreshing repository list for ${discussionId}`);
+                getActions().fetchArtefacts(discussionId);
+                getActions().fetchContextStatus(discussionId);
+            }
+        });
     });
     
     function attachSkill(skill) {

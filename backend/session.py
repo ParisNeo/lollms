@@ -267,6 +267,7 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             auto_memory_enabled=db_user.auto_memory_enabled,
             skills_library_enabled=db_user.skills_library_enabled,
             skills_building_enabled=db_user.skills_building_enabled,
+            form_building_enabled=db_user.form_building_enabled,
             preferred_name=db_user.preferred_name,
             user_personal_info=db_user.user_personal_info,
             share_personal_info_with_llm=db_user.share_personal_info_with_llm,

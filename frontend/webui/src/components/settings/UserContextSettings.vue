@@ -58,6 +58,7 @@ const memoryEnabled = ref(false);
 const autoMemoryEnabled = ref(false);
 const skillsLibraryEnabled = ref(false);
 const skillsBuildingEnabled = ref(false);
+const formBuildingEnabled = ref(true);
 const reasoningActivation = ref(false);
 const reasoningEffort = ref('medium');
 const rlmEnabled = ref(false);
@@ -148,6 +149,7 @@ function populateForm() {
     autoMemoryEnabled.value = !!user.value.auto_memory_enabled;
     skillsLibraryEnabled.value = !!user.value.skills_library_enabled;
     skillsBuildingEnabled.value = !!user.value.skills_building_enabled;
+    formBuildingEnabled.value = user.value.form_building_enabled ?? true;
     reasoningActivation.value = !!user.value.reasoning_activation;
     reasoningEffort.value = user.value.reasoning_effort || 'medium';
     rlmEnabled.value = !!user.value.rlm_enabled;
@@ -201,7 +203,7 @@ watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
-    memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, reasoningActivation, reasoningEffort, rlmEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
+    memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, formBuildingEnabled, reasoningActivation, reasoningEffort, rlmEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
     googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis, webSearchProviders,
     herdModeEnabled, herdRounds, herdPrecodeParticipants, herdPostcodeParticipants, 
     streetViewEnabled, googleDriveEnabled, googleCalendarEnabled, googleGmailEnabled, googleClientSecret, schedulerEnabled,
@@ -255,6 +257,7 @@ async function handleSaveChanges() {
             auto_memory_enabled: autoMemoryEnabled.value,
             skills_library_enabled: skillsLibraryEnabled.value,
             skills_building_enabled: skillsBuildingEnabled.value,
+            form_building_enabled: formBuildingEnabled.value,
             reasoning_activation: reasoningActivation.value,
             reasoning_effort: reasoningEffort.value,
             rlm_enabled: rlmEnabled.value,
@@ -573,8 +576,9 @@ async function handleSaveChanges() {
                     <label class="feature-tag" :class="{'active': slideMakerEnabled}" title="Generate presentations"><input type="checkbox" v-model="slideMakerEnabled"><span>Slides</span></label>
                     <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
                     <label class="feature-tag" :class="{'active': inlineWidgetsEnabled}" title="Build interactive widgets"><input type="checkbox" v-model="inlineWidgetsEnabled"><span>Widgets</span></label>
-                    <label class="feature-tag" :class="{'active': noteGenerationEnabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
-                    <label class="feature-tag" :class="{'active': skillsBuildingEnabled}" title="Save conversation as reusable skills"><input type="checkbox" v-model="skillsBuildingEnabled"><span>Skills</span></label>
+                    <label class="feature-tag" :class="{'active': note_generation_enabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
+                    <label class="feature-tag" :class="{'active': skills_building_enabled}" title="Save conversation as reusable skills"><input type="checkbox" v-model="skillsBuildingEnabled"><span>Skills</span></label>
+                    <label class="feature-tag" :class="{'active': form_building_enabled}" title="Allow AI to create interactive forms"><input type="checkbox" v-model="formBuildingEnabled"><span>Forms</span></label>
                 </div>
             </div>
 

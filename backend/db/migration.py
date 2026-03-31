@@ -642,6 +642,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
 
+        if 'form_building_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN form_building_enabled BOOLEAN DEFAULT 1 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
         if 'preferred_name' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN preferred_name VARCHAR"))
