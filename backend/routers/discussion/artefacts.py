@@ -993,11 +993,11 @@ def build_artefacts_router(router: APIRouter):
                 ext = payload.title.split('.')[-1].lower() if '.' in payload.title else ""
                 final_type = "code" if ext in ['py', 'js', 'ts', 'html', 'css', 'sql', 'cpp', 'c', 'sh'] else "document"
 
-            # Use update_artefact to handle both initial creation and new versioning
-            artefact_info = discussion.update_artefact(
+            # Use add_artefact for initial manual creation
+            artefact_info = discussion.add_artefact(
                 payload.title, 
                 payload.content, 
-                new_images=payload.images_b64, 
+                images=payload.images_b64, 
                 author=current_user.username,
                 active=auto_load,
                 artefact_type=final_type
