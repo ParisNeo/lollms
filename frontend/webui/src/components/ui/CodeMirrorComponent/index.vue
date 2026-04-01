@@ -311,9 +311,9 @@ const handleExport = (format) => discussionsStore.exportRawContent({ content: pr
 
 // --- LIFECYCLE ---
 const initializeEditor = () => {
-    if (editorView) {
-        editorView.destroy();
-        editorView = null;
+    if (editorView.value) {
+        editorView.value.destroy();
+        editorView.value = null;
     }
 
     const baseExtensions = [
@@ -370,16 +370,16 @@ const initializeEditor = () => {
 
     if (props.autofocus) {
         nextTick(() => {
-            editorView?.focus();
+            editorView.value?.focus();
         });
     }
 
-    emit('ready', { view: editorView, state: editorView.state });
+    emit('ready', { view: editorView.value, state: editorView.value.state });
 };
 
 watch(() => props.readOnly, (isReadOnly) => {
-    if (editorView) {
-        editorView.dispatch({
+    if (editorView.value) {
+        editorView.value.dispatch({
             effects: readOnlyCompartment.reconfigure(isReadOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : [])
         });
     }

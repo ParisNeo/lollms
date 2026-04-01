@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-01 14:16]
+
+- chore(frontend): rebuild production assets
+
 ## [2026-04-01 12:09]
 
 - chore(deps): bump picomatch and yaml to latest patch versions
