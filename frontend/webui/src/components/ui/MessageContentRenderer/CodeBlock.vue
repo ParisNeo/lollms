@@ -53,16 +53,25 @@ const canvasId = `code-canvas-${Date.now()}-${Math.random().toString(36).substri
 const canvasSelector = `#${canvasId}`;
 
 const highlightedCode = computed(() => {
-  const lang = props.language || 'plaintext';
-  if (lang.toLowerCase() === 'note') {
+  const lang = (props.language || 'plaintext').toLowerCase();
+  
+  if (lang === 'note') {
       return props.code; 
   }
+
+  // Check if language is supported by highlight.js
   if (hljs.getLanguage(lang)) {
     try {
       return hljs.highlight(props.code, { language: lang, ignoreIllegals: true }).value;
     } catch (e) { console.error(e); }
   }
-  return hljs.highlightAuto(props.code).value;
+  
+  // Fallback to auto-detection
+  try {
+      return hljs.highlightAuto(props.code).value;
+  } catch (e) {
+      return props.code;
+  }
 });
 
 const displayLanguage = computed(() => props.language || 'text');
@@ -590,6 +599,15 @@ async function downloadCreatedFile(filename) {
     </div>
   </div>
 </template>
+
+<style>
+/* Import highlight.js theme globally within this component's scope */
+@import 'highlight.js/styles/github-dark.css';
+
+/* Custom overrides for hljs classes to ensure they work with our theme switching */
+.theme-dark .hljs { color: #d4d4d4; }
+.theme-light .hljs { color: #24292e; }
+</style>
 
 <style scoped>
 .code-block-container { overflow: hidden; font-family: 'Fira Code', 'Courier New', monospace; border-radius: 8px; }

@@ -3,9 +3,12 @@ import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import GenericModal from './GenericModal.vue';
+import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
+
+// Icons
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
+import IconPlus from '../../assets/icons/IconPlus.vue';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
@@ -19,20 +22,20 @@ const isLoading = ref(false);
 const selectedLanguage = ref('markdown');
 
 const languages = [
-    { id: 'markdown', name: 'Markdown', ext: '.md', icon: 'IconMarkdown' },
-    { id: 'python', name: 'Python', ext: '.py', icon: 'IconPython' },
-    { id: 'html', name: 'HTML', ext: '.html', icon: 'IconHtml' },
-    { id: 'javascript', name: 'Javascript', ext: '.js', icon: 'IconJavascript' },
-    { id: 'typescript', name: 'Typescript', ext: '.ts', icon: 'IconTypescript' },
-    { id: 'css', name: 'CSS', ext: '.css', icon: 'IconCode' },
-    { id: 'svg', name: 'SVG', ext: '.svg', icon: 'IconSvg' },
-    { id: 'mermaid', name: 'Mermaid Diagram', ext: '.mermaid', icon: 'IconMermaid' },
-    { id: 'latex', name: 'LaTeX', ext: '.tex', icon: 'IconLatex' },
-    { id: 'json', name: 'JSON', ext: '.json', icon: 'IconJson' },
-    { id: 'yaml', name: 'YAML', ext: '.yaml', icon: 'IconYaml' },
-    { id: 'sql', name: 'SQL', ext: '.sql', icon: 'IconDatabase' },
-    { id: 'cpp', name: 'C++', ext: '.cpp', icon: 'IconCode' },
-    { id: 'code', name: 'Generic Code', ext: '.txt', icon: 'IconTerminal' },
+    { id: 'markdown', name: 'Markdown', ext: '.md' },
+    { id: 'python', name: 'Python', ext: '.py' },
+    { id: 'html', name: 'HTML', ext: '.html' },
+    { id: 'javascript', name: 'Javascript', ext: '.js' },
+    { id: 'typescript', name: 'Typescript', ext: '.ts' },
+    { id: 'css', name: 'CSS', ext: '.css' },
+    { id: 'svg', name: 'SVG', ext: '.svg' },
+    { id: 'mermaid', name: 'Mermaid Diagram', ext: '.mermaid' },
+    { id: 'latex', name: 'LaTeX', ext: '.tex' },
+    { id: 'json', name: 'JSON', ext: '.json' },
+    { id: 'yaml', name: 'YAML', ext: '.yaml' },
+    { id: 'sql', name: 'SQL', ext: '.sql' },
+    { id: 'cpp', name: 'C++', ext: '.cpp' },
+    { id: 'code', name: 'Generic Code', ext: '.txt' },
 ];
 
 const snippets = {
@@ -82,7 +85,6 @@ watch(selectedLanguage, (newLang) => {
 });
 
 function insertSnippet(snippetCode) {
-    // If editor is empty, replace. If not, append.
     if (!content.value.trim()) {
         content.value = snippetCode;
     } else {
@@ -99,11 +101,7 @@ async function handleSubmit() {
         uiStore.addNotification('Title is required.', 'warning');
         return;
     }
-    if (!content.value.trim()) {
-        uiStore.addNotification('Content is required.', 'warning');
-        return;
-    }
-
+    
     isLoading.value = true;
     try {
         await discussionsStore.createManualArtefact({
@@ -123,12 +121,11 @@ async function handleSubmit() {
     <GenericModal
         modalName="createArtefact"
         title="Create New Document"
-        maxWidthClass="max-w-3xl"
+        maxWidthClass="max-w-4xl"
     >
         <template #body>
             <div class="space-y-4 p-1 h-full flex flex-col">
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <!-- Title -->
                     <div class="md:col-span-2">
                         <label for="artefact-title" class="label">Document Title</label>
                         <div class="relative mt-1">
@@ -145,8 +142,6 @@ async function handleSubmit() {
                             />
                         </div>
                     </div>
-
-                    <!-- Type Selector -->
                     <div>
                         <label for="artefact-type" class="label">Language / Format</label>
                         <select v-model="selectedLanguage" class="input-field mt-1">
@@ -157,7 +152,6 @@ async function handleSubmit() {
                     </div>
                 </div>
 
-                <!-- Snippets Bar -->
                 <div v-if="currentSnippets.length > 0" class="flex flex-wrap gap-2 py-1">
                     <span class="text-[10px] font-black uppercase text-gray-400 self-center mr-2">Quick Snippets:</span>
                     <button 
@@ -187,9 +181,9 @@ async function handleSubmit() {
         <template #footer>
             <div class="flex justify-end gap-3">
                 <button @click="uiStore.closeModal('createArtefact')" type="button" class="btn btn-secondary">Cancel</button>
-                <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading || !title.trim() || !content.trim()">
+                <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading || !title.trim()">
                     <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
-                    {{ isLoading ? 'Create & Load' : 'Create & Load' }}
+                    Create & Load
                 </button>
             </div>
         </template>

@@ -339,11 +339,17 @@ async function handlePushToLibrary(type) {
 }
 
 function download() {
-    const blob = new Blob([content.value], { type: 'text/plain' });
+    if (!dbContent.value) return;
+    
+    const blob = new Blob([dbContent.value], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = title.value;
+    a.href = url;
+    a.download = title.value || 'document.txt';
+    document.body.appendChild(a);
     a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 </script>
 
@@ -441,34 +447,39 @@ function download() {
             <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
 
             <!-- Global Library Export -->
-            <DropdownMenu title="Push to Library" icon="folder" button-class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-blue-500 transition-colors" collection="ui">
+            <DropdownMenu title="Library & Types" icon="folder" button-class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-blue-500 transition-colors" collection="ui">
+                <!-- EXPORTS: Save copy to global library -->
                 <button @click="handlePushToLibrary('note')" class="menu-item">
                     <IconPencil class="w-4 h-4 mr-3 text-amber-500" />
                     <div class="flex flex-col">
                         <span class="font-bold">Save as Global Note</span>
-                        <span class="text-[10px] opacity-60">Export to Notes Library</span>
+                        <span class="text-[10px] opacity-60 text-gray-500">Copy to global Notes library</span>
                     </div>
                 </button>
                 <button @click="handlePushToLibrary('skill')" class="menu-item">
                     <IconSparkles class="w-4 h-4 mr-3 text-emerald-500" />
                     <div class="flex flex-col">
                         <span class="font-bold">Save as Global Skill</span>
-                        <span class="text-[10px] opacity-60">Export to Capability Library</span>
+                        <span class="text-[10px] opacity-60 text-gray-500">Copy to global Skills library</span>
                     </div>
                 </button>
+
                 <div class="menu-divider"></div>
-                <!-- Add Type conversion inside dropdown to replace the deleted buttons -->
+                
+                <!-- CONVERSIONS: Change behavior in current chat -->
+                <div class="px-4 py-1 text-[9px] font-black uppercase text-gray-400 tracking-widest">Re-categorize in Chat</div>
+                
                 <button v-if="['note', 'skill'].includes(artefactGroup?.versions[0]?.artefact_type)" @click="handleSave('document')" class="menu-item">
                     <IconFileText class="w-4 h-4 mr-3 text-blue-500" />
-                    <span>Convert to File</span>
+                    <span>Convert to Reference File</span>
                 </button>
                 <button v-if="artefactGroup?.versions[0]?.artefact_type !== 'note'" @click="handleSave('note')" class="menu-item">
                     <IconPencil class="w-4 h-4 mr-3 text-amber-500" />
-                    <span>Convert to Note</span>
+                    <span>Convert to Research Note</span>
                 </button>
                 <button v-if="artefactGroup?.versions[0]?.artefact_type !== 'skill'" @click="handleSave('skill')" class="menu-item">
                     <IconSparkles class="w-4 h-4 mr-3 text-emerald-500" />
-                    <span>Convert to Skill</span>
+                    <span>Convert to AI Skill</span>
                 </button>
             </DropdownMenu>
 

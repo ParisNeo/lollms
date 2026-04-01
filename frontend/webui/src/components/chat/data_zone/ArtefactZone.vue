@@ -73,7 +73,7 @@ async function handleLoadAllArtefacts() {
 }
 
 function handleCreateArtefact() {
-    if (idToUse.value) uiStore.openModal('artefactEditor', { discussionId: idToUse.value });
+    if (idToUse.value) uiStore.openModal('createArtefact', { discussionId: idToUse.value });
 }
 
 function triggerArtefactFileUpload() { artefactFileInput.value?.click(); }

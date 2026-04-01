@@ -1071,15 +1071,15 @@ function onMermaidReady({ svg }, partIndex) {
                   <!-- Inline Iframe Viewport -->
                   <div class="relative w-full h-[400px] bg-white transition-all overflow-hidden">
                       <iframe 
-                        v-if="!part.widget.is_loading"
+                        v-if="getWidgetContent(part.widget)"
                         :srcdoc="getWidgetContent(part.widget)" 
                         class="w-full h-full border-none pointer-events-auto" 
                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>
                       
-                      <!-- Loading Placeholder -->
-                      <div v-else class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/50 dark:bg-gray-900/50">
+                      <!-- Loading Placeholder: Show only if both static content and live buffer are empty -->
+                      <div v-if="!getWidgetContent(part.widget)" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/50 dark:bg-gray-900/50">
                          <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin mb-3 opacity-30" />
                          <p class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Awaiting source data...</p>
                       </div>

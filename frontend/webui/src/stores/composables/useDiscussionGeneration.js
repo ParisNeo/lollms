@@ -193,7 +193,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     };
                     break;
 
-                case 'artefact_chunk':
                 case 'chunk':
                     const chunk = data.content;
                     
@@ -341,6 +340,14 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         const title = data.content.title;
                         const id = data.content.id || title; 
                         
+                        // Register in live buffers immediately so the iframe can mount
+                        if (id && state.liveArtefactBuffers.value[id] === undefined) {
+                            state.liveArtefactBuffers.value = {
+                                ...state.liveArtefactBuffers.value,
+                                [id]: ""
+                            };
+                        }
+
                         // If this is the first chunk of a new artefact, or an explicit start event
                         // and we haven't injected an anchor for it yet.
                         const anchorTag = `id="${id}"`;

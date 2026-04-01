@@ -144,11 +144,16 @@
             <div class="text-sm font-semibold text-red-800 dark:text-red-200 mb-1">Mermaid Rendering Error</div>
             <pre class="text-xs text-red-700 dark:text-red-400 whitespace-pre-wrap max-h-40 overflow-auto p-2 bg-red-50 dark:bg-red-900/20 rounded-md">{{ errorMessage }}</pre>
             <div class="mt-3 flex flex-wrap gap-2">
-              <button @click="copyErrorMessage" class="px-3 py-1 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs font-medium">{{ errorCopyLabel }}</button>
-              <button @click="showProcessed = !showProcessed" class="px-3 py-1 rounded-md bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium">
+              <button @click="handleAiFix" :disabled="isProcessing" class="px-3 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-sm flex items-center gap-2 transition-all active:scale-95">
+                <IconAnimateSpin v-if="isProcessing" class="w-3 h-3 animate-spin" />
+                <IconSparkles v-else class="w-3 h-3" />
+                Fix with AI
+              </button>
+              <button @click="copyErrorMessage" class="px-3 py-1 rounded-md bg-red-600/20 hover:bg-red-600/30 text-red-600 dark:text-red-400 text-xs font-medium">{{ errorCopyLabel }}</button>
+              <button @click="showProcessed = !showProcessed" class="px-3 py-1 rounded-md bg-gray-600/20 hover:bg-gray-600/30 text-gray-600 dark:text-gray-400 text-xs font-medium">
                 {{ showProcessed ? 'Hide' : 'Show' }} Processed Code
               </button>
-              <button @click="showSource = true" class="px-3 py-1 rounded-md bg-gray-600 hover:bg-gray-700 text-white text-xs font-medium">
+              <button @click="showSource = true" class="px-3 py-1 rounded-md bg-gray-600/20 hover:bg-gray-600/30 text-gray-600 dark:text-gray-400 text-xs font-medium">
                 View Raw Source
               </button>
             </div>
@@ -199,6 +204,37 @@ const showRefinement = ref(false)
 const refinementInstruction = ref('')
 const isProcessing = ref(false)
 const discussionsStore = useDiscussionsStore()
+
+async function handleAiFix() {
+    if (isProcessing.value) return;
+    
+    isProcessing.value = true;
+    try {
+        const prompt = `The Mermaid diagram code you provided has syntax errors and failed to render.
+**Error from Parser:**
+${errorMessage.value}
+
+**Problematic Code:**
+\`\`\`mermaid
+${props.mermaidCode}
+\`\`\`
+
+**Instructions:**
+1. Fix all syntax errors (check for nested quotes, unescaped brackets, or reserved words).
+2. Ensure labels with special characters (like quotes or question marks) are correctly wrapped in [" "].
+3. Return ONLY the corrected code block.`;
+
+        await discussionsStore.sendMessage({
+            prompt: prompt,
+            parent_message_id: props.messageId,
+            is_resend: false
+        });
+        
+        uiStore.addNotification("Repairing diagram via AI...", "info");
+    } finally {
+        isProcessing.value = false;
+    }
+}
 
 async function handleRefinement() {
     if (!refinementInstruction.value.trim() || isProcessing.value) return;
@@ -252,8 +288,13 @@ function cleanup() {
 function processMermaidCode(code) {
   if (!code) return code
 
-  // 1. Strip fences
+  // 1. Strip fences and basic cleanup
   let processed = code.replace(/^```mermaid\n?|```$/g, '')
+  
+  // 1.1 Aggressive Sanitization: Fix triple quotes and multi-quotes
+  processed = processed.replace(/"{3,}/g, '"')
+  processed = processed.replace(/'{3,}/g, "'")
+
   processed = processed.split('\n').map(l => l.trimEnd()).join('\n')
 
   // 2. Fix subgraph quoted titles → unquoted
@@ -353,6 +394,7 @@ function processMermaidCode(code) {
       changed = clean.length !== prev
     }
 
+    // 6.5 Fix internal quotes within labels (Escape them for Mermaid)
     const safeLabel = clean.replace(/"/g, '#quot;').replace(/<br\s*\/?>/gi, '<br/>')
 
     let op = '["', cl = '"]'
