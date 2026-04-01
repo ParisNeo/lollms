@@ -74,7 +74,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function createManualArtefact({ discussionId, title, content, imagesB64 }) {
+    async function createManualArtefact({ discussionId, title, content, imagesB64 = [] }) {
         const payload = { title, content, images_b64: imagesB64 };
         await apiClient.post(`/api/discussions/${discussionId}/artefacts/manual`, payload);
         await fetchArtefacts(discussionId);

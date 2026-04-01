@@ -1,8 +1,14 @@
 <template>
     <div class="statusbar bg-gray-50 dark:bg-gray-700/50 p-1 border-t border-gray-300 dark:border-gray-600 flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 px-2 select-none">
-        <span>{{ charCount }} characters, {{ wordCount }} words</span>
+        <div class="flex items-center gap-3">
+            <div class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-bold uppercase text-[9px] tracking-widest border border-blue-200 dark:border-blue-800">
+                <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                {{ language }}
+            </div>
+            <span>{{ charCount }} characters, {{ wordCount }} words</span>
+        </div>
         
-        <div v-if="renderable" class="flex items-center rounded-md border border-gray-300 dark:border-gray-500 bg-gray-200 dark:bg-gray-900/50 p-0.5">
+        <div v-if="allowedModes === 'both'" class="flex items-center rounded-md border border-gray-300 dark:border-gray-500 bg-gray-200 dark:bg-gray-900/50 p-0.5">
             <button @click="$emit('set-mode', 'edit')" title="Edit Mode" :class="['mode-button', currentMode === 'edit' ? 'active' : 'inactive']">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.5L14.732 3.732z"></path></svg>
                 <span>Edit</span>
@@ -12,6 +18,9 @@
                 <span>Render</span>
             </button>
         </div>
+        <div v-else class="text-[10px] uppercase font-bold tracking-tight opacity-50 px-2">
+            {{ allowedModes === 'edit_only' ? 'Editor Only' : 'Render Only' }}
+        </div>
     </div>
 </template>
 
@@ -20,7 +29,8 @@ import { computed } from 'vue';
 
 const props = defineProps({
     modelValue: { type: String, required: true },
-    renderable: { type: Boolean, default: false },
+    language: { type: String, default: 'markdown' },
+    allowedModes: { type: String, default: 'both' },
     currentMode: { type: String, default: 'edit' }
 });
 

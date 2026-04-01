@@ -4,7 +4,7 @@
             v-if="currentMode === 'edit'"
             :toolbarClass="[toolbarClass, 'flex-shrink-0']"
             :buttonClass="buttonClass"
-            :renderable="renderable"
+            :language="language"
             :currentMode="currentMode"
             :isWrappingEnabled="isWrappingEnabled"
             @format="handleFormat"
@@ -29,7 +29,8 @@
         </div>
         <StatusBar 
             :modelValue="modelValue" 
-            :renderable="renderable"
+            :language="language"
+            :allowedModes="allowedModes"
             :currentMode="currentMode"
             @set-mode="setMode"
             class="flex-shrink-0"
@@ -66,33 +67,42 @@ const props = defineProps({
     placeholder: { type: String, default: '' },
     autofocus: { type: Boolean, default: false },
     extensions: { type: Array, default: () => [] },
-    language: { type: String, default: 'markdown' },
-    renderable: { type: Boolean, default: false },
+    language: { type: String, default: 'markdown' }, // 'markdown', 'python', 'html', 'svg', 'mermaid', 'latex'
+    allowedModes: { type: String, default: 'both', validator: (val) => ['edit_only', 'render_only', 'both'].includes(val) },
     initialMode: { type: String, default: 'edit', validator: (val) => ['edit', 'view'].includes(val) },
-    readOnly: { type: Boolean, default: false },
-    contentType: { type: String, default: null }, // Optional: 'python', 'html', 'javascript', etc. for render mode wrapping
+    readOnly: { type: Boolean, default: false }
 });
 
 const emit = defineEmits(['update:modelValue', 'ready', 'submit']);
 
 const discussionsStore = useDiscussionsStore();
 const editorRef = ref(null);
-const editorView = ref(null); // Changed from raw variable to ref
+const editorView = ref(null);
 let updatingFromSelf = false;
-const currentMode = ref(props.initialMode);
+
+// Determine start mode based on allowed modes
+const getStartMode = () => {
+    if (props.allowedModes === 'edit_only') return 'edit';
+    if (props.allowedModes === 'render_only') return 'view';
+    return props.initialMode;
+};
+
+const currentMode = ref(getStartMode());
 const isWrappingEnabled = ref(true);
 let wrappingCompartment = new Compartment();
 let readOnlyCompartment = new Compartment();
 const isRendering = ref(false);
 
-// Computed property for rendered content - wraps in code block if contentType is specified
+// Computed property for rendered content - Automatic language awareness
 const renderedContent = computed(() => {
-    // If contentType is specified and we're not already in markdown, wrap in code block
-    if (props.contentType && props.language !== 'markdown') {
-        return `\`\`\`${props.contentType}\n${props.modelValue}\n\`\`\``;
-    }
-    // Otherwise return raw content (for markdown or when no contentType specified)
-    return props.modelValue;
+    const lang = props.language ? props.language.toLowerCase() : 'markdown';
+    
+    // If it's markdown, we return raw text (which might contain its own blocks)
+    if (lang === 'markdown') return props.modelValue;
+    
+    // If it's a specific language, we wrap it so the MessageContentRenderer treats it as a block
+    // This allows the renderer to provide "Copy", "Run", or "SVG Preview" UI automatically.
+    return `\`\`\`${lang}\n${props.modelValue}\n\`\`\``;
 });
 
 defineExpose({ editorView });
@@ -163,6 +173,16 @@ const handleFormat = (type, options = {}) => {
     const selection = state.selection.main;
     const selectedText = state.doc.sliceString(selection.from, selection.to);
     
+    if (type === 'insert') {
+        const snippet = options.code || '';
+        view.dispatch({
+            changes: { from: selection.from, to: selection.to, insert: snippet },
+            selection: { anchor: selection.from + snippet.length }
+        });
+        view.focus();
+        return;
+    }
+
     if (type === 'codeblock') {
         const lang = options.language || '';
         const startTag = '```' + lang + '\n';
