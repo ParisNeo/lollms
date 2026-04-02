@@ -518,7 +518,7 @@ function download() {
                 v-else
                 v-model="dbContent" 
                 class="absolute inset-0 h-full" 
-                :initialMode="'edit'"
+                :initialMode="'view'"
                 :renderable="true"
                 :contentType="detectedContentType"
                 :language="detectedLanguage"

@@ -206,7 +206,7 @@ async function handleNewItem() {
         store.createNewDiscussion(store.currentGroupId); 
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notes') {
-        notesStore.createNote({ title: 'New Note', content: '', group_id: notesStore.activeGroupId });
+        uiStore.openModal('noteEditor');
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'skills') {
         uiStore.openModal('skillEditor');

@@ -270,12 +270,17 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'note_chunk':
                 case 'skill_chunk':
                 case 'widget_chunk': {
-                    const { id, title, chunk } = data.content;
-                    const key = id || title;
+                    // Normalize the lookup key: prioritize ID, then Title
+                    const content = data.content;
+                    const key = content.id || content.title;
+                    const chunk = content.chunk || "";
+                    
                     if (key) {
+                        // We use a functional update to ensure we don't lose chunks in high-frequency streams
+                        const currentBuffer = state.liveArtefactBuffers.value[key] || "";
                         state.liveArtefactBuffers.value = {
                             ...state.liveArtefactBuffers.value,
-                            [key]: (state.liveArtefactBuffers.value[key] || "") + chunk
+                            [key]: currentBuffer + chunk
                         };
                     }
                     break;

@@ -24,6 +24,9 @@ const isLoading = ref(false);
 const editorMode = ref('edit');
 
 function initForm() {
+    // Determine the prefilled group (either from existing note or current sidebar selection)
+    const activeSidebarGroup = useNotesStore().activeGroupId;
+
     if (note.value && note.value.id) {
         // Editing an existing note
         title.value = note.value.title;
@@ -31,10 +34,11 @@ function initForm() {
         groupId.value = note.value.group_id;
         editorMode.value = 'view';
     } else {
-        // Creating a new note (possibly from AI generation)
-        title.value = prefillTitle.value || 'New Note';
+        // Creating a new note (possibly from AI generation or sidebar button)
+        title.value = prefillTitle.value || '';
         content.value = prefillContent.value || '';
-        groupId.value = null;
+        // If we are in a group in the sidebar, default to that group for the new note
+        groupId.value = activeSidebarGroup || null;
         editorMode.value = 'edit';
     }
 }

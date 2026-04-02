@@ -646,24 +646,25 @@ function saveSkillFromRenderer(part) {
 /**
  * Safely retrieves content for a widget, preferring the live stream buffer.
  */
-function getWidgetContent(widget) {
+function getWidgetContent(widgetOrPart) {
     try {
-        if (!widget) return '';
+        if (!widgetOrPart) return '';
         
         // 1. Check live streaming buffer first
         const buffers = liveArtefactBuffers?.value;
         if (buffers && typeof buffers === 'object') {
-            // Try lookup by ID first (most reliable), then title
-            const key = widget.id || widget.title;
-            if (key && buffers[key] !== undefined) return buffers[key];
+            // Check every possible key (part ID from parser, widget ID from metadata, or Title)
+            const keys = [widgetOrPart.id, widgetOrPart.widget?.id, widgetOrPart.widget?.title];
+            for (const key of keys) {
+                if (key && buffers[key] !== undefined) return buffers[key];
+            }
         }
         
         // 2. Check static source from message metadata
-        // Models may output code under 'source', 'content', 'html' or 'code'
-        return widget.source || widget.content || widget.html || widget.code || '';
+        const w = widgetOrPart.widget || widgetOrPart;
+        return w.source || w.content || w.html || w.code || '';
     } catch (error) {
-        console.warn("[WidgetRenderer] Recovered from lookup error:", error);
-        return widget?.source || widget?.content || widget?.html || widget?.code || '';
+        return '';
     }
 }
 
@@ -1069,9 +1070,10 @@ function onMermaidReady({ svg }, partIndex) {
                   </div>
                   
                   <!-- Inline Iframe Viewport -->
-                  <div class="relative w-full h-[400px] bg-white transition-all overflow-hidden">
+                  <div class="relative w-full h-[400px] bg-white transition-all overflow-hidden border-b dark:border-gray-800">
                       <iframe 
                         v-if="getWidgetContent(part.widget)"
+                        :key="`${part.id}-${discussionsStore.activeUpdatingArtefacts.has(part.id || part.widget?.id) ? 'streaming' : 'final'}`"
                         :srcdoc="getWidgetContent(part.widget)" 
                         class="w-full h-full border-none pointer-events-auto" 
                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
@@ -1079,7 +1081,7 @@ function onMermaidReady({ svg }, partIndex) {
                       ></iframe>
                       
                       <!-- Loading Placeholder: Show only if both static content and live buffer are empty -->
-                      <div v-if="!getWidgetContent(part.widget)" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/50 dark:bg-gray-900/50">
+                      <div v-else class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/50 dark:bg-gray-900/50">
                          <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin mb-3 opacity-30" />
                          <p class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Awaiting source data...</p>
                       </div>
