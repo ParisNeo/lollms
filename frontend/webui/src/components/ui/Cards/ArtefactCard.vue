@@ -27,7 +27,16 @@ const fileExtension = computed(() => {
     return parts.length > 1 ? parts.pop().toUpperCase() : 'DOC';
 });
 
-const isLoadedToDataZone = computed(() => props.artefactGroup.isAnyVersionLoaded);
+const isLoadedToDataZone = computed(() => {
+  return dataZoneStore.isArtefactLoaded(props.artefactGroup.id);
+});
+
+function handleRename() {
+  uiStore.openModal('renameArtefact', {
+    discussionId: discussionsStore.currentDiscussionId,
+    artefact: props.artefactGroup
+  });
+}
 
 const currentType = computed(() => {
     // Get type from the first (latest) version
@@ -122,6 +131,10 @@ async function toggleLoad() {
             <button @click="toggleLoad" class="menu-item">
                 <IconRefresh class="w-4 h-4 mr-3" :class="{'text-green-500': isLoadedToDataZone}"/> 
                 <span>{{ isLoadedToDataZone ? 'Unload from Context' : 'Load to Context' }}</span>
+            </button>
+            <button @click="handleRename" class="menu-item">
+                <IconPencil class="w-4 h-4 mr-3 text-blue-500"/> 
+                <span>Rename / Change Type</span>
             </button>
             <div class="menu-divider"></div>
             <button @click="handleDelete" class="menu-item text-red-500">

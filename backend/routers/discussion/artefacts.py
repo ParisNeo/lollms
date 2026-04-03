@@ -227,26 +227,31 @@ def build_artefacts_router(router: APIRouter):
                 }
 
                 if extension == ".pdf":
+                    # --- NEW: High-Fidelity Multi-Modal PDF Ingestion ---
                     pdf_doc = fitz.open(stream=content_bytes, filetype="pdf")
-                    text_parts = []
-                    image_count = 0
-                    for page in pdf_doc:
-                        text_parts.append(page.get_text())
-                        if extract_images:
-                            img_list = page.get_images(full=True)
-                            image_count += len(img_list)
-                            for img_info in img_list:
-                                xref = img_info[0]
-                                base_image = pdf_doc.extract_image(xref)
-                                image_bytes = base_image["image"]
-                                images.append(base64.b64encode(image_bytes).decode('utf-8'))
-                    content = "\n".join(text_parts).strip()
-                    pdf_doc.close()
-                    if not content and image_count > 0:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="This appears to be a scanned PDF with no text layer. LoLLMs cannot process it directly. Please use an OCR (Optical Character Recognition) tool to convert it to a text-based PDF or extract the text manually before uploading."
+                    pages_md = []
+                    rendered_page_images = []
+                    
+                    for i, page in enumerate(pdf_doc):
+                        # 1. Render page to image for the vision model
+                        pix = page.get_pixmap(dpi=150)
+                        img_bytes = pix.tobytes("png")
+                        rendered_page_images.append(base64.b64encode(img_bytes).decode('utf-8'))
+                        
+                        # 2. Extract text from page
+                        page_text = page.get_text().strip()
+                        
+                        # 3. Create multimodal section with anchor
+                        # The ID format matches Title::PageIndex for resolution
+                        pages_md.append(
+                            f"## Page {i+1}\n\n"
+                            f'<artefact_image id="{title}::{i}" />\n\n'
+                            f"{page_text}"
                         )
+                    
+                    content = "\n\n---\n\n".join(pages_md)
+                    images = rendered_page_images
+                    pdf_doc.close()
 
                 elif extension == ".docx":
                     if docx2python is None:
@@ -384,16 +389,29 @@ def build_artefacts_router(router: APIRouter):
             # Determine type: Code stays code, everything else is a 'file' (custom registered type)
             target_type = "code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "file"
 
-            # Use the library's internal management system
-            # update_artefact handles the logic of checking existence and versioning internally
-            artefact_info = discussion.update_artefact(
-                title,
-                content,
-                new_images=images,
-                author=current_user.username,
-                active=auto_load,
-                artefact_type=target_type
-            )
+            # Check if an artefact with this title already exists in the discussion
+            existing_artefact = discussion.get_artefact(title=title)
+
+            if existing_artefact:
+                # Increment version
+                artefact_info = discussion.update_artefact(
+                    title,
+                    content,
+                    new_images=images,
+                    author=current_user.username,
+                    active=auto_load,
+                    artefact_type=target_type
+                )
+            else:
+                # Initial creation (Version 1)
+                artefact_info = discussion.add_artefact(
+                    title,
+                    content,
+                    images=images,
+                    author=current_user.username,
+                    active=auto_load,
+                    artefact_type=target_type
+                )
             
             discussion.commit()
 
@@ -972,6 +990,45 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to process YouTube transcript: {str(e)}")
+
+    class RenameArtefactRequest(BaseModel):
+        old_title: str
+        new_title: str
+        new_type: Optional[str] = None
+
+    @router.put("/{discussion_id}/artefacts/rename", status_code=status.HTTP_200_OK)
+    async def rename_discussion_artefact(
+        discussion_id: str,
+        payload: RenameArtefactRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        # 1. Type Auto-Detection from extension
+        ext = Path(payload.new_title).suffix.lower()
+        auto_type = payload.new_type
+        
+        if not auto_type:
+            CODE_EXTS = {".py", ".js", ".ts", ".html", ".css", ".c", ".cpp", ".h", ".cs", ".java", ".sh", ".sql", ".vhd", ".v", ".rb", ".php", ".go", ".rs", ".swift", ".kt"}
+            if ext in CODE_EXTS:
+                auto_type = "code"
+            elif ext in {".md", ".txt", ".pdf", ".docx", ".xlsx", ".pptx"}:
+                auto_type = "document"
+
+        try:
+            # We use the library's internal artefacts manager to perform the rename
+            # This ensures all versions associated with the old title are migrated.
+            discussion.artefacts.rename(
+                old_title=payload.old_title, 
+                new_title=payload.new_title, 
+                new_type=auto_type
+            )
+            discussion.commit()
+            return {"message": f"Artefact renamed to '{payload.new_title}'", "detected_type": auto_type}
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
 
     @router.post("/{discussion_id}/artefacts/manual", response_model=ArtefactAndDataZoneUpdateResponse, status_code=status.HTTP_201_CREATED)
     async def create_manual_artefact(

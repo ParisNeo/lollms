@@ -80,6 +80,21 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         await fetchArtefacts(discussionId);
     }
 
+    async function renameArtefact({ discussionId, oldTitle, newTitle, newType }) {
+        try {
+            await apiClient.put(`/api/discussions/${discussionId}/artefacts/rename`, {
+                old_title: oldTitle,
+                new_title: newTitle,
+                new_type: newType
+            });
+            await fetchArtefacts(discussionId);
+            uiStore.addNotification(`Artefact renamed successfully.`, 'success');
+        } catch (e) {
+            console.error("Rename failed:", e);
+            uiStore.addNotification('Failed to rename artefact.', 'error');
+        }
+    }
+
     async function updateArtefact({ discussionId, artefactTitle, newContent, newImagesB64, keptImagesB64, version, updateInPlace, artefactType }) {
         const payload = { 
             new_content: newContent, 

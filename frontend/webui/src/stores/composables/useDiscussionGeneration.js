@@ -197,7 +197,7 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     const chunk = data.content;
                     
                     // Technical tags that contain HTML/CSS/JS and break the app if streamed partially
-                    const messyTags = ['lollms_widget', 'lollms_inline', 'annotate', 'generate_image', 'edit_image', 'generate_slides'];
+                    const messyTags = ['lollms_widget', 'lollms_inline', 'annotate', 'generate_image', 'edit_image', 'generate_slides', 'style', 'script'];
                     const passiveTags = ['note', 'skill', 'artefact', 'think'];
                     
                     // Detect if a known tag is starting in this chunk

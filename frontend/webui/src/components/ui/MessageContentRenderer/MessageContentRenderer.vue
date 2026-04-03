@@ -153,7 +153,7 @@ const parsedStreamingContent = computed(() => {
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
         // [FIX] Broadened regex to catch ALL lollms anchors including building, widgets, and form anchors
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/;
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/;
         match = regex.exec(rawBlock);
     }
     
@@ -245,18 +245,21 @@ const parseSpecialBlock = (rawBlock, match = null) => {
             raw 
         };
     }
-    else if (match[12]) {
-        // --- Building Indicator Anchor ---
-        const raw = match[12];
-        const label = raw.match(/label=["']([^"']+)["']/)?.[1] || 'Component';
+    else if (match[12] || match[15]) {
+        // --- Building / Working Indicator (Merged Logic) ---
+        const raw = match[12] || match[15];
+        // Handle parameters: message/label and optional details
+        const label = raw.match(/message=["']([^"']+)["']|label=["']([^"']+)["']/)?.[1] || raw.match(/label=["']([^"']+)["']/)?.[1] || 'Processing';
         const title = raw.match(/title=["']([^"']+)["']/)?.[1] || '';
+        const sub_content = raw.match(/sub_content=["']([^"']+)["']/)?.[1] || '';
         const id = raw.match(/id=["']([^"']+)["']/)?.[1];
         
+        // Determine if still active (isDone check)
         const isDone = (props.forms?.some(f => f.id === id || f.form_id === id)) || 
                        (props.inlineWidgets?.some(w => w.id === id)) ||
                        (discussionsStore.activeDiscussionArtefacts?.some(a => a.title === title));
                        
-        return { type: 'building_indicator', label, title, isDone, id, raw };
+        return { type: 'building_indicator', label, title, sub_content, isDone, id, raw };
     }
     else if (match[13]) {
         // --- Form Anchor (Permanent mount point) ---
@@ -280,6 +283,17 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         }
         
         return { type: 'form_ready', form: formData, id, raw };
+    }
+    else if (match[16]) {
+        // --- Artefact Image Anchor ---
+        const raw = match[16];
+        const fullId = match[17]; // Title::Index
+        
+        const parts = fullId.split('::');
+        const artTitle = parts[0];
+        const imgIndex = parseInt(parts[1]);
+
+        return { type: 'artefact_image', title: artTitle, index: imgIndex, raw };
     }
 
     return { type: 'content', content: rawBlock };
@@ -1006,20 +1020,39 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </template>
 
-          <!-- ── Building / Progress Indicator ───────────────────────────── -->
+          <!-- ── Building / Progress Indicator (Lollms Working) ───────────────────────────── -->
           <div v-else-if="part.type === 'building_indicator' && !part.isDone" 
-               class="my-4 flex items-center gap-3 p-4 rounded-2xl bg-blue-50/30 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-800/30 animate-in fade-in slide-in-from-left-2">
-              <div class="relative flex-shrink-0">
-                  <IconAnimateSpin class="w-6 h-6 text-blue-500 animate-spin" />
-                  <div class="absolute inset-0 flex items-center justify-center">
-                      <IconPlus class="w-3 h-3 text-blue-600" />
+               class="my-4 flex flex-col gap-2 p-4 rounded-2xl bg-white dark:bg-gray-900 border-2 border-blue-500/20 shadow-xl animate-in fade-in slide-in-from-bottom-2">
+              
+              <div class="flex items-center gap-4">
+                  <!-- Pleasant Pulse/Spin Animation -->
+                  <div class="relative flex-shrink-0 w-10 h-10 flex items-center justify-center">
+                      <div class="absolute inset-0 bg-blue-500/20 rounded-full animate-ping"></div>
+                      <div class="absolute inset-0 border-2 border-t-blue-500 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin"></div>
+                      <IconAnimateSpin class="w-6 h-6 text-blue-500" />
+                  </div>
+
+                  <div class="flex-grow min-w-0">
+                      <div class="flex items-center gap-2">
+                          <span class="text-[9px] font-black uppercase tracking-[0.2em] text-blue-500 animate-pulse">Lollms Engine Active</span>
+                      </div>
+                      <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">
+                          {{ part.label }}<span v-if="part.title">: {{ part.title }}</span>
+                      </h4>
                   </div>
               </div>
-              <div class="flex flex-col min-w-0">
-                  <span class="text-[10px] font-black uppercase tracking-widest text-blue-500/60 leading-none mb-1">In Progress</span>
-                  <span class="text-sm font-bold text-gray-700 dark:text-gray-300 truncate">
-                      Building {{ part.label }}: <span class="text-blue-600 dark:text-blue-400">{{ part.title }}</span>
-                  </span>
+
+              <!-- Collapsible Sub-Content (Logs/Details) -->
+              <div v-if="part.sub_content" class="mt-2 border-t dark:border-gray-800 pt-2">
+                  <details class="group/details">
+                      <summary class="flex items-center gap-2 cursor-pointer list-none select-none">
+                          <IconChevronRight class="w-3 h-3 text-gray-400 group-open/details:rotate-90 transition-transform" />
+                          <span class="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-blue-500 transition-colors">Show Execution Details</span>
+                      </summary>
+                      <div class="mt-3 p-3 bg-gray-50 dark:bg-black/40 rounded-xl font-mono text-[10px] text-gray-500 dark:text-gray-400 whitespace-pre-wrap leading-relaxed shadow-inner border dark:border-gray-800">
+                          {{ part.sub_content }}
+                      </div>
+                  </details>
               </div>
           </div>
 
@@ -1032,6 +1065,36 @@ function onMermaidReady({ svg }, partIndex) {
                 :discussion-id="discussionsStore.currentDiscussionId"
              />
           </template>
+
+          <!-- ── Artefact Image Resolution ───────────────────────────────── -->
+          <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount">
+             <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
+                <!-- Resolution logic: find the artefact in the store -->
+                <template v-if="discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title)">
+                    <div class="relative">
+                        <!-- We fetch the images from the first (latest) version matching the title -->
+                        <AuthenticatedImage 
+                            v-if="discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title).images && discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title).images[part.index]"
+                            :src="'data:image/png;base64,' + discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title).images[part.index]" 
+                            class="w-full h-auto max-h-[600px] object-contain mx-auto"
+                        />
+                        <div v-else class="p-8 text-center text-xs text-gray-500 italic">
+                           <IconAnimateSpin class="w-6 h-6 animate-spin mx-auto mb-2 opacity-30" />
+                           Awaiting image resolution for {{ part.title }} [Page {{ part.index + 1 }}]
+                        </div>
+                        
+                        <!-- Overlay Title -->
+                        <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
+                             <span class="text-[10px] font-black uppercase tracking-widest text-white">{{ part.title }} — Page {{ part.index + 1 }}</span>
+                        </div>
+                    </div>
+                </template>
+                <div v-else class="p-4 flex items-center gap-3 text-red-500">
+                    <IconError class="w-5 h-5" />
+                    <span class="text-xs font-bold">Source document '{{ part.title }}' not found in workspace.</span>
+                </div>
+             </div>
+          </div>
 
           <!-- ── Interactive Teaching Widget (Inline Preview Mode) ─────────── -->
           <div v-else-if="part.type === 'interactive_widget' && part.widget" 

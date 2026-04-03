@@ -296,6 +296,24 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 </template>
 
 <style>
+/** 
+ * UI PROTECTION LAYER 
+ * Prevents AI-generated global resets (like * { margin: 0 }) 
+ * from breaking the application's core layout components.
+ */
+#app, .modal-panel, header, aside, .message-row {
+    margin: 0 !important;
+    padding: 0 !important;
+    box-sizing: border-box !important;
+}
+
+#app {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100vh !important;
+    width: 100vw !important;
+}
+
 @keyframes progress-animation { 0% { background-position: 1rem 0; } 100% { background-position: 0 0; } }
 .progress-bar-animated { background-image: linear-gradient(45deg, rgba(255, 255, 255, .15) 25%, transparent 25%, transparent 50%, rgba(255, 255, 255, .15) 50%, rgba(255, 255, 255, .15) 75%, transparent 75%, transparent); background-size: 1rem 1rem; animation: progress-animation 1s linear infinite; }
 

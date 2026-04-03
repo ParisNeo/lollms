@@ -49,12 +49,68 @@ const citationExtension = {
 
 marked.use({ extensions: [citationExtension] });
 
+/**
+ * Aggressively strips or escapes tags that can break the host UI
+ * when rendered via v-html.
+ */
+/**
+ * Detects "Naked Code" - raw HTML/Code blocks not wrapped in backticks
+ * and wraps them to prevent them from executing in the main UI.
+ */
+function wrapNakedCode(text) {
+    if (!text) return text;
+    
+    // If text looks like a full HTML file but has no markdown fences
+    if ((text.includes('<!DOCTYPE') || text.includes('<html')) && !text.includes('```')) {
+        return "```html\n" + text + "\n```";
+    }
+    
+    // If text starts with many imports or definitions (Python/JS) but no fences
+    const codeStartRegex = /^(import\s|from\s|const\s|function\s|def\s|class\s)/;
+    if (codeStartRegex.test(text.trim()) && !text.includes('```')) {
+        return "```\n" + text + "\n```";
+    }
+    
+    return text;
+}
+
+function sanitizeDangerousTags(html) {
+    if (!html) return html;
+    // 1. Strip ALL style and script blocks from the main UI. 
+    // They are only allowed inside Widget Iframes.
+    let clean = html.replace(/<style[\s\S]*?<\/style>/gi, '');
+    clean = clean.replace(/<script[\s\S]*?<\/script>/gi, '');
+    
+    // 2. Neutralize inline style attributes on ANY tag
+    clean = clean.replace(/\sstyle\s*=\s*["'][^"']*["']/gi, '');
+    
+    // 3. Neutralize event handlers (onclick, etc)
+    clean = clean.replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '');
+
+    // 4. Handle unclosed tags during streaming
+    clean = clean.replace(/<style[\s\S]*/gi, (match) => match.includes('</style>') ? match : '');
+    
+    return clean;
+}
+
 export function parsedMarkdown(content) {
     if (typeof content !== 'string') return '';
-    const protectedContent = protectMath(content);
+    
+    const wrappedContent = wrapNakedCode(content);
+    const normalizedContent = normalizeTables(wrappedContent);
+    const protectedContent = protectMath(normalizedContent);
+    
     // Use marked with our custom extension
-    const rawHtml = marked.parse(protectedContent, { gfm: true, breaks: true, mangle: false, smartypants: false });
-    return unprotectHtml(rawHtml);
+    const rawHtml = marked.parse(protectedContent, { 
+        gfm: true, 
+        breaks: true, 
+        mangle: false, 
+        headerIds: false,
+        smartypants: false 
+    });
+    
+    // Once and for all: Isolated the output from the host UI
+    return sanitizeDangerousTags(unprotectHtml(rawHtml));
 };
 
 // New helper function to tokenize non-code parts

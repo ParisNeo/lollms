@@ -386,7 +386,6 @@ async def register_new_user(user_data: UserCreatePublic, db: Session = Depends(g
         is_admin=False,
         lollms_model_name=settings.get("default_lollms_model_name"),
         safe_store_vectorizer=settings.get("default_safe_store_vectorizer"),
-        llm_ctx_size=settings.get("default_llm_ctx_size"),
         llm_temperature=settings.get("default_llm_temperature"),
         first_login_done=False, # CHANGED to False so the Terms modal appears
         user_ui_level=settings.get("default_user_ui_level", 0),
