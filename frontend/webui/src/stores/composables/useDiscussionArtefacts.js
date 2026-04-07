@@ -107,6 +107,27 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         await apiClient.put(`/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}`, payload);
         await fetchArtefacts(discussionId);
     }
+
+    async function renameArtefact({ discussionId, artefactTitle, newTitle }) {
+        // Double-encode to ensure title characters like dots don't trigger static file handlers
+        const encodedTitle = encodeURIComponent(artefactTitle)
+            .replace(/\./g, '%2E')
+            .replace(/%/g, '%25');
+
+        await apiClient.put(`/api/discussions/${discussionId}/artefacts/${encodedTitle}/rename`, {
+            new_title: newTitle
+        });
+        
+        // Refresh local list
+        await fetchArtefacts(discussionId);
+        
+        // If this file was open in the workspace, update the UI title ref
+        if (uiStore.activeSplitArtefactTitle === artefactTitle) {
+            uiStore.activeSplitArtefactTitle = newTitle;
+        }
+        
+        uiStore.addNotification(`Renamed to '${newTitle}'`, 'success');
+    }
     
     async function deleteArtefact({ discussionId, artefactTitle }) {
         try {
@@ -375,6 +396,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
 
     return {
         revertArtefact,
+        renameArtefact,
         fetchArtefacts,
         addArtefact,
         createManualArtefact,

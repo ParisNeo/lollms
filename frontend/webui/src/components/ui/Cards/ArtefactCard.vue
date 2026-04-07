@@ -31,13 +31,6 @@ const isLoadedToDataZone = computed(() => {
   return dataZoneStore.isArtefactLoaded(props.artefactGroup.id);
 });
 
-function handleRename() {
-  uiStore.openModal('renameArtefact', {
-    discussionId: discussionsStore.currentDiscussionId,
-    artefact: props.artefactGroup
-  });
-}
-
 const currentType = computed(() => {
     // Get type from the first (latest) version
     return props.artefactGroup.versions[0]?.artefact_type || 'file';
@@ -46,6 +39,13 @@ const currentType = computed(() => {
 function handleView() {
     uiStore.activeSplitArtefactTitle = props.artefactGroup.title;
     if (!uiStore.isDataZoneVisible) uiStore.isDataZoneVisible = true;
+}
+
+function handleRename() {
+    uiStore.openModal('renameArtefact', {
+        artefactTitle: props.artefactGroup.title,
+        discussionId: discussionsStore.currentDiscussionId
+    });
 }
 
 async function handleDelete() {
@@ -125,16 +125,17 @@ async function toggleLoad() {
         <button @click.stop="handleDownload" class="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download">
             <IconArrowDownTray class="w-5 h-5" />
         </button>
-        
+
+
         <!-- Advanced Actions Dropdown -->
-        <DropdownMenu icon="menu" buttonClass="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Actions">
+        <DropdownMenu icon="menu" buttonClass="p-2 text-gray-400 hover:text-gray-900 dark:hover:white transition-colors" title="Actions">
             <button @click="toggleLoad" class="menu-item">
                 <IconRefresh class="w-4 h-4 mr-3" :class="{'text-green-500': isLoadedToDataZone}"/> 
                 <span>{{ isLoadedToDataZone ? 'Unload from Context' : 'Load to Context' }}</span>
             </button>
             <button @click="handleRename" class="menu-item">
-                <IconPencil class="w-4 h-4 mr-3 text-blue-500"/> 
-                <span>Rename / Change Type</span>
+                <IconPencil class="w-4 h-4 mr-3" />
+                <span>Rename</span>
             </button>
             <div class="menu-divider"></div>
             <button @click="handleDelete" class="menu-item text-red-500">

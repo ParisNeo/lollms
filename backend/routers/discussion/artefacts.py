@@ -109,6 +109,9 @@ class StackOverflowImportRequest(BaseModel):
     language: str = "en"
     auto_load: bool = True
 
+class ArtefactRenameRequest(BaseModel):
+    new_title: str
+
 def _map_artefact_for_ui(art: dict, discussion_id: str = None) -> dict:
     """
     Standardizes Artefact metadata for the UI.
@@ -1352,3 +1355,61 @@ def build_artefacts_router(router: APIRouter):
             owner_username=current_user.username
         )
         return task
+
+    @router.put("/{discussion_id}/artefacts/{artefact_title}/rename")
+    async def rename_discussion_artefact(
+        discussion_id: str,
+        artefact_title: str,
+        payload: ArtefactRenameRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        from urllib.parse import unquote
+        old_title = unquote(artefact_title)
+        new_title = payload.new_title.strip()
+        
+        if not new_title:
+            raise HTTPException(status_code=400, detail="New title cannot be empty.")
+            
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
+        # Prevent collisions
+        if discussion.get_artefact(title=new_title):
+             raise HTTPException(status_code=400, detail=f"An artefact named '{new_title}' already exists.")
+
+        try:
+            if 'artefacts' in discussion.metadata:
+                # 1. Update versioned artefacts metadata
+                found = False
+                for art in discussion.metadata['artefacts']:
+                    if art['title'] == old_title:
+                        art['title'] = new_title
+                        found = True
+                
+                if not found:
+                    raise HTTPException(status_code=404, detail="Artefact not found.")
+                
+                # 2. Update source field in global discussion images (for vision anchors)
+                if hasattr(discussion, 'images') and discussion.images:
+                    for img in discussion.images:
+                        if img.get('source') == old_title:
+                            img['source'] = new_title
+
+                # 3. Update visual references in message content strings
+                all_msgs = discussion.db_manager.get_all_messages(discussion_id)
+                old_anchor = f'id="{old_title}::'
+                new_anchor = f'id="{new_title}::'
+                for m in all_msgs:
+                    if old_anchor in m.content:
+                        m.content = m.content.replace(old_anchor, new_anchor)
+                        discussion.db_manager.update_message(m)
+
+                # Persist changes
+                discussion.set_metadata_item('artefacts', discussion.metadata['artefacts'])
+                discussion.commit()
+                return {"message": "Artefact renamed successfully.", "new_title": new_title}
+            else:
+                raise HTTPException(status_code=404, detail="No artefacts found.")
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))

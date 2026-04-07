@@ -74,6 +74,31 @@ function wrapNakedCode(text) {
     return text;
 }
 
+/**
+ * Ensures markdown tables have proper spacing before and after to be recognized by the parser.
+ */
+function normalizeTables(text) {
+    if (!text || typeof text !== 'string') return text;
+    const tableSeparatorRegex = /^(\|?\s*:?-+:?\s*\|?)+$/gm;
+    if (!tableSeparatorRegex.test(text)) return text;
+
+    const lines = text.split('\n');
+    const result = [];
+    
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.match(tableSeparatorRegex)) {
+            if (i > 0 && lines[i-1].includes('|')) {
+                if (i > 1 && lines[i-2].trim() !== '' && !lines[i-2].includes('|')) {
+                    result.splice(result.length - 1, 0, '');
+                }
+            }
+        }
+        result.push(line);
+    }
+    return result.join('\n');
+}
+
 function sanitizeDangerousTags(html) {
     if (!html) return html;
     // 1. Strip ALL style and script blocks from the main UI. 
@@ -97,7 +122,15 @@ export function parsedMarkdown(content) {
     if (typeof content !== 'string') return '';
     
     const wrappedContent = wrapNakedCode(content);
-    const normalizedContent = normalizeTables(wrappedContent);
+    
+    // Safety guard for pre-processing
+    let normalizedContent = wrappedContent;
+    try {
+        normalizedContent = normalizeTables(wrappedContent);
+    } catch (e) {
+        console.warn("Markdown pre-processing (tables) failed:", e);
+    }
+
     const protectedContent = protectMath(normalizedContent);
     
     // Use marked with our custom extension

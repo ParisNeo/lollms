@@ -139,10 +139,10 @@ function populateForm() {
     forceAiResponseLanguage.value = !!user.value.force_ai_response_language;
     imageGenerationEnabled.value = !!user.value.image_generation_enabled;
     imageGenerationSystemPrompt.value = user.value.image_generation_system_prompt || '';
-    image_annotation_enabled.value = !!user.value.image_annotation_enabled;
-    image_editing_enabled.value = !!user.value.image_editing_enabled;
+    imageAnnotationEnabled.value = !!user.value.image_annotation_enabled;
+    imageEditingEnabled.value = !!user.value.image_editing_enabled;
     inlineWidgetsEnabled.value = user.value.inline_widgets_enabled ?? true;
-    slide_maker_enabled.value = !!user.value.slide_maker_enabled;
+    slideMakerEnabled.value = !!user.value.slide_maker_enabled;
     activateGeneratedImages.value = !!user.value.activate_generated_images;
     noteGenerationEnabled.value = !!user.value.note_generation_enabled;
     memoryEnabled.value = !!user.value.memory_enabled;
@@ -152,6 +152,7 @@ function populateForm() {
     formBuildingEnabled.value = user.value.form_building_enabled ?? true;
     reasoningActivation.value = !!user.value.reasoning_activation;
     reasoningEffort.value = user.value.reasoning_effort || 'medium';
+    reasoningSummary.value = !!user.value.reasoning_summary;
     rlmEnabled.value = !!user.value.rlm_enabled;
     maxImageWidth.value = user.value.max_image_width ?? -1;
     maxImageHeight.value = user.value.max_image_height ?? -1;
@@ -203,7 +204,9 @@ watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
-    memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, formBuildingEnabled, reasoningActivation, reasoningEffort, rlmEnabled, maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
+    memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, formBuildingEnabled, 
+    reasoningActivation, reasoningEffort, reasoningSummary, rlmEnabled, 
+    maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
     googleApiKey, googleCseId, webSearchEnabled, webSearchDeepAnalysis, webSearchProviders,
     herdModeEnabled, herdRounds, herdPrecodeParticipants, herdPostcodeParticipants, 
     streetViewEnabled, googleDriveEnabled, googleCalendarEnabled, googleGmailEnabled, googleClientSecret, schedulerEnabled,

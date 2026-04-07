@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-07 09:49]
+
+- feat: add StackOverflow import and fun fact asset upload support
+
 ## [2026-04-03 12:45]
 
 - feat(artefacts): enhance discussion artefact handling and rebuild UI

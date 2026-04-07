@@ -86,6 +86,16 @@ async def upload_fun_fact_asset(
     if file.content_type not in allowed_types:
         raise HTTPException(status_code=400, detail="Unsupported image type.")
 
+    # 1.1 Deep Content Verification (Prevention of Spoofing)
+    if file.content_type != "image/svg+xml":
+        try:
+            file.file.seek(0)
+            img = Image.open(file.file)
+            img.verify()
+            file.file.seek(0)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid image content detected. Spoofing attempt blocked.")
+
     # 2. Setup Secure Paths
     from backend.config import APP_DATA_DIR
     base_dir = (APP_DATA_DIR / "assets" / "fun_facts").resolve()
@@ -1002,6 +1012,13 @@ async def upload_chat_image(
         if file.content_type not in ALLOWED_MIME_TYPES:
              raise HTTPException(status_code=400, detail=f"Invalid file type: {file.content_type}. Only images are allowed.")
         
+        # 1.1 Size Limit check
+        file.file.seek(0, os.SEEK_END)
+        size = file.file.tell()
+        file.file.seek(0)
+        if size > 10 * 1024 * 1024:  # 10MB limit
+            raise HTTPException(status_code=400, detail=f"File {file.filename} is too large (max 10MB).")
+
         # 2. Content Verification using PIL
         try:
             file.file.seek(0)
