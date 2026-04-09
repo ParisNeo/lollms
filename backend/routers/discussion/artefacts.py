@@ -961,13 +961,22 @@ def build_artefacts_router(router: APIRouter):
             
             # 6. Save using the internal manager
             artefact_name = f"Youtube_Transcript_{video_id}.md"
-            discussion.update_artefact(
-                artefact_name,
-                full_content,
-                author=current_user.username,
-                active=request.auto_load
-            )
-            
+            latest = discussion.artefacts.get(artefact_name)
+            if latest:
+                discussion.update_artefact(
+                    artefact_name,
+                    full_content,
+                    author=current_user.username,
+                    active=request.auto_load
+                )
+            else:
+                discussion.add_artefact(
+                    artefact_name,
+                    full_content,
+                    author=current_user.username,
+                    active=request.auto_load
+                )
+
             # Activation is already handled by the 'active' parameter logic (default is True in add_artefact)
             
             discussion.commit()
