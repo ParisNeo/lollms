@@ -28,7 +28,8 @@ const fileExtension = computed(() => {
 });
 
 const isLoadedToDataZone = computed(() => {
-  return dataZoneStore.isArtefactLoaded(props.artefactGroup.id);
+    const versionData = props.artefactGroup.versions.find(v => v.version === selectedVersion.value);
+    return versionData ? versionData.is_loaded : false;
 });
 
 const currentType = computed(() => {

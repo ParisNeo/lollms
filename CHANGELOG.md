@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-13 03:14]
+
+- rebuild: regenerate frontend bundles and update artefact handling
+
 ## [2026-04-09 23:38]
 
 - fix(artefacts): use add_artefact for new youtube transcripts instead of update_artefact

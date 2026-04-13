@@ -200,11 +200,11 @@ def build_artefacts_router(router: APIRouter):
         discussion_id: str,
         file: UploadFile = File(...),
         extract_images: bool = Form(True),
+        pdf_mode: str = Form("text_and_embedded_images"),
         auto_load: bool = Form(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db) 
     ):
-        print(f"extract_images: {extract_images}")
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
@@ -230,30 +230,42 @@ def build_artefacts_router(router: APIRouter):
                 }
 
                 if extension == ".pdf":
-                    # --- NEW: High-Fidelity Multi-Modal PDF Ingestion ---
                     pdf_doc = fitz.open(stream=content_bytes, filetype="pdf")
                     pages_md = []
-                    rendered_page_images = []
+                    extracted_images = []
                     
                     for i, page in enumerate(pdf_doc):
-                        # 1. Render page to image for the vision model
-                        pix = page.get_pixmap(dpi=150)
-                        img_bytes = pix.tobytes("png")
-                        rendered_page_images.append(base64.b64encode(img_bytes).decode('utf-8'))
+                        page_md = f"## Page {i+1}\n\n"
                         
-                        # 2. Extract text from page
-                        page_text = page.get_text().strip()
-                        
-                        # 3. Create multimodal section with anchor
-                        # The ID format matches Title::PageIndex for resolution
-                        pages_md.append(
-                            f"## Page {i+1}\n\n"
-                            f'<artefact_image id="{title}::{i}" />\n\n'
-                            f"{page_text}"
-                        )
-                    
+                        if pdf_mode == "render_pages":
+                            pix = page.get_pixmap(dpi=150)
+                            img_bytes = pix.tobytes("png")
+                            img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+                            extracted_images.append(img_b64)
+                            page_md += f'<artefact_image id="{title}::{len(extracted_images)-1}" />\n\n'
+                            
+                        elif pdf_mode in ["embedded_images", "text_and_embedded_images"]:
+                            img_list = page.get_images(full=True)
+                            for img_info in img_list:
+                                xref = img_info[0]
+                                try:
+                                    base_image = pdf_doc.extract_image(xref)
+                                    img_b64 = base64.b64encode(base_image["image"]).decode('utf-8')
+                                    extracted_images.append(img_b64)
+                                    page_md += f'<artefact_image id="{title}::{len(extracted_images)-1}" />\n\n'
+                                except Exception as e:
+                                    pass
+
+                        if pdf_mode != "embedded_images":
+                            page_text = page.get_text().strip()
+                            if page_text:
+                                page_md += f"{page_text}\n\n"
+                                
+                        if page_md.strip() != f"## Page {i+1}":
+                            pages_md.append(page_md.strip())
+
                     content = "\n\n---\n\n".join(pages_md)
-                    images = rendered_page_images
+                    images = extracted_images
                     pdf_doc.close()
 
                 elif extension == ".docx":

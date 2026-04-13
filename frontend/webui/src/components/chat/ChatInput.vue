@@ -88,6 +88,7 @@ const isUploading = ref(false);
 const fileInput = ref(null);
 const imageInput = ref(null);
 const isRecording = ref(false);
+const currentUploadPdfMode = ref('text_and_embedded_images');
 const userPromptSearchTerm = ref('');
 const inputTokenCount = ref(0);
 let tokenizeInputDebounceTimer = null;
@@ -672,7 +673,7 @@ async function toggleArtefactLoad(file) {
 }
 async function removeArtefact(file) { if (!activeDiscussion.value) return; const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' }); if (confirmed.confirmed) await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title }); }
 function removeStagedImage(index) { const removed = stagedImages.value.splice(index, 1)[0]; if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl); }
-function triggerFileUpload() { fileInput.value?.click(); }
+function triggerFileUpload(mode = 'text_and_embedded_images') { currentUploadPdfMode.value = mode; fileInput.value?.click(); }
 function triggerImageUpload() { imageInput.value?.click(); }
 async function handleFilesInput(files) {
     if (files.length === 0) return;
@@ -681,7 +682,7 @@ async function handleFilesInput(files) {
     if (images.length > 0) images.forEach(file => { stagedImages.value.push({ file, previewUrl: URL.createObjectURL(file) }); });
     if (others.length > 0) {
         if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
-        if (activeDiscussion.value) { isUploading.value = true; try { await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true }))); } finally { isUploading.value = false; } }
+        if (activeDiscussion.value) { isUploading.value = true; try { await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true, pdfMode: currentUploadPdfMode.value }))); } finally { isUploading.value = false; } }
     }
 }
 async function handleFileUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files); event.target.value = ''; }
@@ -971,7 +972,14 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                 <div class="pb-1 pl-1">
                     <DropdownMenu icon="plus" collection="" title="Add" buttonClass="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative">
                          <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
-                        <button @click="triggerFileUpload" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Add File</span></button>
+                        <DropdownSubmenu title="Add Document" icon="file-text" collection="ui">
+                            <div class="p-1 min-w-[220px]">
+                                <button @click="triggerFileUpload('text_and_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
+                                <button @click="triggerFileUpload('text_only')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
+                                <button @click="triggerFileUpload('embedded_images')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
+                                <button @click="triggerFileUpload('render_pages')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-pink-500" /> <span>Render Pages (For Scans)</span></button>
+                            </div>
+                        </DropdownSubmenu>
                         <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>
                         <button @click="handleCreateManualArtefact" class="menu-item"><IconFilePlus class="w-4 h-4 mr-3 text-green-500" /> <span>Create Document</span></button>
                         <button @click="handleImportFromInternet" class="menu-item"><IconWeb class="w-4 h-4 mr-3 text-cyan-500" /> <span>Import from Internet</span></button>

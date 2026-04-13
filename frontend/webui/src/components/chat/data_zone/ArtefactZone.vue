@@ -18,6 +18,7 @@ import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
 import IconGather from '../../../assets/icons/IconGather.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconFolder from '../../../assets/icons/IconFolder.vue';
+import IconPhoto from '../../../assets/icons/IconPhoto.vue';
 
 const props = defineProps({
     notebookId: { type: String, default: null }
@@ -32,6 +33,7 @@ const isUploadingArtefact = ref(false);
 const isArtefactsCollapsed = ref(false);
 const artefactFileInput = ref(null);
 const isDraggingFile = ref(false);
+const currentUploadPdfMode = ref('text_and_embedded_images');
 
 const idToUse = computed(() => props.notebookId || discussionsStore.activeDiscussion?.id);
 
@@ -76,7 +78,10 @@ function handleCreateArtefact() {
     if (idToUse.value) uiStore.openModal('createArtefact', { discussionId: idToUse.value });
 }
 
-function triggerArtefactFileUpload() { artefactFileInput.value?.click(); }
+function triggerArtefactFileUpload(mode = 'text_and_embedded_images') { 
+    currentUploadPdfMode.value = mode;
+    artefactFileInput.value?.click(); 
+}
 
 function handleImportFromUrl() {
     const url = prompt("Please enter the URL to import:");
@@ -89,7 +94,7 @@ async function handleArtefactFileUpload(event) {
 
     isUploadingArtefact.value = true;
     try {
-        await Promise.all(files.map(file => discussionsStore.addArtefact({ discussionId: idToUse.value, file, extractImages: true })));
+        await Promise.all(files.map(file => discussionsStore.addArtefact({ discussionId: idToUse.value, file, extractImages: true, pdfMode: currentUploadPdfMode.value })));
     } finally {
         isUploadingArtefact.value = false;
         if (artefactFileInput.value) artefactFileInput.value.value = '';
@@ -146,8 +151,15 @@ function openArtefactInWorkspace(group) {
                 <IconPlus class="w-4 h-4 text-emerald-500 cursor-pointer" @click="handleCreateArtefact" />
                 <span class="text-xs font-bold uppercase tracking-widest text-gray-500">Repository</span>
             </div>
-            <div class="flex gap-1">
-                 <button @click="triggerArtefactFileUpload" class="p-1.5 hover:text-blue-500 transition-colors" title="Upload Files"><IconArrowUpTray class="w-4 h-4" /></button>
+            <div class="flex items-center gap-1">
+                 <DropdownMenu icon="arrow-up-tray" title="Upload Files" buttonClass="p-1.5 hover:text-blue-500 transition-colors">
+                     <div class="p-1 min-w-[220px]">
+                         <button @click="triggerArtefactFileUpload('text_and_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
+                         <button @click="triggerArtefactFileUpload('text_only')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
+                         <button @click="triggerArtefactFileUpload('embedded_images')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
+                         <button @click="triggerArtefactFileUpload('render_pages')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-pink-500" /> <span>Render Pages (For Scans)</span></button>
+                     </div>
+                 </DropdownMenu>
                  <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 transition-colors" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
                  <button @click="handleRefreshArtefacts" class="p-1.5 hover:text-blue-500 transition-colors" title="Refresh List"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" /></button>
             </div>

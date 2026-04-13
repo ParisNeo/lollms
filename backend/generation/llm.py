@@ -1619,8 +1619,13 @@ def build_llm_generation_router(router: APIRouter):
 
                     payload = payload_map.get(mtype_val)
                     if payload:
+                        # Unified Processing Protocol Integration
+                        if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
+                            payload["type"] = params["type"]
+                            payload["processing_type"] = params.get("processing_type")
+
                         # Inject discussion context for secondary streams to trigger frontend refreshes
-                        if mtype_val >= 38: # All knowledge/form/widget events
+                        if mtype_val >= 38 or (params and "processing_type" in params): 
                             payload['discussion_id'] = discussion_id
 
                         # Only append meaningful user-facing events to the persistent log

@@ -485,6 +485,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
         attachedSkills, ttsState, generationState, currentPlayingAudio, imageGenerationSystemPrompt,
+        activeUpdatingArtefacts, liveArtefactBuffers,
 
         // Computeds
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,

@@ -47,11 +47,12 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function addArtefact({ discussionId, file, extractImages }) {
+    async function addArtefact({ discussionId, file, extractImages, pdfMode = 'text_and_embedded_images' }) {
         if (!discussionId) return;
         const formData = new FormData();
         formData.append('file', file);
         formData.append('extract_images', extractImages ? 'true' : 'false');
+        formData.append('pdf_mode', pdfMode);
 
         try {
             // CRITICAL: Explicitly set artefact_type to 'file' for uploads

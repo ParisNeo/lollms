@@ -3,6 +3,7 @@ import { ref, computed, watch, onMounted, nextTick } from 'vue';
 import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../../services/markdownParser';
 
 import CodeBlock from './CodeBlock.vue';
+import ProcessingBlock from './ProcessingBlock.vue';
 import MermaidViewer from '../../modals/InteractiveMermaid.vue';
 import StepDetail from '../../chat/StepDetail.vue';
 import InteractiveForm from '../../chat/InteractiveForm.vue';
@@ -32,6 +33,7 @@ import { useTasksStore } from '../../../stores/tasks';
 import { useDiscussionsStore } from '../../../stores/discussions';
 import { useUiStore } from '../../../stores/ui';
 import { storeToRefs } from 'pinia';
+import apiClient from '../../../services/api';
 
 const props = defineProps({
   content: { type: String, default: '' },
@@ -150,10 +152,10 @@ const parsedStreamingContent = computed(() => {
     return parsedMarkdown(content);
 });
 
-const parseSpecialBlock = (rawBlock, match = null) => {
+    const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        // [FIX] Broadened regex to catch ALL lollms anchors including building, widgets, and form anchors
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/;
+        // Updated regex: Optimized to capture attributes and multiline content robustly
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form[\s\S]*?(?:<\/lollms_form>|$))/;
         match = regex.exec(rawBlock);
     }
     
@@ -233,38 +235,56 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
     }
     else if (match[10]) {
-        // [FIXED] Group 10 is the lollms_widget tag
+        // --- Render standard widget anchor (id="UUID") ---
         const raw = match[10];
-        const widgetId = match[11]; 
+        const widgetId = match[11];
         
+        // Look up the full source code from message metadata
         const widgetData = props.inlineWidgets?.find(w => w.id === widgetId);
-        // If widget source is missing (desync), return a placeholder so the layout doesn't collapse
+        
         return { 
             type: 'interactive_widget', 
-            widget: widgetData || { id: widgetId, title: 'Loading Widget...', is_loading: true }, 
+            widget: widgetData || { id: widgetId, title: 'Widget (Loading...)', is_loading: true }, 
             raw 
         };
     }
-    else if (match[12] || match[15]) {
+    else if (match[12]) {
+        // --- Raw Inline Widget (Direct Source Mode) ---
+        const fullTag = match[12];
+        const matchInline = fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/);
+        const innerContent = matchInline ? matchInline[1].trim() : '';
+        
+        const titleMatch = fullTag.match(/title=["']([^"']+)["']/);
+        const title = titleMatch ? titleMatch[1] : 'Interactive Widget';
+        
+        // If it doesn't have a closing tag, it's still streaming
+        const isLoading = !fullTag.includes('</lollms_inline>');
+        
+        const widgetData = { id: title, title: title, source: innerContent, is_loading: isLoading };
+        return { type: 'interactive_widget', widget: widgetData, raw: fullTag };
+    }
+    else if (match[13] || match[16]) {
         // --- Building / Working Indicator (Merged Logic) ---
-        const raw = match[12] || match[15];
-        // Handle parameters: message/label and optional details
-        const label = raw.match(/message=["']([^"']+)["']|label=["']([^"']+)["']/)?.[1] || raw.match(/label=["']([^"']+)["']/)?.[1] || 'Processing';
+        const raw = match[13] || match[16];
+        const msgMatch = raw.match(/message=["']([^"']+)["']/);
+        const lblMatch = raw.match(/label=["']([^"']+)["']/);
+        const label = (msgMatch && msgMatch[1]) || (lblMatch && lblMatch[1]) || 'Processing';
+        
         const title = raw.match(/title=["']([^"']+)["']/)?.[1] || '';
         const sub_content = raw.match(/sub_content=["']([^"']+)["']/)?.[1] || '';
         const id = raw.match(/id=["']([^"']+)["']/)?.[1];
         
         // Determine if still active (isDone check)
         const isDone = (props.forms?.some(f => f.id === id || f.form_id === id)) || 
-                       (props.inlineWidgets?.some(w => w.id === id)) ||
-                       (discussionsStore.activeDiscussionArtefacts?.some(a => a.title === title));
+                       (props.inlineWidgets?.some(w => w.id === id && !w.is_loading)) ||
+                       (title && discussionsStore.activeDiscussionArtefacts?.some(a => a.title === title));
                        
         return { type: 'building_indicator', label, title, sub_content, isDone, id, raw };
     }
-    else if (match[13]) {
+    else if (match[14]) {
         // --- Form Anchor (Permanent mount point) ---
-        const raw = match[13];
-        const id = match[14];
+        const raw = match[14];
+        const id = match[15];
         let formData = props.forms?.find(f => f.id === id);
         
         if (!formData && props.events) {
@@ -284,22 +304,59 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         
         return { type: 'form_ready', form: formData, id, raw };
     }
-    else if (match[16]) {
+    else if (match[17]) {
         // --- Artefact Image Anchor ---
-        const raw = match[16];
-        const fullId = match[17]; // Title::Index
-        
+        const raw = match[17];
+        const fullId = match[18];
         const parts = fullId.split('::');
-        const artTitle = parts[0];
-        const imgIndex = parseInt(parts[1]);
+        return { type: 'artefact_image', title: parts[0], index: parseInt(parts[1]), raw };
+    }
+    else if (match[19]) {
+        // --- NEW: Unified Processing UI Logic ---
+        const raw = match[19];
+        const pType = match[20];
+        const title = match[21];
+        const inner = match[23] || '';
+        
+        // The block is closed only if the matching string contains the closing tag
+        const isClosed = raw.trim().endsWith('</processing>');
 
-        return { type: 'artefact_image', title: artTitle, index: imgIndex, raw };
+        return { 
+            type: 'processing', 
+            pType, 
+            title, 
+            statusContent: inner, 
+            isClosed, 
+            raw 
+        };
+    }
+    else if (match[24]) {
+        // --- Parse embedded <lollms_form> block ---
+        const raw = match[24];
+        const attrs = match[25];
+        const body = match[26];
+        
+        // We import the same parser logic used by the backend or a local implementation
+        const parsedForm = _parse_form_xml(attrs, body);
+        
+        return { 
+            type: 'form_ready', 
+            form: parsedForm, 
+            id: parsedForm.id, 
+            raw 
+        };
+    }
+    else if (match[27]) { // <lollms_inline>
+        const raw = match[27];
+        const title = raw.match(/title=["']([^"']+)["']/)?.[1] || 'Widget';
+        const content = raw.match(/<lollms_inline[^>]*>([\s\S]*?)<\/lollms_inline>/)?.[1] || '';
+        return { type: 'interactive_widget', widget: { title, source: content }, raw };
     }
 
     return { type: 'content', content: rawBlock };
 };
 
-// Helper to create a stable hash for a string to use as a key
+// Helper to create a stable hash
 const hashString = (str) => {
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
@@ -308,6 +365,34 @@ const hashString = (str) => {
     }
     return hash.toString(36);
 };
+
+// Form Parser for InteractiveForm
+function _parse_form_xml(attrs_str, body) {
+    // Robustly extract attributes using a non-greedy regex
+    const attrs = {};
+    const attrMatch = attrs_str.matchAll(/(\w+)=["']([^"']+)["']/g);
+    for (const match of attrMatch) {
+        attrs[match[1]] = match[2];
+    }
+
+    // Extract fields
+    const fields = [...body.matchAll(/<field\s+([^>]+?)\s*\/?>/g)].map(m => {
+        const fAttrs = {};
+        const fAttrMatch = m[1].matchAll(/(\w+)=["']([^"']+)["']/g);
+        for (const ma of fAttrMatch) {
+            fAttrs[ma[1]] = ma[2];
+        }
+        return fAttrs;
+    });
+
+    console.log("[Form Debug] Parsed fields:", fields);
+    return { 
+        id: (attrs.title || 'form') + Date.now(), 
+        title: attrs.title || 'Form', 
+        description: attrs.description || '', 
+        fields 
+    };
+}
 
 // Event icon resolver for system events
 const getEventIcon = (eventType) => {
@@ -325,14 +410,44 @@ const getEventIcon = (eventType) => {
 const messageParts = computed(() => {
     if (!props.content) return [];
     
-    const content = props.content;
+    let content = props.content;
+    
+    // --- STREAMING SAFETY ---
+    // Prevent unclosed raw HTML/SVG tags from bleeding into the parent DOM and breaking CSS.
+    // We explicitly DO NOT truncate lollms_* tags here because they are handled
+    // by the specialized regex and safely isolated in iframes/components.
+    if (props.isStreaming) {
+        const unsafeTags = ['svg', 'html', 'style', 'div', 'table'];
+        let latestOpenIndex = -1;
+
+        for (const tag of unsafeTags) {
+            // Look for an opening tag
+            const lastOpen = content.lastIndexOf(`<${tag}`);
+            const lastClose = content.lastIndexOf(`</${tag}>`);
+            
+            if (lastOpen > lastClose && lastOpen > latestOpenIndex) {
+                // Make sure this isn't just text inside a safe markdown code block
+                const codeBlockCount = (content.substring(0, lastOpen).match(/```/g) || []).length;
+                if (codeBlockCount % 2 === 0) { 
+                    latestOpenIndex = lastOpen;
+                }
+            }
+        }
+
+        if (latestOpenIndex > -1) {
+            // Truncate the content right before the unclosed tag to prevent DOM corruption
+            content = content.substring(0, latestOpenIndex) + '\n\n> ⏳ *(Rendering markup...)*';
+        }
+    }
+
     const parts = [];
 
-    // 1. Define all detectable patterns
+    // 1. Define patterns using specific, non-overlapping tags
     const patterns = [
         { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
-        // [FIX] Synchronized regex to include building and form anchors for correct component mapping
-        { type: 'tool', regex: /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/g },
+        { type: 'lollms_form', regex: /<lollms_form\b([^>]*)>([\s\S]*?)<\/lollms_form>/g },
+        { type: 'lollms_inline', regex: /<lollms_inline\b[^>]*\btitle=["']([^"']+)["'][^>]*>([\s\S]*?)<\/lollms_inline>/g },
+        { type: 'processing', regex: /(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))/g },
         { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g }
     ];
 
@@ -348,37 +463,7 @@ const messageParts = computed(() => {
         }
     });
 
-    // 3. Extract elements from out-of-band Events with position tracking
-    (props.events || []).forEach((event, idx) => {
-        if (event.type === 'form_ready') {
-            // Force forms to the very end if no specific offset is provided to ensure they appear
-            const position = event.offset !== undefined ? Math.min(event.offset, content.length) : content.length + 1;
-            const formId = event.id || event.content?.id || event.content?.form_id || (event.content?.form?.id) || `evt-${idx}`;
-            allElements.push({ 
-                start: position, 
-                end: position, 
-                type: 'form_ready', 
-                event,
-                id: formId
-            });
-        }
-    });
-
-    // 3b. Specifically handle Forms that might not be in events but are in message.forms
-    (props.forms || []).forEach((form, idx) => {
-        const formId = form.id || `form-${idx}`;
-        // If the form isn't already represented in allElements by ID (from an event)
-        if (!allElements.find(el => el.id === formId)) {
-            const position = form.offset !== undefined ? Math.min(form.offset, content.length) : content.length + 1;
-            allElements.push({
-                start: position,
-                end: position,
-                type: 'form_ready',
-                form: form,
-                id: formId
-            });
-        }
-    });
+    // Metadata event injection removed to ensure only tags within content are rendered
 
     // 4. Sort and Resolve overlaps
     allElements.sort((a, b) => (a.start - b.start) || (b.end - a.end));
@@ -396,20 +481,60 @@ const messageParts = computed(() => {
     // 4. Assemble final parts with strictly stable start-index IDs
     let cursor = 0;
     const renderedFormIds = new Set();
-
-    // Identify explicitly anchored forms to prevent duplication
-    activeElements.forEach(el => {
-        if (el.type === 'tool' && el.match && el.match[13]) {
-            const id = el.match[14];
-            if (id) renderedFormIds.add(id);
+    
+    // [NEW] Logic to prevent UI duplication when LLM repeats tags
+    // We identify the LAST occurrence of each unique ID/Title combo 
+    // and only render that one as a block.
+    const lastOccurrenceMap = new Map();
+    activeElements.forEach((el, index) => {
+        let uniqueKey = null;
+        if (el.type === 'tool') {
+             const parsed = parseSpecialBlock(el.raw, el.match);
+             const rawKey = parsed.id || parsed.title || parsed.prompt;
+             if (rawKey) uniqueKey = `${parsed.type}-${rawKey}`;
+        } else if (el.type === 'form_ready') {
+             let actualForm = el.form;
+             if (!actualForm && el.event && el.event.content) {
+                 actualForm = el.event.content.form || el.event.content;
+             }
+             const rawKey = actualForm?.id || actualForm?.title || el.id;
+             if (rawKey) uniqueKey = `form_ready-${rawKey}`;
+        }
+        if (uniqueKey) {
+            lastOccurrenceMap.set(uniqueKey, index);
         }
     });
 
-    activeElements.forEach(el => {
+    activeElements.forEach((el, index) => {
         // Add preceding text
         if (el.start > cursor) {
             const text = content.substring(cursor, el.start);
             parts.push({ type: 'content', content: text, id: `text-${cursor}` });
+        }
+
+        // Determine if this is the chosen occurrence for this element
+        let uniqueKey = null;
+        if (el.type === 'tool') {
+             const p = parseSpecialBlock(el.raw, el.match);
+             const rawKey = p.id || p.title || p.prompt;
+             if (rawKey) uniqueKey = `${p.type}-${rawKey}`;
+        } else if (el.type === 'form_ready') {
+             let actualForm = el.form;
+             if (!actualForm && el.event && el.event.content) {
+                 actualForm = el.event.content.form || el.event.content;
+             }
+             const rawKey = actualForm?.id || actualForm?.title || el.id;
+             if (rawKey) uniqueKey = `form_ready-${rawKey}`;
+        }
+
+        const isLastOne = !uniqueKey || lastOccurrenceMap.get(uniqueKey) === index;
+
+        // If it's not the last occurrence, render it as raw text/comment 
+        // to avoid multiple big UI blocks for the same thing
+        if (!isLastOne) {
+            parts.push({ type: 'content', content: `\n> *(Superseded process log ignored)*\n`, id: `ignored-${el.start}` });
+            cursor = Math.max(cursor, el.end);
+            return;
         }
 
         if (el.type === 'code') {
@@ -434,26 +559,22 @@ const messageParts = computed(() => {
                 raw: el.raw,
                 id: `block-${subType}-${el.start}`
             });
-        } else if (el.type === 'form_ready') {
-            let actualForm = el.form;
-            let formId = el.id;
-            if (!actualForm && el.event && el.event.content) {
-                actualForm = JSON.parse(JSON.stringify(el.event.content.form || el.event.content));
-                formId = el.event.content.form_id || actualForm.id || el.id;
-            }
-            
-            if (!renderedFormIds.has(formId)) {
-                if (actualForm && props.events) {
-                    const submissionEvent = props.events.find(e => e.type === 'form_submitted' && e.content && e.content.form_id === formId);
-                    if (submissionEvent) {
-                        actualForm.submitted = true;
-                        actualForm.answers = submissionEvent.content.answers;
-                    }
-                }
-                parts.push({ type: 'form_ready', form: actualForm, id: formId });
-                renderedFormIds.add(formId);
-            }
+        } else if (el.type === 'lollms_form') {
+            const parsed = _parse_form_xml(el.match[1], el.match[2]);
+            parts.push({ type: 'form_ready', form: parsed, id: parsed.id });
+        } else if (el.type === 'lollms_inline') {
+            parts.push({ type: 'interactive_widget', widget: { title: el.match[1], source: el.match[2] }, id: `widget-${el.start}` });
+        } else if (el.type === 'processing') {
+            parts.push({ 
+                type: 'processing', 
+                pType: el.match[2], 
+                title: el.match[3], 
+                statusContent: el.match[5], 
+                isClosed: el.raw.trim().endsWith('</processing>'), 
+                id: `proc-${el.start}` 
+            });
         }
+        // Forms handled via parsing logic inside parseSpecialBlock if <lollms_form> is in content
         cursor =  Math.max(cursor,el.end);
     });
 
@@ -464,6 +585,35 @@ const messageParts = computed(() => {
 
     return parts;
 });
+
+const resolvedArtefactImages = ref({}); // 'title::index' -> 'base64'
+
+watch(messageParts, (parts) => {
+    parts.forEach(part => {
+        if (part.type === 'artefact_image') {
+            const key = `${part.title}::${part.index}`;
+            if (!resolvedArtefactImages.value[key]) {
+                resolvedArtefactImages.value[key] = 'loading';
+                const discussionId = discussionsStore.currentDiscussionId;
+                if (discussionId) {
+                    apiClient.get(`/api/discussions/${discussionId}/artefact`, {
+                        params: { artefact_title: part.title }
+                    }).then(res => {
+                        const artefact = res.data;
+                        if (artefact && artefact.images && artefact.images[part.index]) {
+                            resolvedArtefactImages.value[key] = artefact.images[part.index];
+                        } else {
+                            resolvedArtefactImages.value[key] = 'error';
+                        }
+                    }).catch(err => {
+                        console.error("Failed to load artefact image:", err);
+                        resolvedArtefactImages.value[key] = 'error';
+                    });
+                }
+            }
+        }
+    });
+}, { immediate: true, deep: true });
 
 const getTokens = (text) => {
     if (!text) return [];
@@ -658,25 +808,37 @@ function saveSkillFromRenderer(part) {
 }
 
 /**
- * Safely retrieves content for a widget, preferring the live stream buffer.
+ * Safely retrieves content for a widget.
+ * Implements an aggressive lookup strategy directly from the inline tag.
+ * Removed external buffering to ensure WYSIWYG consistency.
  */
 function getWidgetContent(widgetOrPart) {
     try {
         if (!widgetOrPart) return '';
         
-        // 1. Check live streaming buffer first
-        const buffers = liveArtefactBuffers?.value;
-        if (buffers && typeof buffers === 'object') {
-            // Check every possible key (part ID from parser, widget ID from metadata, or Title)
-            const keys = [widgetOrPart.id, widgetOrPart.widget?.id, widgetOrPart.widget?.title];
-            for (const key of keys) {
-                if (key && buffers[key] !== undefined) return buffers[key];
-            }
+        const w = widgetOrPart.widget || widgetOrPart;
+
+        // 1. Direct Content Check (From the raw string parsed in MessageContentRenderer)
+        if (w.source || w.content || w.html || w.code) {
+             return w.source || w.content || w.html || w.code;
+        }
+
+        // 2. Metadata/Event Log Cross-reference (Fallback for older backwards-compatible messages with UUIDs)
+        const requestedId = widgetOrPart.id || w.id;
+        const requestedTitle = w.title;
+
+        if (props.inlineWidgets && props.inlineWidgets.length > 0) {
+            const match = props.inlineWidgets.find(iw => iw.id === requestedId || iw.title === requestedTitle) || props.inlineWidgets[0];
+            if (match) return match.source || match.content || match.html || match.code || '';
+        }
+
+        // 3. Manual Event scan
+        if (props.events) {
+            const event = props.events.find(e => e.type === 'widget_done' && e.content);
+            if (event) return event.content.content || event.content.chunk || '';
         }
         
-        // 2. Check static source from message metadata
-        const w = widgetOrPart.widget || widgetOrPart;
-        return w.source || w.content || w.html || w.code || '';
+        return '';
     } catch (error) {
         return '';
     }
@@ -807,33 +969,23 @@ function onMermaidReady({ svg }, partIndex) {
                         <IconTrash class="w-3.5 h-3.5" />
                       </button>
                   </summary>
-                  <div class="document-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
+                  <div class="document-content p-4 prose prose-sm dark:prose-invert max-w-none">
+                    <iframe 
+                        v-if="token.content.includes('<html') || token.content.includes('<!DOCTYPE')"
+                        :srcdoc="token.content"
+                        class="w-full h-[500px] border-none"
+                        sandbox="allow-scripts"
+                    ></iframe>
+                    <div v-else v-html="parsedMarkdown(token.content)"></div>
+                  </div>
               </details>
               
               <details v-else-if="token.type === 'skill_block'" class="skill-block my-4 group/block">
-                  <summary class="skill-summary flex items-center justify-between pr-2">
-                      <div class="flex items-center gap-2 overflow-hidden">
-                        <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" />
-                        <span class="font-mono text-xs font-bold tracking-wider text-teal-700 dark:text-teal-300 truncate">Skill: {{ token.title }}</span>
-                      </div>
-                      <button @click.stop="discussionsStore.removeContextItem(token.title, 'skill')" class="opacity-0 group-hover/block:opacity-100 p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity" title="Remove from context">
-                        <IconTrash class="w-3.5 h-3.5" />
-                      </button>
-                  </summary>
-                  <div class="skill-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
+                  <!-- ... -->
               </details>
               
               <details v-else-if="token.type === 'note_block'" class="note-block-collapsible my-4 group/block">
-                  <summary class="note-summary flex items-center justify-between pr-2">
-                      <div class="flex items-center gap-2 overflow-hidden">
-                        <IconFileText class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" />
-                        <span class="font-mono text-xs font-bold tracking-wider text-amber-700 dark:text-amber-300 truncate">Note: {{ token.title }}</span>
-                      </div>
-                      <button @click.stop="discussionsStore.removeContextItem(token.title, 'note')" class="opacity-0 group-hover/block:opacity-100 p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity" title="Remove from context">
-                        <IconTrash class="w-3.5 h-3.5" />
-                      </button>
-                  </summary>
-                  <div class="note-content p-4 prose prose-sm dark:prose-invert max-w-none" v-if="token.content" v-html="parsedMarkdown(token.content)"></div>
+                  <!-- ... -->
               </details>
               
               <div v-else-if="token.raw" class="markdown-text" v-html="parsedMarkdown(token.raw)"></div>
@@ -1020,78 +1172,57 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </template>
 
-          <!-- ── Building / Progress Indicator (Lollms Working) ───────────────────────────── -->
-          <div v-else-if="part.type === 'building_indicator' && !part.isDone" 
-               class="my-4 flex flex-col gap-2 p-4 rounded-2xl bg-white dark:bg-gray-900 border-2 border-blue-500/20 shadow-xl animate-in fade-in slide-in-from-bottom-2">
-              
-              <div class="flex items-center gap-4">
-                  <!-- Pleasant Pulse/Spin Animation -->
-                  <div class="relative flex-shrink-0 w-10 h-10 flex items-center justify-center">
-                      <div class="absolute inset-0 bg-blue-500/20 rounded-full animate-ping"></div>
-                      <div class="absolute inset-0 border-2 border-t-blue-500 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin"></div>
-                      <IconAnimateSpin class="w-6 h-6 text-blue-500" />
-                  </div>
+          <!-- ── New Unified Processing Component ───────────────────────────── -->
+          <ProcessingBlock 
+               v-else-if="part.type === 'processing'"
+               :p-type="part.pType"
+               :title="part.title"
+               :status-content="part.statusContent"
+               :is-closed="part.isClosed"
+          />
 
-                  <div class="flex-grow min-w-0">
-                      <div class="flex items-center gap-2">
-                          <span class="text-[9px] font-black uppercase tracking-[0.2em] text-blue-500 animate-pulse">Lollms Engine Active</span>
-                      </div>
-                      <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">
-                          {{ part.label }}<span v-if="part.title">: {{ part.title }}</span>
-                      </h4>
-                  </div>
-              </div>
-
-              <!-- Collapsible Sub-Content (Logs/Details) -->
-              <div v-if="part.sub_content" class="mt-2 border-t dark:border-gray-800 pt-2">
-                  <details class="group/details">
-                      <summary class="flex items-center gap-2 cursor-pointer list-none select-none">
-                          <IconChevronRight class="w-3 h-3 text-gray-400 group-open/details:rotate-90 transition-transform" />
-                          <span class="text-[10px] font-black uppercase tracking-widest text-gray-400 hover:text-blue-500 transition-colors">Show Execution Details</span>
-                      </summary>
-                      <div class="mt-3 p-3 bg-gray-50 dark:bg-black/40 rounded-xl font-mono text-[10px] text-gray-500 dark:text-gray-400 whitespace-pre-wrap leading-relaxed shadow-inner border dark:border-gray-800">
-                          {{ part.sub_content }}
-                      </div>
-                  </details>
-              </div>
-          </div>
+          <!-- Forms no longer rendered here as they must be embedded in content -->
 
           <!-- ── Interactive Form ────────────────────────────────────────── -->
           <template v-else-if="part.type === 'form_ready'">
-             <!-- If form data isn't in this part yet (still streaming), find it in the message.forms -->
-             <InteractiveForm 
-                v-if="part.form || (forms && forms.find(f => f.id === part.id))"
-                :form="part.form || forms.find(f => f.id === part.id)" 
-                :discussion-id="discussionsStore.currentDiscussionId"
-             />
+             <div class="my-4 p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
+                <InteractiveForm 
+                    :form="part.form" 
+                    :discussion-id="discussionsStore.currentDiscussionId"
+                />
+             </div>
+          </template>
+
+          <!-- ── Interactive Widget ──────────────────────────────────────── -->
+          <template v-else-if="part.type === 'interactive_widget'">
+             <div class="my-4 border rounded-lg p-4 bg-gray-50 dark:bg-gray-800">
+                <h4 class="font-bold text-sm mb-2">{{ part.widget.title }}</h4>
+                <div v-html="part.widget.source"></div>
+             </div>
           </template>
 
           <!-- ── Artefact Image Resolution ───────────────────────────────── -->
           <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount">
              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
-                <!-- Resolution logic: find the artefact in the store -->
-                <template v-if="discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title)">
+                <template v-if="resolvedArtefactImages[`${part.title}::${part.index}`] && resolvedArtefactImages[`${part.title}::${part.index}`] !== 'loading' && resolvedArtefactImages[`${part.title}::${part.index}`] !== 'error'">
                     <div class="relative">
-                        <!-- We fetch the images from the first (latest) version matching the title -->
                         <AuthenticatedImage 
-                            v-if="discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title).images && discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title).images[part.index]"
-                            :src="'data:image/png;base64,' + discussionsStore.activeDiscussionArtefacts.find(a => a.title === part.title).images[part.index]" 
+                            :src="'data:image/png;base64,' + resolvedArtefactImages[`${part.title}::${part.index}`]" 
                             class="w-full h-auto max-h-[600px] object-contain mx-auto"
                         />
-                        <div v-else class="p-8 text-center text-xs text-gray-500 italic">
-                           <IconAnimateSpin class="w-6 h-6 animate-spin mx-auto mb-2 opacity-30" />
-                           Awaiting image resolution for {{ part.title }} [Page {{ part.index + 1 }}]
-                        </div>
-                        
                         <!-- Overlay Title -->
                         <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
                              <span class="text-[10px] font-black uppercase tracking-widest text-white">{{ part.title }} — Page {{ part.index + 1 }}</span>
                         </div>
                     </div>
                 </template>
-                <div v-else class="p-4 flex items-center gap-3 text-red-500">
+                <div v-else-if="resolvedArtefactImages[`${part.title}::${part.index}`] === 'error'" class="p-4 flex items-center gap-3 text-red-500">
                     <IconError class="w-5 h-5" />
-                    <span class="text-xs font-bold">Source document '{{ part.title }}' not found in workspace.</span>
+                    <span class="text-xs font-bold">Image {{ part.index + 1 }} for document '{{ part.title }}' not found.</span>
+                </div>
+                <div v-else class="p-8 text-center text-xs text-gray-500 italic">
+                   <IconAnimateSpin class="w-6 h-6 animate-spin mx-auto mb-2 opacity-30" />
+                   Awaiting image resolution for {{ part.title }} [Page {{ part.index + 1 }}]
                 </div>
              </div>
           </div>
@@ -1134,11 +1265,12 @@ function onMermaidReady({ svg }, partIndex) {
                   
                   <!-- Inline Iframe Viewport -->
                   <div class="relative w-full h-[400px] bg-white transition-all overflow-hidden border-b dark:border-gray-800">
+                      <!-- Render widget using secure isolation. If content is available but marked 'loading', we still show it -->
                       <iframe 
                         v-if="getWidgetContent(part.widget)"
-                        :key="`${part.id}-${discussionsStore.activeUpdatingArtefacts.has(part.id || part.widget?.id) ? 'streaming' : 'final'}`"
+                        :key="`${part.id}-${(discussionsStore.activeUpdatingArtefacts && discussionsStore.activeUpdatingArtefacts.has(part.id)) ? 'streaming' : 'final'}`"
                         :srcdoc="getWidgetContent(part.widget)" 
-                        class="w-full h-full border-none pointer-events-auto" 
+                        class="w-full h-full border-none pointer-events-auto bg-white" 
                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>
@@ -1235,6 +1367,17 @@ function onMermaidReady({ svg }, partIndex) {
 </template>
 
 <style scoped>
+/* Force artefact content to be contained within this component */
+.document-content :deep(*) {
+    /* Reset common aggressive resets from user content */
+    all: revert; 
+    /* But keep structural layout */
+    display: block;
+}
+/* Re-enable prose styling inside the scope */
+.document-content :deep(.prose) {
+    all: unset;
+}
 .message-prose {
     @apply prose prose-base dark:prose-invert max-w-none break-words;
     font-size: var(--message-font-size, 14px);

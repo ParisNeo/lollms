@@ -45,6 +45,8 @@ function handleExport(format) {
 // Track if this file is currently being modified by AI - Added defensive checks
 const isLiveUpdating = computed(() => {
     if (!title.value || !discussionsStore.activeUpdatingArtefacts) return false;
+    // Defensive check to ensure it's a valid Set before calling .has()
+    if (typeof discussionsStore.activeUpdatingArtefacts.has !== 'function') return false;
     return discussionsStore.activeUpdatingArtefacts.has(title.value);
 });
 

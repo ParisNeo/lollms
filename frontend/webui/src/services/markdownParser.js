@@ -101,20 +101,21 @@ function normalizeTables(text) {
 
 function sanitizeDangerousTags(html) {
     if (!html) return html;
-    // 1. Strip ALL style and script blocks from the main UI. 
-    // They are only allowed inside Widget Iframes.
-    let clean = html.replace(/<style[\s\S]*?<\/style>/gi, '');
-    clean = clean.replace(/<script[\s\S]*?<\/script>/gi, '');
     
-    // 2. Neutralize inline style attributes on ANY tag
+    // 1. Aggressively strip style and script blocks, even if unclosed (prevents global CSS leaks)
+    // This removes the tag AND everything inside it from the chat bubble.
+    let clean = html.replace(/<style[\s\S]*?(?:<\/style>|$)/gi, '');
+    clean = clean.replace(/<script[\s\S]*?(?:<\/script>|$)/gi, '');
+    
+    // 2. Strip link tags (prevents external CSS loading)
+    clean = clean.replace(/<link[^>]*?(?:>|$)/gi, '');
+
+    // 3. Neutralize inline style attributes on ANY tag (prevents layout shifting)
     clean = clean.replace(/\sstyle\s*=\s*["'][^"']*["']/gi, '');
     
-    // 3. Neutralize event handlers (onclick, etc)
+    // 4. Neutralize event handlers (onclick, etc)
     clean = clean.replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '');
 
-    // 4. Handle unclosed tags during streaming
-    clean = clean.replace(/<style[\s\S]*/gi, (match) => match.includes('</style>') ? match : '');
-    
     return clean;
 }
 

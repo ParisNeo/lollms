@@ -225,9 +225,21 @@ function handleClose() {
         </template>
 
         <template #footer v-if="!modalProps?.fullScreen">
-            <div class="flex justify-between w-full px-4">
-                <p class="text-xs text-gray-500 self-center">Results are updated in real-time during flow execution.</p>
-                <button @click="handleClose" class="btn btn-primary px-8">Done</button>
+            <div class="flex justify-between w-full px-4 items-center">
+                <p class="text-xs text-gray-500">Results are updated in real-time during flow execution.</p>
+                
+                <div class="flex gap-2">
+                    <!-- NEW: Copy All Button for Debugging -->
+                    <button 
+                        @click="uiStore.copyToClipboard(JSON.stringify(results, null, 2), 'All debug metadata copied.')" 
+                        class="btn btn-secondary flex items-center gap-2"
+                    >
+                        <IconCopy class="w-4 h-4" />
+                        <span>Copy All JSON</span>
+                    </button>
+                    
+                    <button @click="handleClose" class="btn btn-primary px-8">Done</button>
+                </div>
             </div>
         </template>
     </GenericModal>
