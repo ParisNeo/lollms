@@ -232,3 +232,4 @@ Add the possibility to create multiple aliases for the same model
 
 ## Important!
 Original models only doesn't work!!
+Model caching is breaking openai v1 access
