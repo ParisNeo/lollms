@@ -740,7 +740,7 @@ async def chat_completions(
 
     try:
         binding_alias, model_name = resolve_model_name(db, request.model)
-        ASCIIColors.panel({"model_name":model_name,"binding_alias":binding_alias}, "Chat completions")
+        ASCIIColors.panel({"model_name":model_name,"binding_alias":binding_alias,"request model":request.model}, "Chat completions")
     except HTTPException as e:
         if e.status_code == 400:
             invalidate_model_cache(db)
