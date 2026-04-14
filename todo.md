@@ -228,3 +228,7 @@ Widgets MUST contain html/css/js code and only html/css/js code)
 Save settings in user context is always disabled
 In users list add the number of requests today, and number of cumulative requests (for api and for generations)
 Add the possibility to create multiple aliases for the same model
+
+
+## Important!
+Original models only doesn't work!!
