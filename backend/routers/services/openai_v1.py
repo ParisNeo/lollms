@@ -246,8 +246,8 @@ def get_cached_models(db: Session):
     global _global_model_cache, _last_cache_time
     
     # Try memory cache first for ultra-fast UI loading
-    if _global_model_cache and (time.time() - _last_cache_time < CACHE_TTL):
-        return _global_model_cache
+    #if _global_model_cache and (time.time() - _last_cache_time < CACHE_TTL):
+    #    return _global_model_cache
 
     config = db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").first()
     if config:
