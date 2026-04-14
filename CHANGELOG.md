@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-14 07:20]
+
+- chore(deps): bump safe_store from 3.3.8 to 3.4.0
+
 ## [2026-04-13 03:14]
 
 - rebuild: regenerate frontend bundles and update artefact handling
