@@ -214,6 +214,8 @@ def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, st
             except Exception: continue
         
         for original_name, alias_data in model_aliases.items():
+            if original_name=="smart-routing":
+                continue 
             if alias_data and alias_data.get('title') == alias_title:
                 return binding.alias, original_name
     return None, None
