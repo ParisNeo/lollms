@@ -208,6 +208,7 @@ def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, st
     all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
     for binding in all_bindings:
         model_aliases = binding.model_aliases or {}
+        print(f"model_aliases: {model_aliases}")
         if isinstance(model_aliases, str):
             try: model_aliases = json.loads(model_aliases)
             except Exception: continue
@@ -218,6 +219,7 @@ def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, st
     return None, None
 
 def resolve_model_name(db: Session, requested_model: str) -> Tuple[str, str]:
+    print(f"resolving model name: {requested_model}")
     if '/' in requested_model:
         parts = requested_model.split('/', 1)
         binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
@@ -737,7 +739,6 @@ async def chat_completions(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-
     try:
         binding_alias, model_name = resolve_model_name(db, request.model)
         ASCIIColors.panel({"model_name":model_name,"binding_alias":binding_alias,"request model":request.model}, "Chat completions")
