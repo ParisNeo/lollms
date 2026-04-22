@@ -233,3 +233,8 @@ Add the possibility to create multiple aliases for the same model
 ## Important!
 Original models only doesn't work!!
 Model caching is breaking openai v1 access
+Notes MUST become versionable
+In friends create groups
+
+Allow collaboration on notes.
+A note must be versionnable.
