@@ -25,6 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, inspect, desc
 
+from backend.lollms_init_watcher import lollms_init_watcher
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
@@ -579,7 +580,7 @@ def run_one_time_startup_tasks(lock: Lock):
                         "lollms", 
                         binding_alias=binding.alias, 
                         load_llm=True, 
-                        callback=None
+                        callback=lollms_init_watcher
                     )
                     ASCIIColors.green(f"  ✔ Binding '{binding.alias}' is ready.")
                 except Exception as ex:
