@@ -653,7 +653,7 @@ async def update_tti_model_alias(binding_id: int, payload: TtiModelAliasUpdate, 
     binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTI Binding not found.")
     if binding.model_aliases is None: binding.model_aliases = {}
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    binding.model_aliases[payload.original_model_name] = payload.alias if isinstance(payload.alias,dict) else payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     db.commit()
     db.refresh(binding)
