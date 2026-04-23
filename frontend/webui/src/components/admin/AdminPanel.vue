@@ -27,6 +27,7 @@ const STTBindingsSettings = defineAsyncComponent(() => import('./bindings/STTBin
 const TTVBindingsSettings = defineAsyncComponent(() => import('./bindings/TTVBindingsSettings.vue'));
 const TTMBindingsSettings = defineAsyncComponent(() => import('./bindings/TTMBindingsSettings.vue'));
 const RAGBindingsSettings = defineAsyncComponent(() => import('./bindings/RAGBindingsSettings.vue'));
+const HttpsSettings = defineAsyncComponent(() => import('./HttpsSettings.vue')); // REGISTERED
 const AiBotSettings = defineAsyncComponent(() => import('./AiBotSettings.vue'));
 const EmailSettings = defineAsyncComponent(() => import('./EmailSettings.vue'));
 const EmailMarketing = defineAsyncComponent(() => import('./EmailMarketing.vue'));
@@ -63,6 +64,7 @@ const tabs = [
     { id: 'ttv_bindings', component: TTVBindingsSettings },
     { id: 'ttm_bindings', component: TTMBindingsSettings },
     { id: 'rag_bindings', component: RAGBindingsSettings },
+    { id: 'https_settings', component: HttpsSettings }, // MAPPED
     { id: 'builders', component: BuildersSettings },
     { id: 'ai_bot', component: AiBotSettings },
     { id: 'apps', component: AppsManagement },

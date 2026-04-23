@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, watch, defineAsyncComponent } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
@@ -46,25 +46,25 @@ const graphStats = ref({ nodes: 0, edges: 0 });
 const graphData = ref({ nodes: [], edges: [] });
 const isLoadingGraph = ref(false);
 const ontologyFileInput = ref(null);
+const isComponentMounted = ref(true);
+const viewMode = ref('graph'); // 'graph' or 'ontology'
 
-const defaultOntology = `{
-  "entities": [
-    {"name": "Person", "description": "Key individuals mentioned in the text"},
-    {"name": "Organization", "description": "Companies, institutions, or groups"},
-    {"name": "Location", "description": "Cities, countries, or physical places"},
-    {"name": "Date", "description": "Specific points in time or durations"},
-    {"name": "Concept", "description": "Abstract ideas, theories, or methodologies"},
-    {"name": "Technology", "description": "Software, hardware, or tools"}
-  ],
-  "relationships": [
-    {"source": "Person", "target": "Organization", "label": "WORKS_FOR"},
-    {"source": "Person", "target": "Location", "label": "LOCATED_IN"},
-    {"source": "Organization", "target": "Location", "label": "HEADQUARTERED_IN"},
-    {"source": "Person", "target": "Person", "label": "KNOWS"},
-    {"source": "Organization", "target": "Product", "label": "PRODUCES"},
-    {"source": "Concept", "target": "Concept", "label": "RELATES_TO"}
-  ]
-}`;
+onBeforeUnmount(() => {
+    isComponentMounted.value = false;
+});
+const ontologyEditorMode = ref('edit'); // 'edit' or 'view'
+
+const defaultOntology = `@prefix : <http://lollms.com/ontology#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+:MainConcept rdf:type owl:Class ;
+             rdfs:label "Base Entity" .
+
+:relatedTo rdf:type owl:ObjectProperty ;
+           rdfs:domain :MainConcept ;
+           rdfs:range :MainConcept .`;
 
 const generationParams = ref({
     model_binding: '',
@@ -86,6 +86,15 @@ const ontologyLanguage = ref('json');
 const presets = ref([]);
 const selectedPreset = ref(null);
 
+const ontologyAsTag = computed(() => `<owl>${generationParams.value.ontology}</owl>`);
+
+// [FIX] Persistence implementation
+watch(() => generationParams.value.ontology, (newCode) => {
+    if (props.store?.id) {
+        dataStore.persistOntology(props.store.id, newCode);
+    }
+});
+
 watch(selectedFullModel, (newVal) => {
     if (newVal) {
         const [binding, ...modelParts] = newVal.split('/');
@@ -96,13 +105,14 @@ watch(selectedFullModel, (newVal) => {
         generationParams.value.model_name = '';
     }
 });
-
 async function fetchGraph() {
+    if (!isComponentMounted.value) return;
     isLoadingGraph.value = true;
     selectedNode.value = null;
     selectedEdge.value = null;
     try {
         const data = await dataStore.fetchDataStoreGraph(props.store.id);
+        if (!isComponentMounted.value) return;
         graphData.value = data || { nodes: [], edges: [] };
         graphStats.value = {
             nodes: data?.nodes?.length || 0,
@@ -347,11 +357,10 @@ async function savePreset() {
 onMounted(() => {
     fetchGraph();
     loadPresets();
-    if (user.value?.lollms_model_name) {
-        selectedFullModel.value = user.value.lollms_model_name;
-    }
-    if(availableLLMModelsGrouped.value.length === 0) {
-        dataStore.fetchAvailableLollmsModels();
+    
+    // [FIX] Guard against accessing storeOntologies if not initialized or if store ID missing
+    if (props.store?.id && dataStore.storeOntologies && dataStore.storeOntologies[props.store.id]) {
+        generationParams.value.ontology = dataStore.storeOntologies[props.store.id];
     }
 });
 
@@ -366,208 +375,221 @@ watch(() => props.task, (newTask, oldTask) => {
 
 </script>
 
+=======
 <template>
-    <div class="h-full flex flex-col lg:flex-row gap-6">
-        <!-- Controls Column -->
-        <div class="w-full lg:w-96 lg:flex-shrink-0 space-y-6 h-full overflow-y-auto custom-scrollbar pr-4">
-            <!-- Stats -->
-            <div class="grid grid-cols-2 gap-4">
-                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600">
-                    <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400">Nodes</h4>
-                    <p v-if="isLoadingGraph" class="text-xl font-bold animate-pulse">...</p>
-                    <p v-else class="text-xl font-bold">{{ graphStats.nodes }}</p>
-                </div>
-                 <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600">
-                    <h4 class="text-xs font-medium text-gray-500 dark:text-gray-400">Edges</h4>
-                     <p v-if="isLoadingGraph" class="text-xl font-bold animate-pulse">...</p>
-                    <p v-else class="text-xl font-bold">{{ graphStats.edges }}</p>
-                </div>
-            </div>
-
-            <!-- Task Progress -->
-             <div v-if="task" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
-                <h4 class="font-semibold text-blue-800 dark:text-blue-200 text-sm flex justify-between">
-                    {{ task.name }}
-                    <span class="text-xs opacity-75">{{ task.progress }}%</span>
-                </h4>
-                <p class="text-xs text-blue-700 dark:text-blue-300 mt-1">{{ task.description }}</p>
-                <div class="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-1.5 mt-2">
-                    <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-500" :style="{ width: task.progress + '%' }"></div>
-                </div>
+    <div class="h-full flex flex-col overflow-hidden">
+        <!-- ── Navigation Header ── -->
+        <div class="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700 z-10 flex-shrink-0">
+            <div class="flex gap-1 p-1 bg-gray-200 dark:bg-gray-900 rounded-xl">
+                <button @click="viewMode = 'graph'" :class="['px-6 py-2 text-xs font-black uppercase tracking-widest rounded-lg transition-all', viewMode === 'graph' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">
+                    Knowledge Graph
+                </button>
+                <button @click="viewMode = 'ontology'" :class="['px-6 py-2 text-xs font-black uppercase tracking-widest rounded-lg transition-all', viewMode === 'ontology' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">
+                    Ontology Designer
+                </button>
             </div>
             
-            <!-- Selection Details -->
-            <div v-if="selectedNode" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700 space-y-3">
-                <div class="flex justify-between items-start">
-                    <h3 class="font-semibold text-lg">{{ selectedNode.label }}</h3>
-                    <span class="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-xs">{{ selectedNode.group }}</span>
-                </div>
-                <div class="text-xs text-gray-500 font-mono">ID: {{ selectedNode.id }}</div>
-                
-                <div class="bg-gray-50 dark:bg-gray-900 p-2 rounded max-h-40 overflow-auto custom-scrollbar">
-                    <pre class="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap">{{ JSON.stringify(selectedNode.properties, null, 2) }}</pre>
-                </div>
-                
-                <div class="flex gap-2 pt-2">
-                    <button @click="openEditNodeModal" class="btn btn-secondary btn-sm flex-1">Edit Properties</button>
-                    <button @click="deleteSelectedNode" class="btn btn-danger btn-sm flex-1">Delete</button>
-                </div>
-            </div>
-            
-            <div v-if="selectedEdge" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700 space-y-3">
-                <h3 class="font-semibold text-lg border-b pb-2 dark:border-gray-700">Relationship</h3>
-                <div class="flex items-center justify-between text-sm">
-                    <span class="font-medium">{{ selectedEdge.label }}</span>
-                </div>
-                <div class="text-xs text-gray-500 space-y-1">
-                    <div><span class="font-semibold">Source:</span> {{ selectedEdge.source }}</div>
-                    <div><span class="font-semibold">Target:</span> {{ selectedEdge.target }}</div>
-                </div>
-                 <div class="flex gap-2 pt-2">
-                    <button @click="deleteSelectedEdge" class="btn btn-danger btn-sm w-full">Delete Relationship</button>
-                </div>
-            </div>
-
-            <!-- Graph Management Actions -->
-            <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
-                <h3 class="text-base font-semibold flex items-center gap-2">
-                    <span class="w-1 h-4 bg-primary-500 rounded-full"></span>
-                    Graph Actions
-                </h3>
-                
-                <div class="flex gap-2" v-if="graphStats.nodes > 0">
-                     <button @click="openAddNodeModal" :disabled="!!task" class="btn btn-secondary btn-sm flex-1">Add Node</button>
-                     <button @click="openAddEdgeModal" :disabled="!!task" class="btn btn-secondary btn-sm flex-1">Add Edge</button>
-                     <button @click="fitGraph" class="btn btn-ghost btn-sm px-2" title="Fit Graph"><IconMaximize class="w-4 h-4"/></button>
-                </div>
-                
-                <hr class="dark:border-gray-700" v-if="graphStats.nodes > 0">
-                
-                <div class="space-y-2">
-                     <div>
-                        <label for="model-select" class="block text-xs font-bold uppercase tracking-wider text-gray-500 mb-1">LLM Model</label>
-                        <select id="model-select" v-model="selectedFullModel" class="input-field text-sm">
-                            <option disabled value="">Select a model</option>
-                            <optgroup v-for="group in availableLLMModelsGrouped" :key="group.label" :label="group.label">
-                                <option v-for="model in group.items" :key="model.id" :value="model.id">{{ model.name }}</option>
-                            </optgroup>
-                        </select>
-                    </div>
-
-                    <div>
-                        <div class="flex justify-between items-center mb-1">
-                            <label class="block text-xs font-bold uppercase tracking-wider text-gray-500">Ontology Schema</label>
-                            <div class="flex items-center gap-2">
-                                <button type="button" @click="handleImportOntology" class="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1" title="Import File">
-                                    <IconArrowUpTray class="w-3 h-3" />
-                                </button>
-                                <button type="button" @click="savePreset" class="text-xs text-primary-600 hover:text-primary-700 flex items-center gap-1" title="Save as Preset">
-                                    <IconSave class="w-3 h-3" />
-                                </button>
-                            </div>
-                        </div>
-                        
-                        <!-- Presets and Language -->
-                        <div class="flex gap-2 mb-2">
-                            <select v-model="selectedPreset" @change="applyPreset" class="input-field text-xs py-1">
-                                <option :value="null" disabled>Load Preset...</option>
-                                <option v-for="(p, i) in presets" :key="i" :value="p">{{ p.name }}</option>
-                            </select>
-                            <select v-model="ontologyLanguage" class="input-field text-xs py-1 w-24">
-                                <option value="json">JSON</option>
-                                <option value="yaml">YAML</option>
-                                <option value="xml">XML</option>
-                                <option value="markdown">MD</option>
-                                <option value="python">Code</option>
-                            </select>
-                        </div>
-
-                        <div class="h-48 border rounded-md overflow-hidden border-gray-300 dark:border-gray-600">
-                            <CodeMirrorEditor 
-                                v-model="generationParams.ontology" 
-                                :language="ontologyLanguage" 
-                                class="h-full w-full text-xs" 
-                            />
-                        </div>
-                        <input type="file" ref="ontologyFileInput" @change="onOntologyFileSelected" class="hidden" accept=".owl,.rdf,.ttl,.jsonld,.pdf,.docx,.txt,.md,.json,.yaml,.yml,.xml">
-                        <p class="text-[10px] text-gray-400 mt-1">Defines the structure for the LLM to extract knowledge.</p>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-3 pt-2">
-                    <button @click="handleGenerateGraph" :disabled="!!task" class="btn btn-primary btn-sm">
-                        {{ graphStats.nodes > 0 ? 'Re-Generate' : 'Generate Graph' }}
-                    </button>
-                    <button @click="handleUpdateGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-secondary btn-sm">
-                        Update Graph
-                    </button>
-                </div>
-                
-                 <div class="pt-2">
-                    <button @click="handleWipeGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-ghost text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 w-full btn-sm flex items-center justify-center gap-2">
-                        <IconTrash class="w-4 h-4"/> Wipe All Data
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Query Section -->
-            <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700" v-if="graphStats.nodes > 0">
-                <h3 class="text-base font-semibold flex items-center gap-2">
-                    <span class="w-1 h-4 bg-green-500 rounded-full"></span>
-                    Query Graph
-                </h3>
-                <form @submit.prevent="handleQuery" class="flex gap-2">
-                    <input v-model="query" type="text" placeholder="Search for concepts..." class="input-field flex-grow text-sm">
-                    <button type="submit" :disabled="isQuerying || !query.trim()" class="btn btn-primary btn-sm px-4">Find</button>
-                </form>
-                
-                <div v-if="isQuerying" class="flex justify-center p-4">
-                    <IconAnimateSpin class="w-6 h-6 text-primary-500" />
-                </div>
-                
-                <div v-if="queryResults.length > 0" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-900 p-2 rounded-md">
-                    <div v-for="(result, index) in queryResults" :key="index" class="p-2 bg-white dark:bg-gray-800 rounded border dark:border-gray-700 text-xs shadow-sm">
-                       <pre class="whitespace-pre-wrap font-sans">{{ result }}</pre>
-                    </div>
-                </div>
-                 <div v-else-if="!isQuerying && query && queryResults.length === 0" class="text-center text-gray-500 text-xs italic">
-                    No results found.
-                </div>
+            <div class="flex items-center gap-3">
+                <button @click="handleUpdateGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-secondary btn-sm h-9">
+                    <IconRefresh class="w-4 h-4 mr-2" /> Sync Changes
+                </button>
+                <button @click="handleGenerateGraph" :disabled="!!task || !selectedFullModel" class="btn btn-primary btn-sm h-9 shadow-lg shadow-blue-500/20">
+                    <IconPlay class="w-4 h-4 mr-2" /> {{ graphStats.nodes > 0 ? 'Full Rebuild' : 'Initialize Graph' }}
+                </button>
             </div>
         </div>
 
-        <!-- Graph Viewer Column -->
-        <div class="flex-grow h-[500px] lg:h-full lg:min-h-0 bg-white dark:bg-gray-900 rounded-lg shadow-inner border dark:border-gray-700 p-1 relative">
-            
-            <!-- Empty State Overlay -->
-            <div v-if="graphStats.nodes === 0 && !isLoadingGraph" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 dark:bg-gray-900/80 z-10 p-6 text-center">
-                <div class="bg-white dark:bg-gray-800 p-8 rounded-xl shadow-lg border dark:border-gray-700 max-w-md">
-                    <div class="w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600 dark:text-blue-400">
-                        <IconRefresh class="w-8 h-8" />
-                    </div>
-                    <h3 class="text-xl font-bold text-gray-900 dark:text-white mb-2">No Graph Built</h3>
-                    <p class="text-gray-500 dark:text-gray-400 text-sm mb-6">
-                        This Data Store doesn't have a knowledge graph yet. Select a model and ontology schema on the left, then click "Generate Graph" to build one from your documents.
-                    </p>
-                    <button @click="handleGenerateGraph" :disabled="!!task || !selectedFullModel" class="btn btn-primary w-full flex items-center justify-center gap-2">
-                        <IconPlay class="w-5 h-5" />
-                        Generate Graph
-                    </button>
-                    <p v-if="!selectedFullModel" class="text-xs text-red-500 mt-2">Please select an LLM Model first.</p>
+        <div class="flex-grow flex flex-col lg:flex-row gap-0 overflow-hidden">
+            <!-- ── Left Sidebar (Dynamic Content) ── -->
+            <div class="w-full lg:w-80 lg:flex-shrink-0 space-y-6 h-full overflow-y-auto custom-scrollbar p-4 border-r dark:border-gray-700 bg-white dark:bg-gray-900">
+                
+                <!-- View-Specific Context Info -->
+                <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
+                    <h4 class="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 mb-1">Current Workspace</h4>
+                    <p class="text-xs font-bold">{{ viewMode === 'graph' ? 'Semantic Explorer' : 'Schema Designer' }}</p>
                 </div>
+
+                <!-- Stats (Always relevant) -->
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600 shadow-inner">
+                        <h4 class="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Total Nodes</h4>
+                        <p class="text-xl font-bold">{{ graphStats.nodes }}</p>
+                    </div>
+                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600 shadow-inner">
+                        <h4 class="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Total Edges</h4>
+                        <p class="text-xl font-bold">{{ graphStats.edges }}</p>
+                    </div>
+                </div>
+
+                <!-- Task Progress (Always relevant) -->
+                <div v-if="task" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800 animate-pulse">
+                    <h4 class="font-semibold text-blue-800 dark:text-blue-200 text-sm flex justify-between">
+                        {{ task.name }}
+                        <span class="text-xs opacity-75">{{ task.progress }}%</span>
+                    </h4>
+                    <div class="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-1.5 mt-2">
+                        <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-500" :style="{ width: task.progress + '%' }"></div>
+                    </div>
+                </div>
+
+                <!-- ── SIDEBAR CONTENT: GRAPH MODE ── -->
+                <template v-if="viewMode === 'graph'">
+                    <!-- Node Selection Info -->
+                    <div v-if="selectedNode" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border-2 border-blue-500 space-y-3 animate-in fade-in zoom-in-95">
+                        <div class="flex justify-between items-start">
+                            <h3 class="font-semibold text-lg">{{ selectedNode.label }}</h3>
+                            <span class="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-[10px] font-black uppercase">{{ selectedNode.group }}</span>
+                        </div>
+                        <div class="text-[10px] text-gray-500 font-mono opacity-50">#{{ selectedNode.id }}</div>
+                        
+                        <div class="bg-gray-50 dark:bg-gray-900 p-2 rounded border dark:border-gray-700 max-h-40 overflow-auto custom-scrollbar">
+                            <JsonRenderer :json="selectedNode.properties" />
+                        </div>
+                        
+                        <div class="flex gap-2 pt-2">
+                            <button @click="openEditNodeModal" class="btn btn-secondary btn-xs flex-1">Edit</button>
+                            <button @click="deleteSelectedNode" class="btn btn-danger btn-xs flex-1">Delete</button>
+                        </div>
+                    </div>
+                    
+                    <div v-else-if="selectedEdge" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border-2 border-indigo-500 space-y-3 animate-in fade-in zoom-in-95">
+                        <h3 class="text-[10px] font-black uppercase text-indigo-500 tracking-widest border-b pb-2 dark:border-gray-700">Semantic Relationship</h3>
+                        <div class="font-bold text-sm text-gray-700 dark:text-gray-200">{{ selectedEdge.label }}</div>
+                        <div class="text-[10px] text-gray-500 space-y-1 bg-gray-50 dark:bg-gray-950 p-2 rounded">
+                            <div class="truncate"><span class="font-bold text-indigo-400">FROM:</span> {{ selectedEdge.source }}</div>
+                            <div class="truncate"><span class="font-bold text-indigo-400">TO:</span> {{ selectedEdge.target }}</div>
+                        </div>
+                        <button @click="deleteSelectedEdge" class="btn btn-danger btn-xs w-full">Delete Link</button>
+                    </div>
+
+                    <!-- Graph Exploration Tools -->
+                    <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
+                        <h3 class="text-xs font-black uppercase text-gray-500 tracking-widest">Exploration Tools</h3>
+                        <form @submit.prevent="handleQuery" class="flex gap-1">
+                            <input v-model="query" type="text" placeholder="Search concepts..." class="input-field flex-grow text-xs h-8">
+                            <button type="submit" :disabled="isQuerying || !query.trim()" class="btn btn-primary btn-xs px-3">Find</button>
+                        </form>
+                        
+                        <div v-if="isQuerying" class="flex justify-center p-4">
+                            <IconAnimateSpin class="w-5 h-5 text-blue-500 animate-spin" />
+                        </div>
+                        
+                        <div v-if="queryResults.length > 0" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-950 p-2 rounded-md shadow-inner">
+                            <div v-for="(result, index) in queryResults" :key="index" class="p-2 bg-white dark:bg-gray-800 rounded border dark:border-gray-700 text-[10px] leading-relaxed shadow-sm">
+                               {{ result }}
+                            </div>
+                        </div>
+                        
+                        <div class="flex gap-2 pt-2 border-t dark:border-gray-700">
+                             <button @click="openAddNodeModal" class="btn btn-secondary btn-xs flex-1">New Node</button>
+                             <button @click="fitGraph" class="btn btn-ghost btn-xs px-2" title="Fit to screen"><IconMaximize class="w-3.5 h-3.5"/></button>
+                        </div>
+                    </div>
+                </template>
+
+                <!-- ── SIDEBAR CONTENT: ONTOLOGY MODE ── -->
+                <template v-else>
+                    <div class="space-y-6">
+                        <!-- Model Selection -->
+                        <div class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
+                            <label class="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Generation Model</label>
+                            <select v-model="selectedFullModel" class="input-field text-xs">
+                                <option disabled value="">Select engine...</option>
+                                <optgroup v-for="group in availableLLMModelsGrouped" :key="group.label" :label="group.label">
+                                    <option v-for="model in group.items" :key="model.id" :value="model.id">{{ model.name }}</option>
+                                </optgroup>
+                            </select>
+                            <p class="text-[9px] text-gray-500 mt-2 italic">This model will be used to extract relationships from your files using the schema defined on the right.</p>
+                        </div>
+
+                        <!-- Presets -->
+                        <div class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700 space-y-3">
+                            <label class="block text-[10px] font-black uppercase tracking-widest text-gray-400">Ontology Presets</label>
+                            <select v-model="selectedPreset" @change="applyPreset" class="input-field text-xs">
+                                <option :value="null" disabled>Load specialized preset...</option>
+                                <option v-for="(p, i) in presets" :key="i" :value="p">{{ p.name }}</option>
+                            </select>
+                            <button @click="savePreset" class="btn btn-secondary btn-xs w-full flex items-center justify-center gap-2">
+                                <IconSave class="w-3.5 h-3.5" /> Save Current as Preset
+                            </button>
+                        </div>
+
+                        <!-- Dangerous Zone -->
+                         <div class="p-4 bg-red-50 dark:bg-red-950/20 rounded-lg border border-red-100 dark:border-red-900/40">
+                             <h4 class="text-[10px] font-black uppercase text-red-600 tracking-widest mb-3">Maintenance</h4>
+                             <button @click="handleWipeGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-ghost text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 w-full btn-xs flex items-center justify-center gap-2 border border-red-200 dark:border-red-800">
+                                <IconTrash class="w-3.5 h-3.5"/> Wipe Graph Data
+                            </button>
+                         </div>
+                    </div>
+                </template>
             </div>
 
-            <!-- Viewer is only rendered if not empty to prevent blank canvas issues if desired, but here overlay handles visual blocking -->
-            <InteractiveGraphViewer 
-                v-if="graphStats.nodes > 0 || isLoadingGraph"
-                ref="graphViewer"
-                :nodes="graphData.nodes" 
-                :edges="graphData.edges" 
-                :is-loading="isLoadingGraph" 
-                @node-select="handleNodeSelect" 
-                @edge-select="handleEdgeSelect" 
-                @deselect="handleDeselect"
-            />
+            <!-- ── Main Workspace ── -->
+            <div class="flex-grow h-full bg-white dark:bg-gray-950 relative overflow-hidden">
+                
+                <!-- MODE: GRAPH VIEW -->
+                <div v-if="viewMode === 'graph'" class="h-full w-full relative">
+                    <!-- Empty State Overlay -->
+                    <div v-if="graphStats.nodes === 0 && !isLoadingGraph" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 dark:bg-gray-900/80 z-10 p-6 text-center">
+                        <div class="bg-white dark:bg-gray-800 p-10 rounded-3xl shadow-2xl border dark:border-gray-700 max-w-lg animate-in zoom-in-95 duration-500">
+                            <div class="w-20 h-20 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mx-auto mb-6 text-blue-600 dark:text-blue-400">
+                                <IconDatabase class="w-10 h-10" />
+                            </div>
+                            <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-3 tracking-tight">Graph is Offline</h3>
+                            <p class="text-gray-500 dark:text-gray-400 text-sm mb-8 leading-relaxed">
+                                No semantic map has been built for this Data Store yet. Switch to the <strong>Ontology Designer</strong> to define your schema and start the extraction process.
+                            </p>
+                            <button @click="viewMode = 'ontology'" class="btn btn-primary px-10 py-3 rounded-2xl shadow-xl shadow-blue-500/20 flex items-center justify-center gap-2 mx-auto">
+                                Open Designer &rarr;
+                            </button>
+                        </div>
+                    </div>
+
+                    <InteractiveGraphViewer 
+                        v-if="graphStats.nodes > 0 || isLoadingGraph"
+                        ref="graphViewer"
+                        :nodes="graphData.nodes" 
+                        :edges="graphData.edges" 
+                        :is-loading="isLoadingGraph" 
+                        @node-select="handleNodeSelect" 
+                        @edge-select="handleEdgeSelect" 
+                        @deselect="handleDeselect"
+                    />
+                </div>
+
+                <!-- MODE: ONTOLOGY DESIGNER -->
+                <div v-else class="h-full flex flex-col">
+                    <div class="flex-shrink-0 p-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex justify-between items-center h-14">
+                        <div class="flex items-center gap-4">
+                            <div class="flex items-center gap-2 px-1 py-1 bg-gray-200 dark:bg-gray-800 rounded-lg">
+                                <button @click="ontologyEditorMode = 'edit'" :class="['px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all', ontologyEditorMode === 'edit' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">Code Editor</button>
+                                <button @click="ontologyEditorMode = 'view'" :class="['px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all', ontologyEditorMode === 'view' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">Visualizer</button>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button @click="handleImportOntology" class="btn btn-secondary btn-xs flex items-center gap-2 px-4 h-8 border-gray-300 dark:border-gray-700 shadow-sm">
+                                <IconArrowUpTray class="w-3.5 h-3.5" /> 
+                                <span class="hidden sm:inline">Import OWL</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex-grow relative bg-white dark:bg-gray-950">
+                        <CodeMirrorEditor 
+                            v-if="ontologyEditorMode === 'edit'"
+                            v-model="generationParams.ontology" 
+                            :language="'python'" 
+                            class="absolute inset-0 h-full w-full" 
+                            placeholder="Define your classes and properties using OWL/Turtle syntax..."
+                        />
+                        <div v-else class="h-full p-10 overflow-auto custom-scrollbar flex justify-center bg-gray-50 dark:bg-gray-950/40">
+                             <div class="w-full max-w-4xl h-full shadow-2xl rounded-3xl overflow-hidden bg-white dark:bg-gray-950 border dark:border-gray-800">
+                                 <MessageContentRenderer :content="ontologyAsTag" />
+                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </template>

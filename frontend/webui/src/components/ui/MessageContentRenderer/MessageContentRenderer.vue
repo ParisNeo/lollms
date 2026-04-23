@@ -154,8 +154,8 @@ const parsedStreamingContent = computed(() => {
 
     const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        // Updated regex: Optimized to capture attributes and multiline content robustly
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form[\s\S]*?(?:<\/lollms_form>|$))/;
+        // [FIX] Added (<owl>[\s\S]*?(?:<\/owl>|$)) to the special block parser
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form[\s\S]*?(?:<\/lollms_form>|$))|(<owl>[\s\S]*?(?:<\/owl>|$))/;
         match = regex.exec(rawBlock);
     }
     
@@ -330,8 +330,13 @@ const parsedStreamingContent = computed(() => {
             raw 
         };
     }
+    else if (match[27]) {
+        // --- NEW: OWL/RDF Semantic Block ---
+        const raw = match[27];
+        const content = raw.replace(/<owl>|<\/owl>/g, '').trim();
+        return { type: 'owl', content, raw };
+    }
     else if (match[24]) {
-        // --- Parse embedded <lollms_form> block ---
         const raw = match[24];
         const attrs = match[25];
         const body = match[26];
@@ -1182,6 +1187,38 @@ function onMermaidReady({ svg }, partIndex) {
           />
 
           <!-- Forms no longer rendered here as they must be embedded in content -->
+
+          <!-- ── OWL Visualization ───────────────────────────────────────── -->
+          <div v-else-if="part.type === 'owl'" class="my-6 border-2 border-indigo-500 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 shadow-xl">
+              <div class="px-4 py-2 bg-indigo-600 text-white flex justify-between items-center">
+                  <span class="text-[10px] font-black uppercase tracking-widest">Semantic OWL Visualizer</span>
+                  <button @click="uiStore.copyToClipboard(part.content)" class="hover:text-indigo-200"><IconCopy class="w-4 h-4"/></button>
+              </div>
+              <div class="h-[400px] relative">
+                  <InteractiveGraphViewer 
+                      :nodes="[]" 
+                      :edges="[]" 
+                      :is-loading="false"
+                      :owl-source="part.content" 
+                  />
+              </div>
+          </div>
+
+          <!-- ── OWL Visualization ───────────────────────────────────────── -->
+          <div v-else-if="part.type === 'owl'" class="my-6 border-2 border-indigo-500 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 shadow-xl">
+              <div class="px-4 py-2 bg-indigo-600 text-white flex justify-between items-center">
+                  <span class="text-[10px] font-black uppercase tracking-widest">Semantic OWL Visualizer</span>
+                  <button @click="uiStore.copyToClipboard(part.content)" class="hover:text-indigo-200"><IconCopy class="w-4 h-4"/></button>
+              </div>
+              <div class="h-[400px] relative">
+                  <InteractiveGraphViewer 
+                      :nodes="[]" 
+                      :edges="[]" 
+                      :is-loading="false"
+                      :owl-source="part.content" 
+                  />
+              </div>
+          </div>
 
           <!-- ── Interactive Form ────────────────────────────────────────── -->
           <template v-else-if="part.type === 'form_ready'">

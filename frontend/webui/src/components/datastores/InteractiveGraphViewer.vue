@@ -70,7 +70,8 @@ import IconPlay from '../../assets/icons/IconPlayCircle.vue';
 const props = defineProps({
     nodes: { type: Array, default: () => [] },
     edges: { type: Array, default: () => [] },
-    isLoading: { type: Boolean, default: false }
+    isLoading: { type: Boolean, default: false },
+    owlSource: { type: String, default: null } // New: Support for OWL direct rendering
 });
 
 const emit = defineEmits(['node-select', 'edge-select', 'deselect']);
@@ -201,8 +202,18 @@ const getOptions = (theme) => {
 };
 
 function initializeOrUpdateGraph() {
-    if (!networkContainer.value) return;
+    // CRITICAL GUARD: Ensure the container exists in the DOM
+    if (!networkContainer.value || !networkContainer.value.offsetParent) return;
 
+    // --- MODE 1: OWL Source Provided (Ontology Preview) ---
+    if (props.owlSource) {
+         // This logic remains similar to standard graph but we 
+         // might want different visualization defaults for schema definitions.
+         renderOwlSource(props.owlSource);
+         return;
+    }
+
+    // --- MODE 2: Standard Graph Data (Knowledge explorer) ---
     const isDark = uiStore.currentTheme === 'dark';
 
     const data = {
@@ -341,6 +352,16 @@ onUnmounted(() => {
         network = null;
     }
 });
+
+function focusNode(nodeId) {
+    if (network) {
+        network.focus(String(nodeId), {
+            scale: 1.2,
+            animation: { duration: 1000, easingFunction: 'easeInOutQuad' }
+        });
+        network.selectNodes([String(nodeId)]);
+    }
+}
 
 function resetView() {
     if (network) {

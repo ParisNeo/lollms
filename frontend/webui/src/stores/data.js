@@ -33,6 +33,18 @@ export const useDataStore = defineStore('data', () => {
     const isLoadingLanguages = ref(false);
     const apiKeys = ref([]);
     const availableVectorizers = ref([]);
+    const storeOntologies = ref({});
+
+    // Initialize from localStorage safely
+    try {
+        const stored = localStorage.getItem('lollms_store_ontologies');
+        if (stored) {
+            storeOntologies.value = JSON.parse(stored);
+        }
+    } catch (e) {
+        console.warn("Failed to parse store ontologies", e);
+        storeOntologies.value = {};
+    }
 
     const defaultLanguages = [
         { label: 'English', value: 'en' },
@@ -876,6 +888,11 @@ export const useDataStore = defineStore('data', () => {
             uiStore.addNotification(error.response?.data?.detail || 'Failed to extract text from file.', 'error');
             throw error;
         }
+    }
+
+    function persistOntology(storeId, code) {
+        storeOntologies.value[storeId] = code;
+        localStorage.setItem('lollms_store_ontologies', JSON.stringify(storeOntologies.value));
     }
 
     async function fetchRagBindingModels(bindingId) {

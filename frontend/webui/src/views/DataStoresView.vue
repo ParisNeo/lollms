@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted, onUnmounted, watch, defineAsyncComponent, Teleport } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch, defineAsyncComponent, Teleport, nextTick  } from 'vue';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
 import { useDataStore } from '../stores/data';
@@ -11,7 +11,6 @@ import apiClient from '../services/api';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import JsonRenderer from '../components/ui/JsonRenderer.vue';
 import GenericModal from '../components/modals/GenericModal.vue';
-
 // Async import for graph manager
 const DataStoreGraphManager = defineAsyncComponent({
   loader: () => import('../components/datastores/DataStoreGraphManager.vue'),
@@ -78,8 +77,29 @@ const scrapeUrl = ref('');
 const scrapeDepth = ref(0);
 const isUploading = ref(false); 
 const isScraping = ref(false); 
+const isComponentMounted = ref(false);
+const isHeaderReady = ref(false);
 
-const queryText = ref('');
+onMounted(async () => {
+    isComponentMounted.value = true;
+    // Wait for the Global Header to be fully rendered in the DOM
+    await nextTick();
+    if (document.getElementById('global-header-title-target')) {
+        isHeaderReady.value = true;
+    }
+
+    dataStore.fetchDataStores();
+    dataStore.fetchAvailableVectorizers();
+    tasksStore.fetchTasks();
+    window.addEventListener('lollms:open-new-datastore', handleAddStoreClick);
+});
+
+onBeforeUnmount(() => {
+    isComponentMounted.value = false;
+    isHeaderReady.value = false;
+});
+
+const queryText = ref('')
 const queryTopK = ref(10);
 const queryMinSim = ref(50.0);
 const queryResults = ref([]);
@@ -95,6 +115,29 @@ const loadingFileContent = ref(null);
 const metadataOption = ref('none');
 const manualMetadata = ref({});
 const vectorizeWithMetadata = ref(true);
+
+const extensionOptions = [
+    { label: 'Docs', items: ['.pdf', '.docx', '.pptx', '.txt', '.md', '.msg'] },
+    { label: 'Code', items: ['.py', '.js', '.ts', '.html', '.css', '.cpp', '.c', '.cs', '.java', '.sh', '.sql', '.vue'] },
+    { label: 'Data', items: ['.json', '.yaml', '.yml', '.csv', '.xml', '.log'] }
+];
+
+const selectedExtensions = ref(new Set(['.pdf', '.docx', '.txt', '.md', '.py', '.js', '.json', '.csv'])); // Sensible defaults
+
+function toggleExtension(ext) {
+    if (selectedExtensions.value.has(ext)) {
+        selectedExtensions.value.delete(ext);
+    } else {
+        selectedExtensions.value.add(ext);
+    }
+}
+
+function selectExtensionGroup(items, select = true) {
+    items.forEach(ext => {
+        if (select) selectedExtensions.value.add(ext);
+        else selectedExtensions.value.delete(ext);
+    });
+}
 const manualMetadataMode = ref('per-file');
 const allFilesMetadata = ref('title: \nsubject: \nauthors: ');
 
@@ -152,14 +195,17 @@ onMounted(() => {
 
 // Watch to manage Title
 watch([selectedStoreId, isAddFormVisible], ([newId, adding]) => {
+    if (!isComponentMounted.value) return;
+
     if (newId) {
-        uiStore.setPageTitle({ title: '' }); // Portal active, hide standard title
+        // Only hide title if we have a valid store and header is ready
+        uiStore.setPageTitle({ title: '' }); 
     } else if (adding) {
         uiStore.setPageTitle({ title: 'New Data Store', icon: IconPlus });
     } else {
         uiStore.setPageTitle({ title: 'Data Studio', icon: IconDatabase });
     }
-}, { immediate: true });
+});
 
 onUnmounted(() => {
     uiStore.setPageTitle({ title: '' });
@@ -348,9 +394,18 @@ function addFilesToSelection(newFiles) {
     const existingNames = new Set(selectedFilesToUpload.value.map(f => f.name + f.size));
     const filesToAdd = [];
     const newMetadata = {};
+    let filteredCount = 0;
     
     for (const file of newFiles) {
         const key = file.name + file.size;
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+
+        // Check against extension filter
+        if (selectedExtensions.value.size > 0 && !selectedExtensions.value.has(ext)) {
+            filteredCount++;
+            continue;
+        }
+
         if (!existingNames.has(key)) {
             filesToAdd.push(file);
             newMetadata[file.name] = 'title: \nsubject: \nauthors: ';
@@ -363,8 +418,12 @@ function addFilesToSelection(newFiles) {
         manualMetadata.value = { ...manualMetadata.value, ...newMetadata };
     }
     
-    if (filesToAdd.length < newFiles.length) {
-         uiStore.addNotification(`${newFiles.length - filesToAdd.length} duplicate files skipped.`, 'info');
+    if (filteredCount > 0) {
+        uiStore.addNotification(`Filtered out ${filteredCount} file(s) not matching selected extensions.`, 'info');
+    }
+
+    if (filesToAdd.length < (newFiles.length - filteredCount)) {
+         uiStore.addNotification(`${(newFiles.length - filteredCount) - filesToAdd.length} duplicate files skipped.`, 'info');
     }
 
     if (fileInputRef.value) fileInputRef.value.value = '';
@@ -377,7 +436,20 @@ function removeFileFromSelection(index) {
         delete manualMetadata.value[removedFile[0].name];
     }
 }
-async function fetchFilesInStore(storeId) { filesLoading.value = true; try { filesInSelectedStore.value = await dataStore.fetchStoreFiles(storeId); } finally { filesLoading.value = false; } }
+async function fetchFilesInStore(storeId) { 
+    if (!isComponentMounted.value) return;
+    filesLoading.value = true; 
+    try { 
+        const result = await dataStore.fetchStoreFiles(storeId); 
+        if (isComponentMounted.value) {
+            filesInSelectedStore.value = result; 
+        }
+    } finally { 
+        if (isComponentMounted.value) {
+            filesLoading.value = false; 
+        }
+    } 
+}
 
 async function handleUploadFiles() {
     if (!currentSelectedStore.value || selectedFilesToUpload.value.length === 0) { uiStore.addNotification('Please select files to upload.', 'warning'); return; }
@@ -735,9 +807,10 @@ async function handleImportStore() {
 <template>
     <div class="flex flex-col h-full w-full">
         <!-- Portals to Global Header -->
-        <template v-if="currentSelectedStore && !isAddFormVisible">
+        <!-- CRITICAL FIX: Extremely strict guard to prevent Teleport internal crashes -->
+        <template v-if="isComponentMounted && isHeaderReady && currentSelectedStore && !isAddFormVisible">
             <!-- Portal for Title and Tabs -->
-            <Teleport to="#global-header-title-target">
+            <Teleport to="#global-header-title-target" v-if="isComponentMounted">
                 <div class="flex items-center gap-4 h-full max-w-full overflow-hidden">
                     <div class="flex items-center gap-2 min-w-0">
                         <IconDatabase class="w-5 h-5 text-green-500 flex-shrink-0" />
@@ -753,7 +826,7 @@ async function handleImportStore() {
             </Teleport>
 
             <!-- Portal for Actions -->
-            <Teleport to="#global-header-actions-target">
+            <Teleport to="#global-header-actions-target" v-if="isComponentMounted">
                 <div class="flex items-center gap-1">
                     <button @click="showStoreInfo = true" class="btn-icon" title="Store Info"><IconInfo class="w-5 h-5"/></button>
                     <div class="h-4 w-px bg-gray-300 dark:border-gray-600 mx-1"></div>
@@ -859,7 +932,44 @@ async function handleImportStore() {
                 <!-- Content Area Tabs -->
                 <div v-show="activeTab === 'documents'" class="p-6 flex-grow overflow-y-auto space-y-8">
                     <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
-                        <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
+                        <div class="flex justify-between items-center">
+                            <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
+                            <div class="flex gap-2">
+                                <button @click="selectedExtensions.clear()" class="text-[10px] font-black uppercase text-red-500 hover:underline">Clear Filters</button>
+                                <button @click="extensionOptions.forEach(g => selectExtensionGroup(g.items))" class="text-[10px] font-black uppercase text-blue-500 hover:underline">Reset Defaults</button>
+                            </div>
+                        </div>
+
+                        <!-- Extension Filter UI -->
+                        <div class="p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-600 shadow-inner">
+                            <div class="space-y-4">
+                                <div v-for="group in extensionOptions" :key="group.label" class="space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">{{ group.label }}</span>
+                                        <div class="flex gap-2">
+                                            <button @click="selectExtensionGroup(group.items, true)" class="text-[8px] font-bold text-blue-400 hover:text-blue-600">All</button>
+                                            <button @click="selectExtensionGroup(group.items, false)" class="text-[8px] font-bold text-gray-400 hover:text-red-400">None</button>
+                                        </div>
+                                    </div>
+                                    <div class="flex flex-wrap gap-1.5">
+                                        <button 
+                                            v-for="ext in group.items" 
+                                            :key="ext"
+                                            @click="toggleExtension(ext)"
+                                            :class="[
+                                                'px-2 py-0.5 rounded text-[10px] font-bold transition-all border',
+                                                selectedExtensions.has(ext) 
+                                                    ? 'bg-blue-500 border-blue-600 text-white shadow-sm' 
+                                                    : 'bg-gray-100 dark:bg-gray-700 border-transparent text-gray-500 dark:text-gray-400'
+                                            ]"
+                                        >
+                                            {{ ext }}
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label for="metadata-option" class="block text-sm font-medium">Metadata Handling</label>

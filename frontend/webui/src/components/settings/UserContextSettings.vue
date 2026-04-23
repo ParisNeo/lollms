@@ -61,6 +61,7 @@ const skillsBuildingEnabled = ref(false);
 const formBuildingEnabled = ref(true);
 const reasoningActivation = ref(false);
 const reasoningEffort = ref('medium');
+const reasoningSummary = ref(false);
 const rlmEnabled = ref(false);
 const maxImageWidth = ref(-1);
 const maxImageHeight = ref(-1);

@@ -268,9 +268,9 @@ async function handleRefreshModels() {
     </div>
 
     <!-- Center: Dynamic Title / Context Area (Portal) -->
-    <div class="flex-1 flex justify-center min-w-0 px-2 lg:px-6">
+    <div class="flex-1 flex justify-center min-w-0 px-2 lg:px-6 h-full relative">
         <!-- 1. Try to render portal content (Views can push custom controls here) -->
-        <div id="global-header-title-target" class="w-full flex justify-center items-center h-full pointer-events-auto"></div>
+        <div id="global-header-title-target" class="w-full flex justify-center items-center h-full pointer-events-auto z-20"></div>
         
         <!-- 2. Fallback: Standard Page Title -->
         <div v-if="pageTitle" class="absolute pointer-events-none flex items-center gap-2 text-gray-600 dark:text-gray-300 font-semibold truncate">

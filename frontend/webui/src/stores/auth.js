@@ -537,32 +537,29 @@ export const useAuthStore = defineStore('auth', () => {
         if (targetId) {
             const personality = dataStore.getPersonalityById(targetId);
             if (personality && personality.required_context_options && personality.required_context_options.length > 0) {
-                
-                // SCENARIO 1: User is trying to disable a requirement of the CURRENT personality
-                if (!isChangingPersonality) {
-                    const violatingRequirement = personality.required_context_options.some(opt => {
-                        const key = optionToPrefKey(opt);
-                        return key && preferences[key] === false;
-                    });
 
-                    if (violatingRequirement) {
-                        // To allow the user to turn off the feature, we MUST drop the personality requirement
-                        preferences.active_personality_id = null;
-                        targetId = null; // Requirements no longer apply for this session
-                        if (notify) uiStore.addNotification('Reset to default personality to allow disabling required features.', 'info');
-                    }
-                }
+                // SCENARIO: User is trying to disable a feature that the personality needs
+                // OR we are switching TO a personality that has requirements.
 
-                // SCENARIO 2: If we are still using a personality (or just switched to one), force its rules
-                if (targetId) {
-                    const activePers = dataStore.getPersonalityById(targetId);
-                    activePers.required_context_options.forEach(opt => {
-                        const key = optionToPrefKey(opt);
-                        if (key) {
-                            // Force to true in the outgoing payload
+                let hasViolations = false;
+                personality.required_context_options.forEach(opt => {
+                    const key = optionToPrefKey(opt);
+                    if (key) {
+                        // If the user is explicitly trying to turn this OFF (false)
+                        if (preferences[key] === false) {
+                            hasViolations = true;
+                        } 
+                        // If we are just saving or switching personality, ensure the required features are ON
+                        else if (preferences[key] === undefined && !user.value[key]) {
                             preferences[key] = true;
                         }
-                    });
+                    }
+                });
+
+                if (hasViolations) {
+                    // USER INTENT OVERRIDE: Clear the personality so the user can control their settings
+                    preferences.active_personality_id = null;
+                    if (notify) uiStore.addNotification('Features manually changed: Reverting to default personality.', 'info');
                 }
             }
         }
