@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 from sqlalchemy.exc import IntegrityError
 from lollms_client import LollmsClient, list_bindings, get_binding_desc
+from backend.lollms_init_watcher import lollms_init_watcher
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.config import (
@@ -236,7 +237,7 @@ def _execute_binding_command_task(task: Task, binding_type: str, binding_data: D
         
         service = None
         if binding_type == "llm":
-            lc = build_lollms_client_from_params(username=username, binding_alias=binding_data['alias'], llm_params=None, load_mcp=False)
+            lc = build_lollms_client_from_params(username=username, binding_alias=binding_data['alias'], llm_params=None, load_mcp=False, callback=lollms_init_watcher)
             service = lc.llm
         elif binding_type == "tti":
             client_params = { "tti_binding_name": binding_data['name'], "tti_binding_config": { **effective_config, "model_name": binding_data['default_model_name'] }, "load_llm": False, "load_tti": True }
