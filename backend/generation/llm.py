@@ -1721,8 +1721,10 @@ def build_llm_generation_router(router: APIRouter):
 
                         # Post-generation Stats
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
-                        tps = (ai_msg.tokens - 1) / (time.time() - first_chunk_time) if first_chunk_time and ai_msg.tokens > 1 else 0
-                        
+                        if ai_msg.tokens:
+                            tps = (ai_msg.tokens - 1) / (time.time() - first_chunk_time) if first_chunk_time and ai_msg.tokens > 1 else 0
+                        else:
+                            tps = -1
                         # CRITICAL FIX: Ensure sources and events are persisted to DB
                         ai_msg.set_metadata_item('ttft', round(ttft, 2), discussion_obj)
                         ai_msg.set_metadata_item('tps', round(tps, 2), discussion_obj)
