@@ -1077,12 +1077,17 @@ Return ONLY a valid JSON object. No markdown formatting.
             elif phase_name == "Post-code Critique":
                 sys_prompt += "\n\nTask: Review the proposed solution/code. Look for bugs, security issues, logic errors, or missing requirements. Be critical but constructive."
 
-        # Emit step start
-        step_start_payload = {"type": "step_start", "content": f"**{display_name}** ({phase_name} Round {round_num})"}
+        # Emit step start using the standard ID-based schema required by the UI for tracking progress
+        step_id = str(uuid.uuid4())
+        step_start_payload = {
+            "type": "step_start", 
+            "content": f"**{display_name}** ({phase_name} Round {round_num})",
+            "id": step_id
+        }
         if all_events is not None:
             all_events.append(step_start_payload)
         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(step_start_payload)) + "\n")
-        
+
         try:
             temp_client = build_lollms_client_from_params(
                 username=user.username,
@@ -1102,8 +1107,8 @@ Return ONLY a valid JSON object. No markdown formatting.
                 temperature=0.7
             )
             
-            # Emit step end with result content
-            step_end_payload = {"type": "step_end", "content": response}
+            # Emit step end with result content, matching the ID to close the UI step correctly
+            step_end_payload = {"type": "step_end", "content": f"Response from {display_name} received.", "id": step_id}
             if all_events is not None:
                 all_events.append(step_end_payload)
             main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(step_end_payload)) + "\n")
@@ -1684,6 +1689,8 @@ def build_llm_generation_router(router: APIRouter):
 
                     result = {}
                     try:
+                        # Call the library's native chat method. 
+                        # This now handles orchestration, tool execution, and artifact post-processing internally.
                         result = discussion_obj.chat(
                             user_message=final_prompt, 
                             personality=active_personality,
@@ -1691,70 +1698,84 @@ def build_llm_generation_router(router: APIRouter):
                             images=images_for_message,
                             streaming_callback=llm_callback, 
                             think=owner_db_user.reasoning_activation,
-                            reasoning_effort=owner_db_user.reasoning_effort, 
-                            add_user_message=False, # We added it ourselves or it's a resend
+                            reasoning_effort=owner_db_user.reasoning_effort,
+                            reasoning_summary=owner_db_user.reasoning_summary, # Added discrepancy fix
+                            add_user_message=False, # We added it ourselves manually above to keep prompt clean
                             tools=agentic_tools,
                             enable_image_generation=owner_db_user.image_generation_enabled,
                             enable_image_editing=owner_db_user.image_editing_enabled,
                             auto_activate_artefacts=True,
-                            # lollms_discussion specification compliance
                             enable_inline_widgets=owner_db_user.inline_widgets_enabled,
                             enable_notes=owner_db_user.note_generation_enabled,
                             enable_skills=owner_db_user.skills_building_enabled,
                             enable_forms=owner_db_user.form_building_enabled,
-                            enable_silent_artefact_explanation=True
+                            enable_silent_artefact_explanation=True # Library handles explanation if only XML was emitted
                         )
                     finally:
-                        # Ensure the discussion is committed even if interrupted by the stop signal
-                        # or if an unexpected exception occurred inside chat().
-                        # This guarantees that the partially generated message content is saved.
+                        # Ensure discussion state is committed even on client disconnect/stop signal
                         discussion_obj.commit()
-                    
+
                     ai_msg = result.get('ai_message')
                     if ai_msg:
-                        # Update Metadata
-                        # LollmsDiscussion handles injecting sources from tool results into metadata natively!
-
-                        # Skill tags are natively handled by LollmsDiscussion artefacts system if it emits `<artefact type="skill">` 
-                        # or by the frontend directly finding the `<skill>` tags in the markdown.
-                        pass
-
-                        # Post-generation Stats
+                        # Calculated Turn-Specific Stats
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
                         if ai_msg.tokens:
                             tps = (ai_msg.tokens - 1) / (time.time() - first_chunk_time) if first_chunk_time and ai_msg.tokens > 1 else 0
                         else:
                             tps = -1
-                        # CRITICAL FIX: Ensure sources and events are persisted to DB
+
+                        # Apply turn-specific metadata to the proxied message object
                         ai_msg.set_metadata_item('ttft', round(ttft, 2), discussion_obj)
                         ai_msg.set_metadata_item('tps', round(tps, 2), discussion_obj)
-                        ai_msg.set_metadata_item('events', all_events, discussion_obj)
-                        
-                        # Use deduplicated sources for the dedicated UI list
+
+                        # Sync events from BOTH Herd Mode (if run) and the library's agentic loop
+                        lib_events = ai_msg.metadata.get('events', [])
+                        combined_events = all_events + lib_events
+                        ai_msg.set_metadata_item('events', combined_events, discussion_obj)
+
+                        # Sources are handled by the library in agentic mode, but for non-agentic search 
+                        # we merge the local collected_sources.
+                        lib_sources = ai_msg.metadata.get('sources', [])
                         unique_sources = []
                         seen_sources = set()
-                        for s in collected_sources:
+                        for s in collected_sources + lib_sources:
                             key = s.get('source') or s.get('title')
                             if key not in seen_sources:
                                 unique_sources.append(s)
                                 seen_sources.add(key)
-                        
                         ai_msg.set_metadata_item('sources', unique_sources, discussion_obj)
 
-                    # Finalize
-                    def msg_to_out(m): return None if not m else {"id": m.id, "sender": m.sender, "content": m.content, "metadata": m.metadata, "sender_type": m.sender_type, "image_references": [f"data:image/png;base64,{i}" for i in (m.images or [])]}
-                    
-                    # Ensure the result dictionary contains the user message we added manually if applicable
+                    # Finalize payload construction
+                    def msg_to_out(m): 
+                        if not m: return None
+                        # Convert LollmsMessage to UI format
+                        return {
+                            "id": m.id, 
+                            "sender": m.sender, 
+                            "content": m.content, 
+                            "metadata": m.metadata, 
+                            "sender_type": m.sender_type, 
+                            "image_references": [f"data:image/png;base64,{i}" for i in (m.images or [])]
+                        }
+
                     effective_user_msg = result.get('user_message') or user_msg
 
                     finalize_payload = {
                         "type": "finalize",
-                        "data": {"user_message": msg_to_out(effective_user_msg), "ai_message": msg_to_out(ai_msg)},
-                        "discussion": {"id": discussion_id, "discussion_data_zone": discussion_obj.discussion_data_zone}
+                        "data": {
+                            "user_message": msg_to_out(effective_user_msg), 
+                            "ai_message": msg_to_out(ai_msg)
+                        },
+                        "discussion": {
+                            "id": discussion_id, 
+                            "discussion_data_zone": discussion_obj.discussion_data_zone
+                        }
                     }
+
+                    # Trigger auto-title if discussion was newly created
                     if current_user.auto_title and discussion_obj.metadata.get('title',"").startswith("New Discussion"):
                         finalize_payload["new_title"] = discussion_obj.auto_title()
-                    
+
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(finalize_payload)) + "\n")
 
                 except Exception as e:
