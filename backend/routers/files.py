@@ -495,13 +495,35 @@ def html_to_docx_bytes(html: str) -> bytes:
             return
 
         if name == "img":
-            src = el.get("src"); alt = el.get("alt") or "[image]"
+            src = el.get("src")
+            alt = el.get("alt") or "[image]"
             tmp = None
             try:
-                tmp = _download_image_to_temp(src)
-                doc.add_picture(tmp, width=Inches(5.5))
+                # Check for SVG (Common with Mermaid exports)
+                if src.startswith("data:image/svg+xml"):
+                    # Word doesn't like SVGs. We need to convert to PNG.
+                    # We'll use a library if available, else skip to prevent crash.
+                    try:
+                        import cairosvg
+                        header, b64data = src.split(",", 1)
+                        svg_code = base64.b64decode(b64data).decode('utf-8')
+                        png_data = cairosvg.svg2png(bytestring=svg_code)
+                        tmp_bio = io.BytesIO(png_data)
+                        doc.add_picture(tmp_bio, width=Inches(5.5))
+                    except ImportError:
+                        print("cairosvg not installed, skipping SVG embedding in DOCX")
+                        doc.add_paragraph(f"[Diagram: {alt} - Static rendering requires cairosvg on server]")
+                else:
+                    # Standard PNG/JPG base64 or URL
+                    tmp = _download_image_to_temp(src)
+                    # Check image size to ensure "Good Resizing"
+                    img = Image.open(tmp)
+                    width, height = img.size
+                    # If image is smaller than page width, use its natural size, else fit to page
+                    pixel_width_in_inches = width / 96.0 # Assume 96 DPI
+                    use_width = min(Inches(5.5), Inches(pixel_width_in_inches))
+                    doc.add_picture(tmp, width=use_width)
             except Exception as e:
-                # Add text placeholder if image fails (e.g. blocked by SSRF check)
                 print(f"Failed to add image to DOCX: {e}")
                 doc.add_paragraph(f"[Image: {alt} - Could not be loaded]")
             finally:

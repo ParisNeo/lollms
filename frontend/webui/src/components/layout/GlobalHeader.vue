@@ -231,7 +231,15 @@ async function handleRefreshModels() {
                          </DropdownSubmenu>
                          
                          <DropdownSubmenu title="Personality" icon="user-circle" :icon-src="selectedPersonality?.icon_base64">
-                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
+                            <div class="flex flex-col sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
+                                <router-link to="/personality-studio" @click="closeMenu" class="flex items-center gap-3 py-2.5 px-4 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-orange-600 transition-colors border-b dark:border-gray-700">
+                                    <IconPencil class="w-4 h-4" />
+                                    <span class="text-xs font-bold uppercase tracking-wider">Personality Studio</span>
+                                </router-link>
+                                <div class="p-2">
+                                    <input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full">
+                                </div>
+                            </div>
                             <div class="p-1 flex-grow overflow-y-auto max-h-96">
                                 <div v-for="group in filteredAvailablePersonalities" :key="group.label">
                                      <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>

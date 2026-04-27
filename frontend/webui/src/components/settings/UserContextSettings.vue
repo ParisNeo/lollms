@@ -580,9 +580,9 @@ async function handleSaveChanges() {
                     <label class="feature-tag" :class="{'active': slideMakerEnabled}" title="Generate presentations"><input type="checkbox" v-model="slideMakerEnabled"><span>Slides</span></label>
                     <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
                     <label class="feature-tag" :class="{'active': inlineWidgetsEnabled}" title="Build interactive widgets"><input type="checkbox" v-model="inlineWidgetsEnabled"><span>Widgets</span></label>
-                    <label class="feature-tag" :class="{'active': note_generation_enabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
-                    <label class="feature-tag" :class="{'active': skills_building_enabled}" title="Save conversation as reusable skills"><input type="checkbox" v-model="skillsBuildingEnabled"><span>Skills</span></label>
-                    <label class="feature-tag" :class="{'active': form_building_enabled}" title="Allow AI to create interactive forms"><input type="checkbox" v-model="formBuildingEnabled"><span>Forms</span></label>
+                    <label class="feature-tag" :class="{'active': noteGenerationEnabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
+                    <label class="feature-tag" :class="{'active': skillsBuildingEnabled}" title="Save conversation as reusable skills"><input type="checkbox" v-model="skillsBuildingEnabled"><span>Skills</span></label>
+                    <label class="feature-tag" :class="{'active': formBuildingEnabled}" title="Allow AI to create interactive forms"><input type="checkbox" v-model="formBuildingEnabled"><span>Forms</span></label>
                 </div>
             </div>
 

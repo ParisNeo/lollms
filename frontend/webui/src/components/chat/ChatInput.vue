@@ -547,16 +547,16 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
         });
     }
-    if (user.value?.note_generation_enabled) {
+    if (user.value?.inline_widgets_enabled) {
         features.push({ 
-            id: 'notes', 
-            icon: IconFileText, 
-            label: 'Note Building', 
-            colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800', 
-            title: 'Note Building Enabled.',
-            modalTitle: 'Note Building',
-            modalDescription: 'Allows the AI to create structured research notes saved directly to your library.',
-            systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
+            id: 'widgets', 
+            icon: IconCpuChip, 
+            label: 'Widgets', 
+            colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800', 
+            title: 'Widget Building Enabled.',
+            modalTitle: 'Interactive Widgets',
+            modalDescription: 'Allows the AI to create live, interactive HTML components for visualizations and tools.',
+            systemPrompt: '## Widgets: Use <lollms_inline title="...">...</lollms_inline> for HTML apps.'
         });
     }
     if (isTtsActive.value || isSttActive.value) {
@@ -1138,8 +1138,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                         <IconCpuChip class="w-4 h-4 text-indigo-500" />
                                         <span>Widget Building</span>
                                     </span>
-                                    <!-- Use a more robust check for the boolean state -->
-                                    <IconCheckCircle v-if="user && (user.inline_widgets_enabled === true || user.inline_widgets_enabled === 1)" class="w-4 h-4 text-green-500" />
+                                    <IconCheckCircle v-if="user?.inline_widgets_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 

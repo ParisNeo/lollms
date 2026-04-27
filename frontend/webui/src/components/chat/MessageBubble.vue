@@ -520,12 +520,24 @@ const groupedEvents = computed(() => {
     if (!hasEvents.value) return [];
     const result =[];
     const stack =[];
-    
-    // CRITICAL: Filter out technical 'new_message_id' events to keep the UI human-friendly
+
+    // EXCLUDE: Technical UI-management events that are already visualized by inline components or sidebars.
+    const REDUNDANT_EVENT_TYPES = [
+        'sources', 
+        'ui_update', 
+        'new_message_id',
+        'processing_open',
+        'processing_status',
+        'processing_close',
+        'artefact_done',
+        'note_done',
+        'skill_done',
+        'widget_done',
+        'artefact_update_done'
+    ];
+
     const filteredEvents = props.message.events.filter(event => 
-        event.type !== 'sources' && 
-        event.type !== 'ui_update' && 
-        event.type !== 'new_message_id'
+        !REDUNDANT_EVENT_TYPES.includes(event.type)
     );
     
     for (let i = 0; i < filteredEvents.length; i++) {
