@@ -91,10 +91,14 @@ export function useDiscussionExports(state, stores, getActions) {
         }
     }
 
-    async function exportRawContent({ content, format }) {
+    async function exportRawContent({ content, format, filename }) {
         uiStore.addNotification(`Exporting content as ${format.toUpperCase()}...`, 'info');
         try {
-            const response = await apiClient.post(`/api/files/export-content`, { content, format }, { responseType: 'blob' });
+            const response = await apiClient.post(`/api/files/export-content`, { 
+                content, 
+                format,
+                filename: filename || 'export'
+            }, { responseType: 'blob' });
             const blob = new Blob([response.data], { type: response.headers['content-type'] });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');

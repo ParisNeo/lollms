@@ -462,7 +462,18 @@ async function renderDiagram() {
 
     const processedCode = processMermaidCode(props.mermaidCode)
     lastProcessedCode.value = processedCode
-    mermaid.initialize(getBaseMermaidConfig(uiStore.currentTheme === 'dark' ? 'dark' : 'default'))
+    // [FIX] Align Mermaid theme with LoLLMs UI state
+    mermaid.initialize({
+        startOnLoad: false,
+        theme: uiStore.currentTheme === 'dark' ? 'dark' : 'default',
+        securityLevel: 'loose',
+        themeVariables: {
+            primaryColor: '#3b82f6', // blue-500
+            primaryTextColor: uiStore.currentTheme === 'dark' ? '#f3f4f6' : '#111827',
+            lineColor: uiStore.currentTheme === 'dark' ? '#4b5563' : '#d1d5db',
+        }
+    });
+    
     const { svg } = await mermaid.render(`mermaid-svg-${Date.now()}`, processedCode)
 
     if (!mountRef.value) return

@@ -205,6 +205,10 @@ async function handleNewItem() {
     if (activeTab.value === 'chat') {
         store.createNewDiscussion(store.currentGroupId); 
         if (window.innerWidth < 768) uiStore.closeSidebar();
+    } else if (activeTab.value === 'files') {
+        // [FIX] Open Create Artefact modal when on the Files/Artefacts tab
+        uiStore.openModal('createArtefact');
+        if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notes') {
         uiStore.openModal('noteEditor');
         if (window.innerWidth < 768) uiStore.closeSidebar();

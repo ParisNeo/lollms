@@ -1138,7 +1138,8 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                         <IconCpuChip class="w-4 h-4 text-indigo-500" />
                                         <span>Widget Building</span>
                                     </span>
-                                    <IconCheckCircle v-if="user?.inline_widgets_enabled" class="w-4 h-4 text-green-500" />
+                                    <!-- Use a more robust check for the boolean state -->
+                                    <IconCheckCircle v-if="user && (user.inline_widgets_enabled === true || user.inline_widgets_enabled === 1)" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 

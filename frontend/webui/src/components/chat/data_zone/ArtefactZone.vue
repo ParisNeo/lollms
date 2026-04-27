@@ -134,7 +134,12 @@ function openArtefactInWorkspace(group) {
     uiStore.dataZoneTab = 'workspace';
     uiStore.activeSplitArtefactTitle = group.title;
 }
-
+function handleCreateNew() {
+    // [FIX] Correctly trigger the manual creation modal
+    uiStore.openModal('createArtefact', { 
+        discussionId: discussionsStore.currentDiscussionId 
+    });
+}
 </script>
 
 <template>

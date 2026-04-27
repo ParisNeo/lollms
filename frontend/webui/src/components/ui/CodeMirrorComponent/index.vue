@@ -98,10 +98,13 @@ const isRendering = ref(false);
 // Computed property for rendered content - Automatic language awareness
 const renderedContent = computed(() => {
     const lang = props.language ? props.language.toLowerCase() : 'markdown';
-    
+
     // If it's markdown, we return raw text (which might contain its own blocks)
     if (lang === 'markdown') return props.modelValue;
-    
+
+    // [FIX] For mermaid, ensure we wrap in fences so MessageContentRenderer identifies it
+    if (lang === 'mermaid') return `\`\`\`mermaid\n${props.modelValue}\n\`\`\``;
+
     // If it's a specific language, we wrap it so the MessageContentRenderer treats it as a block
     // This allows the renderer to provide "Copy", "Run", or "SVG Preview" UI automatically.
     return `\`\`\`${lang}\n${props.modelValue}\n\`\`\``;
@@ -146,10 +149,14 @@ watch(() => props.initialMode, (newMode) => {
 
 // --- EDITOR LOGIC ---
 const getLanguageExtension = () => {
-    switch (props.language.toLowerCase()) {
+    const lang = props.language ? props.language.toLowerCase() : '';
+    switch (lang) {
         case 'html': return html();
         case 'python': return python();
         case 'javascript': return javascript();
+        case 'mermaid': 
+            // Mermaid source is essentially text/markdown with specific keywords
+            return markdown({ base: markdownLanguage, codeLanguages: languages });
         default: return markdown({ base: markdownLanguage, codeLanguages: languages });
     }
 };

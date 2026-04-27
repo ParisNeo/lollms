@@ -36,9 +36,14 @@ const exportFormats = computed(() => {
 });
 
 function handleExport(format) {
+    if (!dbContent.value && format !== 'pdf') {
+        uiStore.addNotification("Nothing to export.", "warning");
+        return;
+    }
     discussionsStore.exportRawContent({ 
-        content: content.value, 
-        format: format 
+        content: dbContent.value, 
+        format: format,
+        filename: title.value || 'workspace_export'
     });
 }
 
@@ -136,10 +141,10 @@ const loadError = ref(null);
             'dockerfile': 'dockerfile', 'makefile': 'makefile', 'cmake': 'cmake',
             'gradle': 'gradle', 'maven': 'xml', 'pom': 'xml',
             // Other
-            'svg': 'svg', 'graphql': 'graphql', 'proto': 'protobuf',
-        };
-        
-        // Return detected type from extension if found
+            'svg': 'svg', 'mermaid': 'mermaid', 'mmd': 'mermaid', 'graphql': 'graphql', 'proto': 'protobuf',
+            };
+
+            // Return detected type from extension if found
         if (extMap[ext]) {
             return extMap[ext];
         }
@@ -162,8 +167,9 @@ const loadError = ref(null);
             'javascript': 'javascript',
             'typescript': 'javascript',
             'html': 'html',
-            'css': 'html', // CodeMirror uses html mode for css in some configs, or we could add css
+            'css': 'html',
             'json': 'javascript',
+            'mermaid': 'mermaid',
             'markdown': 'markdown',
         };
         return cmLangMap[type] || 'markdown';

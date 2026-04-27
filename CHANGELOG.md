@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-27 22:55]
+
+- feat: update chat UI, message rendering, and backend export improvements
+
 ## [2026-04-27 00:48]
 
 - refactor(discussion): simplify artefacts router and update critique phase handling

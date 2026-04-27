@@ -131,10 +131,22 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
 
                 case 'processing_open':
+                    // [FIX] Ensure the opening tag is added to content so the renderer catches it
+                    const openAttrs = data.attrs || {};
+                    let openTag = `<processing type="${data.processing_type}" title="${data.title || 'Processing'}"`;
+                    for (const [k, v] of Object.entries(openAttrs)) { openTag += ` ${k}="${v}"`; }
+                    openTag += '>';
+                    messageToUpdate.content += openTag;
+                    break;
+
                 case 'processing_status':
+                    // [FIX] Append status lines immediately to the visible content
+                    messageToUpdate.content += `\n* ${data.status}`;
+                    break;
+
                 case 'processing_close':
-                    // DO NOTHING: The library now emits these tags directly in the 'chunk' stream.
-                    // Manually appending here causes the duplication seen in your screenshot.
+                    // [FIX] Close the tag to finalize the UI block appearance
+                    messageToUpdate.content += '</processing>';
                     break;
 
                 case 'thought':

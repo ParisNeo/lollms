@@ -1584,20 +1584,9 @@ def build_llm_generation_router(router: APIRouter):
                         ttft = (first_chunk_time - start_time) * 1000
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "ttft", "content": round(ttft, 2)}) + "\n")
 
-                    # Handle Real-time Artefact Events (Note, Skill, Widget starts)
+                    # Relay structural events if present in chunk metadata
                     if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
-                        # Relay the start events (note_start, skill_start, etc.) directly to UI
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(params)) + "\n")
-                        return True
-
-                    # Handle Real-time Artefact Persistence Events (fired as soon as </tag> is parsed)
-                    if mtype_val == MSG_TYPE.MSG_TYPE_ARTEFACTS_STATE_CHANGED.value and params and "artefact" in params:
-                        payload = {
-                            "type": "artefact_event",
-                            "data": params # Contains {artefact: dict, is_new: bool}
-                        }
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
-                        return True
 
                     payload_map = {
                         MSG_TYPE.MSG_TYPE_NEW_MESSAGE.value: {"type": "new_message_id", "content": chunk},
@@ -1609,34 +1598,45 @@ def build_llm_generation_router(router: APIRouter):
                         MSG_TYPE.MSG_TYPE_TOOL_CALL.value: {"type": "tool_call", "content": params if params else {"name": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_TOOL_OUTPUT.value: {"type": "tool_output", "content": params if params else {"output": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_SOURCES_LIST.value: {"type": "sources", "content": params if params else chunk},
-                        # Secondary Content Streams
-                        38: {"type": "artefact_chunk", "content": params},
-                        39: {"type": "artefact_done", "content": params},
-                        40: {"type": "note_chunk", "content": params},
-                        41: {"type": "note_done", "content": params},
-                        42: {"type": "skill_chunk", "content": params},
-                        43: {"type": "skill_done", "content": params},
-                        44: {"type": "widget_chunk", "content": params},
-                        45: {"type": "widget_done", "content": params},
+                        # Secondary Content Streams: Content is the text fragment, params is metadata
+                        38: {"type": "artefact_chunk", "content": chunk, "meta": params},
+                        39: {"type": "artefact_done", "content": chunk, "meta": params},
+                        40: {"type": "note_chunk", "content": chunk, "meta": params},
+                        41: {"type": "note_done", "content": chunk, "meta": params},
+                        42: {"type": "skill_chunk", "content": chunk, "meta": params},
+                        43: {"type": "skill_done", "content": chunk, "meta": params},
+                        44: {"type": "widget_chunk", "content": chunk, "meta": params},
+                        45: {"type": "widget_done", "content": chunk, "meta": params},
                         46: {"type": "form_ready", "content": params},
                         47: {"type": "form_submitted", "content": params}
                     }
 
                     payload = payload_map.get(mtype_val)
                     if payload:
+                        # Ensure content is set for chunks, even if we have params
+                        if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value or mtype_val == MSG_TYPE.MSG_TYPE_CONTENT.value:
+                            payload["content"] = chunk
+
                         # Unified Processing Protocol Integration
                         if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
                             payload["type"] = params["type"]
                             payload["processing_type"] = params.get("processing_type")
+                            payload["title"] = params.get("title")
+                            payload["status"] = params.get("status")
 
                         # Inject discussion context for secondary streams to trigger frontend refreshes
                         if mtype_val >= 38 or (params and "processing_type" in params): 
                             payload['discussion_id'] = discussion_id
 
                         # Only append meaningful user-facing events to the persistent log
-                        if payload['type'] not in ["chunk", "thought", "new_message_id"]:
+                        # Exclude high-frequency content fragments
+                        excluded_from_history = [
+                            "chunk", "thought", "new_message_id", 
+                            "artefact_chunk", "note_chunk", "skill_chunk", "widget_chunk"
+                        ]
+                        if payload['type'] not in excluded_from_history:
                             all_events.append(payload)
-                        
+
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(payload)) + "\n")
                     return True
 

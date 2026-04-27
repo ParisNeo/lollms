@@ -154,8 +154,8 @@ const parsedStreamingContent = computed(() => {
 
     const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        // [FIX] Added (<owl>[\s\S]*?(?:<\/owl>|$)) to the special block parser
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form[\s\S]*?(?:<\/lollms_form>|$))|(<owl>[\s\S]*?(?:<\/owl>|$))/;
+        // [FIX] Standardized capture groups for the monolithic parser
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)|(<owl>[\s\S]*?(?:<\/owl>|$))/;
         match = regex.exec(rawBlock);
     }
     
@@ -318,7 +318,6 @@ const parsedStreamingContent = computed(() => {
         const title = match[21];
         const inner = match[23] || '';
         
-        // The block is closed only if the matching string contains the closing tag
         const isClosed = raw.trim().endsWith('</processing>');
 
         return { 
@@ -452,7 +451,7 @@ const messageParts = computed(() => {
         { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
         { type: 'lollms_form', regex: /<lollms_form\b([^>]*)>([\s\S]*?)<\/lollms_form>/g },
         { type: 'lollms_inline', regex: /<lollms_inline\b[^>]*\btitle=["']([^"']+)["'][^>]*>([\s\S]*?)<\/lollms_inline>/g },
-        { type: 'processing', regex: /(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))/g },
+        { type: 'processing', regex: /(<processing\s+type=["']([^"']*)["']\s+title=["']([^"']*)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))/gi },
         { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g }
     ];
 
@@ -551,9 +550,21 @@ const messageParts = computed(() => {
                 parts.push({ type: 'code', lang, code: inner, id: `code-${el.start}` });
             }
         } else if (el.type === 'tool') {
+            // Re-evaluate using parseSpecialBlock which handles all XML tags
             const parsed = parseSpecialBlock(el.raw, el.match);
             if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
             parts.push({ ...parsed, id: `${parsed.type}-${el.start}` });
+        } else if (el.type === 'processing') {
+            // Manually extract from el.match which comes from the simple processing regex
+            // Group 1: raw, 2: type, 3: title, 4: attrs, 5: content
+            parts.push({ 
+                type: 'processing', 
+                pType: el.match[2], 
+                title: el.match[3], 
+                statusContent: el.match[5], 
+                isClosed: el.raw.trim().endsWith('</processing>'), 
+                id: `proc-${el.start}` 
+            });
         } else if (el.type === 'block_doc') {
             const subType = el.match[1].toLowerCase();
             const finalType = subType === 'skill' ? 'skill_block' : (subType === 'note' ? 'note_block' : 'document');
@@ -1302,10 +1313,13 @@ function onMermaidReady({ svg }, partIndex) {
                   
                   <!-- Inline Iframe Viewport -->
                   <div class="relative w-full h-[400px] bg-white transition-all overflow-hidden border-b dark:border-gray-800">
-                      <!-- Render widget using secure isolation. If content is available but marked 'loading', we still show it -->
+                      <!-- [FIX] Stabilized Iframe: 
+                           We use a key that only changes when 'isStreaming' turns false.
+                           This ensures the JS executes once the widget code is complete, 
+                           without being interrupted by subsequent text tokens. -->
                       <iframe 
                         v-if="getWidgetContent(part.widget)"
-                        :key="`${part.id}-${(discussionsStore.activeUpdatingArtefacts && discussionsStore.activeUpdatingArtefacts.has(part.id)) ? 'streaming' : 'final'}`"
+                        :key="`${part.id}-${isStreaming ? 'live' : 'stable'}`"
                         :srcdoc="getWidgetContent(part.widget)" 
                         class="w-full h-full border-none pointer-events-auto bg-white" 
                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 

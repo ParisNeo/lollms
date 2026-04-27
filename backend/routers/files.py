@@ -859,7 +859,9 @@ async def export_content(
 
         elif export_format == 'pdf':
             media_type = "application/pdf"
-            file_content = md_to_pdf_bytes(content)  # preserves headings/lists/code/images/tables
+            # Ensure we handle potential None content from workspace safely
+            safe_content = content if content else f"# {payload.filename or 'Export'}\n(No content)"
+            file_content = md_to_pdf_bytes(safe_content)  # preserves headings/lists/code/images/tables
 
         elif export_format == 'docx':
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -1044,3 +1046,4 @@ async def upload_chat_image(
         uploaded_files.append({"filename": s_filename, "server_path": unique_filename})
         
     return uploaded_files
+

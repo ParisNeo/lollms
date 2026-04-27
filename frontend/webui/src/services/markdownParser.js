@@ -120,6 +120,16 @@ function sanitizeDangerousTags(html) {
 }
 
 export function parsedMarkdown(content) {
+    if (!content) return '';
+    
+    // [FIX] Auto-fence detection for pure Mermaid diagrams
+    const trimmed = content.trim();
+    if (trimmed.startsWith('graph ') || trimmed.startsWith('flowchart ') || trimmed.startsWith('sequenceDiagram') || trimmed.startsWith('classDiagram')) {
+        if (!trimmed.startsWith('```')) {
+            content = `\`\`\`mermaid\n${trimmed}\n\`\`\``;
+        }
+    }
+  
     if (typeof content !== 'string') return '';
     
     const wrappedContent = wrapNakedCode(content);
@@ -206,3 +216,4 @@ function customTokenizer(text) {
 export function getContentTokensWithMathProtection(text) {
     return customTokenizer(text);
 }
+
