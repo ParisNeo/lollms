@@ -70,6 +70,7 @@ class User(Base):
     inline_widgets_enabled = Column(Boolean, default=True, nullable=False, server_default='1')
     slide_maker_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     
+    # Generation tools
     activate_generated_images = Column(Boolean, default=False, nullable=False, server_default='0')
     note_generation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     memory_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
@@ -145,6 +146,9 @@ class User(Base):
     llm_top_p = Column(Float, nullable=True)
     llm_repeat_penalty = Column(Float, nullable=True)
     llm_repeat_last_n = Column(Integer, nullable=True)
+
+
+
 
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False, server_default='0')
     include_memory_date_in_context = Column(Boolean, default=False, nullable=False, server_default='0')

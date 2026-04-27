@@ -30,6 +30,7 @@ import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconMcp from '../../assets/icons/IconMcp.vue';
+import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconDatabase from '../../assets/icons/IconDatabase.vue';
 import IconTicket from '../../assets/icons/IconTicket.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
@@ -547,7 +548,7 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
         });
     }
-    if (user.value?.inline_widgets_enabled) {
+    if (user.value && user.value.inline_widgets_enabled !== false) {
         features.push({ 
             id: 'widgets', 
             icon: IconCpuChip, 

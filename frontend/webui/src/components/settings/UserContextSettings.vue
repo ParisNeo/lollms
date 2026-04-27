@@ -141,16 +141,16 @@ function populateForm() {
     imageGenerationEnabled.value = !!user.value.image_generation_enabled;
     imageGenerationSystemPrompt.value = user.value.image_generation_system_prompt || '';
     imageAnnotationEnabled.value = !!user.value.image_annotation_enabled;
-    imageEditingEnabled.value = !!user.value.image_editing_enabled;
-    inlineWidgetsEnabled.value = user.value.inline_widgets_enabled ?? true;
-    slideMakerEnabled.value = !!user.value.slide_maker_enabled;
-    activateGeneratedImages.value = !!user.value.activate_generated_images;
-    noteGenerationEnabled.value = !!user.value.note_generation_enabled;
-    memoryEnabled.value = !!user.value.memory_enabled;
-    autoMemoryEnabled.value = !!user.value.auto_memory_enabled;
-    skillsLibraryEnabled.value = !!user.value.skills_library_enabled;
-    skillsBuildingEnabled.value = !!user.value.skills_building_enabled;
-    formBuildingEnabled.value = user.value.form_building_enabled ?? true;
+    imageEditingEnabled.value = !!(user.value.image_editing_enabled ?? false);
+    inlineWidgetsEnabled.value = !!(user.value.inline_widgets_enabled ?? true);
+    slideMakerEnabled.value = !!(user.value.slide_maker_enabled ?? false);
+    activateGeneratedImages.value = !!(user.value.activate_generated_images ?? false);
+    noteGenerationEnabled.value = !!(user.value.note_generation_enabled ?? false);
+    memoryEnabled.value = !!(user.value.memory_enabled ?? false);
+    autoMemoryEnabled.value = !!(user.value.auto_memory_enabled ?? false);
+    skillsLibraryEnabled.value = !!(user.value.skills_library_enabled ?? false);
+    skillsBuildingEnabled.value = !!(user.value.skills_building_enabled ?? false);
+    formBuildingEnabled.value = !!(user.value.form_building_enabled ?? true);
     reasoningActivation.value = !!user.value.reasoning_activation;
     reasoningEffort.value = user.value.reasoning_effort || 'medium';
     reasoningSummary.value = !!user.value.reasoning_summary;
@@ -254,6 +254,7 @@ async function handleSaveChanges() {
             image_generation_system_prompt: imageGenerationSystemPrompt.value,
             image_annotation_enabled: imageAnnotationEnabled.value,
             image_editing_enabled: imageEditingEnabled.value,
+            inline_widgets_enabled: inlineWidgetsEnabled.value,
             slide_maker_enabled: slideMakerEnabled.value,
             activate_generated_images: activateGeneratedImages.value,
             note_generation_enabled: noteGenerationEnabled.value,

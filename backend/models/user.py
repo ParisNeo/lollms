@@ -93,6 +93,10 @@ class UserCreateAdmin(BaseModel):
     # Scheduler
     scheduler_enabled: bool = False
 
+
+
+
+
 class UserPasswordResetAdmin(BaseModel):
     user_id: int
     new_password: str

@@ -223,9 +223,21 @@ async function handleRefreshModels() {
                                 <button @click="selectModel(null)" class="menu-item-button" :class="{'selected': !activeModelName}"><span class="truncate">None</span></button>
                                 <div v-for="group in filteredAvailableModels" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
-                                    <button v-for="item in group.items" :key="item.id" @click="selectModel(item.id)" class="menu-item-button" :class="{'selected': activeModelName === item.id}">
-                                        <div class="flex items-center gap-2 truncate"><span class="truncate">{{ item.name }}</span><IconEye v-if="item.alias?.has_vision" class="w-3.5 h-3.5 text-green-500" /></div>
-                                    </button>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button @click="selectModel(item.id)" class="menu-item-button flex-grow !justify-between" :class="{'selected': activeModelName === item.id}">
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                            <div class="flex items-center gap-1.5 flex-shrink-0">
+                                                <IconEye v-if="item.alias?.has_vision" class="w-3.5 h-3.5 text-green-500" title="Vision Support" />
+                                                <button 
+                                                    @click.stop="uiStore.openModal('modelCard', { model: item })" 
+                                                    class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-blue-500 transition-colors"
+                                                    title="Model Information"
+                                                >
+                                                    <IconInfo class="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                          </DropdownSubmenu>

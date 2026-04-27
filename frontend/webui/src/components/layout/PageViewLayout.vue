@@ -11,6 +11,10 @@ const props = defineProps({
   titleIcon: {
     type: Object, // Vue component
     default: null
+  },
+  showSidebar: {
+    type: Boolean,
+    default: true
   }
 });
 
@@ -30,17 +34,16 @@ onUnmounted(() => {
 <template>
   <div class="flex h-full bg-gray-100 dark:bg-gray-900 overflow-hidden relative">
     <!-- Mobile Sidebar Overlay -->
-    <div v-if="isSidebarOpen" @click="isSidebarOpen = false" class="fixed inset-0 bg-black/30 z-20 md:hidden"></div>
+    <div v-if="showSidebar && isSidebarOpen" @click="isSidebarOpen = false" class="fixed inset-0 bg-black/30 z-20 md:hidden"></div>
 
     <!-- Sidebar Navigation -->
-    <!-- Added md:flex to ensure it shows on desktop, hidden on mobile by default -->
-    <nav class="fixed inset-y-0 left-0 z-30 w-64 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col transform transition-transform md:relative md:translate-x-0"
+    <nav v-if="showSidebar" class="fixed inset-y-0 left-0 z-30 w-64 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col transform transition-transform md:relative md:translate-x-0"
          :class="{'-translate-x-full': !isSidebarOpen, 'translate-x-0': isSidebarOpen}">
-        
+
         <div class="p-4 space-y-1 overflow-y-auto flex-grow custom-scrollbar">
             <slot name="sidebar"></slot>
         </div>
-        
+
         <div class="mt-auto p-4 border-t dark:border-gray-700 flex-shrink-0">
             <router-link 
                 to="/" 
@@ -51,9 +54,9 @@ onUnmounted(() => {
             </router-link>
         </div>
     </nav>
-    
+
     <!-- Mobile Toggle Button (Floating) -->
-    <button @click="isSidebarOpen = !isSidebarOpen" class="md:hidden absolute bottom-4 left-4 z-40 p-3 bg-blue-600 text-white rounded-full shadow-lg">
+    <button v-if="showSidebar" @click="isSidebarOpen = !isSidebarOpen" class="md:hidden absolute bottom-4 left-4 z-40 p-3 bg-blue-600 text-white rounded-full shadow-lg">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
         </svg>
