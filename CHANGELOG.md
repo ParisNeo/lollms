@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-27 23:51]
+
+- feat(changelog): document inline_widgets_enabled user preference addition
+
+## [2026-04-27 23:50]
+
+- feat(user): add inline_widgets_enabled user preference
+
 ## [2026-04-27 23:22]
 
 - feat(ui): regenerate frontend build and update chat/settings components
