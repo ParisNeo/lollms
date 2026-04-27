@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-27 00:24]
+
+- chore(frontend): rebuild dist assets after personality components update
+
 ## [2026-04-27 00:09]
 
 - refactor(ui): restructure header layout and navigation routing

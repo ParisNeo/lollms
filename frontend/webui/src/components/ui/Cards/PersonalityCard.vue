@@ -1,11 +1,13 @@
 <script setup>
-import UserAvatar from './UserAvatar.vue';
+import { computed } from 'vue';
 import IconStar from '../../../assets/icons/IconStar.vue';
 import IconStarFilled from '../../../assets/icons/IconStarFilled.vue';
-import IconCopy from '../../../assets/icons/IconCopy.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
-import IconSend from '../../../assets/icons/IconSend.vue';
+import IconShare from '../../../assets/icons/IconShare.vue';
+import IconCopy from '../../../assets/icons/IconCopy.vue';
+import IconPlayCircle from '../../../assets/icons/IconPlayCircle.vue';
+import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 
 const props = defineProps({
     personality: { type: Object, required: true },
@@ -14,114 +16,273 @@ const props = defineProps({
     isSaving: { type: Boolean, default: false },
     isStarred: { type: Boolean, default: false },
     isShared: { type: Boolean, default: false },
-    sharedBy: { type: String, default: '' }
+    sharedBy: { type: String, default: '' },
+    categoryStyle: { type: Object, default: () => ({ color: 'bg-gray-100 text-gray-700', icon: '🎯' }) }
 });
 
-const emit = defineEmits(['edit', 'delete', 'clone', 'select', 'toggle-star', 'share']);
+const emit = defineEmits(['select', 'toggle-star', 'edit', 'delete', 'share', 'clone']);
 
-function handleEdit(event) {
-    event.stopPropagation();
-    emit(props.isUserPersonality ? 'edit' : 'clone', props.personality);
+// Context option icons mapping
+const contextOptionIcons = {
+    'image_generation': '🎨',
+    'image_editing': '✏️',
+    'slide_maker': '📊',
+    'note_generation': '📝',
+    'memory': '🧠',
+    'inline_widgets': '🧩'
+};
+
+const contextOptionLabels = {
+    'image_generation': 'Image Gen',
+    'image_editing': 'Image Edit',
+    'slide_maker': 'Slides',
+    'note_generation': 'Notes',
+    'memory': 'Memory',
+    'inline_widgets': 'Widgets'
+};
+
+const hasContextOptions = computed(() => {
+    return props.personality.required_context_options && props.personality.required_context_options.length > 0;
+});
+
+const hasTools = computed(() => {
+    return props.personality.tools && props.personality.tools.length > 0;
+});
+
+const descriptionPreview = computed(() => {
+    const desc = props.personality.description || '';
+    if (desc.length > 120) {
+        return desc.substring(0, 120) + '...';
+    }
+    return desc;
+});
+
+function handleSelect() {
+    if (props.isSaving) return;
+    emit('select', props.personality);
 }
 
-function handleDelete(event) {
-    event.stopPropagation();
-    emit('delete', props.personality);
-}
-
-function handleToggleStar(event) {
-    event.stopPropagation();
+function handleStar(e) {
+    e.stopPropagation();
     emit('toggle-star', props.personality);
 }
 
-function handleShare(event) {
-    event.stopPropagation();
+function handleEdit(e) {
+    e.stopPropagation();
+    emit('edit', props.personality);
+}
+
+function handleDelete(e) {
+    e.stopPropagation();
+    emit('delete', props.personality);
+}
+
+function handleShare(e) {
+    e.stopPropagation();
     emit('share', props.personality);
 }
 
-function handleSelect() {
-    emit('select', props.personality);
+function handleClone(e) {
+    e.stopPropagation();
+    emit('clone', props.personality);
 }
 </script>
 
 <template>
-    <div
-        class="relative flex flex-col h-full bg-white dark:bg-gray-800 border dark:border-gray-700 rounded-lg shadow p-4 transition-all hover:shadow-lg cursor-pointer overflow-hidden"
-        :class="{
-            'ring-2 ring-offset-2 ring-green-500 dark:ring-offset-gray-900 !border-green-500': isActive,
-            'opacity-50 pointer-events-none': isSaving
-        }"
+    <div 
         @click="handleSelect"
-        :title="isShared ? `Shared by ${sharedBy}` : `Select personality: ${personality.name}`"
+        class="group relative bg-white dark:bg-gray-800 rounded-xl border-2 transition-all duration-200 cursor-pointer overflow-hidden hover:shadow-lg"
+        :class="[
+            isActive 
+                ? 'border-blue-500 shadow-lg shadow-blue-500/10 ring-2 ring-blue-500/20' 
+                : 'border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600',
+            isSaving ? 'opacity-70 pointer-events-none' : ''
+        ]"
     >
-        <!-- NEW: Shared Banner with a more specific title -->
-        <div v-if="isShared" class="shared-banner" :title="`This personality was sent to you by ${sharedBy}`">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path d="M15 8a3 3 0 10-2.977-2.63l-4.94 2.47a3 3 0 100 4.319l4.94 2.47a3 3 0 10.895-1.789l-4.94-2.47a3.027 3.027 0 000-.74l4.94-2.47C13.456 7.68 14.19 8 15 8z" /></svg>
+        <!-- Active Indicator Strip -->
+        <div 
+            v-if="isActive"
+            class="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-blue-500 to-indigo-500"
+        ></div>
+        
+        <!-- Saving Overlay -->
+        <div v-if="isSaving" class="absolute inset-0 bg-white/60 dark:bg-black/40 flex items-center justify-center z-10">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
         </div>
 
-        <button
-            @click="handleToggleStar"
-            class="absolute top-2 right-2 p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500 z-10"
-            :title="isStarred ? 'Unstar personality' : 'Star personality'"
-        >
-            <svg v-if="isStarred" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
-                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-            </svg>
-            <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 hover:text-yellow-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
-            </svg>
-        </button>
+        <div class="p-5">
+            <!-- Header: Icon + Name + Star -->
+            <div class="flex items-start gap-3 mb-3">
+                <!-- Avatar -->
+                <div class="relative flex-shrink-0">
+                    <div 
+                        class="w-14 h-14 rounded-xl overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 flex items-center justify-center shadow-inner"
+                        :class="{ 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-800': isActive }"
+                    >
+                        <img 
+                            v-if="personality.icon_base64" 
+                            :src="personality.icon_base64" 
+                            class="w-full h-full object-cover"
+                            :alt="personality.name"
+                        />
+                        <span v-else class="text-2xl">{{ categoryStyle.icon }}</span>
+                    </div>
+                    <!-- Active Badge -->
+                    <div 
+                        v-if="isActive"
+                        class="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full flex items-center justify-center shadow-md"
+                    >
+                        <IconCheckCircle class="w-3 h-3 text-white" />
+                    </div>
+                </div>
 
-        <div v-if="isSaving" class="absolute inset-0 bg-gray-500/30 dark:bg-gray-900/50 flex items-center justify-center rounded-lg z-10">
-            <svg class="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-        </div>
+                <!-- Name & Category -->
+                <div class="flex-1 min-w-0 pt-0.5">
+                    <div class="flex items-center gap-2 mb-1">
+                        <h4 class="font-bold text-gray-900 dark:text-white text-sm truncate leading-tight">
+                            {{ personality.name }}
+                        </h4>
+                        <span 
+                            v-if="isShared"
+                            class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                            title="Shared by {{ sharedBy }}"
+                        >
+                            📤
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-1.5 flex-wrap">
+                        <span 
+                            v-if="personality.category"
+                            class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                            :class="categoryStyle.color"
+                        >
+                            {{ categoryStyle.icon }} {{ personality.category }}
+                        </span>
+                        <span 
+                            v-else
+                            class="px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                        >
+                            Uncategorized
+                        </span>
+                    </div>
+                </div>
 
-        <div class="flex items-start space-x-3 mb-2 pr-8">
-            <div class="flex-shrink-0 w-10 h-10 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center overflow-hidden" :title="personality.name">
-                <img v-if="personality.icon_base64" :src="personality.icon_base64" alt="icon" class="w-full h-full object-cover" />
-                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                </svg>
+                <!-- Star Button -->
+                <button 
+                    @click="handleStar"
+                    class="flex-shrink-0 p-1.5 rounded-lg transition-all hover:scale-110"
+                    :class="isStarred ? 'text-yellow-500' : 'text-gray-300 dark:text-gray-600 hover:text-yellow-400'"
+                    title="Toggle favorite"
+                >
+                    <IconStarFilled v-if="isStarred" class="w-5 h-5" />
+                    <IconStar v-else class="w-5 h-5" />
+                </button>
             </div>
-            <div class="flex-grow">
-                <h6 class="font-semibold text-gray-800 dark:text-gray-100" :title="personality.name">{{ personality.name }}</h6>
-                <p v-if="!isUserPersonality && !isShared" class="text-xs text-gray-500 dark:text-gray-400" :title="`Author: ${personality.author || 'System'}`">by {{ personality.author || 'System' }}</p>
-                <p v-if="isShared" class="text-xs text-gray-500 dark:text-gray-400" :title="`Sent by: ${sharedBy}`">from {{ sharedBy }}</p>
-                <p v-if="personality.category" class="text-xs text-blue-500 dark:text-blue-400 bg-blue-100 dark:bg-blue-900/50 px-1.5 py-0.5 rounded-full inline-block mt-1" :title="`Category: ${personality.category}`">{{ personality.category }}</p>
+
+            <!-- Description -->
+            <p 
+                v-if="personality.description"
+                class="text-xs text-gray-600 dark:text-gray-400 leading-relaxed mb-3 line-clamp-2"
+                :title="personality.description"
+            >
+                {{ descriptionPreview }}
+            </p>
+            <p v-else class="text-xs text-gray-400 dark:text-gray-500 italic mb-3">
+                No description provided
+            </p>
+
+            <!-- Context Options & Tools -->
+            <div v-if="hasContextOptions || hasTools" class="flex flex-wrap gap-1.5 mb-3">
+                <span 
+                    v-for="opt in personality.required_context_options" 
+                    :key="opt"
+                    class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800"
+                    :title="contextOptionLabels[opt] || opt"
+                >
+                    {{ contextOptionIcons[opt] || '🔧' }} {{ contextOptionLabels[opt] || opt }}
+                </span>
+                <span 
+                    v-if="hasTools"
+                    class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-800"
+                    :title="personality.tools.join(', ')"
+                >
+                    🔧 {{ personality.tools.length }} tool{{ personality.tools.length > 1 ? 's' : '' }}
+                </span>
             </div>
-        </div>
 
-        <p class="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-3" :title="personality.description">
-            {{ personality.description || 'No description provided.' }}
-        </p>
+            <!-- Footer: Actions -->
+            <div class="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-700/50">
+                <div class="flex items-center gap-1">
+                    <!-- Select Button (when not active) -->
+                    <button 
+                        v-if="!isActive"
+                        @click.stop="handleSelect"
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/20 dark:text-blue-400 dark:hover:bg-blue-900/30 transition-colors"
+                    >
+                        <IconPlayCircle class="w-3.5 h-3.5" />
+                        Activate
+                    </button>
+                    <span 
+                        v-else
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400"
+                    >
+                        <IconCheckCircle class="w-3.5 h-3.5" />
+                        Active
+                    </span>
+                </div>
 
-        <div class="mt-auto flex justify-end items-center space-x-3 border-t dark:border-gray-600 pt-3">
-            <button v-if="isUserPersonality" @click="handleShare" class="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" title="Send to User">
-                <IconSend class="h-4 w-4" />
-            </button>
-            <div class="flex-grow"></div>
-            <template v-if="isUserPersonality">
-                <button @click="handleEdit" class="font-medium text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300" title="Edit this personality">Edit</button>
-                <button @click="handleDelete" class="font-medium text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300" title="Delete this personality">Delete</button>
-            </template>
-            <template v-else>
-                <button @click="handleEdit" class="font-medium text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300" title="Make a copy and edit it">Clone & Edit</button>
-            </template>
+                <!-- Action Buttons -->
+                <div class="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <!-- Clone (for public/system) -->
+                    <button 
+                        v-if="!isUserPersonality && (personality.is_public || personality.owner_username === 'System')"
+                        @click="handleClone"
+                        class="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        title="Clone to my personalities"
+                    >
+                        <IconCopy class="w-4 h-4" />
+                    </button>
+                    
+                    <!-- Edit -->
+                    <button 
+                        v-if="isUserPersonality"
+                        @click="handleEdit"
+                        class="p-1.5 rounded-lg text-gray-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-900/20 transition-colors"
+                        title="Edit personality"
+                    >
+                        <IconPencil class="w-4 h-4" />
+                    </button>
+                    
+                    <!-- Share -->
+                    <button 
+                        v-if="isUserPersonality && !isShared"
+                        @click="handleShare"
+                        class="p-1.5 rounded-lg text-gray-400 hover:text-green-500 hover:bg-green-50 dark:hover:bg-green-900/20 transition-colors"
+                        title="Share with friend"
+                    >
+                        <IconShare class="w-4 h-4" />
+                    </button>
+                    
+                    <!-- Delete -->
+                    <button 
+                        v-if="isUserPersonality"
+                        @click="handleDelete"
+                        class="p-1.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        title="Delete personality"
+                    >
+                        <IconTrash class="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </template>
 
 <style scoped>
-.line-clamp-3 {
-    overflow: hidden;
+.line-clamp-2 {
     display: -webkit-box;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
-    -webkit-line-clamp: 3;
-}
-.shared-banner {
-  @apply absolute top-0 left-0 flex items-center gap-1 px-2 py-0.5 bg-blue-500 text-white text-[10px] font-bold uppercase tracking-wider rounded-br-lg z-10;
+    overflow: hidden;
 }
 </style>

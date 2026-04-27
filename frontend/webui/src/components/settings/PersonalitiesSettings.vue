@@ -6,6 +6,10 @@ import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import PersonalityCard from '../ui/Cards/PersonalityCard.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconPlus from '../../assets/icons/IconPlus.vue';
+import IconMagnifyingGlass from '../../assets/icons/IconMagnifyingGlass.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue';
 
 const authStore = useAuthStore();
 const dataStore = useDataStore();
@@ -22,8 +26,30 @@ const searchQuery = ref('');
 const selectedCategory = ref('All');
 const starredPersonalityIds = ref(new Set());
 const importInputRef = ref(null);
+const isSearchFocused = ref(false);
 
 const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
+
+// Category configuration with colors and icons
+const categoryConfig = {
+    'Creative': { color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300', icon: '✨' },
+    'Coding': { color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300', icon: '💻' },
+    'Educational': { color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300', icon: '📚' },
+    'Technical Support': { color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-300', icon: '🔧' },
+    'Writing': { color: 'bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-300', icon: '✍️' },
+    'Language': { color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300', icon: '🌐' },
+    'Art': { color: 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-300', icon: '🎨' },
+    'Music': { color: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300', icon: '🎵' },
+    'Science': { color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-300', icon: '🔬' },
+    'Business': { color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300', icon: '💼' },
+    'Fun': { color: 'bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-900/30 dark:text-fuchsia-300', icon: '🎭' },
+    'Generic': { color: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300', icon: '🤖' },
+    'default': { color: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300', icon: '🎯' }
+};
+
+function getCategoryStyle(category) {
+    return categoryConfig[category] || categoryConfig['default'];
+}
 
 const allCategories = computed(() => {
     const categories = new Set(['All', 'Starred']);
@@ -50,7 +76,8 @@ const filteredList = computed(() => {
     if (query) {
         list = list.filter(p => 
             p.name.toLowerCase().includes(query) ||
-            (p.description && p.description.toLowerCase().includes(query))
+            (p.description && p.description.toLowerCase().includes(query)) ||
+            (p.category && p.category.toLowerCase().includes(query))
         );
     }
     return list;
@@ -69,6 +96,10 @@ const getSharedByUsername = (personality) => {
     }
     return '';
 };
+
+// Stats for the header
+const totalPersonalities = computed(() => userPersonalities.value.length);
+const publicCount = computed(() => publicPersonalities.value.filter(p => p.owner_username === 'System').length);
 
 onMounted(() => {
     dataStore.fetchPersonalities();
@@ -154,7 +185,8 @@ async function handleDeletePersonality(personality) {
     const confirmed = await uiStore.showConfirmation({
         title: `Delete ${personality.name}`,
         message: 'Are you sure you want to delete this personality? This cannot be undone.',
-        confirmText: 'Delete'
+        confirmText: 'Delete',
+        confirmClass: 'btn-danger'
     });
     if (confirmed) {
         if (activePersonalityId.value === personality.id) await handleDeselectAll();
@@ -180,44 +212,103 @@ async function handleImport(event) {
     await dataStore.importPersonality(file);
     event.target.value = '';
 }
+
+function clearSearch() {
+    searchQuery.value = '';
+}
 </script>
 
 <template>
-    <section>
-        <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-            <h4 class="text-lg font-semibold">Personalities</h4>
-            <div class="flex items-center gap-2">
+    <section class="space-y-6">
+        <!-- Enhanced Header -->
+        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <span class="text-2xl">🎭</span>
+                    Personality Studio
+                </h2>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    {{ totalPersonalities }} personal • {{ publicCount }} public personalities available
+                </p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
                 <input type="file" ref="importInputRef" @change="handleImport" class="hidden" accept=".zip">
-                <button @click="triggerImport" class="btn btn-secondary flex items-center gap-2" title="Import from Zip">
-                    <IconArrowUpTray class="w-4 h-4" /> Import
+                <button @click="triggerImport" class="btn btn-secondary flex items-center gap-2 hover:shadow-md transition-shadow" title="Import from Zip">
+                    <IconArrowUpTray class="w-4 h-4" /> 
+                    <span class="hidden sm:inline">Import</span>
                 </button>
-                <button @click="openGeneratePersonalityModal()" class="btn btn-primary">Generate from Prompt</button>
-                <button @click="openEditor()" class="btn btn-secondary">+ Create New</button>
+                <button @click="openGeneratePersonalityModal()" class="btn btn-primary flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg transition-all">
+                    <IconSparkles class="w-4 h-4" />
+                    <span class="hidden sm:inline">Generate</span>
+                </button>
+                <button @click="openEditor()" class="btn btn-secondary flex items-center gap-2 hover:shadow-md transition-shadow">
+                    <IconPlus class="w-4 h-4" />
+                    <span class="hidden sm:inline">Create New</span>
+                </button>
             </div>
         </div>
         
-        <div class="my-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-             <div class="relative">
-                <input 
-                    type="text" 
-                    v-model="searchQuery" 
-                    placeholder="Search personalities..."
-                    class="input-field w-full !pr-10"
-                />
-                <button v-if="searchQuery" @click="searchQuery = ''" class="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
-                </button>
+        <!-- Enhanced Search & Filter Bar -->
+        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-4 space-y-4">
+            <div class="flex flex-col sm:flex-row gap-3">
+                <!-- Search Input -->
+                <div class="relative flex-1">
+                    <IconMagnifyingGlass class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 transition-colors" :class="{ 'text-blue-500': isSearchFocused }" />
+                    <input 
+                        type="text" 
+                        v-model="searchQuery" 
+                        @focus="isSearchFocused = true"
+                        @blur="isSearchFocused = false"
+                        placeholder="Search personalities by name, description, or category..."
+                        class="input-field w-full !pl-10 !pr-10 transition-all"
+                        :class="{ 'ring-2 ring-blue-500/20 border-blue-300': isSearchFocused }"
+                    />
+                    <button 
+                        v-if="searchQuery" 
+                        @click="clearSearch" 
+                        class="absolute right-3 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 transition-colors"
+                    >
+                        <IconXMark class="w-4 h-4" />
+                    </button>
+                </div>
+                <!-- Category Dropdown -->
+                <div class="relative min-w-[160px]">
+                    <select v-model="selectedCategory" class="input-field w-full appearance-none cursor-pointer">
+                        <option v-for="cat in allCategories" :key="cat" :value="cat">
+                            {{ cat === 'All' ? '📋 All Categories' : cat === 'Starred' ? '⭐ Starred' : cat }}
+                        </option>
+                    </select>
+                    <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                        <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+                    </div>
+                </div>
             </div>
-            <div>
-                <select v-model="selectedCategory" class="input-field w-full">
-                    <option v-for="cat in allCategories" :key="cat" :value="cat">{{ cat }}</option>
-                </select>
+            
+            <!-- Quick Category Chips (when not searching) -->
+            <div v-if="!searchQuery && selectedCategory === 'All'" class="flex flex-wrap gap-2">
+                <button 
+                    v-for="cat in allCategories.filter(c => c !== 'All' && c !== 'Starred')" 
+                    :key="cat"
+                    @click="selectedCategory = cat"
+                    class="px-3 py-1.5 rounded-full text-xs font-medium transition-all hover:scale-105"
+                    :class="getCategoryStyle(cat).color"
+                >
+                    {{ getCategoryStyle(cat).icon }} {{ cat }}
+                </button>
             </div>
         </div>
 
-        <div class="space-y-10">
+        <!-- Content Sections -->
+        <div class="space-y-8">
+            <!-- Starred Section (when selected) -->
             <div v-if="selectedCategory === 'Starred'">
-                <h5 class="text-md font-semibold mb-4">Starred Personalities</h5>
+                <div class="flex items-center gap-2 mb-4">
+                    <span class="text-xl">⭐</span>
+                    <h3 class="text-lg font-bold text-gray-900 dark:text-white">Starred Personalities</h3>
+                    <span class="px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300 text-xs font-medium">
+                        {{ filteredList.length }}
+                    </span>
+                </div>
                 <div v-if="filteredList.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                     <PersonalityCard
                         v-for="p in filteredList"
@@ -229,6 +320,7 @@ async function handleImport(event) {
                         :is-starred="starredPersonalityIds.has(p.id)"
                         :is-shared="isShared(p)"
                         :shared-by="getSharedByUsername(p)"
+                        :category-style="getCategoryStyle(p.category)"
                         @select="handleSelectPersonality($event)"
                         @toggle-star="handleToggleStar($event)"
                         @clone="openEditor($event)"
@@ -237,27 +329,46 @@ async function handleImport(event) {
                         @share="handleShare($event)"
                     />
                 </div>
-                 <p v-else class="italic text-sm text-gray-500 p-2">
-                    {{ searchQuery ? 'No starred personalities match your search.' : 'You haven\'t starred any personalities yet. Click the star icon on a personality to add it here.' }}
-                </p>
+                <div v-else class="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                    <span class="text-4xl mb-3 block">⭐</span>
+                    <p class="text-gray-500 dark:text-gray-400 font-medium">
+                        {{ searchQuery ? 'No starred personalities match your search.' : 'No starred personalities yet' }}
+                    </p>
+                    <p v-if="!searchQuery" class="text-sm text-gray-400 dark:text-gray-500 mt-1">
+                        Click the star icon on any personality to add it here
+                    </p>
+                </div>
             </div>
             
             <template v-else>
+                <!-- Your Personalities Section -->
                 <div>
-                    <h5 class="text-md font-semibold mb-4">Your Personalities</h5>
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="text-xl">👤</span>
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-white">Your Personalities</h3>
+                        <span class="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-xs font-medium">
+                            {{ filteredUserPersonalities.length }}
+                        </span>
+                    </div>
+                    
                     <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <!-- No Personality Card -->
                         <div
                             @click="handleDeselectAll"
-                            class="flex flex-col items-center justify-center h-full min-h-[160px] bg-white dark:bg-gray-800 border-2 border-dashed dark:border-gray-600 rounded-lg p-4 transition-all hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer"
-                            :class="{ '!border-solid ring-2 ring-offset-2 ring-green-500 dark:ring-offset-gray-900 !border-green-500': !activePersonalityId }"
+                            class="group flex flex-col items-center justify-center h-full min-h-[180px] bg-white dark:bg-gray-800 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-6 transition-all hover:border-gray-400 dark:hover:border-gray-500 cursor-pointer hover:shadow-md"
+                            :class="{ '!border-solid !border-green-500 !bg-green-50 dark:!bg-green-900/20 !shadow-lg': !activePersonalityId }"
                         >
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                              <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                            </svg>
-                            <span class="font-semibold text-sm text-gray-700 dark:text-gray-300">No Personality</span>
-                            <span class="text-xs text-gray-500 dark:text-gray-400">(Default)</span>
+                            <div class="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mb-3 transition-transform group-hover:scale-110" :class="{ '!bg-green-100 dark:!bg-green-800': !activePersonalityId }">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-gray-400 transition-colors" :class="{ '!text-green-600': !activePersonalityId }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                                </svg>
+                            </div>
+                            <span class="font-bold text-sm text-gray-700 dark:text-gray-300">No Personality</span>
+                            <span class="text-xs text-gray-500 dark:text-gray-400 mt-1">Use default behavior</span>
+                            <span v-if="!activePersonalityId" class="mt-2 px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-300 text-xs font-medium">Active</span>
                         </div>
 
+                        <!-- User Personality Cards -->
                         <PersonalityCard
                             v-for="p in filteredUserPersonalities"
                             :key="p.id"
@@ -268,6 +379,7 @@ async function handleImport(event) {
                             :is-starred="starredPersonalityIds.has(p.id)"
                             :is-shared="isShared(p)"
                             :shared-by="getSharedByUsername(p)"
+                            :category-style="getCategoryStyle(p.category)"
                             @select="handleSelectPersonality($event)"
                             @toggle-star="handleToggleStar($event)"
                             @edit="openEditor($event)"
@@ -275,18 +387,42 @@ async function handleImport(event) {
                             @share="handleShare($event)"
                         />
                     </div>
-                    <p v-if="filteredUserPersonalities.length === 0 && userPersonalities.length === 0 && selectedCategory === 'All' && !searchQuery" class="italic text-sm text-gray-500 p-2 mt-4">
-                        You haven't created any personalities yet.
-                    </p>
-                     <p v-else-if="filteredUserPersonalities.length === 0" class="italic text-sm text-gray-500 p-2 mt-4">
+                    
+                    <!-- Empty State -->
+                    <div v-if="filteredUserPersonalities.length === 0 && userPersonalities.length === 0 && selectedCategory === 'All' && !searchQuery" class="mt-6 text-center py-12 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/10 dark:to-indigo-900/10 rounded-xl border border-blue-100 dark:border-blue-800">
+                        <span class="text-5xl mb-4 block">🎭</span>
+                        <h4 class="text-lg font-bold text-gray-900 dark:text-white mb-2">Create Your First Personality</h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 max-w-md mx-auto mb-4">
+                            Personalities let you customize how the AI behaves. Create a coding assistant, a creative writer, or any character you can imagine.
+                        </p>
+                        <div class="flex gap-2 justify-center">
+                            <button @click="openGeneratePersonalityModal()" class="btn btn-primary flex items-center gap-2">
+                                <IconSparkles class="w-4 h-4" />
+                                Generate with AI
+                            </button>
+                            <button @click="openEditor()" class="btn btn-secondary flex items-center gap-2">
+                                <IconPlus class="w-4 h-4" />
+                                Create Manually
+                            </button>
+                        </div>
+                    </div>
+                    <p v-else-if="filteredUserPersonalities.length === 0" class="text-center py-8 text-gray-500 dark:text-gray-400">
                         No matches found in your personalities.
                     </p>
                 </div>
 
+                <!-- Public & System Personalities Section -->
                 <div>
-                    <h5 class="text-md font-semibold mb-4">Public & System Personalities</h5>
+                    <div class="flex items-center gap-2 mb-4">
+                        <span class="text-xl">🌍</span>
+                        <h3 class="text-lg font-bold text-gray-900 dark:text-white">Public & System Personalities</h3>
+                        <span class="px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300 text-xs font-medium">
+                            {{ filteredPublicPersonalities.length }}
+                        </span>
+                    </div>
+                    
                     <div v-if="filteredPublicPersonalities.length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                         <PersonalityCard
+                        <PersonalityCard
                             v-for="p in filteredPublicPersonalities"
                             :key="p.id"
                             :personality="p"
@@ -296,6 +432,7 @@ async function handleImport(event) {
                             :is-starred="starredPersonalityIds.has(p.id)"
                             :is-shared="isShared(p)"
                             :shared-by="getSharedByUsername(p)"
+                            :category-style="getCategoryStyle(p.category)"
                             @select="handleSelectPersonality($event)"
                             @toggle-star="handleToggleStar($event)"
                             @clone="openEditor($event)"
@@ -304,9 +441,12 @@ async function handleImport(event) {
                             @share="handleShare($event)"
                         />
                     </div>
-                    <p v-else class="italic text-sm text-gray-500 p-2">
-                        {{ searchQuery || selectedCategory !== 'All' ? 'No matches found in public personalities.' : "No public personalities available." }}
-                    </p>
+                    <div v-else class="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-xl border-2 border-dashed border-gray-200 dark:border-gray-700">
+                        <span class="text-4xl mb-3 block">🌍</span>
+                        <p class="text-gray-500 dark:text-gray-400 font-medium">
+                            {{ searchQuery || selectedCategory !== 'All' ? 'No matches found in public personalities.' : 'No public personalities available' }}
+                        </p>
+                    </div>
                 </div>
             </template>
         </div>

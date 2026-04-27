@@ -11,9 +11,7 @@ const titleIcon = markRaw(IconUserCircle);
     <PageViewLayout title="Personality Studio" :title-icon="titleIcon">
         <template #main>
             <div class="p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto">
-                <div class="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-                    <PersonalitiesSettings />
-                </div>
+                <PersonalitiesSettings />
             </div>
         </template>
     </PageViewLayout>
