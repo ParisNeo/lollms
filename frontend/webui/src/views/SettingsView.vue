@@ -39,7 +39,6 @@ const sections = [
     { id: 'general', name: 'General', icon: markRaw(IconCog), component: GeneralSettings },
     { id: 'context', name: 'User Context', icon: markRaw(IconFingerPrint), component: UserContextSettings }, // Added new section
     { type: 'divider' },
-    { id: 'personalities', name: 'Personalities', icon: markRaw(IconUserCircle), component: PersonalitiesSettings },
     { id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles), component: PromptsSettings },
     { id: 'mcps', name: 'MCPs', icon: markRaw(IconMcp), component: McpsSettings },
     { id: 'apps', name: 'Apps', icon: markRaw(IconSquares2x2), component: AppsSettings },

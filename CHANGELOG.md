@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-04-27 00:09]
+
+- refactor(ui): restructure header layout and navigation routing
+
 ## [2026-04-26 23:13]
 
 - chore(deps): bump lollms-client from 1.13.4 to 1.13.5

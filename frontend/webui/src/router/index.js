@@ -38,6 +38,11 @@ const routes = [
     component: () => import('../views/DataStoresView.vue')
   },
   {
+    path: '/personality-studio',
+    name: 'PersonalityStudio',
+    component: () => import('../views/PersonalityStudioView.vue')
+  },
+  {
     path: '/notebooks',
     name: 'Notebooks',
     component: () => import('../views/NotebookStudioView.vue')

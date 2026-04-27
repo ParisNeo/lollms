@@ -46,6 +46,7 @@ const isDiscussionActive = computed(() => route.path === '/' && uiStore.mainView
 const isNotebooksActive = computed(() => route.path.startsWith('/notebooks'));
 const isImageStudioActive = computed(() => route.path.startsWith('/image-studio'));
 const isVoicesStudioActive = computed(() => route.path.startsWith('/voices-studio'));
+const isPersonalityStudioActive = computed(() => route.path.startsWith('/personality-studio'));
 const isDataStoresActive = computed(() => route.path.startsWith('/datastores'));
 const isFlowStudioActive = computed(() => route.path.startsWith('/flow-studio'));
 
@@ -222,6 +223,14 @@ const vOnClickOutside = {
                                     <span class="text-[10px] opacity-60">Chat & Generation</span>
                                 </div>
                             </button>
+
+                            <router-link to="/personality-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isPersonalityStudioActive}">
+                                <IconUserCircle class="h-5 w-5 text-orange-500" />
+                                <div class="flex flex-col">
+                                    <span class="font-bold">Personality Studio</span>
+                                    <span class="text-[10px] opacity-60">AI Character Design</span>
+                                </div>
+                            </router-link>
 
                             <router-link to="/notebooks" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isNotebooksActive}">
                                 <IconServer class="h-5 w-5 text-blue-500" />
