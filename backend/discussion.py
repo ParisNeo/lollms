@@ -14,6 +14,7 @@ from backend.discussion_manager import get_user_discussion_manager
 ArtefactType.register_custom_type("note", label="Research Note")
 ArtefactType.register_custom_type("skill", label="AI Capability")
 ArtefactType.register_custom_type("file", label="External Document")
+ArtefactType.register_custom_type("book", label="Digital Book")
 
 
 def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None) -> Optional[LollmsDiscussion]:

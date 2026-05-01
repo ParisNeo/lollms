@@ -622,7 +622,7 @@ def build_artefacts_router(router: APIRouter):
                     content = f"# {paper.title} (Abstract)\nAuthors: {', '.join([a.name for a in paper.authors])}\nSource: {paper.entry_id}\n\n{paper.summary}"
                 
                 # Use update_artefact for unified management
-                discussion.update_artefact(
+                    discussion.update_artefact(
                     f"Arxiv_{item.id}.md", 
                     content, 
                     author=current_user.username, 

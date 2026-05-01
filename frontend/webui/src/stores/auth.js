@@ -500,7 +500,8 @@ export const useAuthStore = defineStore('auth', () => {
             'skills_library': 'skills_library_enabled',
             'web_search': 'web_search_enabled',
             'inline_widgets': 'inline_widgets_enabled',
-            'form_building': 'form_building_enabled'
+            'form_building': 'form_building_enabled',
+            'book_generation': 'book_generation_enabled'
         };
         return map[opt];
     }

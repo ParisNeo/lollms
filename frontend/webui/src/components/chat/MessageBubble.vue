@@ -661,33 +661,6 @@ function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.
 function handleExportCode() { discussionsStore.exportMessageCodeToZip({ content: props.message.content, title: discussionsStore.activeDiscussion?.title || 'discussion' }); }
 function handleBuildNewDiscussion(event) { event.stopPropagation(); discussionsStore.createDiscussionFromMessage({ discussionId: discussionsStore.currentDiscussionId, messageId: props.message.id }); }
 
-function handleShowMetadata() {
-    // Parse metadata if it's currently a string (coming from some DB paths)
-    let meta = props.message.metadata;
-    if (typeof meta === 'string') {
-        try {
-            meta = JSON.parse(meta);
-        } catch (e) {
-            meta = { error: "Failed to parse metadata string", raw: meta };
-        }
-    }
-
-    uiStore.openModal('interactiveOutput', {
-        title: `Developer Tools: Message Metadata`,
-        results: {
-            "Message State": {
-                "id": props.message.id,
-                "sender": props.message.sender,
-                "sender_type": props.message.sender_type,
-                "token_count": props.message.token_count,
-                "created_at": props.message.created_at
-            },
-            "Raw Metadata": meta,
-            "Internal Events": props.message.events,
-            "Sources": props.message.sources
-        }
-    });
-}
 
 function handleBranchOrRegenerate() {
     discussionsStore.initiateBranch(props.message);
@@ -1032,10 +1005,6 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
                         <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             <!-- Debug Metadata Button -->
-                            <button @click="handleShowMetadata" title="View Message Metadata" class="action-btn !text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-900/30">
-                                <IconCode class="w-4 h-4" />
-                            </button>
-
                             <button v-if="isTtsActive && isAi" @click="handleSpeak" :title="messageTtsState.isLoading ? 'Generating...' : 'Speak'" class="action-btn" :disabled="messageTtsState.isLoading">
                                 <IconAnimateSpin v-if="messageTtsState.isLoading" class="w-4 h-4 animate-spin" />
                                 <IconSpeakerWave v-else class="w-4 h-4" />

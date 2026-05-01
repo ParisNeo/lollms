@@ -94,7 +94,7 @@ class FormSubmitRequest(BaseModel):
     answers: Dict[str, Any]
 
 def build_message_router(router: APIRouter):
-    @router.post("/{discussion_id}/forms/{form_id}/submit")
+    @router.post("/{discussion_id}/forms/{form_id:path}/submit")
     async def submit_form_data(
         discussion_id: str,
         form_id: str,
@@ -548,7 +548,16 @@ def build_message_router(router: APIRouter):
 
             elif export_format == 'pdf':
                 media_type = "application/pdf"
-                file_content = md_to_pdf_bytes(content, extra_images=slide_images_b64)
+                # Check if this is a book artefact (HTML based)
+                metadata = message.metadata or {}
+                is_book = any(a.get('type') == 'book' for a in metadata.get('artefacts', []))
+
+                if is_book:
+                    # Use high-fidelity HTML to PDF for books to preserve CSS
+                    from backend.routers.files import html_to_pdf_bytes
+                    file_content = html_to_pdf_bytes(content)
+                else:
+                    file_content = md_to_pdf_bytes(content, extra_images=slide_images_b64)
 
             elif export_format == 'docx':
                 media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"

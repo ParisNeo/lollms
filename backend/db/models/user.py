@@ -79,11 +79,15 @@ class User(Base):
     skills_building_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     form_building_enabled = Column(Boolean, default=True, nullable=False, server_default='1')
 
+    # Reasoning
     reasoning_activation = Column(Boolean, default=False, nullable=True, server_default='0')
     reasoning_effort = Column(String, nullable=True)
     reasoning_summary = Column(Boolean, default=False, nullable=True, server_default='0')
     rlm_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
-    
+
+    # Book Generation
+    book_generation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
+
     # Herd Mode Settings
     herd_mode_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     herd_participants = Column(JSON, nullable=True) # Legacy/Fallback list

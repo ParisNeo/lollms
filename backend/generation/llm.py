@@ -1183,6 +1183,7 @@ def build_llm_generation_router(router: APIRouter):
         image_server_paths_json: str = Form("[]"),
         parent_message_id: Optional[str] = Form(None), 
         is_resend: bool = Form(False),
+        enable_books: Optional[bool] = Form(None),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> StreamingResponse:
@@ -1489,7 +1490,11 @@ def build_llm_generation_router(router: APIRouter):
         # [FIX] Local import to break circular dependency and ensure settings instance is available
         from backend.settings import settings
         if settings.get("enable_forms", True):
-             preamble_parts.append("## Interactive Forms: If you need multiple details from the user, use <lollms_form title=\"Title\"><field name=\"id\" label=\"Label\" type=\"text\"/></lollms_form>. Generation will pause until user submits.")
+             preamble_parts.append("## Interactive Forms: Use <lollms_form title=\"Title\"><field name=\"id\" label=\"Label\" type=\"TYPE\"/></lollms_form>.\n"
+                                   "CRITICAL SYNTAX FOR SELECTIONS:\n"
+                                   "If type is 'select' or 'radio', you MUST provide options as nested child tags. "
+                                   "Example: <field type=\"select\" label=\"...\" name=\"...\"><option>Opt 1</option><option>Opt 2</option></field>\n"
+                                   "DANGER: Using an 'options' attribute is DEPRECATED and will result in an EMPTY list. Always use <option> tags.")
         if getattr(owner_db_user, 'skills_building_enabled', False):
             preamble_parts.append("## Skill Building: If the user asks to save this as a skill, learn a new trick, or remember a pattern, wrap the detailed documentation or code pattern in `<skill title=\"Clear Name\" description=\"What this teaches/provides\" category=\"programming/language/feature\">content</skill>`. Make sure the category uses forward slashes.")
 
@@ -1599,6 +1604,7 @@ def build_llm_generation_router(router: APIRouter):
                         MSG_TYPE.MSG_TYPE_TOOL_OUTPUT.value: {"type": "tool_output", "content": params if params else {"output": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_SOURCES_LIST.value: {"type": "sources", "content": params if params else chunk},
                         # Secondary Content Streams: Content is the text fragment, params is metadata
+                        MSG_TYPE.MSG_TYPE_FORM_READY.value: {"type": "form_ready", "content": params, "discussion_id": discussion_id},
                         38: {"type": "artefact_chunk", "content": chunk, "meta": params},
                         39: {"type": "artefact_done", "content": chunk, "meta": params},
                         40: {"type": "note_chunk", "content": chunk, "meta": params},
@@ -1678,6 +1684,7 @@ def build_llm_generation_router(router: APIRouter):
                     # 2. Call chat with add_user_message=False to use final_prompt for context only
                     user_msg = None
                     if not is_resend:
+                        # Standard path: User sends a NEW message
                         user_msg = discussion_obj.add_message(
                             sender=current_user.username,
                             content=prompt,
@@ -1686,6 +1693,11 @@ def build_llm_generation_router(router: APIRouter):
                             parent_id=parent_message_id
                         )
                         discussion_obj.commit()
+                        effective_parent_id = user_msg.id
+                    else:
+                        # Branching path: User clicked regenerate on an AI message
+                        # We use the parent_message_id (which should be the User message ID) directly
+                        effective_parent_id = parent_message_id
 
                     result = {}
                     try:
@@ -1694,7 +1706,7 @@ def build_llm_generation_router(router: APIRouter):
                         result = discussion_obj.chat(
                             user_message=final_prompt, 
                             personality=active_personality,
-                            branch_tip_id=user_msg.id if user_msg else parent_message_id,
+                            branch_tip_id=effective_parent_id,
                             images=images_for_message,
                             streaming_callback=llm_callback, 
                             think=owner_db_user.reasoning_activation,
@@ -1709,8 +1721,9 @@ def build_llm_generation_router(router: APIRouter):
                             enable_notes=owner_db_user.note_generation_enabled,
                             enable_skills=owner_db_user.skills_building_enabled,
                             enable_forms=owner_db_user.form_building_enabled,
+                            enable_books=enable_books if enable_books is not None else owner_db_user.book_generation_enabled,
                             enable_silent_artefact_explanation=True # Library handles explanation if only XML was emitted
-                        )
+                            )
                     finally:
                         # Ensure discussion state is committed even on client disconnect/stop signal
                         discussion_obj.commit()

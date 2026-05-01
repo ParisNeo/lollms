@@ -577,6 +577,31 @@ def _save_pdf(pdf: MarkdownPdf, out_path: str) -> None:
 
     return pdf_bytes
 
+def html_to_pdf_bytes(html_content: str) -> bytes:
+    """Converts raw HTML (Books) to high-quality PDF, preserving CSS."""
+    try:
+        import pipmaster as pm
+        pm.ensure_package("weasyprint")
+        from weasyprint import HTML
+        
+        # Wrap in basic document if it's just a fragment
+        if "<html>" not in html_content.lower():
+            html_content = f"<html><body>{html_content}</body></html>"
+            
+        pdf_bytes = HTML(string=html_content).write_pdf()
+        return pdf_bytes
+    except Exception as e:
+        print(f"WeasyPrint failed, falling back to xhtml2pdf: {e}")
+        try:
+            pm.ensure_package("xhtml2pdf")
+            from xhtml2pdf import pisa
+            result = io.BytesIO()
+            pisa.createPDF(html_content, dest=result)
+            return result.getvalue()
+        except Exception as ex:
+            raise Exception(f"All PDF conversion paths failed: {ex}")
+
+
 def md_to_pdf_bytes(
     md_text: str,
     toc_level: int = 3,

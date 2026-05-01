@@ -54,6 +54,7 @@ const inlineWidgetsEnabled = ref(true);
 const slideMakerEnabled = ref(false);
 const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
+const bookGenerationEnabled = ref(false);
 const memoryEnabled = ref(false);
 const autoMemoryEnabled = ref(false);
 const skillsLibraryEnabled = ref(false);
@@ -146,6 +147,7 @@ function populateForm() {
     slideMakerEnabled.value = !!(user.value.slide_maker_enabled ?? false);
     activateGeneratedImages.value = !!(user.value.activate_generated_images ?? false);
     noteGenerationEnabled.value = !!(user.value.note_generation_enabled ?? false);
+    bookGenerationEnabled.value = !!(user.value.book_generation_enabled ?? false);
     memoryEnabled.value = !!(user.value.memory_enabled ?? false);
     autoMemoryEnabled.value = !!(user.value.auto_memory_enabled ?? false);
     skillsLibraryEnabled.value = !!(user.value.skills_library_enabled ?? false);
@@ -205,6 +207,7 @@ watch([
     preferredName, generalInfo, personalInfo, codingStyle, langPrefs, tellOS, shareDynamicInfo, sharePersonalInfo,
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
+    bookGenerationEnabled,
     memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, formBuildingEnabled, 
     reasoningActivation, reasoningEffort, reasoningSummary, rlmEnabled, 
     maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
@@ -258,6 +261,7 @@ async function handleSaveChanges() {
             slide_maker_enabled: slideMakerEnabled.value,
             activate_generated_images: activateGeneratedImages.value,
             note_generation_enabled: noteGenerationEnabled.value,
+            book_generation_enabled: bookGenerationEnabled.value,
             memory_enabled: memoryEnabled.value,
             auto_memory_enabled: autoMemoryEnabled.value,
             skills_library_enabled: skillsLibraryEnabled.value,
@@ -582,6 +586,7 @@ async function handleSaveChanges() {
                     <div class="w-px h-6 bg-gray-200 dark:bg-gray-700 mx-1"></div>
                     <label class="feature-tag" :class="{'active': inlineWidgetsEnabled}" title="Build interactive widgets"><input type="checkbox" v-model="inlineWidgetsEnabled"><span>Widgets</span></label>
                     <label class="feature-tag" :class="{'active': noteGenerationEnabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
+                    <label class="feature-tag" :class="{'active': bookGenerationEnabled}" title="Generate digital books"><input type="checkbox" v-model="bookGenerationEnabled"><span>Books</span></label>
                     <label class="feature-tag" :class="{'active': skillsBuildingEnabled}" title="Save conversation as reusable skills"><input type="checkbox" v-model="skillsBuildingEnabled"><span>Skills</span></label>
                     <label class="feature-tag" :class="{'active': formBuildingEnabled}" title="Allow AI to create interactive forms"><input type="checkbox" v-model="formBuildingEnabled"><span>Forms</span></label>
                 </div>

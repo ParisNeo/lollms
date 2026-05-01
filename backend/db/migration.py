@@ -611,7 +611,13 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("ALTER TABLE users ADD COLUMN note_generation_enabled BOOLEAN DEFAULT 0 NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
-            
+
+        if 'book_generation_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN book_generation_enabled BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
         if 'image_editing_enabled' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN image_editing_enabled BOOLEAN DEFAULT 0 NOT NULL"))

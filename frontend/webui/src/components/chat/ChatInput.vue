@@ -548,6 +548,18 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Notes: Use <note title="Title">...</note> for structured data.'
         });
     }
+    if (user.value?.book_generation_enabled) {
+        features.push({ 
+            id: 'books', 
+            icon: IconBookOpen, 
+            label: 'Book Building', 
+            colorClass: 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-900/20 border-rose-200 dark:border-rose-800', 
+            title: 'Book Building Enabled.',
+            modalTitle: 'Digital Books',
+            modalDescription: 'Allows the AI to write and format complete digital books with automatic PDF conversion.',
+            systemPrompt: '## Books: Use <artifact type="book" title="Title">...</artifact> using semantic HTML5.'
+        });
+    }
     if (user.value && user.value.inline_widgets_enabled !== false) {
         features.push({ 
             id: 'widgets', 
@@ -1150,6 +1162,16 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                         <span>Note Building</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.note_generation_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Book Building Toggle -->
+                                <button @click.stop="toggleUserPref('book_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
+                                    <span class="flex items-center gap-2">
+                                        <IconBookOpen class="w-4 h-4 text-rose-500" />
+                                        <span>Book Building</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.book_generation_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 

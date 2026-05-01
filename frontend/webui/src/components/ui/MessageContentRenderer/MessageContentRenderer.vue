@@ -970,7 +970,18 @@ function onMermaidReady({ svg }, partIndex) {
               @ready="onMermaidReady($event, index)" 
             />
           </div>
-
+        <!-- Book Artefact Rendering -->
+        <div v-else-if="part.type === 'artefact' && part.meta.type === 'book'" class="book-artefact-container my-6">
+            <div class="book-frame bg-white dark:bg-slate-50 text-slate-900 p-8 sm:p-12 shadow-2xl rounded-sm border-l-8 border-slate-300 dark:border-slate-400 mx-auto max-w-3xl overflow-hidden relative">
+                <div class="book-content prose prose-slate max-w-none" v-html="part.content"></div>
+                <div class="absolute bottom-4 right-8 text-[10px] font-serif italic text-slate-400">LoLLMs Digital Edition</div>
+            </div>
+            <div class="flex justify-center mt-4">
+                <button @click="$emit('export', { format: 'pdf', content: part.content, title: part.meta.title })" class="btn btn-secondary btn-xs gap-2">
+                    <IconArrowDownTray class="w-3 h-3" /> Download as PDF
+                </button>
+            </div>
+        </div>
           <div v-else-if="part.type === 'content'" class="content-token-container">
             <template v-for="(token, tokenIndex) in (getTokens(part.content) || [])" :key="token.uid || `token-${tokenIndex}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />

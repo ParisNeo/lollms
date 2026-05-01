@@ -231,16 +231,40 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
     async function initiateBranch(message) {
         if (!state.activeDiscussion.value || generationInProgress.value || !message) return;
-        let target = message;
-        if (target.sender_type !== 'user' && target.parent_message_id) {
-            target = messages.value.find(m => m.id === target.parent_message_id) || target;
+
+        // Logic: To regenerate/branch, we need the last USER message as the parent.
+        // If clicking on an AI message, the target is its parent (the User prompt).
+        // If clicking on a User message, the target is that message itself.
+        let anchorMessage = message;
+        if (anchorMessage.sender_type !== 'user') {
+            anchorMessage = messages.value.find(m => m.id === anchorMessage.parent_message_id);
         }
+
+        if (!anchorMessage) {
+            uiStore.addNotification('Cannot find parent message for branching.', 'error');
+            return;
+        }
+
         try {
-            await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: target.id });
-            const idx = messages.value.findIndex(m => m.id === target.id);
-            if (idx > -1) messages.value = messages.value.slice(0, idx + 1);
-            await sendMessage({ prompt: target.content, is_resend: true, parent_message_id: target.id });
-        } catch(e) { uiStore.addNotification('Branch failed.', 'error'); }
+            // 1. Tell backend which message we are branching FROM
+            await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: anchorMessage.id });
+
+            // 2. Visually trim the local message list to the branch point
+            const idx = messages.value.findIndex(m => m.id === anchorMessage.id);
+            if (idx > -1) {
+                messages.value = messages.value.slice(0, idx + 1);
+            }
+
+            // 3. Trigger new generation starting from this anchor
+            await sendMessage({ 
+                prompt: anchorMessage.content, 
+                is_resend: true, 
+                parent_message_id: anchorMessage.id 
+            });
+        } catch(e) { 
+            console.error("Branching failed:", e);
+            uiStore.addNotification('Branching failed.', 'error'); 
+        }
     }
 
     async function switchBranch(id) {
