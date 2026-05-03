@@ -13,7 +13,7 @@ import string
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Union, Any
 from concurrent.futures import ThreadPoolExecutor
-
+from fastapi import File, Form, UploadFile
 from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -1096,6 +1096,182 @@ async def create_image_generation(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
 
+
+@openai_v1_router.post("/images/edits", response_model=ImageGenerationResponse)
+async def create_image_edit(
+    fastapi_request: Request,
+    # ── Required ──────────────────────────────────────────────────────────────
+    prompt: str = Form(...),
+    image: List[UploadFile] = File(..., description="One or more source images (PNG/JPEG/WEBP, max 4 MB each)."),
+    # ── Optional ──────────────────────────────────────────────────────────────
+    mask: Optional[UploadFile] = File(None, description="Mask PNG — transparent areas mark where to edit."),
+    model: Optional[str] = Form(None),
+    n: int = Form(1, ge=1, le=10),
+    size: Optional[str] = Form("1024x1024"),
+    quality: Optional[str] = Form("standard"),
+    response_format: Optional[str] = Form("b64_json"),
+    background: Optional[str] = Form(None),
+    output_format: Optional[str] = Form("png"),
+    output_compression: Optional[int] = Form(None, ge=0, le=100),
+    input_fidelity: Optional[str] = Form(None),
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /v1/images/edits — OpenAI-compatible image edit endpoint.
+    Delegates to lc.tti.edit_image(images, prompt, mask, **kwargs).
+    """
+    # ── Resolve model / binding ────────────────────────────────────────────────
+    if model is None:
+        if user.tti_binding_model_name:
+            model = user.tti_binding_model_name
+        else:
+            default_binding = (
+                db.query(DBTTIBinding)
+                .filter(DBTTIBinding.is_active == True)
+                .order_by(DBTTIBinding.id)
+                .first()
+            )
+            if not default_binding:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "No TTI model specified and no default TTI binding "
+                        "configured for this user or system."
+                    ),
+                )
+            model = f"{default_binding.alias}/{default_binding.default_model_name or ''}"
+
+    if "/" not in model:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid model name. Use 'tti_binding_alias/model_name' format.",
+        )
+
+    tti_binding_alias, tti_model_name = model.split("/", 1)
+
+    ASCIIColors.panel(
+        f"[bold]Open AI V1 — Image Edit[/bold]\n"
+        f"[bold]User:[/bold] {user.username}\n"
+        f"[bold]Model:[/bold] {model}\n"
+        f"[bold]Images:[/bold] {len(image)}\n"
+        f"[bold]Mask:[/bold] {'yes' if mask else 'no'}\n"
+        f"[bold]n:[/bold] {n}  [bold]Size:[/bold] {size}  "
+        f"[bold]Quality:[/bold] {quality}",
+        title="Image Edit Request",
+        border_style="magenta",
+    )
+
+    # ── Read uploaded file bytes (must happen in async context) ───────────────
+    async def _read(upload: UploadFile) -> bytes:
+        try:
+            return await upload.read()
+        finally:
+            await upload.close()
+
+    source_bytes_list: List[bytes] = [await _read(img) for img in image]
+    mask_bytes: Optional[bytes] = await _read(mask) if mask else None
+
+    # ── Convert to base64 strings — the format edit_image() expects ───────────
+    images_b64: List[str] = [
+        base64.b64encode(b).decode("utf-8") for b in source_bytes_list
+    ]
+    mask_b64: Optional[str] = (
+        base64.b64encode(mask_bytes).decode("utf-8") if mask_bytes else None
+    )
+
+    # ── Parse size into width/height ──────────────────────────────────────────
+    width, height = 1024, 1024
+    if size and "x" in size:
+        try:
+            w_str, h_str = size.split("x", 1)
+            width, height = int(w_str), int(h_str)
+        except ValueError:
+            pass  # keep defaults
+
+    # ── Build TTI client ───────────────────────────────────────────────────────
+    loop = asyncio.get_running_loop()
+    try:
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                tti_binding_alias=tti_binding_alias,
+                tti_model_name=tti_model_name,
+                load_llm=False,
+                load_tti=True,
+            ),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to build TTI client: {e}")
+
+    if not hasattr(lc, "tti") or not lc.tti:
+        raise HTTPException(
+            status_code=500,
+            detail=f"TTI functionality is not available for binding '{tti_binding_alias}'.",
+        )
+
+    # ── Build extra kwargs forwarded to edit_image() ──────────────────────────
+    edit_kwargs: Dict[str, Any] = {"quality": quality}
+    if background is not None:
+        edit_kwargs["background"] = background
+    if output_format is not None:
+        edit_kwargs["output_format"] = output_format
+    if output_compression is not None:
+        edit_kwargs["output_compression"] = output_compression
+    if input_fidelity is not None:
+        edit_kwargs["input_fidelity"] = input_fidelity
+
+    # ── Generate n edited images ───────────────────────────────────────────────
+    generated: List[ImageObject] = []
+    user_generated_path = get_user_data_root(user.username) / "generated_images"
+
+    for i in range(n):
+        try:
+            # edit_image(images, prompt, negative_prompt, mask, width, height, **kwargs) → bytes
+            result_bytes: bytes = await loop.run_in_executor(
+                executor,
+                lambda: lc.tti.edit_image(
+                    images=images_b64,
+                    prompt=prompt,
+                    negative_prompt="",
+                    mask=mask_b64,
+                    width=width,
+                    height=height,
+                    **edit_kwargs,
+                ),
+            )
+
+            if not result_bytes:
+                raise ValueError("edit_image() returned empty data.")
+
+            if response_format == "url":
+                result_bytes_final = (
+                    result_bytes
+                    if isinstance(result_bytes, bytes)
+                    else base64.b64decode(result_bytes)
+                )
+                user_generated_path.mkdir(parents=True, exist_ok=True)
+                ext = output_format or "png"
+                filename = f"{uuid.uuid4().hex}.{ext}"
+                (user_generated_path / filename).write_bytes(result_bytes_final)
+                base_url = str(fastapi_request.base_url).rstrip("/")
+                generated.append(
+                    ImageObject(url=f"{base_url}/api/files/generated/{filename}")
+                )
+            else:
+                # edit_image() returns raw bytes per the abstract base class
+                b64 = base64.b64encode(result_bytes).decode("utf-8")
+                generated.append(ImageObject(b64_json=b64))
+
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Image edit failed (image {i + 1}/{n}): {e}",
+            )
+
+    return ImageGenerationResponse(data=generated)
 
 @openai_v1_router.post("/embeddings", response_model=EmbeddingResponse)
 async def create_embeddings(

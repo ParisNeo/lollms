@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-03 22:07]
+
+- refactor: remove orphaned chat panel and context manager modules
+
 ## [2026-05-01 20:45]
 
 - feat(user): add skills building flag and personality generation support
