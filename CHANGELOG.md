@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-04 01:21]
+
+- chore(deps): bump safe_store from 3.4.2 to 3.5.0
+
 ## [2026-05-03 22:07]
 
 - refactor: remove orphaned chat panel and context manager modules
