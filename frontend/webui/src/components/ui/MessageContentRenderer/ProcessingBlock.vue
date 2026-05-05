@@ -146,16 +146,9 @@ const uniqueSteps = computed(() => {
     });
 });
 
-const progressPercent = computed(() => {
-    const total = Math.max(uniqueSteps.value.length, 3);
-    const current = rawLines.value.length;
-    return Math.min(Math.round((current / total) * 100), 100);
-});
-
 const stepCounter = computed(() => {
-    const total = Math.max(uniqueSteps.value.length, 3);
-    const current = Math.min(rawLines.value.length, total);
-    return `${current} of ~${total}`;
+    const current = rawLines.value.length;
+    return `${current} steps logged`;
 });
 </script>
 
@@ -219,15 +212,20 @@ const stepCounter = computed(() => {
                             {{ stepCounter }}
                         </span>
                     </div>
-                    <span class="text-[10px] font-bold tabular-nums" :class="typeConfig.colorClass">
-                        {{ progressPercent }}%
+                    <span v-if="!isClosed" class="text-[10px] font-bold uppercase tracking-tighter animate-pulse" :class="typeConfig.colorClass">
+                        Working...
                     </span>
                 </div>
-                <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden relative">
                     <div 
-                        class="h-full rounded-full transition-all duration-500 ease-out"
-                        :class="[typeConfig.barClass, { 'animate-pulse': !isClosed }]"
-                        :style="{ width: `${progressPercent}%` }"
+                        v-if="!isClosed"
+                        class="absolute top-0 left-0 h-full w-1/3 rounded-full animate-marquee"
+                        :class="[typeConfig.barClass, 'opacity-70']"
+                    ></div>
+                    <div 
+                        v-else
+                        class="h-full w-full rounded-full"
+                        :class="typeConfig.barClass"
                     ></div>
                 </div>
             </div>
@@ -357,5 +355,18 @@ const stepCounter = computed(() => {
 
 .animate-shimmer {
     animation: shimmer 2s ease-in-out infinite;
+}
+
+@keyframes marquee {
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(300%);
+    }
+}
+
+.animate-marquee {
+    animation: marquee 1.5s linear infinite;
 }
 </style>
