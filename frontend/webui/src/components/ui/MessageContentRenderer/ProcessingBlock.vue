@@ -7,6 +7,7 @@ import IconFileText from '../../../assets/icons/IconFileText.vue';
 import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
+import IconTerminal from '../../../assets/icons/ui/IconTerminal.vue';
 
 const props = defineProps({
     pType: { type: String, default: 'process' },
@@ -16,6 +17,7 @@ const props = defineProps({
 });
 
 const isExpanded = ref(!props.isClosed);
+const showAllLogs = ref(false);
 
 // Auto-expand when new status updates arrive during streaming
 watch(() => props.statusContent, () => {
@@ -31,28 +33,36 @@ const typeConfig = computed(() => {
             icon: IconWrenchScrewdriver,
             colorClass: 'text-purple-500',
             bgClass: 'bg-purple-50 dark:bg-purple-900/20',
-            borderClass: 'border-purple-100 dark:border-purple-800/50'
+            borderClass: 'border-purple-100 dark:border-purple-800/50',
+            barClass: 'bg-purple-500',
+            glowClass: 'shadow-purple-500/30'
         },
         'artefact_building': {
             label: 'Building Artefact',
             icon: IconFileText,
             colorClass: 'text-blue-500',
             bgClass: 'bg-blue-50 dark:bg-blue-900/20',
-            borderClass: 'border-blue-100 dark:border-blue-800/50'
+            borderClass: 'border-blue-100 dark:border-blue-800/50',
+            barClass: 'bg-blue-500',
+            glowClass: 'shadow-blue-500/30'
         },
         'widget_building': {
             label: 'Creating Widget',
             icon: IconCpuChip,
             colorClass: 'text-indigo-500',
             bgClass: 'bg-indigo-50 dark:bg-indigo-900/20',
-            borderClass: 'border-indigo-100 dark:border-indigo-800/50'
+            borderClass: 'border-indigo-100 dark:border-indigo-800/50',
+            barClass: 'bg-indigo-500',
+            glowClass: 'shadow-indigo-500/30'
         },
         'note_building': {
             label: 'Writing Note',
             icon: IconPencil,
             colorClass: 'text-amber-500',
             bgClass: 'bg-amber-50 dark:bg-amber-900/20',
-            borderClass: 'border-amber-100 dark:border-amber-800/50'
+            borderClass: 'border-amber-100 dark:border-amber-800/50',
+            barClass: 'bg-amber-500',
+            glowClass: 'shadow-amber-500/30'
         }
     };
     return configs[props.pType] || {
@@ -60,17 +70,92 @@ const typeConfig = computed(() => {
         icon: IconCpuChip,
         colorClass: 'text-gray-500',
         bgClass: 'bg-gray-50 dark:bg-gray-900/20',
-        borderClass: 'border-gray-100 dark:border-gray-800/50'
+        borderClass: 'border-gray-100 dark:border-gray-800/50',
+        barClass: 'bg-gray-500',
+        glowClass: 'shadow-gray-500/30'
     };
 });
 
-const parsedStatusLines = computed(() => {
+const genericPatterns = [
+    'WRITING CONTENT DATA',
+    'GENERATING CONTENT',
+    'PROCESSING DATA',
+    'BUILDING COMPONENT',
+    'COMPILING ASSETS',
+    'FETCHING DATA',
+    'RENDERING OUTPUT'
+];
+
+function isGenericMessage(msg) {
+    if (!msg) return false;
+    const upper = msg.toUpperCase();
+    return genericPatterns.some(pattern => upper.includes(pattern));
+}
+
+const rawLines = computed(() => {
     if (!props.statusContent) return [];
     return props.statusContent
         .split('\n')
         .map(line => line.trim())
         .filter(line => line.startsWith('*'))
         .map(line => line.substring(1).trim());
+});
+
+const collapsedLines = computed(() => {
+    const lines = rawLines.value;
+    if (lines.length === 0) return [];
+
+    const result = [];
+    let current = lines[0];
+    let count = 1;
+    let isGeneric = isGenericMessage(current);
+
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        const lineGeneric = isGenericMessage(line);
+
+        if (line === current) {
+            count++;
+        } else if (lineGeneric && isGeneric) {
+            // Merge consecutive generic messages
+            count++;
+            current = line;
+            isGeneric = lineGeneric;
+        } else {
+            result.push({ text: current, count, isGeneric });
+            current = line;
+            count = 1;
+            isGeneric = lineGeneric;
+        }
+    }
+
+    result.push({ text: current, count, isGeneric });
+    return result;
+});
+
+const displayLines = computed(() => {
+    return showAllLogs.value ? rawLines.value.map(text => ({ text, count: 1, isGeneric: isGenericMessage(text) })) : collapsedLines.value;
+});
+
+const uniqueSteps = computed(() => {
+    const seen = new Set();
+    return rawLines.value.filter(line => {
+        if (seen.has(line)) return false;
+        seen.add(line);
+        return true;
+    });
+});
+
+const progressPercent = computed(() => {
+    const total = Math.max(uniqueSteps.value.length, 3);
+    const current = rawLines.value.length;
+    return Math.min(Math.round((current / total) * 100), 100);
+});
+
+const stepCounter = computed(() => {
+    const total = Math.max(uniqueSteps.value.length, 3);
+    const current = Math.min(rawLines.value.length, total);
+    return `${current} of ~${total}`;
 });
 </script>
 
@@ -125,6 +210,28 @@ const parsedStatusLines = computed(() => {
                 </div>
             </div>
 
+            <!-- Progress Bar -->
+            <div v-if="rawLines.length > 0" class="px-4 pb-2">
+                <div class="flex items-center justify-between mb-1.5">
+                    <div class="flex items-center gap-2">
+                        <IconTerminal class="w-3 h-3 text-gray-400" />
+                        <span class="text-[10px] font-bold uppercase tracking-tighter text-gray-500 dark:text-gray-400">
+                            {{ stepCounter }}
+                        </span>
+                    </div>
+                    <span class="text-[10px] font-bold tabular-nums" :class="typeConfig.colorClass">
+                        {{ progressPercent }}%
+                    </span>
+                </div>
+                <div class="h-1.5 w-full rounded-full bg-gray-200 dark:bg-gray-700 overflow-hidden">
+                    <div 
+                        class="h-full rounded-full transition-all duration-500 ease-out"
+                        :class="[typeConfig.barClass, { 'animate-pulse': !isClosed }]"
+                        :style="{ width: `${progressPercent}%` }"
+                    ></div>
+                </div>
+            </div>
+
             <!-- Content / Logs Section -->
             <Transition
                 enter-active-class="transition-all duration-300 ease-out"
@@ -135,25 +242,94 @@ const parsedStatusLines = computed(() => {
                 leave-to-class="max-h-0 opacity-0"
             >
                 <div v-if="isExpanded" class="overflow-hidden">
-                    <div class="px-4 pb-4 pt-3 space-y-2.5 border-t border-gray-200/50 dark:border-gray-700/50">
-                        <div v-if="parsedStatusLines.length === 0" class="text-xs text-gray-400 italic pl-10">
+                    <div class="px-4 pb-4 pt-3 space-y-1 border-t border-gray-200/50 dark:border-gray-700/50">
+                        <div v-if="rawLines.length === 0" class="text-xs text-gray-400 italic pl-10 font-mono">
                             Awaiting task logs...
                         </div>
-                        <div 
-                            v-for="(line, idx) in parsedStatusLines" 
-                            :key="idx"
-                            class="flex items-start gap-3 pl-1 group/line"
-                        >
-                            <div class="flex items-center justify-center w-5 h-5 flex-shrink-0">
-                                <div class="w-1.5 h-1.5 rounded-full bg-gray-300 dark:bg-gray-600 group-last/line:bg-blue-500 group-last/line:animate-pulse"></div>
+
+                        <!-- Terminal Header -->
+                        <div v-if="rawLines.length > 0" class="flex items-center justify-between mb-2 pb-2 border-b border-gray-200/30 dark:border-gray-700/30">
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-2.5 h-2.5 rounded-full bg-red-400/80"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-yellow-400/80"></div>
+                                <div class="w-2.5 h-2.5 rounded-full bg-green-400/80"></div>
+                                <span class="ml-2 text-[10px] text-gray-400 font-mono uppercase tracking-wider">console.log</span>
                             </div>
-                            <span class="text-xs font-medium uppercase tracking-tight" :class="[
-                                idx === parsedStatusLines.length - 1 && !isClosed 
-                                ? 'text-blue-600 dark:text-blue-400 font-bold' 
-                                : 'text-gray-500 dark:text-gray-400'
-                            ]">
-                                {{ line }}
-                            </span>
+                            <button 
+                                v-if="collapsedLines.length !== rawLines.length"
+                                @click.stop="showAllLogs = !showAllLogs"
+                                class="text-[10px] font-bold uppercase tracking-tighter px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                            >
+                                {{ showAllLogs ? 'Collapse' : 'Show all' }} {{ rawLines.length }}
+                            </button>
+                        </div>
+
+                        <!-- Log Lines -->
+                        <div 
+                            v-for="(line, idx) in displayLines" 
+                            :key="idx"
+                            class="flex items-start gap-2.5 pl-1 group/line font-mono"
+                        >
+                            <!-- Step Indicator -->
+                            <div class="flex items-center justify-center w-5 h-5 flex-shrink-0 mt-0.5">
+                                <!-- Active / Last step -->
+                                <div 
+                                    v-if="idx === displayLines.length - 1 && !isClosed"
+                                    class="relative"
+                                >
+                                    <div 
+                                        class="w-4 h-4 rounded-full flex items-center justify-center"
+                                        :class="[typeConfig.bgClass, typeConfig.glowClass, { 'animate-pulse shadow-lg': !isClosed }]"
+                                    >
+                                        <div class="w-2 h-2 rounded-full" :class="typeConfig.barClass"></div>
+                                    </div>
+                                    <!-- Shimmer ring -->
+                                    <div 
+                                        class="absolute inset-0 rounded-full border-2 border-transparent animate-spin"
+                                        :class="typeConfig.colorClass"
+                                        style="border-top-color: currentColor; animation-duration: 2s;"
+                                    ></div>
+                                </div>
+                                <!-- Completed step -->
+                                <div 
+                                    v-else-if="idx < displayLines.length - 1 || isClosed"
+                                    class="w-4 h-4 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-800"
+                                >
+                                    <IconCheckCircle class="w-3 h-3 text-green-500" />
+                                </div>
+                            </div>
+
+                            <!-- Line Text -->
+                            <div class="flex items-center gap-2 min-w-0 flex-1">
+                                <span 
+                                    class="text-[11px] leading-relaxed tracking-tight truncate"
+                                    :class="[
+                                        idx === displayLines.length - 1 && !isClosed 
+                                            ? [typeConfig.colorClass, 'font-bold'] 
+                                            : 'text-gray-400 dark:text-gray-500'
+                                    ]"
+                                >
+                                    {{ line.text }}
+                                </span>
+                                <!-- Count Badge -->
+                                <span 
+                                    v-if="line.count > 1"
+                                    class="flex-shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 tabular-nums"
+                                >
+                                    ×{{ line.count }}
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Live cursor for active process -->
+                        <div v-if="!isClosed && rawLines.length > 0" class="flex items-center gap-2.5 pl-1 mt-1">
+                            <div class="w-5 flex-shrink-0 flex justify-center">
+                                <div 
+                                    class="w-2 h-4 rounded-sm animate-pulse"
+                                    :class="typeConfig.barClass"
+                                ></div>
+                            </div>
+                            <span class="text-[10px] text-gray-400 font-mono animate-pulse">_</span>
                         </div>
                     </div>
                 </div>
@@ -165,5 +341,21 @@ const parsedStatusLines = computed(() => {
 <style scoped>
 .processing-block-wrapper {
     max-width: 100%;
+}
+
+@keyframes shimmer {
+    0% {
+        opacity: 0.4;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0.4;
+    }
+}
+
+.animate-shimmer {
+    animation: shimmer 2s ease-in-out infinite;
 }
 </style>
