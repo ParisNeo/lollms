@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-11 01:37]
+
+- chore(deps): bump lollms-client from 1.13.11 to 1.13.13
+
 ## [2026-05-08 15:21]
 
 - refactor(openai_v1): streamline chat completions streaming and tool formatting logic
