@@ -42,6 +42,12 @@ bearer_scheme = HTTPBearer(auto_error=False)
 # Create a thread pool for blocking operations
 executor = ThreadPoolExecutor(max_workers=50)
 
+
+#Constants
+TTFT_TIMEOUT  = float(settings.get("stream_ttft_timeout",  300.0))   # 5 min default
+CHUNK_TIMEOUT = float(settings.get("stream_chunk_timeout",  60.0))   # 60s default
+
+
 # --- Pydantic Models for OpenAI Compatibility ---
 
 class FunctionCall(BaseModel):
@@ -826,6 +832,11 @@ async def chat_completions(
                     )
                     return f"data: {chunk.model_dump_json()}\n\n"
 
+                def make_error_chunk(message: str) -> str:
+                    """Emit an OpenAI-compatible error event before [DONE]."""
+                    payload = json.dumps({"error": {"message": message, "type": "server_error"}})
+                    return f"data: {payload}\n\n"
+
                 async def watch_disconnect() -> None:
                     try:
                         receive = (
@@ -847,27 +858,28 @@ async def chat_completions(
                         return
 
                     ASCIIColors.warning(
-                        f"[stream] Client '{user.username}' disconnected — cancelling generation."
+                        f"[stream] Client '{user.username}' disconnected — cancelling."
                     )
-                    # 1. Tell the binding to abort (closes HTTP session etc.)
                     await loop.run_in_executor(None, lambda: _cancel_generation(lc))
-                    # 2. Unblock the consumer
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
                 try:
-                    _prepare_generation(lc)   # arm clean cancel state
+                    _prepare_generation(lc)
                     watcher_task = asyncio.ensure_future(watch_disconnect())
 
-                    # ── TOOLS PATH (non-streaming generation + parse) ──────────
+                    # ── TOOLS PATH ────────────────────────────────────────────────────────
                     if request.tools:
-                        result_content = await loop.run_in_executor(
-                            executor,
-                            lambda: lc.generate_from_messages(
-                                openai_messages,
-                                temperature=request.temperature,
-                                n_predict=request.max_tokens,
-                                **generation_kwargs
-                            )
+                        result_content = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                executor,
+                                lambda: lc.generate_from_messages(
+                                    openai_messages,
+                                    temperature=request.temperature,
+                                    n_predict=request.max_tokens,
+                                    **generation_kwargs
+                                )
+                            ),
+                            timeout=TTFT_TIMEOUT,   # tools path: single blocking call
                         )
                         if lc.llm and lc.llm.is_cancelled():
                             yield "data: [DONE]\n\n"
@@ -875,7 +887,7 @@ async def chat_completions(
                         if isinstance(result_content, dict) and (
                             "error" in result_content or result_content.get("status") is False
                         ):
-                            yield f"data: {json.dumps({'error': {'message': result_content.get('error'), 'type': 'server_error'}})}\n\n"
+                            yield make_error_chunk(result_content.get("error", "LLM error"))
                             yield "data: [DONE]\n\n"
                             return
                         content, tool_calls = parse_tool_calls_from_text(result_content)
@@ -886,14 +898,15 @@ async def chat_completions(
                             for i, tc in enumerate(tool_calls):
                                 tc.index = i
                                 yield make_chunk(DeltaMessage(tool_calls=[tc]))
-                        yield make_chunk(DeltaMessage(), finish_reason="tool_calls" if tool_calls else "stop")
+                        yield make_chunk(
+                            DeltaMessage(),
+                            finish_reason="tool_calls" if tool_calls else "stop"
+                        )
                         yield "data: [DONE]\n\n"
                         return
 
-                    # ── STREAMING PATH ─────────────────────────────────────────
+                    # ── STREAMING PATH ────────────────────────────────────────────────────
                     def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
-                        # Cooperative check — also honours bindings that don't
-                        # override cancel() but do poll is_cancelled().
                         if lc.llm and lc.llm.is_cancelled():
                             return False
                         if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
@@ -915,22 +928,60 @@ async def chat_completions(
                             )
                         except Exception as ex:
                             ASCIIColors.error(f"[blocking_gen] {ex}")
+                            # Signal the error back to the consumer
+                            main_loop.call_soon_threadsafe(
+                                stream_queue.put_nowait,
+                                make_error_chunk(str(ex))
+                            )
                         finally:
                             main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
                     loop.run_in_executor(executor, blocking_gen)
                     yield make_chunk(DeltaMessage(role="assistant"))
 
-                    CHUNK_TIMEOUT = 30.0
+                    first_token_received = False
+
                     while True:
+                        # Use a longer timeout until we get the first token (TTFT),
+                        # then switch to the shorter inter-chunk timeout.
+                        timeout = CHUNK_TIMEOUT if first_token_received else TTFT_TIMEOUT
+
                         try:
-                            item = await asyncio.wait_for(stream_queue.get(), timeout=CHUNK_TIMEOUT)
+                            item = await asyncio.wait_for(
+                                stream_queue.get(), timeout=timeout
+                            )
                         except asyncio.TimeoutError:
-                            ASCIIColors.warning("[stream] Chunk timeout — forcing cancel.")
-                            await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                            if not first_token_received:
+                                ASCIIColors.warning(
+                                    f"[stream] TTFT timeout ({TTFT_TIMEOUT}s) — "
+                                    f"no first token received for user '{user.username}'. Cancelling."
+                                )
+                                await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                                yield make_error_chunk(
+                                    f"Generation timed out waiting for first token "
+                                    f"({TTFT_TIMEOUT:.0f}s). "
+                                    f"The model may be overloaded or the context is too large."
+                                )
+                            else:
+                                ASCIIColors.warning(
+                                    f"[stream] Inter-chunk timeout ({CHUNK_TIMEOUT}s) — "
+                                    f"stalled mid-stream for user '{user.username}'. Cancelling."
+                                )
+                                await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                                yield make_error_chunk(
+                                    f"Generation stalled mid-stream ({CHUNK_TIMEOUT:.0f}s "
+                                    f"between tokens). Partial response may have been received."
+                                )
                             break
+
                         if item is None:
+                            # None is the sentinel from blocking_gen or watch_disconnect
                             break
+
+                        # Mark first token received before yielding
+                        if not first_token_received:
+                            first_token_received = True
+
                         yield item
 
                     if lc.llm and not lc.llm.is_cancelled():
@@ -940,9 +991,10 @@ async def chat_completions(
                 except Exception as e:
                     ASCIIColors.error(f"[stream_generator] Crash: {e}")
                     trace_exception(e)
+                    yield make_error_chunk(str(e))
                     yield "data: [DONE]\n\n"
                 finally:
-                    _cancel_generation(lc)   # idempotent safety net
+                    _cancel_generation(lc)
                     if watcher_task and not watcher_task.done():
                         watcher_task.cancel()
                         try:

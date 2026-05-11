@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-11 20:55]
+
+- feat(openai_v1): add thread pool executor for async operations
+
 ## [2026-05-11 01:37]
 
 - chore(changelog): add missing lollms-client dependency bump entry for requirements.txt
