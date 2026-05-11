@@ -203,6 +203,28 @@ class FileExtractionRequest(BaseModel):
 class FileExtractionResponse(BaseModel):
     text: str = Field(..., description="The extracted text content.")
 
+
+
+
+
+def _prepare_generation(lc) -> None:
+    """Call before every generation to arm a clean cancellation state."""
+    if hasattr(lc, 'llm') and lc.llm is not None and hasattr(lc.llm, 'reset_cancel'):
+        lc.llm.reset_cancel()
+
+
+def _cancel_generation(lc) -> None:
+    """
+    Best-effort cancellation:
+      1. Call binding.cancel() — closes HTTP sessions, sets the event.
+      2. If the binding didn't override cancel() (i.e. it's purely cooperative
+         via is_cancelled()), the event alone may not be enough for a hung
+         thread.  The caller should still hard-kill the process as a last resort
+         if lc lives in a child process (see below).
+    """
+    if hasattr(lc, 'llm') and lc.llm is not None and hasattr(lc.llm, 'cancel'):
+        lc.llm.cancel()
+
 # --- NEW HELPER FUNCTIONS for model resolution ---
 def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, str]]:
     all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
@@ -788,189 +810,214 @@ async def chat_completions(
     stream_style = '\nTools requested in stream mode.' if request.tools else ""
     ASCIIColors.panel(f"[bold]Open AI V1[/bold]\n[bold]User:[/bold] {user.username}\n[bold]Model:[/bold] {request.model}\n[bold]Stream:[/bold] {request.stream}{stream_style}\n[bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}\n[bold]Received images:[/bold] {len(images)}\n[bold]Max Tokens:[/bold] {request.max_tokens}", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
     if request.stream:
-        async def stream_generator():
-            main_loop = asyncio.get_running_loop()
-            stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
-            stop_event = threading.Event()
-            completion_id = f"chatcmpl-{uuid.uuid4().hex}"
-            created_ts = int(time.time())
-            watcher_task: Optional[asyncio.Task] = None
+            async def stream_generator():
+                main_loop = asyncio.get_running_loop()
+                stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
+                completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+                created_ts = int(time.time())
+                watcher_task: Optional[asyncio.Task] = None
 
-            # ------------------------------------------------------------------ #
-            #  Disconnect watcher — aborts generation when the client drops       #
-            # ------------------------------------------------------------------ #
-            async def disconnect_watcher():
-                try:
-                    while not await fastapi_request.is_disconnected():
-                        await asyncio.sleep(0.5)
-                    ASCIIColors.warning(
-                        f"[stream_generator] Client '{user.username}' disconnected mid-stream. Aborting."
+                def make_chunk(delta: DeltaMessage, finish_reason=None) -> str:
+                    chunk = ChatCompletionStreamResponse(
+                        id=completion_id, model=request.model, created=created_ts,
+                        choices=[ChatCompletionResponseStreamChoice(
+                            index=0, delta=delta, finish_reason=finish_reason
+                        )]
                     )
-                except asyncio.CancelledError:
-                    return  # normal shutdown — generation finished first
-                finally:
-                    stop_event.set()
+                    return f"data: {chunk.model_dump_json()}\n\n"
+
+                async def watch_disconnect() -> None:
+                    try:
+                        receive = (
+                            fastapi_request.scope.get("_receive")
+                            or getattr(fastapi_request, "_receive", None)
+                        )
+                        if receive:
+                            while True:
+                                msg = await receive()
+                                if msg.get("type") == "http.disconnect":
+                                    break
+                        else:
+                            while not await fastapi_request.is_disconnected():
+                                await asyncio.sleep(0.25)
+                    except asyncio.CancelledError:
+                        return
+                    except Exception as e:
+                        ASCIIColors.warning(f"[watch_disconnect] {e}")
+                        return
+
+                    ASCIIColors.warning(
+                        f"[stream] Client '{user.username}' disconnected — cancelling generation."
+                    )
+                    # 1. Tell the binding to abort (closes HTTP session etc.)
+                    await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                    # 2. Unblock the consumer
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
-            # ------------------------------------------------------------------ #
-            #  Helpers                                                            #
-            # ------------------------------------------------------------------ #
-            def make_chunk(delta: DeltaMessage, finish_reason: Optional[str] = None) -> str:
-                chunk = ChatCompletionStreamResponse(
-                    id=completion_id,
-                    model=request.model,
-                    created=created_ts,
-                    choices=[ChatCompletionResponseStreamChoice(
-                        index=0,
-                        delta=delta,
-                        finish_reason=finish_reason
-                    )]
-                )
-                return f"data: {chunk.model_dump_json()}\n\n"
+                try:
+                    _prepare_generation(lc)   # arm clean cancel state
+                    watcher_task = asyncio.ensure_future(watch_disconnect())
 
-            # ------------------------------------------------------------------ #
-            #  Main body                                                          #
-            # ------------------------------------------------------------------ #
-            try:
-                watcher_task = asyncio.ensure_future(disconnect_watcher())
-
-                # ── TOOLS PATH ─────────────────────────────────────────────────
-                # Tools require a full non-streaming generation so we can parse
-                # the JSON tool-call block from the complete response.
-                if request.tools:
-                    result_content = await loop.run_in_executor(
-                        executor,
-                        lambda: lc.generate_from_messages(
-                            openai_messages,
-                            temperature=request.temperature,
-                            n_predict=request.max_tokens,
-                            **generation_kwargs
+                    # ── TOOLS PATH (non-streaming generation + parse) ──────────
+                    if request.tools:
+                        result_content = await loop.run_in_executor(
+                            executor,
+                            lambda: lc.generate_from_messages(
+                                openai_messages,
+                                temperature=request.temperature,
+                                n_predict=request.max_tokens,
+                                **generation_kwargs
+                            )
                         )
-                    )
-
-                    # Client may have disconnected while we were waiting
-                    if stop_event.is_set():
-                        ASCIIColors.warning("[stream_generator/tools] Aborted after generation (client gone).")
+                        if lc.llm and lc.llm.is_cancelled():
+                            yield "data: [DONE]\n\n"
+                            return
+                        if isinstance(result_content, dict) and (
+                            "error" in result_content or result_content.get("status") is False
+                        ):
+                            yield f"data: {json.dumps({'error': {'message': result_content.get('error'), 'type': 'server_error'}})}\n\n"
+                            yield "data: [DONE]\n\n"
+                            return
+                        content, tool_calls = parse_tool_calls_from_text(result_content)
+                        yield make_chunk(DeltaMessage(role="assistant"))
+                        if content:
+                            yield make_chunk(DeltaMessage(content=content))
+                        if tool_calls:
+                            for i, tc in enumerate(tool_calls):
+                                tc.index = i
+                                yield make_chunk(DeltaMessage(tool_calls=[tc]))
+                        yield make_chunk(DeltaMessage(), finish_reason="tool_calls" if tool_calls else "stop")
                         yield "data: [DONE]\n\n"
                         return
 
-                    # Binding returned an error dict instead of a string
-                    if isinstance(result_content, dict) and (
-                        "error" in result_content or result_content.get("status") is False
-                    ):
-                        error_msg = result_content.get("error", "Internal Server Error from LLM Binding.")
-                        error_obj = {
-                            "error": {
-                                "message": error_msg,
-                                "type": "server_error",
-                                "code": result_content.get("status_code", 500),
-                            }
-                        }
-                        yield f"data: {json.dumps(error_obj)}\n\n"
-                        yield "data: [DONE]\n\n"
-                        return
+                    # ── STREAMING PATH ─────────────────────────────────────────
+                    def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
+                        # Cooperative check — also honours bindings that don't
+                        # override cancel() but do poll is_cancelled().
+                        if lc.llm and lc.llm.is_cancelled():
+                            return False
+                        if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
+                            main_loop.call_soon_threadsafe(
+                                stream_queue.put_nowait,
+                                make_chunk(DeltaMessage(content=chunk_text))
+                            )
+                        return True
 
-                    content, tool_calls = parse_tool_calls_from_text(result_content)
+                    def blocking_gen() -> None:
+                        try:
+                            lc.generate_from_messages(
+                                openai_messages,
+                                streaming_callback=llm_callback,
+                                temperature=request.temperature,
+                                n_predict=request.max_tokens,
+                                stream=True,
+                                **generation_kwargs
+                            )
+                        except Exception as ex:
+                            ASCIIColors.error(f"[blocking_gen] {ex}")
+                        finally:
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
-                    # role opener
+                    loop.run_in_executor(executor, blocking_gen)
                     yield make_chunk(DeltaMessage(role="assistant"))
 
-                    # text content (if any precedes the tool call)
-                    if content:
-                        yield make_chunk(DeltaMessage(content=content))
+                    CHUNK_TIMEOUT = 30.0
+                    while True:
+                        try:
+                            item = await asyncio.wait_for(stream_queue.get(), timeout=CHUNK_TIMEOUT)
+                        except asyncio.TimeoutError:
+                            ASCIIColors.warning("[stream] Chunk timeout — forcing cancel.")
+                            await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                            break
+                        if item is None:
+                            break
+                        yield item
 
-                    # tool call deltas
-                    if tool_calls:
-                        for i, tc in enumerate(tool_calls):
-                            tc.index = i
-                            yield make_chunk(DeltaMessage(tool_calls=[tc]))
-
-                    finish_reason = "tool_calls" if tool_calls else "stop"
-                    yield make_chunk(DeltaMessage(), finish_reason=finish_reason)
+                    if lc.llm and not lc.llm.is_cancelled():
+                        yield make_chunk(DeltaMessage(), finish_reason="stop")
                     yield "data: [DONE]\n\n"
-                    return
 
-                # ── STREAMING PATH ─────────────────────────────────────────────
-                def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
-                    """Called from the executor thread for each generated token."""
-                    if stop_event.is_set():
-                        return False  # tells the binding to stop
-                    if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
-                        main_loop.call_soon_threadsafe(
-                            stream_queue.put_nowait,
-                            make_chunk(DeltaMessage(content=chunk_text))
-                        )
-                    return True
+                except Exception as e:
+                    ASCIIColors.error(f"[stream_generator] Crash: {e}")
+                    trace_exception(e)
+                    yield "data: [DONE]\n\n"
+                finally:
+                    _cancel_generation(lc)   # idempotent safety net
+                    if watcher_task and not watcher_task.done():
+                        watcher_task.cancel()
+                        try:
+                            await watcher_task
+                        except asyncio.CancelledError:
+                            pass
 
-                def blocking_gen():
-                    try:
-                        lc.generate_from_messages(
-                            openai_messages,
-                            streaming_callback=llm_callback,
-                            temperature=request.temperature,
-                            n_predict=request.max_tokens,
-                            stream=True,
-                            **generation_kwargs
-                        )
-                    except Exception as ex:
-                        ASCIIColors.error(f"[stream_generator] Blocking generation error: {ex}")
-                    finally:
-                        # Always unblock the consumer, even on error / early stop
-                        main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
-
-                loop.run_in_executor(executor, blocking_gen)
-
-                # role opener
-                yield make_chunk(DeltaMessage(role="assistant"))
-
-                # consume token chunks until generation finishes or client drops
-                while True:
-                    item = await stream_queue.get()
-                    if item is None:
-                        break
-                    yield item
-
-                # Only send the stop frame if the client is still there
-                if not stop_event.is_set():
-                    yield make_chunk(DeltaMessage(), finish_reason="stop")
-
-                yield "data: [DONE]\n\n"
-
-            except Exception as e:
-                ASCIIColors.error(f"[stream_generator] Unexpected crash: {e}")
-                trace_exception(e)
-                yield "data: [DONE]\n\n"
-
-            finally:
-                # Always cancel the watcher so it doesn't linger as a zombie coroutine
-                if watcher_task and not watcher_task.done():
-                    watcher_task.cancel()
-                    try:
-                        await watcher_task
-                    except asyncio.CancelledError:
-                        pass
-                stop_event.set()  # belt-and-suspenders: ensure blocking_gen exits if still running
-        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+            return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
     else:
-        try:
-            # Use executor for non-streaming blocking call as well
-            result_content = await loop.run_in_executor(
-                executor, 
-                lambda: lc.generate_from_messages(
-                    openai_messages,
-                    temperature=request.temperature,
-                    n_predict=request.max_tokens,
-                    **generation_kwargs
+        async def wait_for_disconnect() -> None:
+            try:
+                receive = (
+                    fastapi_request.scope.get("_receive")
+                    or getattr(fastapi_request, "_receive", None)
                 )
+                if receive:
+                    while True:
+                        msg = await receive()
+                        if msg.get("type") == "http.disconnect":
+                            return
+                else:
+                    while not await fastapi_request.is_disconnected():
+                        await asyncio.sleep(0.25)
+            except (asyncio.CancelledError, Exception):
+                pass
+
+        _prepare_generation(lc)
+
+        gen_future = loop.run_in_executor(
+            executor,
+            lambda: lc.generate_from_messages(
+                openai_messages,
+                temperature=request.temperature,
+                n_predict=request.max_tokens,
+                **generation_kwargs
             )
-            
-            # [FIX] Handle error dictionaries from the binding to prevent Pydantic crash
-            if isinstance(result_content, dict) and ("error" in result_content or result_content.get("status") is False):
-                error_msg = result_content.get("error", "Internal Server Error from LLM Binding.")
-                status_code = result_content.get("status_code", 500)
-                ASCIIColors.error(f"LLM Binding Error: {error_msg}")
-                raise HTTPException(status_code=status_code, detail=error_msg)
+        )
+        disconnect_task = asyncio.ensure_future(wait_for_disconnect())
+        gen_task = asyncio.ensure_future(gen_future)
+
+        try:
+            done, _ = await asyncio.wait(
+                {gen_task, disconnect_task},
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if disconnect_task in done and gen_task not in done:
+                ASCIIColors.warning(
+                    f"[non-stream] Client '{user.username}' disconnected — cancelling."
+                )
+                # Cancel at the binding level first (fast for HTTP bindings)
+                await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                raise HTTPException(status_code=499, detail="Client disconnected.")
+
+            result_content = await gen_task
+
+        finally:
+            _cancel_generation(lc)   # always reset for next request
+            for t in [gen_task, disconnect_task]:
+                if not t.done():
+                    t.cancel()
+                    try:
+                        await t
+                    except (asyncio.CancelledError, Exception):
+                        pass
+
+        try:
+            if isinstance(result_content, dict) and (
+                "error" in result_content or result_content.get("status") is False
+            ):
+                raise HTTPException(
+                    status_code=result_content.get("status_code", 500),
+                    detail=result_content.get("error", "LLM Binding error.")
+                )
 
             content = result_content
             finish_reason = "stop"
@@ -980,28 +1027,13 @@ async def chat_completions(
                 content, tool_calls = parse_tool_calls_from_text(result_content)
                 if tool_calls:
                     finish_reason = "tool_calls"
-                    ASCIIColors.success(f"Parsed {len(tool_calls)} tool calls.")
-            
-            if tool_calls and not content:
-                content = None
 
-            msg_obj = ChatMessage(
-                role="assistant", 
-                content=content,
-                tool_calls=tool_calls
-            )
+            msg_obj = ChatMessage(role="assistant", content=content, tool_calls=tool_calls)
+            choice = ChatCompletionResponseChoice(index=0, message=msg_obj, finish_reason=finish_reason)
 
-            choice = ChatCompletionResponseChoice(
-                index=0,
-                message=msg_obj,
-                finish_reason=finish_reason
-            )
-            
-            # Token counting can be CPU intensive too
             prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(openai_messages)))
-            completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(result_content))
-            
-            
+            completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(result_content)))
+
             return ChatCompletionResponse(
                 id=f"chatcmpl-{uuid.uuid4().hex}",
                 model=request.model,
@@ -1009,10 +1041,9 @@ async def chat_completions(
                 usage=UsageInfo(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
-                    total_tokens=prompt_tokens + completion_tokens
-                )
+                    total_tokens=prompt_tokens + completion_tokens,
+                ),
             )
-            
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")
