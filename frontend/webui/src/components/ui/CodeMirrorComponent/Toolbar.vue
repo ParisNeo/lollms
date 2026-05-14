@@ -195,17 +195,3 @@ const getButtonTitle = (type) => {
     return map[type] || type;
 };
 </script>
-
-<style scoped>
-@reference "tailwindcss";
-
-.mode-button {
-    @apply px-2.5 py-1 text-sm rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5;
-}
-.mode-button.active {
-    @apply bg-white dark:bg-gray-600 text-gray-800 dark:text-gray-100 shadow-sm;
-}
-.mode-button.inactive {
-    @apply bg-transparent text-gray-600 dark:text-gray-400 hover:bg-gray-300/50 dark:hover:bg-gray-700/50;
-}
-</style>    

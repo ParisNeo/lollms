@@ -446,11 +446,3 @@ onBeforeUnmount(() => {
     }
 });
 </script>
-
-<style>
-.editor-content-host > .cm-editor {
-    height: 100%;
-    padding: 0.25rem;
-    background-color: transparent;
-}
-</style>

@@ -10,21 +10,23 @@
 
 @layer base {
   html {
-    font-size: 16px;
+    font-size: 19px; /* Increased to match the image's large body text */
   }
   @media (max-width: 768px) {
     html {
-      font-size: 15px;
+      font-size: 17px;
     }
   }
   @media (max-width: 480px) {
     html {
-      font-size: 14px;
+      font-size: 16px;
     }
   }
 
   body {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    /* Switched to a Serif stack to match the image typography */
+    font-family: Georgia, Cambria, "Times New Roman", Times, serif;
+    line-height: 1.6;
     overscroll-behavior-y: none;
     @apply bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
     margin: 0;
@@ -107,9 +109,10 @@
    4. Message Bubbles & Chat Area
    ========================================================================== */
 .message-row { @apply w-full; }
-.message-content-container { @apply max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-start space-x-4; }
+/* Increased max-width to utilize more screen real estate on large monitors */
+.message-content-container { @apply max-w-7xl xl:max-w-[90%] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-start space-x-4; }
 
-.user-bubble { @apply self-end rounded-br-md bg-blue-50 text-blue-900 dark:bg-blue-800 dark:text-blue-100; }
+.user-bubble { @apply self-end rounded-br-md bg-blue-50 text-blue-900 dark:bg-blue-800 dark:text-blue-100; width: 100%; }
 .ai-bubble { @apply self-start rounded-bl-md bg-white text-gray-800 border border-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600; }
 .system-bubble { @apply self-center italic text-sm text-center max-w-full md:max-w-[80%] rounded-lg px-4 py-2 bg-yellow-50 text-yellow-800 border border-yellow-200 dark:bg-yellow-900/50 dark:text-yellow-200 dark:border-yellow-700/50 shadow-none; }
 
@@ -323,7 +326,7 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .menu-item-button.selected { @apply bg-blue-100 dark:bg-blue-900/50 font-semibold; }
 
 /* Code mirror */
-.message-prose { @apply prose prose-base dark:prose-invert max-w-none break-words; }
+.message-prose { @apply prose prose-base dark:prose-invert max-w-none break-words; font-family: Georgia, serif; }
 .think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
 details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
 .think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
@@ -365,4 +368,265 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .is-authenticating * {
     transition: none !important;
     animation-duration: 0.1s !important;
+}
+
+/* Message renderer stuff */
+/* Force artefact content to be contained within this component */
+.document-content :deep(*) {
+    /* Reset common aggressive resets from user content */
+    all: revert; 
+    /* But keep structural layout */
+    display: block;
+}
+/* Re-enable prose styling inside the scope */
+.document-content :deep(.prose) {
+    all: unset;
+}
+.message-prose {
+    @apply prose prose-base dark:prose-invert max-w-none break-words;
+    font-family: Georgia, Cambria, "Times New Roman", Times, serif;
+    font-size: var(--message-font-size, 1.05rem);
+    line-height: 1.65;
+}
+.btn-icon-sm { @apply p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center; }
+.think-block { @apply bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/30 rounded-xl overflow-hidden transition-all duration-300 shadow-sm; }
+details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30 bg-blue-100/30 dark:bg-blue-900/20; }
+.think-summary { @apply flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-blue-700 dark:text-blue-300 cursor-pointer list-none select-none hover:bg-blue-100/50 dark:hover:bg-blue-900/30; font-family: system-ui, sans-serif; }
+
+.think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
+.think-summary::-webkit-details-marker { display: none; }
+.think-content { @apply p-3; }
+.document-block { @apply bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/50 rounded-lg; }
+.document-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
+.document-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
+.document-summary::-webkit-details-marker { display: none; }
+details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
+.document-content { @apply p-3; }
+
+/* Shared structure for status/action blocks */
+.skill-block, .note-block-collapsible, .document-block { @apply rounded-xl overflow-hidden shadow-sm transition-all duration-300 border mb-4; }
+.skill-summary, .note-summary, .document-summary { @apply flex items-center gap-3 px-4 py-3 text-sm font-bold tracking-tight uppercase cursor-pointer list-none select-none transition-colors; font-family: system-ui, sans-serif; }
+.skill-summary::-webkit-details-marker, .note-summary::-webkit-details-marker, .document-summary::-webkit-details-marker { display: none; }
+
+/* Skill/Tool specific colors */
+.skill-block { @apply bg-teal-50/30 dark:bg-teal-900/10 border-teal-200 dark:border-teal-800/40; }
+.skill-summary { @apply text-teal-800 dark:text-teal-300 hover:bg-teal-100/50 dark:hover:bg-teal-900/30; }
+details[open].skill-block > .skill-summary { @apply border-b border-teal-200 dark:border-teal-800/40 bg-teal-100/20; }
+
+/* Note/Amber specific colors */
+.note-block-collapsible { @apply bg-amber-50/30 dark:bg-amber-900/10 border-amber-200 dark:border-amber-800/40; }
+.note-summary { @apply text-amber-800 dark:text-amber-300 hover:bg-amber-100/50 dark:hover:bg-amber-900/30; }
+details[open].note-block-collapsible > .note-summary { @apply border-b border-amber-200 dark:border-amber-800/40 bg-amber-100/20; }
+
+/* Document/Gray specific colors */
+.document-block { @apply bg-gray-50/50 dark:bg-gray-900/30 border-gray-200 dark:border-gray-700/50; }
+.document-summary { @apply text-gray-800 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800; }
+details[open].document-block > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50 bg-gray-100/40; }
+
+.timeline-details summary::-webkit-details-marker { display: none; }
+.timeline-details[open] { @apply shadow-xl ring-2 ring-blue-500/5 bg-white dark:bg-gray-900/40 border-blue-500/20; }
+.timeline-details summary:focus { @apply outline-none; }
+
+/* Mermaid wrapper — starts at a sensible default, auto-sized by onMermaidReady */
+.mermaid-wrapper {
+  height: 500px;
+  transition: height 0.2s ease;
+}
+
+/* Note block */
+.note-block {
+  position: relative;
+}
+
+.note-block summary::-webkit-details-marker {
+  display: none;
+}
+
+.note-block[open] .summary-arrow {
+  transform: rotate(90deg);
+}
+.note-content :deep(p) { @apply my-2 leading-relaxed; font-family: Georgia, serif; }
+.note-content :deep(h1),
+.note-content :deep(h2),
+.note-content :deep(h3) { @apply font-bold text-gray-900 dark:text-gray-100 mt-4 mb-2; font-family: system-ui, sans-serif; }
+.note-content :deep(ul),
+.note-content :deep(ol) { @apply my-1.5 pl-5; }
+.note-content :deep(li) { @apply my-0.5; }
+.note-content :deep(code) { @apply bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 px-1 py-0.5 rounded text-xs; }
+.note-content :deep(pre) { @apply bg-amber-100/60 dark:bg-amber-900/30 rounded-lg p-3 my-2 overflow-auto; }
+.note-content :deep(blockquote) { @apply border-l-2 border-amber-400 pl-3 italic text-gray-600 dark:text-gray-400 my-2; }
+.note-content :deep(hr) { @apply border-amber-200 dark:border-amber-800 my-3; }
+.note-content :deep(table) { @apply w-full text-sm my-2; }
+.note-content :deep(th) { @apply bg-amber-100 dark:bg-amber-900/40 font-semibold px-2 py-1 text-left; }
+.note-content :deep(td) { @apply border-t border-amber-100 dark:border-amber-900/30 px-2 py-1; }
+
+/* Processing Block & Job Cards */
+.processing-block-wrapper {
+    @apply w-full my-4;
+}
+
+.processing-card {
+    @apply relative bg-white dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300;
+}
+
+.processing-content {
+    @apply p-5 flex flex-col gap-3;
+}
+
+.processing-header {
+    @apply flex items-center justify-between gap-4;
+}
+
+.processing-status-group {
+    @apply flex items-center gap-3 min-w-0;
+}
+
+.processing-label {
+    @apply text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 dark:text-gray-500 font-sans;
+}
+
+.processing-title {
+    @apply text-lg font-bold text-gray-900 dark:text-gray-100 truncate;
+    font-family: Georgia, serif; /* High-end serif title as requested */
+}
+
+.processing-meta-right {
+    @apply flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500 font-sans;
+}
+
+.processing-footer {
+    @apply flex items-center justify-between px-5 pb-4 mt-1;
+}
+
+.steps-logged {
+    @apply flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400;
+}
+
+/* Progress Bar at the bottom of the card */
+.processing-progress-container {
+    @apply h-1.5 w-full bg-gray-100 dark:bg-gray-700/50 relative overflow-hidden;
+}
+
+.processing-progress-fill {
+    @apply h-full bg-gray-500 dark:bg-gray-400 transition-all duration-500 ease-out relative;
+}
+
+/* Animations */
+@keyframes shimmer {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
+}
+.animate-shimmer { animation: shimmer 2.5s ease-in-out infinite; }
+
+@keyframes marquee-shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(400%); }
+}
+.processing-progress-fill::after {
+    content: '';
+    @apply absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent;
+    animation: marquee-shimmer 2s infinite;
+}
+
+/* Code Block - Enhanced Aesthetic */
+.code-block-container { 
+    @apply rounded-xl overflow-hidden shadow-sm border my-5 transition-all duration-300;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace; 
+}
+.code-block-header { 
+    @apply flex justify-between items-center px-4 py-2.5 text-[10px] font-black uppercase tracking-[0.15em] w-full cursor-pointer;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+.code-language { @apply opacity-70; }
+.code-action-btn { 
+    @apply flex items-center gap-2 rounded-lg px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-all duration-200; 
+}
+.code-action-btn:disabled { cursor: not-allowed; opacity: 0.6; }
+.install-input { background-color: transparent; border: none; outline: none; font-size: 0.8rem; padding: 2px 4px; border-bottom: 1px solid; }
+.install-cancel-btn { padding: 0 8px; font-size: 1.2rem; line-height: 1; }
+.uploaded-files-list { padding: 8px 12px; border-top: 1px solid; display: flex; flex-wrap: wrap; gap: 8px; font-size: 0.75rem; }
+.uploaded-file-item { display: flex; align-items: center; padding: 2px 6px; border-radius: 4px; gap: 6px; }
+.file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 150px; }
+.remove-file-btn { font-size: 1rem; line-height: 1; border-radius: 50%; width: 16px; height: 16px; display: flex; align-items: center; justify-content: center; }
+.remove-file-btn:hover { background-color: rgba(0,0,0,0.1); }
+.code-block-scrollable { 
+    @apply m-0 p-5 max-h-[500px] overflow-auto leading-relaxed; 
+    font-size: 0.85rem;
+}
+.code-block-scrollable > .hljs { background-color: transparent !important; padding: 0 !important; }
+.code-execution-output { @apply p-4 text-[0.8rem] font-mono border-t transition-colors; }
+.code-execution-output pre { @apply m-0 whitespace-pre-wrap break-words leading-relaxed; }
+.output-header { @apply font-black text-[9px] uppercase tracking-[0.2em] mb-2 opacity-50; }
+.output-section:not(:first-child) { margin-top: 1rem; }
+.file-list { list-style: none; padding: 0; margin: 0; }
+.file-link { display: flex; align-items: center; text-decoration: none; padding: 4px 0; border-radius: 4px; }
+.theme-dark { @apply bg-gray-900 border-gray-800 text-gray-300; }
+.theme-dark .code-block-header { @apply bg-gray-950/50 border-b border-gray-800; }
+.theme-dark .code-language { @apply text-gray-400; }
+.theme-dark .code-action-btn { @apply bg-gray-800 text-gray-300 border border-gray-700/50; }
+.theme-dark .code-action-btn:hover:not(:disabled) { @apply bg-gray-700 text-white border-gray-600; }
+.theme-dark .install-input { color: #d4d4d4; border-bottom-color: #606060; }
+.theme-dark .install-input:focus { border-bottom-color: #a2c1ff; }
+.theme-dark .install-confirm-btn { background-color: #2c622f; border-color: #4CAF50; }
+.theme-dark .uploaded-files-list { border-top-color: #333; }
+.theme-dark .uploaded-file-item { background-color: #3e3e42; }
+.theme-dark .remove-file-btn { color: #f0f0f0; }
+.theme-dark .remove-file-btn:hover { background-color: #5a5a5e; }
+.theme-dark .code-block-scrollable { scrollbar-color: #555 #252526; }
+.theme-dark .code-execution-output { background-color: #252526; border-top: 1px solid #333; }
+.theme-dark .code-execution-output.is-error { background-color: #4a1d1d; border-top-color: #842e2e; color: #f8d7da; }
+.theme-dark .code-execution-output.is-error pre { color: #f8d7da; }
+.theme-dark .code-execution-output pre { color: #d4d4d4; }
+.theme-dark .output-header { color: #888; }
+.theme-dark .file-link { color: #a2c1ff; }
+.theme-dark .file-link:hover { background-color: #3e3e42; }
+.theme-light { @apply bg-white border-gray-200 text-gray-800; }
+.theme-light .code-block-header { @apply bg-gray-50/80 border-b border-gray-200; }
+.theme-light .code-language { @apply text-gray-500; }
+.theme-light .code-action-btn { @apply bg-gray-100 text-gray-700 border border-gray-200; }
+.theme-light .code-action-btn:hover:not(:disabled) { @apply bg-gray-200 text-gray-900; }
+.theme-light .install-input { color: #212121; border-bottom-color: #bdbdbd; }
+.theme-light .install-input:focus { border-bottom-color: #0059b3; }
+.theme-light .install-confirm-btn { background-color: #e8f5e9; border-color: #a5d6a7; }
+.theme-light .uploaded-files-list { border-top-color: #e0e0e0; }
+.theme-light .uploaded-file-item { background-color: #e0e0e0; }
+.theme-light .remove-file-btn { color: #212121; }
+.theme-light .remove-file-btn:hover { background-color: #bdbdbd; }
+.theme-light .code-block-scrollable { scrollbar-color: #bdbdbd #f5f5f5; }
+.theme-light .code-execution-output { background-color: #f5f5f5; border-top: 1px solid #e0e0e0; }
+.theme-light .code-execution-output.is-error { background-color: #fff1f0; border-top-color: #ffccc7; color: #a8071a; }
+.theme-light .code-execution-output.is-error pre { color: #a8071a; }
+.theme-light .code-execution-output pre { color: #212121; }
+.theme-light .output-header { color: #757575; }
+.theme-light .file-link { color: #0059b3; }
+.theme-light .file-link:hover { background-color: #e0e0e0; }
+
+/* Code Mirror & Editor Controls */
+.editor-content-host > .cm-editor {
+    @apply h-full p-3 bg-transparent;
+    font-family: 'Fira Code', 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+}
+
+/* Consolidated & Enhanced Mode Buttons */
+.mode-switch-container {
+    @apply flex items-center p-1 bg-gray-100/50 dark:bg-gray-800/50 rounded-xl border border-gray-200/50 dark:border-gray-700/50;
+}
+
+.mode-button {
+    @apply px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.12em] rounded-lg transition-all duration-200 flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20;
+    font-family: system-ui, -apple-system, sans-serif;
+}
+
+.mode-button.active {
+    @apply bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5;
+}
+
+.mode-button.inactive {
+    @apply bg-transparent text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-200/50 dark:hover:bg-gray-700/30;
+}
+
+/* UI Icons inside editor buttons */
+.mode-button svg {
+    @apply w-3.5 h-3.5 opacity-70;
 }

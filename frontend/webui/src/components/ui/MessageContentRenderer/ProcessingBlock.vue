@@ -349,38 +349,3 @@ const stepCounter = computed(() => {
         </div>
     </div>
 </template>
-
-<style scoped>
-.processing-block-wrapper {
-    max-width: 100%;
-}
-
-@keyframes shimmer {
-    0% {
-        opacity: 0.4;
-    }
-    50% {
-        opacity: 1;
-    }
-    100% {
-        opacity: 0.4;
-    }
-}
-
-.animate-shimmer {
-    animation: shimmer 2s ease-in-out infinite;
-}
-
-@keyframes marquee {
-    0% {
-        transform: translateX(-100%);
-    }
-    100% {
-        transform: translateX(300%);
-    }
-}
-
-.animate-marquee {
-    animation: marquee 1.5s linear infinite;
-}
-</style>
