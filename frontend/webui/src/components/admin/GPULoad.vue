@@ -69,7 +69,7 @@ const formatPercent = (pct) => pct ? `${pct.toFixed(1)}%` : '0%';
                             </div>
                         </div>
                         
-                        <div class="flex-grow grid grid-cols-1 sm:grid-cols-2 gap-6">
+                        <div class="grow grid grid-cols-1 sm:grid-cols-2 gap-6">
                             <!-- Compute Load -->
                             <div>
                                 <div class="flex justify-between text-xs mb-1 font-medium text-gray-600 dark:text-gray-300">

@@ -62,9 +62,9 @@
             </div>
         </div>
 
-        <div class="flex-grow flex min-h-0 relative overflow-hidden">
+        <div class="grow flex min-h-0 relative overflow-hidden">
             <!-- Central Viewport -->
-            <main ref="containerRef" class="flex-grow bg-gray-200 dark:bg-black relative overflow-hidden flex items-center justify-center cursor-crosshair pattern-grid" 
+            <main ref="containerRef" class="grow bg-gray-200 dark:bg-black relative overflow-hidden flex items-center justify-center cursor-crosshair pattern-grid" 
                 @wheel="handleWheel" 
                 @mousedown="startAction" 
                 @mousemove="handleMove" 
@@ -119,7 +119,7 @@
                     <h3 class="font-black text-[10px] uppercase tracking-widest text-gray-500">Workspace Management</h3>
                 </div>
                 
-                <div class="flex-grow overflow-y-auto custom-scrollbar">
+                <div class="grow overflow-y-auto custom-scrollbar">
                     
                     <!-- LAYER MANAGER -->
                     <div class="p-4 border-b dark:border-gray-800 space-y-3">
@@ -131,7 +131,7 @@
                         <div class="space-y-1">
                              <div @click="activeLayerId = 'mask'" class="layer-item group" :class="{'active': activeLayerId === 'mask'}">
                                 <IconPhoto class="w-3.5 h-3.5 opacity-50"/>
-                                <span class="text-xs font-bold truncate flex-grow">Selection Mask (AI Only)</span>
+                                <span class="text-xs font-bold truncate grow">Selection Mask (AI Only)</span>
                             </div>
 
                             <div v-for="layer in sortedLayers" :key="layer.id" @click="activeLayerId = layer.id" class="layer-item group" :class="{'active': activeLayerId === layer.id}">
@@ -139,7 +139,7 @@
                                     <IconEye v-if="layer.visible" class="w-3.5 h-3.5 text-blue-500"/>
                                     <IconEyeOff v-else class="w-3.5 h-3.5 text-gray-500"/>
                                 </button>
-                                <span class="text-xs truncate flex-grow" :class="layer.id === 'base' ? 'font-black' : ''">{{ layer.name }}</span>
+                                <span class="text-xs truncate grow" :class="layer.id === 'base' ? 'font-black' : ''">{{ layer.name }}</span>
                                 <button v-if="layer.id !== 'base'" @click.stop="deleteLayer(layer.id)" class="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:text-red-500"><IconTrash class="w-3.5 h-3.5"/></button>
                             </div>
                         </div>
@@ -500,6 +500,8 @@ function handleKeydown(e) {
 </script>
 
 <style scoped>
+@reference "tailwindcss";
+
 .pattern-grid { background-image: linear-gradient(45deg, #e5e7eb 25%, transparent 25%), linear-gradient(-45deg, #e5e7eb 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #e5e7eb 75%), linear-gradient(-45deg, transparent 75%, #e5e7eb 75%); background-size: 20px 20px; background-position: 0 0, 0 10px, 10px -10px, -10px 0px; }
 .dark .pattern-grid { background-image: linear-gradient(45deg, #1f2937 25%, transparent 25%), linear-gradient(-45deg, #1f2937 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1f2937 75%), linear-gradient(-45deg, transparent 75%, #1f2937 75%); }
 .layer-canvas { image-rendering: pixelated; }

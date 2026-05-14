@@ -1,7 +1,7 @@
 <template>
     <div class="h-full flex flex-col bg-gray-50 dark:bg-gray-900 overflow-hidden relative">
         <!-- Header -->
-        <div class="h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-20 shadow-sm flex-shrink-0">
+        <div class="h-14 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between px-4 z-20 shadow-sm shrink-0">
             <div class="flex items-center gap-4">
                 <router-link to="/image-studio" class="btn-icon" title="Back to Image Studio">
                     <IconArrowLeft class="w-5 h-5" />
@@ -22,9 +22,9 @@
         </div>
 
         <!-- Main Content -->
-        <div class="flex-grow flex min-h-0 overflow-hidden">
+        <div class="grow flex min-h-0 overflow-hidden">
             <!-- Storyboard / Keyframes List -->
-            <div class="w-96 flex-shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden">
+            <div class="w-96 shrink-0 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col overflow-hidden">
                 <div class="p-3 border-b dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex justify-between items-center">
                     <h3 class="font-semibold text-sm">Storyboard</h3>
                     <button @click="addKeyframe" class="btn btn-secondary btn-sm text-xs gap-1">
@@ -32,7 +32,7 @@
                     </button>
                 </div>
                 
-                <div class="flex-grow overflow-y-auto p-3 space-y-3 custom-scrollbar">
+                <div class="grow overflow-y-auto p-3 space-y-3 custom-scrollbar">
                     <div v-for="(frame, index) in keyframes" :key="index" class="p-3 bg-gray-100 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600 relative group transition-all hover:shadow-md">
                         <div class="flex justify-between items-start mb-2">
                             <span class="text-xs font-bold text-gray-500 bg-gray-200 dark:bg-gray-600 px-1.5 rounded">Frame {{ index + 1 }}</span>
@@ -62,7 +62,7 @@
             </div>
 
             <!-- Preview & Settings Area -->
-            <div class="flex-grow flex flex-col min-w-0 bg-gray-100 dark:bg-gray-900 overflow-y-auto p-6">
+            <div class="grow flex flex-col min-w-0 bg-gray-100 dark:bg-gray-900 overflow-y-auto p-6">
                 
                 <div class="max-w-4xl mx-auto w-full space-y-6">
                     <!-- Global Settings -->

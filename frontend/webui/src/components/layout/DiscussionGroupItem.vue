@@ -130,14 +130,14 @@ async function handleDrop(event) {
         'bg-blue-50 dark:bg-blue-900/20': isGroupSelected
       }"
       >
-      <button @click="toggleGroup" class="flex items-center space-x-2 flex-grow min-w-0 h-full text-left">
-        <IconFolder class="w-4 h-4 flex-shrink-0 text-slate-500 dark:text-gray-400" :class="{'text-blue-500 dark:text-blue-400': isGroupSelected}" />
+      <button @click="toggleGroup" class="flex items-center space-x-2 grow min-w-0 h-full text-left">
+        <IconFolder class="w-4 h-4 shrink-0 text-slate-500 dark:text-gray-400" :class="{'text-blue-500 dark:text-blue-400': isGroupSelected}" />
         <span class="font-medium text-slate-700 dark:text-gray-300 truncate" :class="{'text-blue-700 dark:text-blue-300': isGroupSelected}">{{ group.name }}</span>
         <div class="px-1.5 py-0.5 bg-slate-200 dark:bg-gray-700 text-slate-600 dark:text-gray-400 rounded text-xs font-medium">
           {{ group.discussions.length }}
         </div>
       </button>
-      <div class="flex items-center flex-shrink-0">
+      <div class="flex items-center shrink-0">
         <div @click.stop class="opacity-0 group-hover:opacity-100 transition-opacity">
           <DropdownMenu icon="menu" buttonClass="btn-icon-flat p-1" title="Group actions">
             <button @click="handleNewSubgroup" class="menu-item"><IconFolder class="h-4 w-4" /><span>New Subgroup</span></button>

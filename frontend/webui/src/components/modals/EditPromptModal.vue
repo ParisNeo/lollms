@@ -75,7 +75,7 @@ async function handleSavePrompt() {
             <form v-if="formState" @submit.prevent="handleSavePrompt" class="space-y-4">
                 <div class="flex items-start gap-4">
                     <IconUploader v-model="formState.icon" default-icon-component="IconTicket" />
-                    <div class="flex-grow space-y-4">
+                    <div class="grow space-y-4">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div>
                                 <label for="prompt-name" class="block text-sm font-medium">Name <span class="text-red-500">*</span></label>

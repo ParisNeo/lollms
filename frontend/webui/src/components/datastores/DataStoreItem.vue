@@ -28,10 +28,10 @@ function onLeave(e) { e.stopPropagation(); emit('leave', props.store); }
         class="group flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer relative"
         :class="isSelected ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'"
     >
-        <div class="flex items-center min-w-0 flex-grow">
+        <div class="flex items-center min-w-0 grow">
             <span class="truncate">{{ store.name }}</span>
-            <span v-if="isOwner" class="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 flex-shrink-0">Owner</span>
-            <span v-else class="ml-2 text-xs px-2 py-0.5 rounded-full flex-shrink-0" :class="{ 
+            <span v-if="isOwner" class="ml-2 text-xs px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 shrink-0">Owner</span>
+            <span v-else class="ml-2 text-xs px-2 py-0.5 rounded-full shrink-0" :class="{ 
                 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': store.permission_level === 'revectorize', 
                 'bg-purple-100 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300': store.permission_level === 'read_write', 
                 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300': store.permission_level === 'read_query' 

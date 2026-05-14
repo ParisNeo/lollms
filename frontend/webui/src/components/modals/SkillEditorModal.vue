@@ -135,7 +135,7 @@ async function exportFormat(format) {
                         <input type="text" v-model="description" class="input-field w-full" placeholder="Brief description of what this skill does">
                     </div>
                 </div>
-                <div class="flex-grow min-h-0 border rounded-md overflow-hidden dark:border-gray-700">
+                <div class="grow min-h-0 border rounded-md overflow-hidden dark:border-gray-700">
                      <CodeMirrorEditor 
                         v-model="content" 
                         class="h-full" 

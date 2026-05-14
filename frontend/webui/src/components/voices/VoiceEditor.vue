@@ -76,7 +76,7 @@
         <AudioEditor :audio-url="referenceAudioUrl" @trimmed="handleTrim" />
         
         <div class="flex items-center gap-3">
-            <div class="flex-grow"></div>
+            <div class="grow"></div>
             <button v-if="isPreviewingSynth" @click="handleSetAsReference" class="btn btn-warning btn-sm" :disabled="isSaving" title="Set the current audio as the new reference for this voice">
                  <IconCheckCircle class="w-4 h-4 mr-1" /> Set as Reference
             </button>

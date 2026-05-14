@@ -57,7 +57,7 @@ async function runFlow() {
 
     <!-- Main Content -->
     <div class="h-full flex flex-col relative bg-gray-50 dark:bg-gray-900">
-        <div class="h-12 border-b dark:border-gray-700 flex items-center px-4 gap-2 bg-white dark:bg-gray-800 flex-shrink-0 justify-between">
+        <div class="h-12 border-b dark:border-gray-700 flex items-center px-4 gap-2 bg-white dark:bg-gray-800 shrink-0 justify-between">
             <div class="flex items-center gap-2">
                 <button @click="saveCurrentFlow" class="btn btn-secondary btn-sm gap-2" :disabled="!flowStore.currentFlow"><IconSave class="w-4 h-4" /> Save</button>
                 <button @click="runFlow" class="btn btn-primary btn-sm gap-2" :disabled="!flowStore.currentFlow"><IconPlayCircle class="w-4 h-4" /> Run Flow</button>
@@ -68,7 +68,7 @@ async function runFlow() {
             </div>
         </div>
         
-        <div class="flex-grow relative bg-gray-100 dark:bg-gray-900 overflow-hidden">
+        <div class="grow relative bg-gray-100 dark:bg-gray-900 overflow-hidden">
             <Suspense>
                 <template #default>
                     <FlowEditor ref="editorRef" v-if="flowStore.currentFlow" :flow="flowStore.currentFlow" />

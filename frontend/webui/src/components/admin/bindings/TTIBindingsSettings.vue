@@ -303,8 +303,8 @@ async function executeCommand(cmd, bindingId, params) {
                                 </div>
                             </div>
                             <div v-else-if="param.type === 'bool'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                                <span class="flex-grow flex flex-col pr-4"><span class="text-sm text-gray-500 dark:text-gray-400">{{ param.description }}</span></span>
-                                <button @click="form.config[param.name] = !form.config[param.name]" type="button" :class="[form.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span class="grow flex flex-col pr-4"><span class="text-sm text-gray-500 dark:text-gray-400">{{ param.description }}</span></span>
+                                <button @click="form.config[param.name] = !form.config[param.name]" type="button" :class="[form.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.config[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
@@ -313,8 +313,8 @@ async function executeCommand(cmd, bindingId, params) {
                     </div>
 
                     <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                        <span class="flex-grow flex flex-col"><span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span><span class="text-sm text-gray-500 dark:text-gray-400">If disabled, this TTI service will not be available.</span></span>
-                        <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                        <span class="grow flex flex-col"><span class="text-sm font-medium text-gray-900 dark:text-gray-100">Active</span><span class="text-sm text-gray-500 dark:text-gray-400">If disabled, this TTI service will not be available.</span></span>
+                        <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                             <span :class="[form.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                         </button>
                     </div>
@@ -359,7 +359,7 @@ async function executeCommand(cmd, bindingId, params) {
                                 <label class="block text-xs font-medium uppercase text-gray-500 dark:text-gray-400 mb-1">{{ p.name }}</label>
                                 <input v-if="p.type !== 'bool'" type="text" v-model="commandParams[cmd.name][p.name]" class="input-field text-sm" :placeholder="p.default">
                                 <div v-else class="flex items-center gap-2">
-                                     <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                     <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                         <span :class="[commandParams[cmd.name][p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                     </button>
                                     <span class="text-sm text-gray-600 dark:text-gray-400">{{ p.description }}</span>
@@ -440,12 +440,12 @@ async function executeCommand(cmd, bindingId, params) {
             <div v-else class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 <div v-for="binding in ttiBindings" :key="binding.id" @click="showEditForm(binding)" class="bg-white dark:bg-gray-800 p-5 rounded-lg shadow-md hover:shadow-lg transition-shadow cursor-pointer flex flex-col gap-4 border border-transparent hover:border-blue-500 group relative">
                     <div class="absolute top-4 right-4 z-10" @click.stop>
-                         <button @click="toggleBindingActive(binding)" type="button" :class="[binding.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']" :title="binding.is_active ? 'Deactivate' : 'Activate'">
+                         <button @click="toggleBindingActive(binding)" type="button" :class="[binding.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']" :title="binding.is_active ? 'Deactivate' : 'Activate'">
                             <span :class="[binding.is_active ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
                     
-                    <div class="flex-grow">
+                    <div class="grow">
                          <div class="flex items-center gap-3 mb-2">
                              <IconPhoto class="w-8 h-8 text-blue-500" />
                              <div>

@@ -9,7 +9,7 @@
              :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px', transform: 'translate(-50%, -100%)', marginTop: '-15px' }">
             
             <div class="flex items-center gap-2 border-b border-gray-100 dark:border-gray-700 pb-2">
-                 <span class="w-3 h-3 rounded-full flex-shrink-0 shadow-sm" :style="{ backgroundColor: tooltip.color }"></span>
+                 <span class="w-3 h-3 rounded-full shrink-0 shadow-sm" :style="{ backgroundColor: tooltip.color }"></span>
                  <span class="font-bold text-sm text-gray-800 dark:text-gray-100 break-words leading-tight">{{ tooltip.node.label }}</span>
             </div>
             

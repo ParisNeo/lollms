@@ -242,7 +242,7 @@ watch(searchQuery, (newVal) => {
         </div>
 
         <!-- Topic List -->
-        <div class="flex-grow overflow-y-auto px-1 custom-scrollbar">
+        <div class="grow overflow-y-auto px-1 custom-scrollbar">
             <div v-if="isLoadingIndex" class="space-y-4 p-4 animate-pulse">
                 <div class="h-4 bg-gray-200 dark:bg-gray-700 rounded w-1/2"></div>
                 <div class="h-12 bg-gray-100 dark:bg-gray-800 rounded-xl"></div>
@@ -307,6 +307,8 @@ watch(searchQuery, (newVal) => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .animate-fade-in {
     animation: fadeIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }

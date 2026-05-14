@@ -81,12 +81,12 @@ async function saveSettings() {
       </div>
       <div v-else class="space-y-6">
         <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-            <span class="flex-grow flex flex-col pr-4">
+            <span class="grow flex flex-col pr-4">
                 <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable SCIM</span>
                 <span class="text-xs text-gray-500 dark:text-gray-400">Allow an external IdP to manage users and groups in lollms.</span>
             </span>
             <button @click="settings.scim_enabled = !settings.scim_enabled" type="button" 
-                    :class="[parseAsBoolean(settings.scim_enabled) ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                    :class="[parseAsBoolean(settings.scim_enabled) ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                 <span :class="[parseAsBoolean(settings.scim_enabled) ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
             </button>
         </div>
@@ -95,7 +95,7 @@ async function saveSettings() {
             <div>
                 <label class="block text-sm font-medium">SCIM Tenant URL</label>
                 <div class="mt-1 flex rounded-md shadow-sm">
-                    <input type="text" :value="scimBaseUrl" readonly class="input-field rounded-r-none flex-grow">
+                    <input type="text" :value="scimBaseUrl" readonly class="input-field rounded-r-none grow">
                     <button @click.prevent="uiStore.copyToClipboard(scimBaseUrl)" type="button" class="relative -ml-px inline-flex items-center space-x-2 rounded-r-md border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600">
                         <IconCopy class="h-5 w-5" />
                         <span>Copy</span>
@@ -105,7 +105,7 @@ async function saveSettings() {
             <div>
                 <label class="block text-sm font-medium">SCIM Secret Token</label>
                 <div class="mt-1 flex rounded-md shadow-sm">
-                    <input type="password" :value="settings.scim_token || 'A token will be generated on save'" readonly class="input-field rounded-r-none flex-grow">
+                    <input type="password" :value="settings.scim_token || 'A token will be generated on save'" readonly class="input-field rounded-r-none grow">
                      <button @click.prevent="uiStore.copyToClipboard(settings.scim_token)" type="button" class="relative -ml-px inline-flex items-center space-x-2 rounded-r-md border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600" :disabled="!settings.scim_token">
                         <IconCopy class="h-5 w-5" />
                         <span>Copy</span>

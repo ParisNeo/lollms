@@ -989,7 +989,7 @@ function onMermaidReady({ svg }, partIndex) {
               <details v-else-if="token.type === 'document'" class="document-block my-4 group/block">
                   <summary class="document-summary flex items-center justify-between pr-2">
                       <div class="flex items-center gap-2 overflow-hidden">
-                        <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 flex-shrink-0" />
+                        <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
                         <span class="font-mono truncate">{{ token.title }}</span>
                       </div>
                       <button @click.stop="discussionsStore.removeContextItem(token.title, 'document')" class="opacity-0 group-hover/block:opacity-100 p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity" title="Remove from context">
@@ -1026,7 +1026,7 @@ function onMermaidReady({ svg }, partIndex) {
 
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
             <summary class="think-summary">
-              <IconThinking class="h-5 w-5 flex-shrink-0" />
+              <IconThinking class="h-5 w-5 shrink-0" />
               <span>Thinking...</span>
             </summary>
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
@@ -1120,7 +1120,7 @@ function onMermaidReady({ svg }, partIndex) {
               <div class="flex items-center gap-2.5">
                 <IconChevronRight class="w-3 h-3 text-amber-500 transition-transform duration-200 summary-arrow" />
                 <!-- Notepad icon -->
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
                 <div class="flex flex-col leading-tight">
@@ -1161,7 +1161,7 @@ function onMermaidReady({ svg }, partIndex) {
             <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800/60 cursor-pointer list-none select-none">
               <div class="flex items-center gap-2.5">
                 <IconChevronRight class="w-3 h-3 text-teal-500 transition-transform duration-200 summary-arrow" />
-                <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 flex-shrink-0" />
+                <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                 <div class="flex flex-col leading-tight">
                   <span class="text-[9px] font-black uppercase tracking-widest text-teal-500 dark:text-teal-400">AI Skill Proposal</span>
                   <span class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ part.title }}</span>
@@ -1362,7 +1362,7 @@ function onMermaidReady({ svg }, partIndex) {
         <!-- ── [NEW] Live Active Event Indicator ──────────────────────── -->
         <div v-if="isStreaming && $attrs.message?.lastEvent" class="mt-4 animate-in fade-in slide-in-from-bottom-1">
              <div class="flex items-center gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100/50 dark:border-blue-800/30">
-                  <div class="relative flex-shrink-0">
+                  <div class="relative shrink-0">
                       <IconAnimateSpin class="w-5 h-5 text-blue-500 animate-spin" />
                       <div class="absolute inset-0 flex items-center justify-center">
                           <component :is="getEventIcon($attrs.message.lastEvent.type)" class="w-2.5 h-2.5 text-blue-600" />
@@ -1400,12 +1400,12 @@ function onMermaidReady({ svg }, partIndex) {
                 
                 <div class="flex items-start justify-between gap-3 relative z-10">
                     <div class="flex items-center gap-2.5 min-w-0">
-                        <span class="flex-shrink-0 w-6 h-6 flex items-center justify-center bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-black font-mono">
+                        <span class="shrink-0 w-6 h-6 flex items-center justify-center bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-black font-mono">
                             {{ source.index || sIdx + 1 }}
                         </span>
                         <span class="font-bold text-sm truncate text-gray-800 dark:text-gray-100 group-hover/src:text-blue-600 transition-colors">{{ source.title || 'Untitled Source' }}</span>
                     </div>
-                    <div v-if="source.relevance_score" class="flex-shrink-0 text-[10px] font-mono font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800/50">
+                    <div v-if="source.relevance_score" class="shrink-0 text-[10px] font-mono font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800/50">
                         {{ Math.round(source.relevance_score > 1 ? source.relevance_score : source.relevance_score * 100) }}%
                     </div>
                 </div>
@@ -1429,6 +1429,9 @@ function onMermaidReady({ svg }, partIndex) {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+@reference "@/assets/css/main.css";
+
 /* Force artefact content to be contained within this component */
 .document-content :deep(*) {
     /* Reset common aggressive resets from user content */

@@ -73,10 +73,10 @@ const formatPercent = (pct) => pct ? `${pct.toFixed(1)}%` : '0%';
                  :class="{'border-green-500': disk.is_app_disk, 'border-purple-500': disk.is_data_disk, 'border-gray-300 dark:border-gray-600': !disk.is_app_disk && !disk.is_data_disk}">
                 <div class="flex items-center justify-between mb-4">
                     <div class="flex items-center text-gray-700 dark:text-gray-200 min-w-0">
-                        <IconHardDrive class="w-6 h-6 mr-2 flex-shrink-0"/> 
+                        <IconHardDrive class="w-6 h-6 mr-2 shrink-0"/> 
                         <span class="font-semibold truncate" :title="disk.mount_point">{{ disk.mount_point }}</span>
                     </div>
-                    <div class="flex gap-1 flex-shrink-0 ml-2">
+                    <div class="flex gap-1 shrink-0 ml-2">
                         <span v-if="disk.is_app_disk" class="px-2 py-0.5 rounded bg-green-100 text-green-800 text-xs font-bold">APP</span>
                         <span v-if="disk.is_data_disk" class="px-2 py-0.5 rounded bg-purple-100 text-purple-800 text-xs font-bold">DATA</span>
                     </div>

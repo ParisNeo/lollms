@@ -148,11 +148,13 @@ const vOnClickOutside = {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .selector-button {
   @apply w-full flex items-center gap-x-2 text-left px-2.5 py-2 text-sm bg-gray-100 dark:bg-gray-900/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500;
 }
 .selector-icon {
-  @apply w-4 h-4 flex-shrink-0 text-gray-500 dark:text-gray-400;
+  @apply w-4 h-4 shrink-0 text-gray-500 dark:text-gray-400;
 }
 .menu-item {
   @apply px-3 py-1.5 text-sm text-gray-800 dark:text-gray-200 cursor-pointer hover:bg-blue-500 hover:text-white;

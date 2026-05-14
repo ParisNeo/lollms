@@ -126,7 +126,7 @@ function handleDrop(event) { event.preventDefault(); isDragging.value = false; a
                 <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg flex flex-col gap-3 border dark:border-gray-700">
                     <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">📄 Arxiv Papers</label>
                     <div class="flex gap-2">
-                        <input v-model="arxivQuery" @keyup.enter="handleArxivSearch" class="input-field flex-grow text-sm" placeholder="Search topic (e.g. 'transformer attention')..." />
+                        <input v-model="arxivQuery" @keyup.enter="handleArxivSearch" class="input-field grow text-sm" placeholder="Search topic (e.g. 'transformer attention')..." />
                         <button @click="handleArxivSearch" class="btn btn-primary px-3" :disabled="isSearchingArxiv">
                             <IconAnimateSpin v-if="isSearchingArxiv" class="w-4 h-4 animate-spin"/>
                             <IconMagnifyingGlass v-else class="w-4 h-4"/>
@@ -136,7 +136,7 @@ function handleDrop(event) { event.preventDefault(); isDragging.value = false; a
                     <div v-if="arxivResults.length > 0" class="max-h-60 overflow-y-auto custom-scrollbar space-y-2 border-t dark:border-gray-700 pt-2">
                         <div v-for="res in arxivResults" :key="res.entry_id" class="p-3 bg-white dark:bg-gray-700 rounded-lg text-xs shadow-sm border border-transparent hover:border-blue-300 transition-colors">
                             <div class="flex justify-between items-start gap-2">
-                                <div class="flex items-start gap-2 flex-grow">
+                                <div class="flex items-start gap-2 grow">
                                     <input type="checkbox" :checked="isArxivSelected(res.entry_id)" @change="handleArxivCheck(res)" class="mt-1 rounded text-blue-600 focus:ring-blue-500" />
                                     <div>
                                         <p class="font-bold text-gray-900 dark:text-white leading-tight">{{ res.title }}</p>
@@ -170,7 +170,7 @@ function handleDrop(event) { event.preventDefault(); isDragging.value = false; a
 
                 <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border dark:border-gray-700">
                     <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">🌐 Web Links</label>
-                    <div class="flex gap-2 my-2"><input v-model="newUrl" @keyup.enter="addUrl" class="input-field flex-grow text-sm" placeholder="https://..." /><button @click="addUrl" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                    <div class="flex gap-2 my-2"><input v-model="newUrl" @keyup.enter="addUrl" class="input-field grow text-sm" placeholder="https://..." /><button @click="addUrl" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                     <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in data.urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg border dark:border-gray-600"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                 </div>
 
@@ -184,19 +184,19 @@ function handleDrop(event) { event.preventDefault(); isDragging.value = false; a
             <div class="space-y-5">
                 <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border dark:border-gray-700">
                     <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">🔍 Google Search</label>
-                    <div class="flex gap-2 my-2"><input v-model="newGoogle" @keyup.enter="addGoogle" class="input-field flex-grow text-sm" placeholder="Query..." /><button @click="addGoogle" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                    <div class="flex gap-2 my-2"><input v-model="newGoogle" @keyup.enter="addGoogle" class="input-field grow text-sm" placeholder="Query..." /><button @click="addGoogle" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                     <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in data.google_search_queries" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg border dark:border-gray-600"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('google_search_queries', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                 </div>
 
                 <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border dark:border-gray-700">
                     <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">🎥 YouTube Videos</label>
-                    <div class="flex gap-2 my-2"><input v-model="newYoutube" @keyup.enter="addYoutube" class="input-field flex-grow text-sm" placeholder="URL..." /><button @click="addYoutube" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                    <div class="flex gap-2 my-2"><input v-model="newYoutube" @keyup.enter="addYoutube" class="input-field grow text-sm" placeholder="URL..." /><button @click="addYoutube" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                     <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in data.youtube_urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg border dark:border-gray-600"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('youtube_urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                 </div>
 
                 <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg border dark:border-gray-700">
                     <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">📚 Wikipedia</label>
-                    <div class="flex gap-2 my-2"><input v-model="newWiki" @keyup.enter="addWiki" class="input-field flex-grow text-sm" placeholder="Article Title..." /><button @click="addWiki" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                    <div class="flex gap-2 my-2"><input v-model="newWiki" @keyup.enter="addWiki" class="input-field grow text-sm" placeholder="Article Title..." /><button @click="addWiki" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                     <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in data.wikipedia_urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg border dark:border-gray-600"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('wikipedia_urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                 </div>
 
@@ -215,6 +215,8 @@ function handleDrop(event) { event.preventDefault(); isDragging.value = false; a
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 .toggle-checkbox:checked { @apply right-0 border-blue-600; }

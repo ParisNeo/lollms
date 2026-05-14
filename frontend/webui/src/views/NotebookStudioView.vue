@@ -63,14 +63,14 @@ watch(() => route.params.id, (newId) => {
 </script>
 
 <template>
-    <div class="flex-grow h-full w-full flex flex-col overflow-hidden bg-white dark:bg-gray-900 relative">
+    <div class="grow h-full w-full flex flex-col overflow-hidden bg-white dark:bg-gray-900 relative">
         <!-- Main Loading -->
         <div v-if="isLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white/80 dark:bg-gray-900/80 z-[100] backdrop-blur-sm">
             <IconAnimateSpin class="w-10 h-10 text-blue-500 animate-spin mb-4" />
             <p class="text-[10px] font-black uppercase tracking-widest text-gray-400">Syncing Production...</p>
         </div>
 
-        <div v-else-if="activeNotebook" class="flex-grow h-full w-full overflow-hidden">
+        <div v-else-if="activeNotebook" class="grow h-full w-full overflow-hidden">
             <component 
                 :is="currentViewComponent" 
                 :notebook="activeNotebook"
@@ -79,7 +79,7 @@ watch(() => route.params.id, (newId) => {
         </div>
         
         <!-- Empty State -->
-        <div v-else class="flex-grow h-full flex flex-col items-center justify-center text-center p-12">
+        <div v-else class="grow h-full flex flex-col items-center justify-center text-center p-12">
             <div class="max-w-md">
                 <div class="w-20 h-20 bg-gray-100 dark:bg-gray-800 rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-inner">
                     <IconServer class="w-10 h-10 text-gray-300" />

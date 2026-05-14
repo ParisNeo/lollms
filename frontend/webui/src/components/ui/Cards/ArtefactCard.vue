@@ -110,7 +110,7 @@ async function toggleLoad() {
     </div>
 
     <!-- Info Column -->
-    <div class="flex-grow min-w-0 flex flex-col justify-center cursor-pointer" @click="handleView">
+    <div class="grow min-w-0 flex flex-col justify-center cursor-pointer" @click="handleView">
         <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate" :title="artefactGroup.title">
             {{ artefactGroup.title }}
         </h4>
@@ -149,6 +149,8 @@ async function toggleLoad() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .artefact-list-item {
     @apply flex items-center gap-4 p-2 bg-white dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-700/50 hover:border-gray-300 dark:hover:border-gray-600 transition-all shadow-sm;
 }
@@ -156,7 +158,7 @@ async function toggleLoad() {
     @apply ring-1 ring-blue-500/50 bg-blue-50/10 dark:bg-blue-900/5;
 }
 .file-icon-box {
-    @apply w-12 h-12 flex-shrink-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 rounded-lg border dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors;
+    @apply w-12 h-12 shrink-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 rounded-lg border dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors;
 }
 .menu-item { @apply flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors; }
 .menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }

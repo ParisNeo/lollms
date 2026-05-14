@@ -2,7 +2,7 @@
   <div class="relative" ref="triggerRef" @mouseenter="openSubmenu" @mouseleave="closeSubmenu">
     <div class="flex items-center justify-between px-3 py-1.5 hover:bg-gray-200 dark:hover:bg-gray-700 rounded cursor-pointer text-sm text-gray-700 dark:text-gray-200 w-full">
       <EditorIcon v-if="props.icon" :name="props.icon" :collection="props.collection" class="h-6 w-6 mr-2" />
-      <span class="flex-grow">{{ props.title }}</span>
+      <span class="grow">{{ props.title }}</span>
       <EditorIcon name="chevron-right" collection="ui" class="h-4 w-4 ml-2 opacity-70" />
     </div>
 

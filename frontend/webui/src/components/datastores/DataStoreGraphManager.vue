@@ -379,7 +379,7 @@ watch(() => props.task, (newTask, oldTask) => {
 <template>
     <div class="h-full flex flex-col overflow-hidden">
         <!-- ── Navigation Header ── -->
-        <div class="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700 z-10 flex-shrink-0">
+        <div class="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700 z-10 shrink-0">
             <div class="flex gap-1 p-1 bg-gray-200 dark:bg-gray-900 rounded-xl">
                 <button @click="viewMode = 'graph'" :class="['px-6 py-2 text-xs font-black uppercase tracking-widest rounded-lg transition-all', viewMode === 'graph' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">
                     Knowledge Graph
@@ -399,9 +399,9 @@ watch(() => props.task, (newTask, oldTask) => {
             </div>
         </div>
 
-        <div class="flex-grow flex flex-col lg:flex-row gap-0 overflow-hidden">
+        <div class="grow flex flex-col lg:flex-row gap-0 overflow-hidden">
             <!-- ── Left Sidebar (Dynamic Content) ── -->
-            <div class="w-full lg:w-80 lg:flex-shrink-0 space-y-6 h-full overflow-y-auto custom-scrollbar p-4 border-r dark:border-gray-700 bg-white dark:bg-gray-900">
+            <div class="w-full lg:w-80 lg:shrink-0 space-y-6 h-full overflow-y-auto custom-scrollbar p-4 border-r dark:border-gray-700 bg-white dark:bg-gray-900">
                 
                 <!-- View-Specific Context Info -->
                 <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
@@ -466,7 +466,7 @@ watch(() => props.task, (newTask, oldTask) => {
                     <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
                         <h3 class="text-xs font-black uppercase text-gray-500 tracking-widest">Exploration Tools</h3>
                         <form @submit.prevent="handleQuery" class="flex gap-1">
-                            <input v-model="query" type="text" placeholder="Search concepts..." class="input-field flex-grow text-xs h-8">
+                            <input v-model="query" type="text" placeholder="Search concepts..." class="input-field grow text-xs h-8">
                             <button type="submit" :disabled="isQuerying || !query.trim()" class="btn btn-primary btn-xs px-3">Find</button>
                         </form>
                         
@@ -526,7 +526,7 @@ watch(() => props.task, (newTask, oldTask) => {
             </div>
 
             <!-- ── Main Workspace ── -->
-            <div class="flex-grow h-full bg-white dark:bg-gray-950 relative overflow-hidden">
+            <div class="grow h-full bg-white dark:bg-gray-950 relative overflow-hidden">
                 
                 <!-- MODE: GRAPH VIEW -->
                 <div v-if="viewMode === 'graph'" class="h-full w-full relative">
@@ -560,7 +560,7 @@ watch(() => props.task, (newTask, oldTask) => {
 
                 <!-- MODE: ONTOLOGY DESIGNER -->
                 <div v-else class="h-full flex flex-col">
-                    <div class="flex-shrink-0 p-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex justify-between items-center h-14">
+                    <div class="shrink-0 p-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex justify-between items-center h-14">
                         <div class="flex items-center gap-4">
                             <div class="flex items-center gap-2 px-1 py-1 bg-gray-200 dark:bg-gray-800 rounded-lg">
                                 <button @click="ontologyEditorMode = 'edit'" :class="['px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all', ontologyEditorMode === 'edit' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">Code Editor</button>
@@ -574,7 +574,7 @@ watch(() => props.task, (newTask, oldTask) => {
                             </button>
                         </div>
                     </div>
-                    <div class="flex-grow relative bg-white dark:bg-gray-950">
+                    <div class="grow relative bg-white dark:bg-gray-950">
                         <CodeMirrorEditor 
                             v-if="ontologyEditorMode === 'edit'"
                             v-model="generationParams.ontology" 

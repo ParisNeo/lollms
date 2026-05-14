@@ -103,15 +103,15 @@ async function handleDeletePrompt(prompt) {
                 </button>
                 <div v-if="openedCategories[category]" class="border border-t-0 dark:border-gray-700/50 rounded-b-lg">
                     <div v-for="prompt in prompts" :key="prompt.id" class="p-3 flex items-center justify-between border-t dark:border-gray-700/50 first:border-t-0">
-                        <div class="flex items-center gap-3 flex-grow truncate">
-                            <img v-if="prompt.icon" :src="prompt.icon" class="h-8 w-8 rounded-md flex-shrink-0 object-cover" alt="Icon">
-                            <IconTicket v-else class="h-8 w-8 flex-shrink-0 text-gray-400 p-1" />
-                            <div class="flex-grow truncate">
+                        <div class="flex items-center gap-3 grow truncate">
+                            <img v-if="prompt.icon" :src="prompt.icon" class="h-8 w-8 rounded-md shrink-0 object-cover" alt="Icon">
+                            <IconTicket v-else class="h-8 w-8 shrink-0 text-gray-400 p-1" />
+                            <div class="grow truncate">
                                 <p class="font-medium truncate">{{ prompt.name }}</p>
                                 <p class="text-xs text-gray-500 truncate">{{ prompt.description || 'No description' }}</p>
                             </div>
                         </div>
-                        <div class="flex items-center gap-x-2 flex-shrink-0">
+                        <div class="flex items-center gap-x-2 shrink-0">
                             <button @click="handleEditPrompt(prompt)" class="btn btn-secondary btn-sm p-2" title="Edit"><IconPencil class="w-4 h-4" /></button>
                             <button @click="handleDeletePrompt(prompt)" class="btn btn-danger btn-sm p-2" title="Delete"><IconTrash class="w-4 h-4" /></button>
                         </div>

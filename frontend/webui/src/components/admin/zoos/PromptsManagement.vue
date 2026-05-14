@@ -135,6 +135,7 @@ async function handleRefreshCache() {
 </script>
 
 <style scoped>
+@reference "tailwindcss";
 .tab-button { @apply px-4 py-2 text-sm font-medium rounded-t-lg border-b-2 transition-colors; }
 .tab-button.active { @apply border-blue-500 text-blue-600 dark:text-blue-400; }
 .tab-button.inactive { @apply border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:border-gray-600; }

@@ -105,7 +105,7 @@ onUnmounted(() => {
     </div>
 
     <!-- List -->
-    <div class="flex-grow overflow-y-auto custom-scrollbar p-2 space-y-1">
+    <div class="grow overflow-y-auto custom-scrollbar p-2 space-y-1">
       <div v-if="notebooks.length === 0" class="py-10 text-center px-4">
           <IconServer class="w-8 h-8 text-gray-200 dark:text-gray-800 mx-auto mb-2" />
           <p class="text-[10px] font-bold text-gray-400 uppercase">No projects yet</p>
@@ -124,7 +124,7 @@ onUnmounted(() => {
             <component :is="getIcon(nb.type)" class="w-4 h-4" />
         </div>
         
-        <div class="flex-grow min-w-0">
+        <div class="grow min-w-0">
           <p class="text-xs font-black truncate" :class="activeId === nb.id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-700 dark:text-gray-300'">
             {{ nb.title || 'Untitled Project' }}
           </p>
@@ -145,6 +145,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-200 dark:bg-gray-800 rounded-full; }
 </style>

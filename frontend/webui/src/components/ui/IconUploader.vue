@@ -62,7 +62,7 @@ function removeIcon() {
     <div class="mt-1 flex items-center gap-4">
       <!-- Preview -->
       <div 
-        class="flex-shrink-0 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center"
+        class="shrink-0 bg-gray-100 dark:bg-gray-700 rounded-lg border border-gray-300 dark:border-gray-600 flex items-center justify-center"
         :class="`h-${size} w-${size}`"
       >
         <img v-if="modelValue" :src="modelValue" alt="Icon preview" class="h-full w-full object-cover rounded-lg">

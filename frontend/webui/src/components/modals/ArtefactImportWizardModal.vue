@@ -184,7 +184,7 @@ const tabs = [
                 </div>
 
                 <!-- Tab Content -->
-                <div class="flex-grow p-6 overflow-y-auto custom-scrollbar">
+                <div class="grow p-6 overflow-y-auto custom-scrollbar">
 
                     <!-- FILES -->
                     <div v-if="activeTab === 'files'" class="space-y-4">
@@ -205,7 +205,7 @@ const tabs = [
                     <!-- WEB URLS -->
                     <div v-if="activeTab === 'web'" class="space-y-4">
                         <div class="flex gap-2">
-                            <input v-model="tempUrl" @keyup.enter="addUrl" placeholder="Enter link (https://...)" class="input-field flex-grow" />
+                            <input v-model="tempUrl" @keyup.enter="addUrl" placeholder="Enter link (https://...)" class="input-field grow" />
                             <button @click="addUrl" class="btn btn-secondary"><IconPlus class="w-5 h-5" /></button>
                         </div>
                         <div class="space-y-2">
@@ -222,7 +222,7 @@ const tabs = [
                             Ground your notebook with full Wikipedia articles.
                         </div>
                         <div class="flex gap-2">
-                            <input v-model="tempWiki" @keyup.enter="addWiki" placeholder="Article Title or Wiki URL..." class="input-field flex-grow" />
+                            <input v-model="tempWiki" @keyup.enter="addWiki" placeholder="Article Title or Wiki URL..." class="input-field grow" />
                             <button @click="addWiki" class="btn btn-secondary"><IconPlus class="w-5 h-5" /></button>
                         </div>
                         <div class="space-y-2">
@@ -236,7 +236,7 @@ const tabs = [
                     <!-- YOUTUBE -->
                     <div v-if="activeTab === 'youtube'" class="space-y-4">
                         <div class="flex gap-2">
-                            <input v-model="tempYt.url" placeholder="YouTube Video URL..." class="input-field flex-grow" />
+                            <input v-model="tempYt.url" placeholder="YouTube Video URL..." class="input-field grow" />
                             <select v-model="tempYt.lang" class="input-field w-32">
                                 <option v-for="l in languages" :key="l.code" :value="l.code">{{ l.name }}</option>
                             </select>
@@ -260,7 +260,7 @@ const tabs = [
                         </div>
 
                         <div class="flex gap-2">
-                            <input v-model="arxivQuery" @keyup.enter="handleArxivSearch" placeholder="Search Arxiv (e.g. 'transformer attention')..." class="input-field flex-grow" />
+                            <input v-model="arxivQuery" @keyup.enter="handleArxivSearch" placeholder="Search Arxiv (e.g. 'transformer attention')..." class="input-field grow" />
                             <button @click="handleArxivSearch" class="btn btn-secondary" :disabled="isSearchingArxiv">
                                 <IconAnimateSpin v-if="isSearchingArxiv" class="w-4 h-4 animate-spin"/>
                                 <IconMagnifyingGlass v-else class="w-4 h-4"/>
@@ -271,7 +271,7 @@ const tabs = [
                         <div v-if="arxivResults.length > 0" class="space-y-2 max-h-80 overflow-y-auto custom-scrollbar border-t dark:border-gray-700 pt-2">
                             <div v-for="res in arxivResults" :key="res.entry_id" class="p-3 bg-white dark:bg-gray-700 rounded-lg text-xs shadow-sm border border-transparent hover:border-blue-300 transition-colors">
                                 <div class="flex justify-between items-start gap-2">
-                                    <div class="flex items-start gap-2 flex-grow">
+                                    <div class="flex items-start gap-2 grow">
                                         <input type="checkbox" :checked="isArxivSelected(res.entry_id)" @change="toggleArxivSelection(res)" class="mt-1 rounded text-blue-600 focus:ring-blue-500" />
                                         <div>
                                             <p class="font-bold text-gray-900 dark:text-white leading-tight">{{ res.title }}</p>
@@ -307,7 +307,7 @@ const tabs = [
                     <!-- MANUAL TEXT -->
                     <div v-if="activeTab === 'manual'" class="space-y-4 h-full flex flex-col">
                         <input v-model="form.manual_title" placeholder="Artefact Title (e.g. Brainstorming Notes)" class="input-field font-bold" />
-                        <textarea v-model="form.manual_content" placeholder="Paste or type content here..." class="flex-grow input-field text-sm leading-relaxed min-h-[200px] resize-none"></textarea>
+                        <textarea v-model="form.manual_content" placeholder="Paste or type content here..." class="grow input-field text-sm leading-relaxed min-h-[200px] resize-none"></textarea>
                     </div>
 
                 </div>
@@ -326,6 +326,8 @@ const tabs = [
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 

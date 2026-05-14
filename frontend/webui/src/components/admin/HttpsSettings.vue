@@ -78,7 +78,7 @@ async function handleSave() {
                 <!-- Restart Warning -->
                 <div class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 rounded-lg">
                     <div class="flex">
-                        <div class="flex-shrink-0">
+                        <div class="shrink-0">
                             <svg class="h-5 w-5 text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                 <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd" />
                             </svg>
@@ -120,11 +120,11 @@ async function handleSave() {
 
                 <!-- HTTPS Toggle -->
                 <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                    <span class="flex-grow flex flex-col pr-4">
+                    <span class="grow flex flex-col pr-4">
                         <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable HTTPS</span>
                         <span class="text-xs text-gray-500 dark:text-gray-400">Serve the application over a secure HTTPS connection.</span>
                     </span>
-                    <button @click="form.https_enabled = !form.https_enabled" type="button" :class="[form.https_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                    <button @click="form.https_enabled = !form.https_enabled" type="button" :class="[form.https_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                         <span :class="[form.https_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                     </button>
                 </div>

@@ -72,7 +72,7 @@ onUnmounted(() => {
           :class="[maxWidthClass, maxWidthClass.includes('max-w-full') ? 'max-h-full h-full !rounded-none' : 'max-h-[90vh]']"
         >
           <header 
-            class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 flex-shrink-0"
+            class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 shrink-0"
             :class="[maxWidthClass.includes('max-w-full') ? 'p-2 bg-gray-950/50 border-gray-800' : 'p-4']"
           >
             <h2 
@@ -95,7 +95,7 @@ onUnmounted(() => {
              </slot>
           </main>
           
-          <footer v-if="$slots.footer" class="flex items-center justify-end p-4 space-x-3 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 flex-shrink-0">
+          <footer v-if="$slots.footer" class="flex items-center justify-end p-4 space-x-3 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 shrink-0">
             <slot name="footer"></slot>
           </footer>
         </div>

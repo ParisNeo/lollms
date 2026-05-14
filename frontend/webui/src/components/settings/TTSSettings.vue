@@ -237,12 +237,12 @@ onMounted(() => {
                         <button ref="ttsTriggerRef" @click="isTtsMenuOpen = !isTtsMenuOpen" type="button" class="toolbox-select truncate w-full flex items-center justify-between">
                             <div class="flex items-center space-x-3 truncate">
                                 <img v-if="selectedModelDetails?.alias?.icon" :src="selectedModelDetails.alias.icon" class="h-8 w-8 rounded-md object-cover"/>
-                                <span v-else class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconMicrophone class="w-5 h-5" /></span>
+                                <span v-else class="w-8 h-8 shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconMicrophone class="w-5 h-5" /></span>
                                 <div class="min-w-0 text-left">
                                     <span class="block font-semibold truncate">{{ selectedModelDetails?.name || 'Select a Speech Model' }}</span>
                                 </div>
                             </div>
-                            <svg class="w-4 h-4 text-gray-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                            <svg class="w-4 h-4 text-gray-400 shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                         </button>
                         <Teleport to="body">
                             <Transition enter-active-class="transition ease-out duration-100" enter-from-class="transform opacity-0 scale-95" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-75" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-95">
@@ -250,18 +250,18 @@ onMounted(() => {
                                     <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                         <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full">
                                     </div>
-                                    <div class="p-1 flex-grow overflow-y-auto">
+                                    <div class="p-1 grow overflow-y-auto">
                                         <div v-if="dataStore.isLoadingTtsModels" class="text-center p-4 text-sm text-gray-500">Loading TTS models...</div>
                                         <div v-else-if="filteredAvailableTtsModels.length === 0" class="text-center p-4 text-sm text-gray-500">No TTS models found.</div>
                                         <div v-for="group in filteredAvailableTtsModels" :key="group.label">
                                             <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                             <button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModel === item.id}">
                                                 <div class="flex items-center space-x-3 truncate">
-                                                    <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                                    <IconMicrophone v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                                    <img v-if="item.alias?.icon" :src="item.alias.icon" class="h-6 w-6 rounded-md object-cover shrink-0" />
+                                                    <IconMicrophone v-else class="w-6 h-6 text-gray-500 dark:text-gray-400 shrink-0" />
                                                     <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                                 </div>
-                                                <IconCheckCircle v-if="activeTtsModel === item.id" class="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                                                <IconCheckCircle v-if="activeTtsModel === item.id" class="w-5 h-5 text-blue-600 dark:text-blue-400 shrink-0" />
                                             </button>
                                         </div>
                                     </div>
@@ -308,7 +308,7 @@ onMounted(() => {
                                 :placeholder="`Default: ${param.default}`"
                             />
                              <div v-else-if="param.type === 'bool'" class="mt-1">
-                                <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
@@ -319,7 +319,7 @@ onMounted(() => {
                     </div>
                 </div>
                 <div v-else-if="activeTtsModel && selectedModelDetails && !allowOverrides" class="p-4 border border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-sm text-yellow-800 dark:text-yellow-200 flex items-center gap-3">
-                    <IconInfo class="w-5 h-5 flex-shrink-0" />
+                    <IconInfo class="w-5 h-5 shrink-0" />
                     <span>An administrator has locked the parameters for this model alias. Your personal settings will be ignored.</span>
                 </div>
                  <div class="flex justify-end pt-4 border-t dark:border-gray-600">
@@ -331,6 +331,8 @@ onMounted(() => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .toolbox-select {
     @apply w-full text-left text-sm px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500;
 }

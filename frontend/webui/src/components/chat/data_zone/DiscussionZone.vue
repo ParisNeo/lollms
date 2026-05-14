@@ -70,7 +70,7 @@ async function handleSync() {
 <template>
   <div class="flex flex-col h-full overflow-hidden">
     <!-- Action Bar -->
-    <div class="flex-shrink-0 flex items-center justify-between gap-2 p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-t-lg shadow-sm">
+    <div class="shrink-0 flex items-center justify-between gap-2 p-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-t-lg shadow-sm">
         <div class="flex items-center gap-1.5">
             <button @click="handleClear" 
                     class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 text-gray-400 hover:text-red-500 transition-colors" 
@@ -107,13 +107,14 @@ async function handleSync() {
     </div>
 
     <!-- Help Footer -->
-    <div class="flex-shrink-0 p-2 text-[9px] text-gray-400 italic">
+    <div class="shrink-0 p-2 text-[9px] text-gray-400 italic">
         This text is injected into the system prompt for all messages in this chat.
     </div>
   </div>
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 /* Ensure the editor doesn't have extra borders inside our container */
 :deep(.cm-editor) {
     @apply border-0;

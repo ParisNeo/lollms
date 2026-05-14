@@ -355,7 +355,7 @@ function formatShareDate(dateString) {
                   <p class="text-xs text-gray-500 dark:text-gray-400">Shared {{ formatShareDate(share.shared_at) }}</p>
                 </div>
               </div>
-              <div class="flex items-center gap-2 flex-shrink-0">
+              <div class="flex items-center gap-2 shrink-0">
                 <select v-model="share.permission_level" @change="handleUpdatePermission(share)" class="input-field !py-1 !text-xs w-28"><option value="view">View Only</option><option value="interact">Can Interact</option></select>
                 <button @click="handleRevoke(share)" class="btn btn-danger btn-sm !p-1.5" :title="`Revoke access for ${share.shared_with_username}`"><svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg></button>
               </div>

@@ -18,7 +18,7 @@ const iconComponent = computed(() => {
 <template>
   <button :title="title" :class="buttonClass">
     <slot name="icon">
-      <component v-if="iconComponent" :is="iconComponent" class="w-4 h-4 flex-shrink-0" />
+      <component v-if="iconComponent" :is="iconComponent" class="w-4 h-4 shrink-0" />
     </slot>
     <slot></slot>
   </button>

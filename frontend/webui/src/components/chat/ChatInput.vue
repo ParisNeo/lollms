@@ -818,11 +818,11 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 </script>
 
 <template>
-    <div class="flex-shrink-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur border-t dark:border-gray-700 shadow-lg relative">
+    <div class="shrink-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur border-t dark:border-gray-700 shadow-lg relative">
 
         <!-- Vision Warning -->
         <div v-if="!currentModelVisionSupport && stagedImages.length > 0" class="px-4 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-[10px] text-yellow-700 dark:text-yellow-300 flex items-center gap-2">
-            <IconInfo class="w-3.5 h-3.5 flex-shrink-0" />
+            <IconInfo class="w-3.5 h-3.5 shrink-0" />
             <p>Model lacks vision support. Your uploaded images will be ignored.</p>
         </div>
 
@@ -832,7 +832,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
              <div class="max-w-4xl mx-auto flex items-center gap-3">
                 <template v-if="showContextBar">
                     <div @click="uiStore.openModal('contextViewer')" 
-                         class="flex-grow flex items-center gap-3 cursor-pointer group/context select-none active:scale-[0.99] transition-transform relative">
+                         class="grow flex items-center gap-3 cursor-pointer group/context select-none active:scale-[0.99] transition-transform relative">
                         
                         <!-- ── [NEW] Rich Tooltip Overlay ── -->
                         <!-- Fixed: Increased z-index to 50 and ensured background is solid enough to read -->
@@ -863,34 +863,34 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                             <div class="absolute left-6 top-full -mt-1 w-3 h-3 bg-white dark:bg-gray-900 border-r border-b border-gray-200 dark:border-gray-700 transform rotate-45"></div>
                         </div>
 
-                        <div class="flex items-center gap-1 text-gray-500 flex-shrink-0 group-hover/context:text-blue-500 transition-colors">
+                        <div class="flex items-center gap-1 text-gray-500 shrink-0 group-hover/context:text-blue-500 transition-colors">
                             <IconToken class="w-3.5 h-3.5" />
                             <span class="text-[10px] font-black uppercase tracking-tight hidden sm:inline">Context</span>
                         </div>
 
                         <!-- Progress Bar with improved contrast and segment dividers -->
-                        <div :class="['flex-grow h-2.5 rounded-full overflow-hidden flex border dark:border-gray-800 transition-all shadow-inner', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'bg-gray-200 dark:bg-gray-700 group-hover/context:ring-blue-400/50', progressBorderColorClass]">
+                        <div :class="['grow h-2.5 rounded-full overflow-hidden flex border dark:border-gray-800 transition-all shadow-inner', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'bg-gray-200 dark:bg-gray-700 group-hover/context:ring-blue-400/50', progressBorderColorClass]">
                             <div v-for="part in contextParts" :key="part.label" 
                                 :class="[totalPercentage >= 100 ? 'bg-red-600' : part.colorClass, 'h-full transition-all duration-500 ease-out border-r border-black/5 last:border-0']" 
                                 :style="{ width: `${getPercentage(part.value)}%` }" 
                             ></div>
                         </div>
 
-                        <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap flex-shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors">
+                        <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors">
                             <span class="font-bold">{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
                         </div>
                     </div>
                 </template>
-                <div v-else class="flex-grow"></div> 
+                <div v-else class="grow"></div> 
 
-                <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 flex-shrink-0" v-if="showContextBar && activeFeatures.length > 0"></div>
+                <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 shrink-0" v-if="showContextBar && activeFeatures.length > 0"></div>
 
-                <div class="flex items-center gap-1.5 flex-shrink-0" v-if="activeFeatures.length > 0">
+                <div class="flex items-center gap-1.5 shrink-0" v-if="activeFeatures.length > 0">
                     <div v-for="feat in visibleFeatures" :key="feat.id" 
                          @click="showFeatureInfo(feat)"
                          :class="['flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer hover:opacity-80', feat.colorClass]"
                          :title="feat.title">
-                        <div class="w-3 h-3 flex-shrink-0 flex items-center justify-center">
+                        <div class="w-3 h-3 shrink-0 flex items-center justify-center">
                             <component :is="feat.icon" class="w-full h-full fill-current" />
                         </div>
                         <span class="hidden md:inline">{{ feat.label }}</span>
@@ -1211,7 +1211,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                         <DropdownSubmenu title="RAG Context" icon="database">
                              <div class="p-1 max-h-64 overflow-y-auto min-w-[200px]">
                                 <div v-if="availableRagStores.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No stores available.</div>
-                                <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="menu-item flex justify-between items-center group/item"><span class="truncate pr-4" :class="{'font-bold text-green-600': ragStoreSelection.includes(store.id)}">{{ store.name }}</span><IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 flex-shrink-0" /></button>
+                                <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="menu-item flex justify-between items-center group/item"><span class="truncate pr-4" :class="{'font-bold text-green-600': ragStoreSelection.includes(store.id)}">{{ store.name }}</span><IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 shrink-0" /></button>
                              </div>
                         </DropdownSubmenu>
                         <DropdownSubmenu title="MCP Tools" icon="server">
@@ -1219,7 +1219,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 <div v-if="availableMcpToolsForSelector.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No tools available.</div>
                                 <div v-for="group in availableMcpToolsForSelector" :key="group.label" class="mb-2">
                                     <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ group.label }}</div>
-                                    <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="menu-item flex justify-between items-center pl-5"><span class="truncate pr-4 text-xs" :class="{'font-bold text-purple-600': mcpToolSelection.includes(tool.id)}">{{ tool.name }}</span><IconCheckCircle v-if="mcpToolSelection.includes(tool.id)" class="w-4 h-4 text-purple-500 flex-shrink-0" /></button>
+                                    <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="menu-item flex justify-between items-center pl-5"><span class="truncate pr-4 text-xs" :class="{'font-bold text-purple-600': mcpToolSelection.includes(tool.id)}">{{ tool.name }}</span><IconCheckCircle v-if="mcpToolSelection.includes(tool.id)" class="w-4 h-4 text-purple-500 shrink-0" /></button>
                                 </div>
                             </div>
                         </DropdownSubmenu>
@@ -1241,7 +1241,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 <div v-if="notes.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No notes found.</div>
                                 <button v-for="note in notes" :key="note.id" @click.stop="discussionsStore.addNoteAsArtefact(note)" class="menu-item flex justify-between items-center group/item">
                                     <span class="truncate pr-4 text-xs">{{ note.title }}</span>
-                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === note.title && i.type === 'note')" class="w-4 h-4 text-green-500 flex-shrink-0" />
+                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === note.title && i.type === 'note')" class="w-4 h-4 text-green-500 shrink-0" />
                                 </button>
                              </div>
                         </DropdownSubmenu>
@@ -1251,7 +1251,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                 <div v-if="skills.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No skills found.</div>
                                 <button v-for="skill in skills" :key="skill.id" @click.stop="discussionsStore.addSkillAsArtefact(skill)" class="menu-item flex justify-between items-center group/item">
                                     <span class="truncate pr-4 text-xs">{{ skill.name }}</span>
-                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === skill.name && i.type === 'skill')" class="w-4 h-4 text-green-500 flex-shrink-0" />
+                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === skill.name && i.type === 'skill')" class="w-4 h-4 text-green-500 shrink-0" />
                                 </button>
                              </div>
                         </DropdownSubmenu>
@@ -1260,7 +1260,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
                 </div>
 
-                <div class="flex-grow min-w-0 relative flex flex-col">
+                <div class="grow min-w-0 relative flex flex-col">
                     <!-- Standard Auto-Growing Textarea -->
                     <textarea 
                         v-if="!isAdvancedEditor"
@@ -1330,6 +1330,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .tool-badge { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black border shadow-sm transition-all; }
 .menu-item { @apply flex items-center w-full px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left; }
 .menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }

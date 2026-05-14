@@ -20,17 +20,17 @@
                          <input type="text" v-model="searchTerm" placeholder="Search models..." class="input-field w-full pl-10" />
                          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><svg class="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg></div>
                     </div>
-                    <div class="overflow-y-auto flex-grow">
+                    <div class="overflow-y-auto grow">
                         <ul v-if="filteredModels.length > 0">
                             <li v-for="model in filteredModels" :key="model.original_model_name">
                                 <button @click="selectModel(model)"
                                         class="w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between"
                                         :class="{'bg-blue-100 dark:bg-blue-900/50': selectedModel && selectedModel.original_model_name === model.original_model_name}">
-                                    <div class="flex-grow min-w-0">
+                                    <div class="grow min-w-0">
                                         <p class="font-mono text-sm truncate" :class="{'font-bold': model.alias}">{{ model.alias?.title || model.original_model_name }}</p>
                                         <p v-if="model.alias" class="text-xs text-gray-500 truncate">{{ model.original_model_name }}</p>
                                     </div>
-                                    <div class="flex-shrink-0 flex items-center gap-1.5 pl-2">
+                                    <div class="shrink-0 flex items-center gap-1.5 pl-2">
                                         <span v-if="isBindingDefault(model.original_model_name)" class="tag text-xs bg-blue-100 text-blue-800" title="Binding Default">B</span>
                                         <span v-if="isGlobalDefault(model.original_model_name)" class="tag text-xs bg-green-100 text-green-800" title="Global Default">G</span>
                                     </div>
@@ -106,11 +106,11 @@
                                     <h4 class="font-medium mb-2 text-sm">Reasoning Capabilities</h4>
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                                            <span class="flex-grow flex flex-col pr-4">
+                                            <span class="grow flex flex-col pr-4">
                                                 <span class="text-sm font-medium">Enable Reasoning (Thinking)</span>
                                                 <span class="text-xs text-gray-500 dark:text-gray-400">Activates thought generation if supported.</span>
                                             </span>
-                                            <button @click="form.reasoning_activation = !form.reasoning_activation" type="button" :class="[form.reasoning_activation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                            <button @click="form.reasoning_activation = !form.reasoning_activation" type="button" :class="[form.reasoning_activation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                                 <span :class="[form.reasoning_activation ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                             </button>
                                         </div>
@@ -124,11 +124,11 @@
                                             </select>
                                         </div>
                                          <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md md:col-span-2">
-                                            <span class="flex-grow flex flex-col pr-4">
+                                            <span class="grow flex flex-col pr-4">
                                                 <span class="text-sm font-medium">Reasoning Summary</span>
                                                 <span class="text-xs text-gray-500 dark:text-gray-400">Enable summarization of reasoning steps in output.</span>
                                             </span>
-                                            <button @click="form.reasoning_summary = !form.reasoning_summary" type="button" :class="[form.reasoning_summary ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                            <button @click="form.reasoning_summary = !form.reasoning_summary" type="button" :class="[form.reasoning_summary ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                                 <span :class="[form.reasoning_summary ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                             </button>
                                         </div>
@@ -152,7 +152,7 @@
                                             :placeholder="param.help || ''"
                                         />
                                         <div v-else-if="param.type === 'bool'" class="mt-1">
-                                            <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                            <button @click="form[param.name] = !form[param.name]" type="button" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                                 <span :class="[form[param.name] ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                             </button>
                                         </div>
@@ -162,31 +162,31 @@
 
 
                              <div v-if="bindingType === 'llm'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                                <span class="flex-grow flex flex-col">
+                                <span class="grow flex flex-col">
                                     <span class="text-sm font-medium">Vision Support</span>
                                     <span class="text-sm text-gray-500 dark:text-gray-400">Enable if this model can process images.</span>
                                 </span>
-                                <button @click="form.has_vision = !form.has_vision" type="button" :class="[form.has_vision ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <button @click="form.has_vision = !form.has_vision" type="button" :class="[form.has_vision ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.has_vision ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
                             
                              <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                                <span class="flex-grow flex flex-col">
+                                <span class="grow flex flex-col">
                                     <span class="text-sm font-medium">Allow User Overrides</span>
                                     <span class="text-sm text-gray-500 dark:text-gray-400">If enabled, users can change generation parameters (excluding context size) for their own use.</span>
                                 </span>
-                                <button @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <button @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.allow_parameters_override ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
                             
                             <div v-if="bindingType === 'llm'" class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                                <span class="flex-grow flex flex-col">
+                                <span class="grow flex flex-col">
                                     <span class="text-sm font-medium">Allow User Overrides</span>
                                     <span class="text-sm text-gray-500 dark:text-gray-400">If disabled, all generation parameters above will be forced for this model.</span>
                                 </span>
-                                <button @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <button @click="form.allow_parameters_override = !form.allow_parameters_override" type="button" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.allow_parameters_override ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                                 </button>
                             </div>

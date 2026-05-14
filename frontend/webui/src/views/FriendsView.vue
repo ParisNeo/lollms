@@ -48,7 +48,7 @@ onMounted(() => {
             ]"
         >
             <div class="flex items-center space-x-3">
-                <component :is="tab.icon" class="w-5 h-5 flex-shrink-0" />
+                <component :is="tab.icon" class="w-5 h-5 shrink-0" />
                 <span>{{ tab.label }}</span>
             </div>
             <span v-if="tab.count > 0" class="bg-red-500 text-white text-xs font-bold rounded-full h-5 w-5 flex items-center justify-center">

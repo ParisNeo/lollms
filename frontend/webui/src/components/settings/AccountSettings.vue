@@ -186,7 +186,7 @@ async function handleGenerateAvatar() {
             <div class="border-t border-gray-200 dark:border-gray-700 p-4 sm:p-6">
                 <form @submit.prevent="handleSaveProfile" class="flex flex-col md:flex-row gap-8">
                     <!-- Avatar Section -->
-                    <div class="flex-shrink-0 flex flex-col items-center space-y-2 w-full md:w-40">
+                    <div class="shrink-0 flex flex-col items-center space-y-2 w-full md:w-40">
                         <UserAvatar :icon="user.icon" :username="user.username" size-class="h-28 w-28" />
                         <input
                             type="file"
@@ -215,7 +215,7 @@ async function handleGenerateAvatar() {
                     </div>
 
                     <!-- Profile Info Form -->
-                    <div class="flex-grow space-y-6">
+                    <div class="grow space-y-6">
                         <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                             <div>
                                 <label for="firstName" class="block text-sm font-medium text-gray-700 dark:text-gray-300">First Name</label>

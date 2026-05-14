@@ -119,7 +119,7 @@ const formatPercent = (pct) => pct ? `${pct.toFixed(1)}%` : '0%';
                         </div>
                     </div>
                     
-                    <div class="flex-grow space-y-3">
+                    <div class="grow space-y-3">
                         <!-- Compute Load -->
                         <div>
                             <div class="flex justify-between text-xs mb-1"><span>Compute Load</span><span class="font-bold">{{ gpu.gpu_utilization }}%</span></div>

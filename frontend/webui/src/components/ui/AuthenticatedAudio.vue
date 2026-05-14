@@ -1,6 +1,6 @@
 <template>
   <div class="w-full flex items-center gap-2">
-    <div v-if="isLoading" class="flex-grow h-8 bg-gray-200 dark:bg-gray-700 animate-pulse rounded-lg flex items-center px-4">
+    <div v-if="isLoading" class="grow h-8 bg-gray-200 dark:bg-gray-700 animate-pulse rounded-lg flex items-center px-4">
         <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Loading Audio...</span>
     </div>
     <audio 
@@ -11,7 +11,7 @@
         class="w-full h-8"
         @error="handleAudioError"
     ></audio>
-    <div v-else class="flex-grow h-8 bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center px-4 border border-red-200 dark:border-red-800">
+    <div v-else class="grow h-8 bg-red-50 dark:bg-red-900/20 rounded-lg flex items-center px-4 border border-red-200 dark:border-red-800">
         <span class="text-[10px] font-bold text-red-500 uppercase tracking-widest">
             {{ error ? 'Audio Access Error' : 'No Audio Data' }}
         </span>

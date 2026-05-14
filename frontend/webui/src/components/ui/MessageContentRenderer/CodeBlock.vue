@@ -489,7 +489,7 @@ async function downloadCreatedFile(filename) {
   <div class="code-block-container not-prose my-4" :class="themeClass">
     <button @click="isCollapsed = !isCollapsed" class="code-block-header" :title="isCollapsed ? 'Expand' : 'Collapse'">
       <div class="flex items-center gap-2">
-        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform flex-shrink-0" :class="{'rotate-90': !isCollapsed}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4-4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 transition-transform shrink-0" :class="{'rotate-90': !isCollapsed}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4-4a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
         <span class="code-language">{{ displayLanguage }}</span>
       </div>
       <div v-if="!isInstallUiVisible" class="flex flex-row gap-2" @click.stop>
@@ -536,7 +536,7 @@ async function downloadCreatedFile(filename) {
                 @keyup.esc="hideInstallUi"
                 type="text" 
                 placeholder="e.g. pandas numpy" 
-                class="install-input flex-grow"
+                class="install-input grow"
                 autofocus
             />
             <button @click="handleInstall" class="code-action-btn install-confirm-btn" :disabled="isInstalling">

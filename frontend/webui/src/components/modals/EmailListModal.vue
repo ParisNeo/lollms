@@ -123,7 +123,7 @@ function copyEmailList() {
                 >
                     Open in Email App
                 </a>
-                <div class="flex-grow"></div>
+                <div class="grow"></div>
                 <div class="flex space-x-3">
                     <button 
                         type="button" 

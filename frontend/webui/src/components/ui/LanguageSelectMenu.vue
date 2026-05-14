@@ -67,7 +67,7 @@ const vOnClickOutside = {
                   {{ group.label }}
                 </div>
                 <li v-for="lang in group.items" :key="lang.id" @click="selectLanguage(lang.id)" class="flex items-center space-x-2 text-gray-900 dark:text-gray-100 cursor-pointer select-none relative p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700">
-                    <span class="h-4 w-4 flex-shrink-0" v-html="lang.icon"></span>
+                    <span class="h-4 w-4 shrink-0" v-html="lang.icon"></span>
                     <span class="font-normal block truncate">{{ lang.name }}</span>
                 </li>
               </div>

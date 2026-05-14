@@ -19,11 +19,11 @@
                 </div>
             </div>
             
-            <div class="flex-grow flex min-h-0 relative">
+            <div class="grow flex min-h-0 relative">
                 
                 <!-- Left Panel: Configuration (Scrollable) -->
                 <div class="w-full md:w-1/3 flex flex-col border-r dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50">
-                    <div class="p-4 flex-grow overflow-y-auto custom-scrollbar space-y-6">
+                    <div class="p-4 grow overflow-y-auto custom-scrollbar space-y-6">
                         
                         <!-- Metadata Group -->
                         <div class="space-y-3">
@@ -115,7 +115,7 @@
 
                 <!-- Right Panel: Editor & Tools -->
                 <div class="w-full md:w-2/3 flex flex-col h-full bg-gray-900 text-gray-200 relative">
-                    <div class="flex-shrink-0 p-2 bg-gray-800 border-b border-gray-700 flex justify-between items-center">
+                    <div class="shrink-0 p-2 bg-gray-800 border-b border-gray-700 flex justify-between items-center">
                         <div class="flex items-center gap-2">
                             <span class="text-xs font-mono text-blue-400 font-bold px-2">node_logic.py</span>
                             <div class="h-4 w-px bg-gray-600"></div>
@@ -128,17 +128,17 @@
                         </div>
                     </div>
 
-                    <div v-show="activeTab === 'code'" class="flex-grow relative flex flex-col min-h-0">
+                    <div v-show="activeTab === 'code'" class="grow relative flex flex-col min-h-0">
                         <CodeMirrorEditor v-model="form.code" class="absolute inset-0 h-full w-full text-sm" :extensions="extensions" />
                     </div>
 
-                    <div v-show="activeTab === 'test'" class="flex-grow flex flex-col p-4 space-y-4 bg-gray-900 overflow-y-auto">
+                    <div v-show="activeTab === 'test'" class="grow flex flex-col p-4 space-y-4 bg-gray-900 overflow-y-auto">
                         <div class="grid grid-cols-2 gap-4 h-1/2 min-h-[200px]">
-                            <div class="flex flex-col"><label class="text-xs font-bold text-gray-400 mb-2 uppercase">Test Inputs (JSON)</label><CodeMirrorEditor v-model="testInputsJson" :extensions="jsonExtensions" class="flex-grow border border-gray-700 rounded bg-gray-800" /></div>
-                            <div class="flex flex-col"><label class="text-xs font-bold text-gray-400 mb-2 uppercase">Output Result</label><div class="flex-grow border border-gray-700 rounded bg-black/50 p-2 font-mono text-xs overflow-auto text-green-400 whitespace-pre-wrap">{{ testOutput }}</div></div>
+                            <div class="flex flex-col"><label class="text-xs font-bold text-gray-400 mb-2 uppercase">Test Inputs (JSON)</label><CodeMirrorEditor v-model="testInputsJson" :extensions="jsonExtensions" class="grow border border-gray-700 rounded bg-gray-800" /></div>
+                            <div class="flex flex-col"><label class="text-xs font-bold text-gray-400 mb-2 uppercase">Output Result</label><div class="grow border border-gray-700 rounded bg-black/50 p-2 font-mono text-xs overflow-auto text-green-400 whitespace-pre-wrap">{{ testOutput }}</div></div>
                         </div>
                         <div class="flex justify-end pt-2 border-t border-gray-800">
-                             <div class="text-xs text-red-400 font-mono flex-grow pr-4" v-if="testError">{{ testError }}</div>
+                             <div class="text-xs text-red-400 font-mono grow pr-4" v-if="testError">{{ testError }}</div>
                              <button @click="runTest" class="btn btn-primary btn-sm" :disabled="isTesting"><IconAnimateSpin v-if="isTesting" class="w-4 h-4 mr-2 animate-spin" />{{ isTesting ? 'Running...' : 'Run Test' }}</button>
                         </div>
                     </div>

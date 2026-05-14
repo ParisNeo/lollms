@@ -377,15 +377,15 @@ async function finalizeSetup() {
                     <h4 class="text-sm font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 mb-6">Ethical Pillars</h4>
                     <ul class="space-y-6">
                         <li class="flex items-start gap-3">
-                            <div class="mt-1 w-2 h-2 rounded-full bg-green-500 flex-shrink-0"></div>
+                            <div class="mt-1 w-2 h-2 rounded-full bg-green-500 shrink-0"></div>
                             <div class="text-xs"><strong>Privacy First</strong>: Run models locally to ensure your data stays yours.</div>
                         </li>
                         <li class="flex items-start gap-3">
-                            <div class="mt-1 w-2 h-2 rounded-full bg-blue-500 flex-shrink-0"></div>
+                            <div class="mt-1 w-2 h-2 rounded-full bg-blue-500 shrink-0"></div>
                             <div class="text-xs"><strong>Open Science</strong>: Bridging the gap between researchers and end-users.</div>
                         </li>
                         <li class="flex items-start gap-3">
-                            <div class="mt-1 w-2 h-2 rounded-full bg-purple-500 flex-shrink-0"></div>
+                            <div class="mt-1 w-2 h-2 rounded-full bg-purple-500 shrink-0"></div>
                             <div class="text-xs"><strong>No Silos</strong>: A unified hub for all AI technologies without walled gardens.</div>
                         </li>
                     </ul>
@@ -393,7 +393,7 @@ async function finalizeSetup() {
             </div>
             
             <div class="flex items-center gap-3 p-4 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-800 dark:text-yellow-200 text-xs font-bold rounded-xl border border-yellow-100 dark:border-yellow-900/30">
-                <IconCheckCircle class="w-5 h-5 flex-shrink-0" />
+                <IconCheckCircle class="w-5 h-5 shrink-0" />
                 <span>By clicking "Next", you formally accept these terms and commit to using LoLLMs for the betterment of society.</span>
             </div>
         </div>
@@ -421,7 +421,7 @@ async function finalizeSetup() {
                 </div>
 
                 <!-- ADDING FLOW -->
-                <div v-if="isAddingBinding" class="flex-grow flex flex-col gap-4 border rounded-2xl p-6 bg-gray-50 dark:bg-gray-900 shadow-inner overflow-hidden">
+                <div v-if="isAddingBinding" class="grow flex flex-col gap-4 border rounded-2xl p-6 bg-gray-50 dark:bg-gray-900 shadow-inner overflow-hidden">
                     
                     <!-- 1. Select Type -->
                     <template v-if="!selectedBindingType">
@@ -451,7 +451,7 @@ async function finalizeSetup() {
                              <h4 class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Configure Parameters</h4>
                         </div>
 
-                        <div class="flex-grow overflow-y-auto custom-scrollbar space-y-4 pr-2">
+                        <div class="grow overflow-y-auto custom-scrollbar space-y-4 pr-2">
                             <div>
                                 <label class="label text-xs">Friendly Alias</label>
                                 <input v-model="bindingForm.alias" class="input-field" placeholder="e.g. My Local Ollama">
@@ -476,7 +476,7 @@ async function finalizeSetup() {
                                 <!-- Toggle/Boolean -->
                                 <div v-else-if="param.type === 'bool'" class="flex items-center justify-between p-2 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
                                     <span class="text-[10px] text-gray-500 pr-4">{{ param.description }}</span>
-                                    <button @click="bindingForm.config[param.name] = !bindingForm.config[param.name]" type="button" :class="[bindingForm.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors']">
+                                    <button @click="bindingForm.config[param.name] = !bindingForm.config[param.name]" type="button" :class="[bindingForm.config[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors']">
                                         <span :class="[bindingForm.config[param.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition']"></span>
                                     </button>
                                 </div>
@@ -523,15 +523,15 @@ async function finalizeSetup() {
                 </div>
 
                 <!-- LIST VIEW -->
-                <div v-else class="flex-grow flex flex-col gap-3 overflow-y-auto custom-scrollbar">
-                    <div v-if="configuredBindings.length === 0" class="flex-grow flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-10 opacity-60">
+                <div v-else class="grow flex flex-col gap-3 overflow-y-auto custom-scrollbar">
+                    <div v-if="configuredBindings.length === 0" class="grow flex flex-col items-center justify-center border-2 border-dashed rounded-3xl p-10 opacity-60">
                         <IconCircle class="w-12 h-12 mb-4 text-gray-300" />
                         <p class="text-sm font-bold text-gray-500 uppercase tracking-widest">No Active Providers</p>
                         <p class="text-xs text-gray-400 mt-1">Click "Add Provider" above to get started.</p>
                     </div>
                     
                     <div v-for="b in configuredBindings" :key="b.id" class="flex items-center justify-between p-4 bg-white dark:bg-gray-800 rounded-2xl border dark:border-gray-700 shadow-sm group">
-                        <div class="flex items-center gap-4 flex-grow cursor-pointer" @click="handleEditBinding(b)">
+                        <div class="flex items-center gap-4 grow cursor-pointer" @click="handleEditBinding(b)">
                             <div class="p-2 rounded-xl bg-gray-100 dark:bg-gray-700 text-blue-500">
                                 <IconServer class="w-5 h-5" />
                             </div>
@@ -551,7 +551,7 @@ async function finalizeSetup() {
                     </div>
 
                     <div v-if="currentCategory === 'llm' && configuredBindings.length > 0" class="mt-auto p-4 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800 flex items-center gap-3">
-                         <IconCheckCircle class="w-5 h-5 text-green-500 flex-shrink-0" />
+                         <IconCheckCircle class="w-5 h-5 text-green-500 shrink-0" />
                          <span class="text-xs text-blue-800 dark:text-blue-300">LLM Engine ready. You can add more bindings later in Admin Settings.</span>
                     </div>
                 </div>
@@ -818,6 +818,7 @@ async function finalizeSetup() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .animate-fade-in { animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }

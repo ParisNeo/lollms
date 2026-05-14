@@ -250,7 +250,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                         <div class="h-full bg-blue-600 transition-all duration-500 progress-bar-animated" :style="{width: activeTask.progress + '%'}"></div>
                     </div>
 
-                    <div class="flex-grow flex flex-col min-h-0 bg-black rounded-3xl shadow-2xl border border-gray-800 overflow-hidden">
+                    <div class="grow flex flex-col min-h-0 bg-black rounded-3xl shadow-2xl border border-gray-800 overflow-hidden">
                         <div class="px-6 py-3 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
                             <span class="text-[10px] font-black uppercase text-gray-500 tracking-widest">Video Studio Terminal Output</span>
                             <div class="flex gap-1.5">
@@ -259,7 +259,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                                 <div class="w-2 h-2 rounded-full bg-green-500/50"></div>
                             </div>
                         </div>
-                        <div ref="logsContainerRef" class="flex-grow overflow-y-auto p-6 font-mono text-xs text-gray-400 space-y-1.5 custom-scrollbar">
+                        <div ref="logsContainerRef" class="grow overflow-y-auto p-6 font-mono text-xs text-gray-400 space-y-1.5 custom-scrollbar">
                             <div v-for="(log, i) in activeTask.logs" :key="i" class="flex gap-4">
                                 <span class="text-gray-700 shrink-0 select-none">[{{ new Date(log.timestamp).toLocaleTimeString() }}]</span> 
                                 <span :class="{'text-red-400 font-bold': log.level === 'ERROR', 'text-blue-400': log.level === 'INFO', 'text-yellow-400': log.level === 'WARNING'}">{{ log.message }}</span>
@@ -286,7 +286,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                                 <label class="text-[10px] font-black uppercase text-gray-500 mb-2 block tracking-widest">2. Research Sources</label>
                                 <div class="grid grid-cols-2 gap-2 max-h-40 overflow-y-auto p-2 border rounded-xl dark:border-gray-800">
                                     <button v-for="art in notebook.artefacts" :key="art.filename" @click="toggleWizardArtefact(art.filename)" class="p-2 rounded-lg text-[10px] flex items-center gap-2 text-left transition-all border" :class="wizardData.selected_artefacts.includes(art.filename) ? 'bg-green-50 border-green-500 text-green-700' : 'border-transparent hover:bg-gray-50 text-gray-500'">
-                                        <IconCheckCircle v-if="wizardData.selected_artefacts.includes(art.filename)" class="w-3 h-3 flex-shrink-0" /><IconFileText v-else class="w-3 h-3 opacity-30 flex-shrink-0" /><span class="truncate">{{ art.filename }}</span>
+                                        <IconCheckCircle v-if="wizardData.selected_artefacts.includes(art.filename)" class="w-3 h-3 shrink-0" /><IconFileText v-else class="w-3 h-3 opacity-30 shrink-0" /><span class="truncate">{{ art.filename }}</span>
                                     </button>
                                 </div>
                             </div>
@@ -333,7 +333,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
         </transition>
 
         <!-- LEFT SIDEBAR -->
-        <div class="w-72 border-r dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col flex-shrink-0 transition-all duration-300">
+        <div class="w-72 border-r dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col shrink-0 transition-all duration-300">
             <div class="p-4 border-b dark:border-gray-800 font-black text-[10px] uppercase tracking-widest text-gray-500 flex justify-between items-center">
                 <span>Video Studio</span>
                 <div class="flex gap-2">
@@ -342,7 +342,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                 </div>
             </div>
             
-            <div class="flex-grow overflow-y-auto p-3 space-y-4 custom-scrollbar">
+            <div class="grow overflow-y-auto p-3 space-y-4 custom-scrollbar">
                 <!-- PERSONALITIES PANEL -->
                 <div v-if="showPersonalities" class="bg-blue-50 dark:bg-blue-900/10 rounded-xl p-3 border border-blue-100 dark:border-blue-900/30 mb-4 animate-in slide-in-from-left duration-300">
                     <div class="flex justify-between items-center mb-3">
@@ -356,11 +356,11 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                     
                     <div class="space-y-2">
                         <div v-for="(p, idx) in scriptData.personalities" :key="p.id" class="flex items-center gap-2 bg-white dark:bg-gray-800 p-2 rounded-lg shadow-sm">
-                            <div class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex-shrink-0 overflow-hidden cursor-pointer border border-gray-200 dark:border-gray-600" @click="viewImage(p.image_path)">
+                            <div class="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden cursor-pointer border border-gray-200 dark:border-gray-600" @click="viewImage(p.image_path)">
                                 <AuthenticatedImage v-if="p.image_path" :src="p.image_path" class="w-full h-full object-cover" />
                                 <IconUserGroup v-else class="w-4 h-4 m-2 text-gray-400" />
                             </div>
-                            <div class="min-w-0 flex-grow">
+                            <div class="min-w-0 grow">
                                 <p class="text-xs font-bold truncate">{{ p.name }}</p>
                             </div>
                             <div class="flex gap-1">
@@ -379,7 +379,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                 
                 <div v-if="activeTabId === scriptTab?.id" class="space-y-1">
                     <div v-for="(scene, idx) in scriptData.scenes" :key="idx" @click="selectedSceneIdx = idx" class="group flex items-center justify-between p-2 rounded-lg cursor-pointer text-sm transition-all" :class="selectedSceneIdx === idx ? 'bg-gray-200 dark:bg-gray-700 font-bold text-gray-900 dark:text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800'">
-                        <div class="flex items-center gap-2 truncate min-w-0"><span class="w-4 h-4 flex items-center justify-center bg-gray-300 dark:bg-gray-600 rounded-full text-[8px] flex-shrink-0">{{ idx + 1 }}</span><span class="truncate">{{ scene.title }}</span></div>
+                        <div class="flex items-center gap-2 truncate min-w-0"><span class="w-4 h-4 flex items-center justify-center bg-gray-300 dark:bg-gray-600 rounded-full text-[8px] shrink-0">{{ idx + 1 }}</span><span class="truncate">{{ scene.title }}</span></div>
                         <button @click.stop="removeScene(idx)" class="opacity-0 group-hover:opacity-100 hover:text-red-500 p-1"><IconTrash class="w-3.5 h-3.5" /></button>
                     </div>
                 </div>
@@ -389,7 +389,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
         </div>
 
         <!-- Main Workspace -->
-        <div class="flex-grow flex flex-col relative min-w-0">
+        <div class="grow flex flex-col relative min-w-0">
             <!-- Empty State -->
             <div v-if="scriptData.scenes.length === 0" class="absolute inset-0 flex items-center justify-center p-8 text-center bg-gray-50 dark:bg-gray-900/50">
                 <div class="max-w-md">
@@ -418,8 +418,8 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                         @click="toggleWizardArtefact(art.filename)">
                         
                         <div class="flex items-center gap-2 truncate min-w-0">
-                            <IconCheckCircle v-if="wizardData.selected_artefacts.includes(art.filename)" class="w-3 h-3 flex-shrink-0" />
-                            <IconFileText v-else class="w-3 h-3 opacity-30 flex-shrink-0" />
+                            <IconCheckCircle v-if="wizardData.selected_artefacts.includes(art.filename)" class="w-3 h-3 shrink-0" />
+                            <IconFileText v-else class="w-3 h-3 opacity-30 shrink-0" />
                             <span class="truncate">{{ art.filename }}</span>
                         </div>
 
@@ -434,9 +434,9 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                     </div>
                 </div>
                 <!-- SCENE EDITOR -->
-                <div class="flex-grow overflow-hidden relative">
+                <div class="grow overflow-hidden relative">
                     <div v-if="currentTab.type === 'youtube_script'" class="absolute inset-0 flex flex-col md:flex-row overflow-hidden">
-                        <div class="flex-grow overflow-y-auto p-6 md:p-10 custom-scrollbar bg-gray-50/30 dark:bg-transparent">
+                        <div class="grow overflow-y-auto p-6 md:p-10 custom-scrollbar bg-gray-50/30 dark:bg-transparent">
                             <div v-if="scriptData.scenes[selectedSceneIdx]" class="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-300">
                                 
                                 <!-- Scene Header -->
@@ -502,7 +502,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
         </div>
 
         <div class="p-4 border-t dark:border-gray-800 bg-white dark:bg-gray-900 flex gap-4 shadow-2xl z-20">
-            <div class="relative flex-grow">
+            <div class="relative grow">
                 <input v-model="aiPrompt" @keyup.enter="generateScript" placeholder="Quickly modify script or scene..." class="input-field w-full pr-32" />
                 <div class="flex items-center gap-2 px-2 border-l dark:border-gray-700 absolute right-1 top-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 pl-2 h-8">
                     <input type="checkbox" id="mod-tab" v-model="modifyCurrentTab" class="h-3 w-3 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"/>

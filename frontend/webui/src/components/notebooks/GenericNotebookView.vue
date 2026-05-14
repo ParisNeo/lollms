@@ -28,6 +28,8 @@ import IconClock from '../../assets/icons/IconClock.vue';
 import IconStopCircle from '../../assets/icons/IconStopCircle.vue';
 import IconMagic from '../../assets/icons/IconMagic.vue';
 import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
+import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
+import { useAuthStore } from '../../stores/auth';
 
 const props = defineProps({
     notebook: { type: Object, required: true }
@@ -36,7 +38,12 @@ const props = defineProps({
 const notebookStore = useNotebookStore();
 const uiStore = useUiStore();
 const tasksStore = useTasksStore();
+const authStore = useAuthStore();
 const { tasks } = storeToRefs(tasksStore);
+
+const hasTtsConfigured = computed(() => {
+    return !!authStore.user?.tts_binding_model_name;
+});
 
 const activeTabId = ref(null);
 const isRenderMode = ref(true);
@@ -54,6 +61,7 @@ const exportOptions = [
     { label: 'PDF Document', value: 'pdf' }, { label: 'Word (DOCX)', value: 'docx' }, { label: 'Markdown', value: 'md' }, { label: 'PowerPoint', value: 'pptx' }, { label: 'Text File', value: 'txt' }
 ];
 
+const audioExportOption = { label: 'Audio Reading (WAV)', value: 'wav', icon: IconSpeakerWave };
 const quickActions = [
     { id: 'summarize', label: 'Summarize', icon: IconSparkles, color: 'text-purple-500', bg: 'bg-purple-50 dark:bg-purple-900/20' },
     { id: 'extract_key_points', label: 'Key Points', icon: IconFileText, color: 'text-blue-500', bg: 'bg-blue-50 dark:bg-blue-900/20' },
@@ -169,32 +177,32 @@ function toggleArtefact(name) {
             <div class="flex items-center gap-1">
                 <button @click="handleAutoTabTitle" class="btn-icon-flat text-purple-500" title="Auto-Title"><IconMagic class="w-4 h-4" /></button>
                 <button @click="handleCopy" class="btn-icon-flat text-gray-500 hover:text-blue-500" title="Copy Content"><IconCopy class="w-4 h-4" /></button>
-                <DropdownMenu title="Export" button-class="btn-icon-flat text-gray-500"><template #icon><IconArrowDownTray class="w-4 h-4" /></template><div class="w-48 py-1"><button v-for="opt in exportOptions" :key="opt.value" @click="handleExport(opt.value)" class="w-full text-left px-4 py-2 text-xs font-bold hover:bg-gray-100 dark:hover:bg-gray-800">{{ opt.label }}</button></div></DropdownMenu>
+                <DropdownMenu title="Export" button-class="btn-icon-flat text-gray-500"><template #icon><IconArrowDownTray class="w-4 h-4" /></template><div class="w-48 py-1"><button v-for="opt in exportOptions" :key="opt.value" @click="handleExport(opt.value)" class="w-full text-left px-4 py-2 text-xs font-bold hover:bg-gray-100 dark:hover:bg-gray-800">{{ opt.label }}</button><button v-if="hasTtsConfigured" @click="handleExport(audioExportOption.value)" class="w-full text-left px-4 py-2 text-xs font-bold hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center gap-2 text-blue-600 dark:text-blue-400"><IconSpeakerWave class="w-4 h-4" />{{ audioExportOption.label }}</button></div></DropdownMenu>
                 <div class="flex bg-gray-100 dark:bg-gray-800 p-0.5 rounded-lg border dark:border-gray-700 mx-1"><button @click="isRenderMode = true" class="p-1.5 rounded transition-colors" :class="isRenderMode ? 'bg-white dark:bg-gray-700 shadow text-blue-600' : 'text-gray-400'"><IconEye class="w-3.5 h-3.5"/></button><button @click="isRenderMode = false" class="p-1.5 rounded transition-colors" :class="!isRenderMode ? 'bg-white dark:bg-gray-700 shadow text-blue-600' : 'text-gray-400'"><IconPencil class="w-3.5 h-3.5"/></button></div>
                 <button @click="notebookStore.saveActive" class="btn-icon-flat text-green-500" title="Save All"><IconSave class="w-4 h-4" /></button>
             </div>
         </Teleport>
 
-        <div class="flex-grow flex overflow-hidden">
-            <div class="w-72 border-r dark:border-gray-800 bg-gray-100 dark:bg-gray-900 flex flex-col flex-shrink-0">
+        <div class="grow flex overflow-hidden">
+            <div class="w-72 border-r dark:border-gray-800 bg-gray-100 dark:bg-gray-900 flex flex-col shrink-0">
                 <div class="p-4 border-b dark:border-gray-800 font-black text-[10px] uppercase text-gray-500 flex justify-between items-center"><span>Research Material</span><button @click="uiStore.openModal('artefactImportWizard', { notebookId: props.notebook.id })" class="text-green-500"><IconPlus class="w-4 h-4" /></button></div>
-                <div class="flex-grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
+                <div class="grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
                     <div v-for="art in notebook.artefacts" :key="art.filename" @click="toggleArtefact(art.filename)" class="flex items-center gap-2 p-3 rounded-lg cursor-pointer group bg-white dark:bg-gray-800 border transition-all" :class="selectedArtefactNames.includes(art.filename) ? 'border-green-500' : 'border-transparent'">
                         <IconCheckCircle v-if="selectedArtefactNames.includes(art.filename)" class="w-4 h-4 text-green-500" /><IconFileText v-else class="w-4 h-4 text-gray-400 opacity-50" /><span class="truncate text-xs font-bold">{{ art.filename }}</span>
                     </div>
                 </div>
             </div>
 
-            <div class="flex-grow flex flex-col min-w-0 bg-white dark:bg-gray-900">
+            <div class="grow flex flex-col min-w-0 bg-white dark:bg-gray-900">
                 <div class="border-b dark:border-gray-800 flex overflow-x-auto pt-2 px-2 shadow-sm bg-gray-50 dark:bg-gray-900">
                     <div v-for="tab in notebook.tabs" :key="tab.id" @click="activeTabId = tab.id" class="group px-4 py-2 cursor-pointer text-[10px] font-black uppercase transition-all flex items-center gap-2 border-t border-x rounded-t-xl mx-0.5 min-w-[120px] max-w-[200px] h-9" :class="activeTabId === tab.id ? 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-blue-600' : 'text-gray-400 border-transparent hover:text-gray-600'">
                         <input v-if="editingTabId === tab.id" :id="`tab-input-${tab.id}`" v-model="tabTitleInput" @blur="saveTabTitle" @keyup.enter="saveTabTitle" class="bg-transparent border-none outline-none w-full p-0 text-[10px] font-black uppercase text-blue-600" />
-                        <span v-else class="truncate flex-grow" @dblclick="startEditingTab(tab)">{{ tab.title }}</span>
+                        <span v-else class="truncate grow" @dblclick="startEditingTab(tab)">{{ tab.title }}</span>
                         <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100"><button @click.stop="startEditingTab(tab)" class="p-0.5 hover:text-blue-500"><IconPencil class="w-2.5 h-2.5"/></button><button v-if="tab.title !== 'Main Draft'" @click.stop="notebookStore.removeTab(tab.id)" class="p-0.5 hover:text-red-500"><IconXMark class="w-3 h-3"/></button></div>
                     </div>
                 </div>
 
-                <div class="flex-grow overflow-hidden relative">
+                <div class="grow overflow-hidden relative">
                     <!-- TERMINAL UI -->
                     <div v-if="isCurrentTabProcessing && activeTask" class="absolute inset-0 z-50 flex flex-col bg-slate-900/95 backdrop-blur-sm animate-in fade-in duration-300">
                         <div class="p-6 border-b border-white/10 flex items-center justify-between">
@@ -207,8 +215,8 @@ function toggleArtefact(name) {
                                 <button @click="stopTask" class="btn btn-danger px-8 py-3 rounded-xl flex items-center gap-2 shadow-2xl"><IconStopCircle class="w-6 h-6" /> Stop</button>
                             </div>
                         </div>
-                        <div class="flex-grow flex flex-col min-h-0 m-8 bg-black rounded-3xl border border-white/10 shadow-2xl overflow-hidden font-mono">
-                            <div ref="logsContainerRef" class="flex-grow overflow-y-auto p-8 text-xs text-gray-400 space-y-2 custom-scrollbar">
+                        <div class="grow flex flex-col min-h-0 m-8 bg-black rounded-3xl border border-white/10 shadow-2xl overflow-hidden font-mono">
+                            <div ref="logsContainerRef" class="grow overflow-y-auto p-8 text-xs text-gray-400 space-y-2 custom-scrollbar">
                                 <div v-for="(log, i) in activeTask.logs" :key="i" class="flex gap-4">
                                     <span class="text-gray-700 shrink-0 select-none">[{{ new Date(log.timestamp).toLocaleTimeString() }}]</span> 
                                     <span :class="{'text-red-400 font-bold': log.level === 'ERROR', 'text-blue-400': log.level === 'INFO', 'text-green-400': log.level === 'SUCCESS'}">{{ log.message }}</span>
@@ -240,7 +248,7 @@ function toggleArtefact(name) {
                 </button>
             </div>
             <div class="max-w-6xl mx-auto w-full flex gap-2 relative">
-                <input v-model="aiPrompt" @keyup.enter="handleAction('text_processing')" placeholder="Ask AI to analyze or write..." class="input-field flex-grow pr-64 h-12 rounded-xl text-sm" />
+                <input v-model="aiPrompt" @keyup.enter="handleAction('text_processing')" placeholder="Ask AI to analyze or write..." class="input-field grow pr-64 h-12 rounded-xl text-sm" />
                 <div class="absolute right-14 top-1/2 -translate-y-1/2 flex items-center gap-4 border-l dark:border-gray-700 pl-3 pr-2 bg-white dark:bg-gray-800 h-8">
                     <label class="flex items-center gap-1.5 cursor-pointer group"><input type="checkbox" v-model="useRlm" class="h-3 w-3 rounded text-purple-600 focus:ring-purple-500"/><span class="text-[9px] font-black uppercase text-gray-400 group-hover:text-purple-500 select-none">RLM Mode</span></label>
                     <label class="flex items-center gap-1.5 cursor-pointer group"><input type="checkbox" v-model="modifyCurrentTab" class="h-3 w-3 rounded text-blue-600 focus:ring-blue-500"/><span class="text-[9px] font-black uppercase text-gray-400 group-hover:text-blue-500 select-none">Update Active</span></label>

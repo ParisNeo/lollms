@@ -1,10 +1,19 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { resolve } from 'path'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    tailwindcss(),
+    vue(),
+  ],
+  resolve: {
+    alias: {
+      '@': resolve(__dirname, './src'),  // add this
+    }
+  },  
   server: {
     // Proxy API requests to the backend server to avoid CORS issues during development
     proxy: {
@@ -25,7 +34,7 @@ export default defineConfig({
         ws: true,
         changeOrigin: true,
       },
-       '/favicon.ico': {
+      '/favicon.ico': {
         target: 'http://localhost:9642',
         changeOrigin: true,
       },
@@ -40,5 +49,6 @@ export default defineConfig({
     assetsDir: 'ui_assets', // Changed from 'assets' to prevent conflict with backend /assets route
     // This ensures that the output directory is cleared before each build.
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1000, // raise to 1MB to silence for now
   },
 })

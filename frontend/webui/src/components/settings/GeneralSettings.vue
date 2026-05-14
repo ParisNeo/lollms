@@ -138,38 +138,38 @@ async function handleSave() {
 
                 <div class="space-y-6 pt-6 border-t dark:border-gray-700">
                     <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                        <span class="flex-grow flex flex-col pr-4">
+                        <span class="grow flex flex-col pr-4">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Auto Generate Discussion Titles</span>
                             <span class="text-xs text-gray-500 dark:text-gray-400">Automatically create a title for new discussions.</span>
                         </span>
-                        <button @click="form.auto_title = !form.auto_title" type="button" :class="[form.auto_title ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                        <button @click="form.auto_title = !form.auto_title" type="button" :class="[form.auto_title ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                             <span :class="[form.auto_title ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
                      <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                        <span class="flex-grow flex flex-col pr-4">
+                        <span class="grow flex flex-col pr-4">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Show Token Counter</span>
                             <span class="text-xs text-gray-500 dark:text-gray-400">Display a token counter in the chat input bar.</span>
                         </span>
-                        <button @click="form.show_token_counter = !form.show_token_counter" type="button" :class="[form.show_token_counter ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                        <button @click="form.show_token_counter = !form.show_token_counter" type="button" :class="[form.show_token_counter ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                             <span :class="[form.show_token_counter ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
                     <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                        <span class="flex-grow flex flex-col pr-4">
+                        <span class="grow flex flex-col pr-4">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Fun Mode</span>
                              <span class="text-xs text-gray-500 dark:text-gray-400">Enables more playful and whimsical AI responses.</span>
                         </span>
-                         <button @click="form.fun_mode = !form.fun_mode" type="button" :class="[form.fun_mode ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                         <button @click="form.fun_mode = !form.fun_mode" type="button" :class="[form.fun_mode ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                             <span :class="[form.fun_mode ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
                     <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                        <span class="flex-grow flex flex-col pr-4">
+                        <span class="grow flex flex-col pr-4">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Include AI Thoughts in Context</span>
                             <span class="text-xs text-gray-500 dark:text-gray-400">AI's internal "thoughts" will be part of the next turn's history.</span>
                         </span>
-                        <button @click="form.put_thoughts_in_context = !form.put_thoughts_in_context" type="button" :class="[form.put_thoughts_in_context ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                        <button @click="form.put_thoughts_in_context = !form.put_thoughts_in_context" type="button" :class="[form.put_thoughts_in_context ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                             <span :class="[form.put_thoughts_in_context ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>

@@ -105,7 +105,7 @@ const isSourceList = computed(() => {
           <div v-for="([key, value]) in objectEntries" :key="key" class="flex flex-col gap-y-1 py-1 border-b border-gray-100 dark:border-gray-800 last:border-0">
             <div class="flex items-center gap-2">
                 <span class="text-[9px] font-black text-blue-500 uppercase tracking-widest">{{ key }}</span>
-                <div class="h-px flex-grow bg-gray-50 dark:bg-gray-800/50"></div>
+                <div class="h-px grow bg-gray-50 dark:bg-gray-800/50"></div>
             </div>
             
             <!-- Beautiful Rendering for 'content' key -->
@@ -144,6 +144,7 @@ const isSourceList = computed(() => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .step-detail-node { @apply w-full; }
 .type-string { @apply leading-relaxed; }
 </style>

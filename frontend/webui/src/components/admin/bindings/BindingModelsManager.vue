@@ -333,13 +333,13 @@ watch(() => props.binding, (newBinding) => {
 
 <template>
     <div class="flex flex-col h-[70vh]">
-        <div v-if="isLoading" class="flex-grow flex items-center justify-center">
+        <div v-if="isLoading" class="grow flex items-center justify-center">
             <div class="text-center">
                 <IconAnimateSpin class="w-8 h-8 text-blue-500 mx-auto mb-2" />
                 <p>Loading models...</p>
             </div>
         </div>
-        <div v-else class="flex flex-grow overflow-hidden">
+        <div v-else class="flex grow overflow-hidden">
             <!-- Model List -->
             <div class="w-1/3 border-r dark:border-gray-700 pr-4 flex flex-col min-w-[250px]">
                 <div class="relative mb-2">
@@ -348,17 +348,17 @@ watch(() => props.binding, (newBinding) => {
                          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                      </div>
                 </div>
-                <div class="overflow-y-auto flex-grow">
+                <div class="overflow-y-auto grow">
                     <ul v-if="filteredModels.length > 0" class="space-y-1">
                         <li v-for="model in filteredModels" :key="model.original_model_name">
                             <button @click="selectModel(model)"
                                     class="w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between transition-colors"
                                     :class="{'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-100': selectedModel && selectedModel.original_model_name === model.original_model_name}">
-                                <div class="flex-grow min-w-0">
+                                <div class="grow min-w-0">
                                     <p class="font-medium text-sm truncate">{{ model.alias?.title || model.original_model_name }}</p>
                                     <p v-if="model.alias" class="text-xs opacity-70 truncate">{{ model.original_model_name }}</p>
                                 </div>
-                                <div class="flex-shrink-0 flex items-center gap-1">
+                                <div class="shrink-0 flex items-center gap-1">
                                     <span v-if="isBindingDefault(model.original_model_name)" class="w-2 h-2 rounded-full bg-blue-500" title="Binding Default"></span>
                                     <span v-if="isGlobalDefault(model.original_model_name)" class="w-2 h-2 rounded-full bg-green-500" title="Global Default"></span>
                                 </div>
@@ -387,7 +387,7 @@ watch(() => props.binding, (newBinding) => {
                     <form @submit.prevent="saveAlias" class="space-y-5 pb-6">
 
                         <div class="flex gap-4">
-                            <div class="flex-shrink-0">
+                            <div class="shrink-0">
                                 <label class="label mb-1">Icon</label>
                                 <div class="group relative w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 flex items-center justify-center bg-gray-50 dark:bg-gray-800">
                                     <img v-if="form.icon" :src="form.icon" alt="Icon" class="w-full h-full object-cover rounded-md">
@@ -404,7 +404,7 @@ watch(() => props.binding, (newBinding) => {
                                     </div>
                                 </div>
                             </div>
-                            <div class="flex-grow space-y-3">
+                            <div class="grow space-y-3">
                                 <div>
                                     <label for="alias-title" class="label">Alias Title</label>
                                     <input id="alias-title" v-model="form.title" type="text" class="input-field" placeholder="Friendly Name">
@@ -455,7 +455,7 @@ watch(() => props.binding, (newBinding) => {
                                         :placeholder="param.help || ''"
                                     />
                                      <div v-else-if="param.type === 'bool'" class="mt-1">
-                                         <button type="button" @click="form[param.name] = !form[param.name]" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
+                                         <button type="button" @click="form[param.name] = !form[param.name]" :class="[form[param.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
                                             <span :class="[form[param.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                                         </button>
                                      </div>
@@ -470,7 +470,7 @@ watch(() => props.binding, (newBinding) => {
                                     <IconEye class="w-4 h-4 text-gray-500" />
                                     <span class="text-sm font-medium">Vision Support</span>
                                 </div>
-                                <button type="button" @click="form.has_vision = !form.has_vision" :class="[form.has_vision ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
+                                <button type="button" @click="form.has_vision = !form.has_vision" :class="[form.has_vision ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
                                     <span :class="[form.has_vision ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                                 </button>
                             </div>
@@ -480,7 +480,7 @@ watch(() => props.binding, (newBinding) => {
                              <div class="flex items-center gap-2">
                                 <span class="text-sm font-medium">Allow User Overrides</span>
                             </div>
-                            <button type="button" @click="form.allow_parameters_override = !form.allow_parameters_override" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
+                            <button type="button" @click="form.allow_parameters_override = !form.allow_parameters_override" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
                                 <span :class="[form.allow_parameters_override ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>

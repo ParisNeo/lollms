@@ -140,12 +140,12 @@ function handleBulkEmail() {
                class="group flex items-center gap-3 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors mb-1"
                @click="isSelectionMode ? toggleSelection(note.id) : handleNoteClick(note)">
               
-              <div v-if="isSelectionMode" class="flex-shrink-0">
+              <div v-if="isSelectionMode" class="shrink-0">
                   <input type="checkbox" :checked="selectedNoteIds.has(note.id)" class="rounded border-gray-300">
               </div>
 
-              <div class="flex items-center gap-2 min-w-0 flex-grow">
-                  <div class="p-1.5 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 flex-shrink-0 border border-amber-100 dark:border-amber-800">
+              <div class="flex items-center gap-2 min-w-0 grow">
+                  <div class="p-1.5 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 shrink-0 border border-amber-100 dark:border-amber-800">
                       <IconPencil class="w-3.5 h-3.5" />
                   </div>
                   <div class="flex flex-col min-w-0 leading-tight">

@@ -116,12 +116,12 @@ async function handleShare(prompt) {
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 h-[60vh]">
                 <!-- Prompt List -->
                 <div class="md:col-span-1 flex flex-col h-full bg-gray-50 dark:bg-gray-700/50 rounded-lg p-2">
-                    <div class="flex-shrink-0 mb-2">
+                    <div class="shrink-0 mb-2">
                         <button @click="startNewPrompt" class="btn btn-secondary w-full">
                             <IconPlus class="w-4 h-4 mr-2" /> New Prompt
                         </button>
                     </div>
-                    <div class="flex-grow overflow-y-auto">
+                    <div class="grow overflow-y-auto">
                         <div v-if="promptsStore.isLoading" class="text-center p-4 text-sm">Loading...</div>
                         <div v-else-if="savedPrompts.length === 0" class="text-center p-4 text-sm text-gray-500">No saved prompts.</div>
                         <ul v-else class="space-y-1">
@@ -141,9 +141,9 @@ async function handleShare(prompt) {
                             <label class="block text-sm font-medium">Prompt Name</label>
                             <input type="text" v-model="newPromptName" class="input-field mt-1" placeholder="A descriptive name for your prompt" />
                         </div>
-                        <div class="flex-grow flex flex-col min-h-0">
+                        <div class="grow flex flex-col min-h-0">
                             <label class="block text-sm font-medium mb-1">Prompt Content</label>
-                            <CodeMirrorEditor v-model="newPromptContent" class="flex-grow" placeholder="Enter your prompt here. Use @<name:type:default>@ for placeholders." />
+                            <CodeMirrorEditor v-model="newPromptContent" class="grow" placeholder="Enter your prompt here. Use @<name:type:default>@ for placeholders." />
                         </div>
                     </div>
                     <div v-else class="flex items-center justify-center h-full bg-gray-50 dark:bg-gray-700/50 rounded-lg">

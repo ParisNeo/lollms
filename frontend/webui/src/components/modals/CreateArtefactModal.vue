@@ -164,9 +164,9 @@ async function handleSubmit() {
                     </button>
                 </div>
 
-                <div class="flex-grow flex flex-col min-h-[400px]">
+                <div class="grow flex flex-col min-h-[400px]">
                     <label class="label mb-1">Content</label>
-                    <div class="flex-grow border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden relative shadow-inner">
+                    <div class="grow border border-gray-300 dark:border-gray-600 rounded-md overflow-hidden relative shadow-inner">
                         <CodeMirrorEditor 
                             v-model="content" 
                             class="h-full absolute inset-0"

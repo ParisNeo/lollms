@@ -34,7 +34,7 @@ function openTasksManager() {
             : 'btn-icon'">
         
         <template v-if="mostRecentActiveTask">
-            <div class="relative w-6 h-6 flex-shrink-0">
+            <div class="relative w-6 h-6 shrink-0">
                 <svg class="w-full h-full" viewBox="0 0 36 36">
                     <circle
                         class="text-gray-300 dark:text-gray-600"

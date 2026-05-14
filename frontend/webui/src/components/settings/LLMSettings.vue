@@ -168,12 +168,12 @@ async function handleSave() {
                         <button ref="llmTriggerRef" @click="isLlmMenuOpen = !isLlmMenuOpen" type="button" class="toolbox-select truncate w-full flex items-center justify-between">
                             <div class="flex items-center space-x-3 truncate">
                                 <img v-if="selectedModel?.icon_base64" :src="selectedModel.icon_base64" class="h-8 w-8 rounded-md object-cover"/>
-                                <span v-else class="w-8 h-8 flex-shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconCpuChip class="w-5 h-5" /></span>
+                                <span v-else class="w-8 h-8 shrink-0 text-gray-500 dark:text-gray-400 flex items-center justify-center bg-gray-200 dark:bg-gray-700 rounded-md"><IconCpuChip class="w-5 h-5" /></span>
                                 <div class="min-w-0 text-left">
                                     <span class="block font-semibold truncate">{{ selectedModel?.name || 'Select a Model' }}</span>
                                 </div>
                             </div>
-                            <svg class="w-4 h-4 text-gray-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
+                            <svg class="w-4 h-4 text-gray-400 shrink-0" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /></svg>
                         </button>
                         <Teleport to="body">
                             <Transition enter-active-class="transition ease-out duration-100" enter-from-class="transform opacity-0 scale-95" enter-to-class="transform opacity-100 scale-100" leave-active-class="transition ease-in duration-75" leave-from-class="transform opacity-100 scale-100" leave-to-class="transform opacity-0 scale-95">
@@ -181,17 +181,17 @@ async function handleSave() {
                                     <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                         <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full">
                                     </div>
-                                    <div class="p-1 flex-grow overflow-y-auto">
+                                    <div class="p-1 grow overflow-y-auto">
                                         <div v-if="isLoadingLollmsModels" class="text-center p-4 text-sm text-gray-500">Loading models...</div>
                                         <div v-for="group in filteredAvailableLLMModels" :key="group.label">
                                             <h4 class="px-2 py-1.5 text-xs font-bold text-gray-600 dark:text-gray-300">{{ group.label }}</h4>
                                             <button v-for="item in group.items" :key="item.id" @click="selectModel(item.id)" class="menu-item-button" :class="{'selected': activeModelName === item.id}">
                                                 <div class="flex items-center space-x-3 truncate">
-                                                    <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover flex-shrink-0" />
-                                                    <IconCpuChip v-else class="w-6 h-6 p-0.5 text-gray-500 dark:text-gray-400 flex-shrink-0" />
+                                                    <img v-if="item.icon_base64" :src="item.icon_base64" class="h-6 w-6 rounded-md object-cover shrink-0" />
+                                                    <IconCpuChip v-else class="w-6 h-6 p-0.5 text-gray-500 dark:text-gray-400 shrink-0" />
                                                     <div class="truncate text-left"><p class="font-medium truncate text-sm">{{ item.name }}</p></div>
                                                 </div>
-                                                <div class="flex items-center gap-2 flex-shrink-0">
+                                                <div class="flex items-center gap-2 shrink-0">
                                                     <IconCheckCircle v-if="activeModelName === item.id" class="w-5 h-5 text-blue-600 dark:text-blue-400" />
                                                     <IconEye v-if="item.alias?.has_vision" class="w-5 h-5 text-green-500" title="Vision active" />
                                                 </div>
@@ -238,11 +238,11 @@ async function handleSave() {
                     <h3 class="font-semibold text-gray-800 dark:text-gray-200 mb-3">Reasoning Capabilities</h3>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6" :class="{'opacity-60': areSettingsForced}">
                         <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                            <span class="flex-grow flex flex-col pr-4">
+                            <span class="grow flex flex-col pr-4">
                                 <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Reasoning (Thinking)</span>
                                 <span class="text-xs text-gray-500 dark:text-gray-400">Activates thought generation if supported by the model.</span>
                             </span>
-                            <button @click="form.reasoning_activation = !form.reasoning_activation" type="button" :disabled="areSettingsForced" :class="[form.reasoning_activation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                            <button @click="form.reasoning_activation = !form.reasoning_activation" type="button" :disabled="areSettingsForced" :class="[form.reasoning_activation ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                                 <span :class="[form.reasoning_activation ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
@@ -259,22 +259,22 @@ async function handleSave() {
                         </div>
 
                         <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                             <span class="flex-grow flex flex-col pr-4">
+                             <span class="grow flex flex-col pr-4">
                                 <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Reasoning Summary</span>
                                 <span class="text-xs text-gray-500 dark:text-gray-400">Enable summarization of reasoning steps in output.</span>
                             </span>
-                            <button @click="form.reasoning_summary = !form.reasoning_summary" type="button" :disabled="areSettingsForced" :class="[form.reasoning_summary ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                            <button @click="form.reasoning_summary = !form.reasoning_summary" type="button" :disabled="areSettingsForced" :class="[form.reasoning_summary ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                                 <span :class="[form.reasoning_summary ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
                         
                          <!-- Toggle for 'think' blocks -->
                         <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-3 rounded-md">
-                             <span class="flex-grow flex flex-col pr-4">
+                             <span class="grow flex flex-col pr-4">
                                 <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Include "think" blocks in context</span>
                                 <span class="text-xs text-gray-500 dark:text-gray-400">Allows the AI to see its previous reasoning steps.</span>
                             </span>
-                            <button @click="form.put_thoughts_in_context = !form.put_thoughts_in_context" type="button" :disabled="areSettingsForced" :class="[form.put_thoughts_in_context ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                            <button @click="form.put_thoughts_in_context = !form.put_thoughts_in_context" type="button" :disabled="areSettingsForced" :class="[form.put_thoughts_in_context ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                                 <span :class="[form.put_thoughts_in_context ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
@@ -294,6 +294,8 @@ async function handleSave() {
     </div>
 </template>
 <style scoped>
+@reference "tailwindcss";
+
 .toolbox-select { @apply w-full text-left text-sm px-2.5 py-1.5 bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500; }
 .menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2; }
 .menu-item-button.selected { @apply bg-blue-100 dark:bg-blue-900/50 font-semibold; }

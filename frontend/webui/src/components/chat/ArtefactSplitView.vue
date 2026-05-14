@@ -439,7 +439,7 @@ function download() {
                 Undo
             </button>
             
-            <div class="flex-grow"></div>
+            <div class="grow"></div>
             
             <!-- Export Dropdown -->
             <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" collection="ui">

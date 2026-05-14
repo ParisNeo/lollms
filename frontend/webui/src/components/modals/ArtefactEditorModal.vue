@@ -170,13 +170,13 @@ async function handleSubmit() {
                 </div>
                 <!-- New Switch for Update In-Place -->
                 <div v-if="isEditing" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <span class="flex-grow flex flex-col">
+                    <span class="grow flex flex-col">
                         <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Update Current Version</span>
                         <span class="text-sm text-gray-500 dark:text-gray-400">
                             {{ updateInPlace ? 'Overwrite this version directly.' : 'Create a new version with your changes.' }}
                         </span>
                     </span>
-                    <button @click="updateInPlace = !updateInPlace" type="button" :class="[updateInPlace ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                    <button @click="updateInPlace = !updateInPlace" type="button" :class="[updateInPlace ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                         <span :class="[updateInPlace ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
                     </button>
                 </div>

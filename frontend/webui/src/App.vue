@@ -173,10 +173,10 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
         <div v-if="isFunFactHanging" class="fixed inset-0 bg-white/40 dark:bg-black/60 backdrop-blur-md z-[140] transition-all duration-500" @click="toggleFactHang"></div>
 
         <!-- Main Layout Container: Splits Top branding/fact from Bottom progress -->
-        <div class="flex-grow flex flex-col relative z-10 transition-all duration-500" :class="{'blur-lg opacity-10 scale-95 pointer-events-none': isFunFactHanging}">
+        <div class="grow flex flex-col relative z-10 transition-all duration-500" :class="{'blur-lg opacity-10 scale-95 pointer-events-none': isFunFactHanging}">
             
             <!-- Branding & Fact Group: Pushed toward top-middle -->
-            <div class="flex-grow flex flex-col items-center justify-center p-6 space-y-8 sm:space-y-12">
+            <div class="grow flex flex-col items-center justify-center p-6 space-y-8 sm:space-y-12">
                 
                 <!-- Branding -->
                 <div class="text-center splash-branding">
@@ -260,11 +260,11 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     </div>
 
     <!-- Main Layout -->
-    <div v-else-if="layoutState === 'authenticated'" class="flex flex-col flex-grow min-h-0 relative overflow-hidden">
+    <div v-else-if="layoutState === 'authenticated'" class="flex flex-col grow min-h-0 relative overflow-hidden">
       <!-- HEADER NOW ON TOP OF EVERYTHING -->
       <GlobalHeader />
       
-      <div class="flex flex-grow min-h-0 relative w-full h-full">
+      <div class="flex grow min-h-0 relative w-full h-full">
         <!-- Main Sidebar (Discussions, etc.) -->
         <div v-if="showMainSidebar" class="absolute md:relative inset-y-0 left-0 z-40 md:z-auto transition-transform duration-300 ease-in-out h-full" :class="isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'"><Sidebar/></div>
         <div v-if="showMainSidebar && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/30 z-30 md:hidden"></div>
@@ -280,7 +280,7 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     </div>
     
     <!-- Guest Layout (Login/Welcome) -->
-    <div v-else-if="layoutState === 'guest'" class="flex flex-col flex-grow min-h-0"><router-view /></div>
+    <div v-else-if="layoutState === 'guest'" class="flex flex-col grow min-h-0"><router-view /></div>
 
     <!-- Global Overlays -->
     <ModalContainer />

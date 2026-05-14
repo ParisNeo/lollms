@@ -9,7 +9,7 @@
       ref="fullscreenOverlayRef"
     >
       <!-- Fullscreen toolbar -->
-      <div class="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 flex-shrink-0">
+      <div class="flex items-center justify-between px-4 py-2 bg-gray-900 border-b border-gray-700 shrink-0">
         <span class="text-xs font-semibold text-gray-300">{{ detectedTypeLabel || 'Mermaid Diagram' }} — Fullscreen</span>
         <div class="flex items-center gap-2">
           <button @click="showSource = !showSource" class="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200 font-medium transition-colors">
@@ -26,7 +26,7 @@
       <!-- Fullscreen body: source pane + diagram -->
       <div class="flex flex-1 min-h-0">
         <!-- Source pane -->
-        <div v-if="showSource" class="w-96 flex-shrink-0 bg-gray-950 border-r border-gray-700 overflow-auto">
+        <div v-if="showSource" class="w-96 shrink-0 bg-gray-950 border-r border-gray-700 overflow-auto">
           <pre class="text-xs text-green-300 p-4 leading-relaxed whitespace-pre-wrap">{{ mermaidCode }}</pre>
         </div>
         <!-- Diagram pane — solid dark background so SVG renders correctly -->

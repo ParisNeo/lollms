@@ -82,7 +82,7 @@ const chartOptions = {
             Count of users currently assigned to each model.
         </p>
 
-        <div class="flex-grow relative">
+        <div class="grow relative">
             <div v-if="isLoadingModelUsageStats" class="absolute inset-0 flex items-center justify-center">
                 <p class="text-gray-500">Loading stats...</p>
             </div>

@@ -69,7 +69,7 @@ async function deleteAlbum(album) {
             :class="{'bg-pink-50 dark:bg-pink-900/20': selectedAlbumId === null}"
         >
             <div class="flex items-center gap-3 min-w-0">
-                <IconPhoto class="w-4 h-4 flex-shrink-0 text-pink-500" />
+                <IconPhoto class="w-4 h-4 shrink-0 text-pink-500" />
                 <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">All Images</span>
             </div>
         </div>
@@ -80,7 +80,7 @@ async function deleteAlbum(album) {
              @click="selectAlbum(album.id)"
         >
             <div class="flex items-center gap-3 min-w-0">
-                <IconFolder class="w-4 h-4 flex-shrink-0 text-yellow-500" />
+                <IconFolder class="w-4 h-4 shrink-0 text-yellow-500" />
                 <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ album.name }}</span>
             </div>
             
@@ -99,5 +99,7 @@ async function deleteAlbum(album) {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .menu-item { @apply flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left; }
 </style>

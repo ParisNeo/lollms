@@ -166,7 +166,7 @@ watch(() => props.userId, (newId) => {
         {{ isLoading ? 'Reloading...' : 'Reload Data' }}
       </button>
       <button @click="exportChart" class="btn btn-secondary">Export Image</button>
-      <div class="flex-grow"></div>
+      <div class="grow"></div>
       <button @click="uiStore.closeModal('userStats')" class="btn btn-primary">Close</button>
     </template>
   </GenericModal>

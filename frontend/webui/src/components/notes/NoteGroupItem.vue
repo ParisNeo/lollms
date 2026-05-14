@@ -45,7 +45,7 @@ function toggle() {
 <template>
     <div>
         <div class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer group" :style="{ paddingLeft }">
-            <div class="flex items-center gap-2 flex-grow min-w-0" @click="toggle">
+            <div class="flex items-center gap-2 grow min-w-0" @click="toggle">
                 <IconFolder class="w-4 h-4 text-yellow-500" />
                 <span class="text-sm font-medium truncate">{{ group.name }}</span>
                 <span class="text-xs text-gray-500 bg-gray-200 dark:bg-gray-700 px-1.5 rounded-full">{{ group.notes.length }}</span>
@@ -87,12 +87,12 @@ function toggle() {
                  :class="{ 'selected': activeNoteMenuId === note.id }"
                  @click="selectionMode ? emit('toggle-select', note.id) : emit('note-click', note)">
                 
-                <div v-if="selectionMode" class="flex-shrink-0 mr-2">
+                <div v-if="selectionMode" class="shrink-0 mr-2">
                     <input type="checkbox" :checked="selectedIds.has(note.id)" class="rounded border-gray-300">
                 </div>
 
-                <div class="flex items-center gap-3 min-w-0 flex-grow">
-                    <IconPencil class="w-4 h-4 flex-shrink-0 text-amber-500" />
+                <div class="flex items-center gap-3 min-w-0 grow">
+                    <IconPencil class="w-4 h-4 shrink-0 text-amber-500" />
                     <p class="discussion-title">{{ note.title || 'Untitled' }}</p>
                 </div>
 

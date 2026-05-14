@@ -154,13 +154,13 @@ async function handleRefreshModels() {
 </script>
 
 <template>
-  <header class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 h-14 flex items-center justify-between px-3 sm:px-4 z-[50] relative shadow-sm">
+  <header class="shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 h-14 flex items-center justify-between px-3 sm:px-4 z-[50] relative shadow-sm">
     
     <!-- Left: Logo & Sidebar Toggle & Model Selector -->
     <div class="flex items-center gap-2 sm:gap-4 min-w-0">
         <!-- Logo / Home Link -->
-        <router-link to="/" class="flex items-center gap-2 flex-shrink-0 group">
-             <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
+        <router-link to="/" class="flex items-center gap-2 shrink-0 group">
+             <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
              <span class="hidden md:inline font-black text-lg tracking-tighter text-blue-600 dark:text-blue-400">LoLLMs</span>
         </router-link>
 
@@ -178,7 +178,7 @@ async function handleRefreshModels() {
             <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" 
                 class="flex items-center gap-2 px-1.5 py-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors group border border-transparent hover:border-gray-200 dark:hover:border-gray-600">
                 <!-- Personality Avatar -->
-                <div class="w-8 h-8 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 flex-shrink-0 border border-gray-300 dark:border-gray-600 shadow-sm relative">
+                <div class="w-8 h-8 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 shrink-0 border border-gray-300 dark:border-gray-600 shadow-sm relative">
                      <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="w-full h-full object-cover" />
                      <IconUserCircle v-else class="w-full h-full p-1 text-gray-500" />
                      <!-- Tiny Model Icon Overlay -->
@@ -219,14 +219,14 @@ async function handleRefreshModels() {
 
                          <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full"></div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                            <div class="p-1 grow overflow-y-auto max-h-96">
                                 <button @click="selectModel(null)" class="menu-item-button" :class="{'selected': !activeModelName}"><span class="truncate">None</span></button>
                                 <div v-for="group in filteredAvailableModels" :key="group.label">
                                     <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
                                     <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
-                                        <button @click="selectModel(item.id)" class="menu-item-button flex-grow !justify-between" :class="{'selected': activeModelName === item.id}">
+                                        <button @click="selectModel(item.id)" class="menu-item-button grow !justify-between" :class="{'selected': activeModelName === item.id}">
                                             <span class="truncate pr-2">{{ item.name }}</span>
-                                            <div class="flex items-center gap-1.5 flex-shrink-0">
+                                            <div class="flex items-center gap-1.5 shrink-0">
                                                 <IconEye v-if="item.alias?.has_vision" class="w-3.5 h-3.5 text-green-500" title="Vision Support" />
                                                 <button 
                                                     @click.stop="uiStore.openModal('modelCard', { model: item })" 
@@ -252,7 +252,7 @@ async function handleRefreshModels() {
                                     <input type="text" v-model="personalitySearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full">
                                 </div>
                             </div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-96">
+                            <div class="p-1 grow overflow-y-auto max-h-96">
                                 <div v-for="group in filteredAvailablePersonalities" :key="group.label">
                                      <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
                                      <div v-for="item in group.items" :key="item.id" class="relative group/p">
@@ -271,15 +271,15 @@ async function handleRefreshModels() {
                          <div class="border-t dark:border-gray-700 my-1"></div>
                          <DropdownSubmenu v-if="!user.tti_model_forced" title="Image Generation" icon="photo" :icon-src="selectedTtiModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtiModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtiModel(item.id)" class="menu-item-button" :class="{'selected': activeTtiModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
+                            <div class="p-1 grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtiModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtiModel(item.id)" class="menu-item-button" :class="{'selected': activeTtiModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
                          </DropdownSubmenu>
                          <DropdownSubmenu v-if="!user.tts_model_forced" title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.alias?.icon">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtsModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
+                            <div class="p-1 grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtsModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
                          </DropdownSubmenu>
                          <DropdownSubmenu v-if="!user.stt_model_forced" title="Speech-to-Text" icon="microphone" :icon-src="selectedSttModel?.alias?.icon">
                              <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
-                            <div class="p-1 flex-grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableSttModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectSttModel(item.id)" class="menu-item-button" :class="{'selected': activeSttModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
+                            <div class="p-1 grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableSttModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectSttModel(item.id)" class="menu-item-button" :class="{'selected': activeSttModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
                          </DropdownSubmenu>
                      </div>
                 </Transition>
@@ -300,7 +300,7 @@ async function handleRefreshModels() {
     </div>
 
     <!-- Right: Actions, System Tools & User Profile -->
-    <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+    <div class="flex items-center gap-1 sm:gap-2 shrink-0">
         <!-- Portal Target for View-Specific Actions -->
         <div id="global-header-actions-target" class="flex items-center gap-1 mr-1 sm:mr-3"></div>
         
@@ -336,6 +336,8 @@ async function handleRefreshModels() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .menu-item { @apply w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center; }
 .menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2 text-sm text-gray-700 dark:text-gray-200; }
 .menu-item-button.selected { @apply bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 font-medium; }

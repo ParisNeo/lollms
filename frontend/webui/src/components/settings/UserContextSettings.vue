@@ -457,7 +457,7 @@ async function handleSaveChanges() {
                     <div v-if="herdDynamicMode" class="space-y-3">
                         <div class="flex justify-between items-center"><label class="text-xs font-bold">Model Pool</label><button @click="addModelToPool" class="btn btn-secondary btn-xs"><IconPlus class="w-3 h-3 mr-1"/> Add</button></div>
                         <div v-for="(item, index) in herdModelPool" :key="'pool-'+index" class="flex gap-2 items-start bg-gray-50 dark:bg-gray-900 p-3 rounded border dark:border-gray-700">
-                            <div class="flex-grow grid grid-cols-2 gap-2">
+                            <div class="grow grid grid-cols-2 gap-2">
                                 <select v-model="item.model" class="input-field text-xs"><option v-for="m in availableLollmsModels" :key="m.id" :value="m.id">{{ m.name }}</option></select>
                                 <input type="text" v-model="item.description" class="input-field text-xs" placeholder="e.g. Creative Expert">
                             </div>
@@ -637,6 +637,8 @@ async function handleSaveChanges() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .section-card { @apply p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm; }
 .toggle-switch { @apply relative inline-flex items-center cursor-pointer; }
 .toggle-switch input { @apply sr-only; }

@@ -184,13 +184,13 @@ defineExpose({ openRunner: () => showRunnerModal.value = true });
 <template>
     <div class="relative w-full h-full flex overflow-hidden">
         <!-- Palette (Grouped) -->
-        <div class="w-64 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col z-10 flex-shrink-0">
+        <div class="w-64 bg-white dark:bg-gray-800 border-r dark:border-gray-700 flex flex-col z-10 shrink-0">
             <div class="p-3 border-b dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/30">
                 <span class="font-black text-[10px] uppercase text-gray-500 tracking-widest">Logic Nodes</span>
                 <button @click="showTutorial = true" class="text-blue-500 hover:text-blue-600"><IconInfo class="w-4 h-4"/></button>
             </div>
             
-            <div class="flex-grow overflow-y-auto custom-scrollbar">
+            <div class="grow overflow-y-auto custom-scrollbar">
                 <div v-for="(groupItems, category) in groupedNodeTypes" :key="category" class="border-b dark:border-gray-700 last:border-0">
                     <button @click="collapsedGroups[category] = !collapsedGroups[category]" 
                             class="w-full flex items-center justify-between p-3 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors group">
@@ -223,7 +223,7 @@ defineExpose({ openRunner: () => showRunnerModal.value = true });
         </div>
 
         <!-- Canvas -->
-        <div class="flex-grow relative bg-gray-100 dark:bg-gray-950 flow-canvas overflow-hidden cursor-grab active:cursor-grabbing pattern-grid" @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp" @wheel="onWheel">
+        <div class="grow relative bg-gray-100 dark:bg-gray-950 flow-canvas overflow-hidden cursor-grab active:cursor-grabbing pattern-grid" @mousedown="onMouseDown" @mousemove="onMouseMove" @mouseup="onMouseUp" @wheel="onWheel">
             <div class="transform-origin-0-0 w-full h-full" :style="{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})` }">
                 <svg class="absolute top-0 left-0 overflow-visible pointer-events-none w-full h-full" style="width:1px;height:1px"><g><path v-for="(c,i) in connections" :key="c.id" :d="getPathD(c)" class="stroke-gray-400 dark:stroke-gray-500 stroke-[3px] fill-none pointer-events-auto hover:stroke-blue-500" @click.stop="deleteConnection(i)" /><path v-if="isLinking" :d="activeLinkPath" class="stroke-blue-400 stroke-[3px] fill-none" stroke-dasharray="5,5" /></g></svg>
                 
@@ -257,6 +257,8 @@ defineExpose({ openRunner: () => showRunnerModal.value = true });
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .transform-origin-0-0 { transform-origin: 0 0; }
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }

@@ -96,20 +96,20 @@ watch(() => props.binding, () => {
              </div>
         </div>
 
-        <div v-if="isLoadingZoo" class="flex-grow flex items-center justify-center">
+        <div v-if="isLoadingZoo" class="grow flex items-center justify-center">
              <div class="text-center">
                 <IconAnimateSpin class="w-8 h-8 text-blue-500 mx-auto mb-2" />
                 <p>Loading zoo...</p>
             </div>
         </div>
         
-        <div v-else-if="zooModels.length === 0" class="flex-grow flex items-center justify-center text-gray-500">
+        <div v-else-if="zooModels.length === 0" class="grow flex items-center justify-center text-gray-500">
             No models found in zoo for this binding.
         </div>
         
-        <div v-else class="flex-grow overflow-y-auto space-y-3 pr-2">
+        <div v-else class="grow overflow-y-auto space-y-3 pr-2">
             <div v-for="(model, index) in filteredZooModels" :key="index" class="bg-white dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600 flex flex-col sm:flex-row gap-4">
-                <div class="flex-grow">
+                <div class="grow">
                     <h4 class="font-bold text-gray-900 dark:text-white">{{ model.name }}</h4>
                     <p class="text-sm text-gray-600 dark:text-gray-300 mt-1">{{ model.description }}</p>
                     <div class="flex flex-wrap gap-2 mt-2 text-xs text-gray-500 dark:text-gray-400">
@@ -117,7 +117,7 @@ watch(() => props.binding, () => {
                          <span v-if="model.type" class="bg-gray-100 dark:bg-gray-600 px-2 py-0.5 rounded">Type: {{ model.type }}</span>
                     </div>
                 </div>
-                <div class="flex-shrink-0 flex items-center">
+                <div class="shrink-0 flex items-center">
                     <button 
                         @click="installModel(model, index)" 
                         class="btn btn-primary btn-sm flex items-center gap-2"

@@ -317,21 +317,21 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
 
 <template>
     <div 
-      class="h-full flex flex-col bg-white dark:bg-gray-900 w-full flex-shrink-0"
+      class="h-full flex flex-col bg-white dark:bg-gray-900 w-full shrink-0"
       @dragover.prevent="isRootDragOver = true"
       @dragleave="isRootDragOver = false"
       @drop.prevent="handleRootDrop"
       :class="{'bg-blue-50 dark:bg-blue-900/20': isRootDragOver}"
     >
         
-        <div class="p-4 border-b border-slate-200 dark:border-gray-700 flex-shrink-0 space-y-3">
+        <div class="p-4 border-b border-slate-200 dark:border-gray-700 shrink-0 space-y-3">
             <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-3 min-w-0 flex-grow">
+                <div class="flex items-center space-x-3 min-w-0 grow">
                     <button @click="uiStore.toggleSidebar" class="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors md:hidden" title="Toggle Menu">
                         <IconMenu class="w-5 h-5" />
                     </button>
-                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 flex-shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
-                    <div class="min-w-0 flex-grow">
+                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
+                    <div class="min-w-0 grow">
                         <h1 class="text-base font-semibold text-slate-900 dark:text-gray-100 truncate" :title="welcomeText">{{ welcomeText }}</h1>
                         <p class="text-xs text-slate-500 dark:text-gray-400 truncate" :title="welcomeSlogan">{{ welcomeSlogan }}</p>
                     </div>
@@ -473,7 +473,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
             </div>
         </div>
         
-        <div ref="scrollComponent" class="flex-grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
+        <div ref="scrollComponent" class="grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
             <!-- CHATS TAB -->
             <template v-if="activeTab === 'chat'">
                 <div v-if="isLoadingDiscussions" class="space-y-2 animate-pulse">
@@ -592,7 +592,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                          :class="{'bg-purple-50 dark:bg-purple-900/20': notebookStore.activeNotebook?.id === nb.id}"
                          @click="openNotebook(nb)">
                         <div class="flex items-center gap-3 min-w-0">
-                            <IconServer class="w-4 h-4 flex-shrink-0 text-purple-500" />
+                            <IconServer class="w-4 h-4 shrink-0 text-purple-500" />
                             <div class="flex flex-col min-w-0">
                                 <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ nb.title || 'Untitled Notebook' }}</span>
                                 <span class="text-[10px] text-gray-500 uppercase font-black tracking-widest">{{ (nb.type || 'generic').replace('_', ' ') }}</span>
@@ -609,11 +609,11 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
             <template v-else-if="activeTab === 'data'">
                 <div class="space-y-2 mb-4">
                     <button @click="handleNewItem" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 transition-colors">
-                        <IconPlus class="w-5 h-5 flex-shrink-0" />
+                        <IconPlus class="w-5 h-5 shrink-0" />
                         <span>New Data Store</span>
                     </button>
                     <button @click="dataStore.fetchDataStores()" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                        <IconRefresh class="w-5 h-5 flex-shrink-0" />
+                        <IconRefresh class="w-5 h-5 shrink-0" />
                         <span>Refresh All Stores</span>
                     </button>
                 </div>
@@ -679,7 +679,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                          :class="{'bg-cyan-50 dark:bg-cyan-900/20': flowStore.currentFlow?.id === flow.id}"
                          @click="openFlow(flow)">
                         <div class="flex items-center gap-3 min-w-0">
-                            <IconShare class="w-4 h-4 flex-shrink-0 text-cyan-500" />
+                            <IconShare class="w-4 h-4 shrink-0 text-cyan-500" />
                             <div class="flex flex-col min-w-0">
                                 <span class="text-sm font-medium text-slate-700 dark:text-gray-200 truncate">{{ flow.name }}</span>
                                 <span class="text-[10px] text-gray-500 truncate" v-if="flow.description">{{ flow.description }}</span>
@@ -701,6 +701,8 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .custom-scrollbar::-webkit-scrollbar { height: 4px; width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }

@@ -4,7 +4,7 @@
     <Teleport to="#global-header-title-target">
         <div class="flex items-center gap-2 sm:gap-3 pointer-events-auto bg-gray-100 dark:bg-gray-800/80 px-3 py-1.5 rounded-lg border dark:border-gray-700/50 backdrop-blur-sm max-w-[200px] sm:max-w-md transition-all">
             <div class="flex items-center gap-2 min-w-0">
-                <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer flex-shrink-0" title="Select All" />
+                <input type="checkbox" v-model="areAllSelected" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0" title="Select All" />
                 <h2 class="font-bold text-gray-800 dark:text-gray-200 text-xs uppercase tracking-widest truncate">
                     {{ currentAlbumName }}
                 </h2>
@@ -75,10 +75,10 @@
             <p class="text-xl sm:text-2xl font-bold text-blue-600 text-center">Drop images to upload</p>
         </div>
         
-        <div class="flex-grow min-h-0 flex relative overflow-hidden">
+        <div class="grow min-h-0 flex relative overflow-hidden">
             <!-- SETTINGS SIDEBAR -->
             <aside 
-                class="absolute inset-y-0 left-0 z-30 bg-white dark:bg-gray-800 border-r dark:border-gray-700 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 flex flex-col flex-shrink-0 shadow-lg"
+                class="absolute inset-y-0 left-0 z-30 bg-white dark:bg-gray-800 border-r dark:border-gray-700 transform transition-transform duration-300 ease-in-out lg:relative lg:translate-x-0 flex flex-col shrink-0 shadow-lg"
                 :class="showMobileSidebar ? 'translate-x-0' : '-translate-x-full'"
                 :style="sidebarStyle"
             >
@@ -87,7 +87,7 @@
                     class="hidden lg:block absolute top-0 right-0 bottom-0 w-1.5 cursor-col-resize z-50 hover:bg-blue-500/50 transition-colors"
                 ></div>
 
-                <div class="flex-grow p-4 space-y-6 overflow-y-auto custom-scrollbar">
+                <div class="grow p-4 space-y-6 overflow-y-auto custom-scrollbar">
                     <div class="flex items-center justify-between lg:hidden mb-4 border-b dark:border-gray-700 pb-2">
                         <span class="font-black uppercase tracking-widest text-xs text-gray-500">Studio Tools</span>
                         <button @click="showMobileSidebar = false" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
@@ -173,9 +173,9 @@
 
             <div v-if="showMobileSidebar" @click="showMobileSidebar = false" class="absolute inset-0 bg-black/40 z-20 lg:hidden backdrop-blur-sm"></div>
 
-            <main class="flex-grow flex flex-col min-w-0 h-full relative">
+            <main class="grow flex flex-col min-w-0 h-full relative">
                 
-                <div class="flex-grow overflow-y-auto p-4 custom-scrollbar bg-gray-50 dark:bg-gray-900">
+                <div class="grow overflow-y-auto p-4 custom-scrollbar bg-gray-50 dark:bg-gray-900">
                     
                     <!-- SPECIAL SELECTION ZONE AT TOP -->
                     <transition
@@ -198,7 +198,7 @@
                             <div class="flex gap-3 overflow-x-auto p-3 custom-scrollbar">
                                 <div v-for="img in selectedImageObjects" :key="'sel-'+img.id" 
                                      @click="toggleSelection(img.id)" 
-                                     class="relative w-20 h-20 flex-shrink-0 group cursor-pointer border-2 border-blue-500 rounded-xl overflow-hidden shadow-sm hover:scale-105 transition-transform"
+                                     class="relative w-20 h-20 shrink-0 group cursor-pointer border-2 border-blue-500 rounded-xl overflow-hidden shadow-sm hover:scale-105 transition-transform"
                                      title="Click to Deselect"
                                 >
                                      <AuthenticatedImage :src="`/api/image-studio/${img.id}/file`" class="w-full h-full object-cover" />

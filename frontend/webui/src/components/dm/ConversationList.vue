@@ -158,7 +158,7 @@ async function handleDeleteConversation(convo) {
                     </button>
 
                     <!-- Actions Area (Always Visible) -->
-                    <div class="px-2 flex items-center gap-1 flex-shrink-0 border-l dark:border-gray-700 ml-1">
+                    <div class="px-2 flex items-center gap-1 shrink-0 border-l dark:border-gray-700 ml-1">
                         <button 
                             @click.stop="handleDeleteConversation(convo)" 
                             class="p-2.5 rounded-lg text-red-500 bg-red-50/50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/30 transition-all border border-red-100 dark:border-red-900/30"

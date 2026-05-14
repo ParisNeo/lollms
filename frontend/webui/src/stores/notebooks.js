@@ -122,11 +122,11 @@ export const useNotebookStore = defineStore('notebooks', () => {
                 params: { format },
                 responseType: 'blob'
             });
-            
+
             const url = window.URL.createObjectURL(new Blob([response.data]));
             const link = document.createElement('a');
             link.href = url;
-            const extension = format === 'markdown' ? 'md' : format;
+            const extension = format === 'markdown' ? 'md' : (format === 'wav' ? 'wav' : format);
             link.setAttribute('download', `${activeNotebook.value.title || 'notebook'}.${extension}`);
             document.body.appendChild(link);
             link.click();

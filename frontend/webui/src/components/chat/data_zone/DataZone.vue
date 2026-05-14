@@ -73,7 +73,7 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="relative h-full flex flex-shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-10 shadow-2xl transition-[width] duration-300" 
+    <div class="relative h-full flex shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-10 shadow-2xl transition-[width] duration-300" 
          :class="[isDataZoneExpanded ? 'absolute inset-0 w-full' : '']" 
          :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }">
         
@@ -83,7 +83,7 @@ onMounted(() => {
              v-if="!isDataZoneExpanded"></div>
 
         <!-- Vertical Navigation Rail -->
-        <div class="w-14 flex-shrink-0 border-r dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900 flex flex-col items-center py-4 gap-4">
+        <div class="w-14 shrink-0 border-r dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900 flex flex-col items-center py-4 gap-4">
             <button @click="activeTab = 'context'" 
                     class="p-2.5 rounded-xl transition-all relative group"
                     :class="activeTab === 'context' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'">
@@ -112,7 +112,7 @@ onMounted(() => {
 
         <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
             <!-- Unified Header -->
-            <div class="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center px-4 h-14 shadow-sm">
+            <div class="shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center px-4 h-14 shadow-sm">
                 <div class="flex flex-col">
                     <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">
                         {{ activeTab === 'context' ? 'Intelligence Context' : activeTab === 'files' ? 'Knowledge Management' : 'Active Project' }}
@@ -165,7 +165,7 @@ onMounted(() => {
                         <div v-show="!collapsed.personality" class="h-64 p-2 pt-0"><PersonalityZone /></div>
                     </div>
 
-                    <div class="flex flex-col flex-grow min-h-0">
+                    <div class="flex flex-col grow min-h-0">
                         <button @click="collapsed.memory = !collapsed.memory" 
                                 class="w-full flex items-center justify-between p-4 hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors group">
                             <div class="flex items-center gap-3">
@@ -176,7 +176,7 @@ onMounted(() => {
                             </div>
                             <IconChevronDown class="w-4 h-4 text-gray-400 transition-transform duration-300" :class="{'rotate-180': !collapsed.memory}" />
                         </button>
-                        <div v-show="!collapsed.memory" class="flex-grow p-2 pt-0"><MemoryZone /></div>
+                        <div v-show="!collapsed.memory" class="grow p-2 pt-0"><MemoryZone /></div>
                     </div>
                 </div>
 
@@ -201,11 +201,9 @@ onMounted(() => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
-</style>
-
-<style scoped>
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 </style>

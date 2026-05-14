@@ -111,7 +111,7 @@ function toggleComments() {
   <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md flex flex-col">
     <div class="p-4 flex space-x-4">
       <!-- Avatar Column -->
-      <div class="flex-shrink-0">
+      <div class="shrink-0">
         <router-link :to="`/profile/${post.author?.username}`">
           <UserAvatar :icon="post.author?.icon" :username="post.author?.username" size-class="h-10 w-10" />
         </router-link>

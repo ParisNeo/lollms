@@ -124,12 +124,12 @@ async function saveArtefactEdit() {
         </Teleport>
 
         <!-- Sidebar -->
-        <div class="w-72 border-r dark:border-gray-700 bg-white dark:bg-gray-850 flex flex-col flex-shrink-0">
+        <div class="w-72 border-r dark:border-gray-700 bg-white dark:bg-gray-850 flex flex-col shrink-0">
             <div class="p-4 border-b dark:border-gray-700 font-black text-[10px] uppercase tracking-widest text-gray-500 flex justify-between items-center">
                 <span>Manuscript</span>
                 <button @click="notebookStore.addTab('markdown')" class="text-blue-500 hover:text-blue-600"><IconPlus class="w-4 h-4" /></button>
             </div>
-            <div class="flex-grow overflow-y-auto p-2 space-y-4 custom-scrollbar">
+            <div class="grow overflow-y-auto p-2 space-y-4 custom-scrollbar">
                 <div v-if="planTab" @click="activeTabId = planTab.id" class="p-3 rounded-lg border-2 cursor-pointer shadow-sm" :class="activeTabId === planTab.id ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'bg-gray-50 dark:bg-gray-800 border-transparent'">
                     <div class="flex items-center gap-2 mb-1 text-blue-600"><IconBookOpen class="w-4 h-4"/> <span class="font-bold text-xs uppercase">Outline</span></div>
                     <p class="text-[10px] opacity-70">{{ notebook.title }} Plan</p>
@@ -138,17 +138,17 @@ async function saveArtefactEdit() {
         </div>
 
         <!-- Main Content Area -->
-        <div class="flex-grow flex flex-col relative min-w-0">
-            <div class="flex-grow overflow-hidden relative">
+        <div class="grow flex flex-col relative min-w-0">
+            <div class="grow overflow-hidden relative">
                 <div v-if="currentTab?.type === 'book_plan'" class="absolute inset-0 overflow-y-auto p-8 space-y-6 bg-gray-50/50 dark:bg-transparent">
                     <div class="max-w-4xl mx-auto space-y-4">
                         <div v-for="(ch, i) in chapters" :key="i" class="p-6 bg-white dark:bg-gray-800 rounded-xl border-l-4 border-blue-500 shadow-md flex justify-between items-start transition-transform hover:scale-[1.01]">
-                            <div class="flex-grow pr-6">
+                            <div class="grow pr-6">
                                 <div class="text-[10px] font-black uppercase text-blue-500 mb-1">Chapter {{ i+1 }}</div>
                                 <div class="font-bold text-lg text-gray-900 dark:text-white mb-2">{{ ch.title }}</div>
                                 <p class="text-sm text-gray-600 dark:text-gray-400 leading-relaxed">{{ ch.description }}</p>
                             </div>
-                            <button @click="writeChapter(ch)" class="btn btn-primary btn-sm flex-shrink-0 shadow-lg" :disabled="activeTask"><IconSparkles class="w-4 h-4 mr-2"/> Write</button>
+                            <button @click="writeChapter(ch)" class="btn btn-primary btn-sm shrink-0 shadow-lg" :disabled="activeTask"><IconSparkles class="w-4 h-4 mr-2"/> Write</button>
                         </div>
                     </div>
                 </div>
@@ -162,14 +162,14 @@ async function saveArtefactEdit() {
 
             <!-- Global Action Bar -->
             <div class="p-4 border-t dark:border-gray-700 bg-white dark:bg-gray-900 flex gap-3 shadow-inner">
-                <div class="relative flex-grow">
+                <div class="relative grow">
                     <input v-model="aiPrompt" @keyup.enter="handleProcess" placeholder="Describe instructions for the book..." class="input-field w-full pr-32" />
                     <div class="flex items-center gap-2 px-2 border-l dark:border-gray-700 absolute right-1 top-1/2 -translate-y-1/2 bg-white dark:bg-gray-800 pl-2 h-8">
                         <input type="checkbox" id="mod-tab" v-model="modifyCurrentTab" class="h-3 w-3 rounded text-blue-600 cursor-pointer"/>
                         <label for="mod-tab" class="text-[9px] font-black uppercase text-gray-400 cursor-pointer">Update Active</label>
                     </div>
                 </div>
-                <button @click="handleProcess" class="btn btn-primary px-8 flex-shrink-0" :disabled="activeTask"><IconSparkles class="w-4 h-4 mr-2"/> Go</button>
+                <button @click="handleProcess" class="btn btn-primary px-8 shrink-0" :disabled="activeTask"><IconSparkles class="w-4 h-4 mr-2"/> Go</button>
             </div>
         </div>
     </div>

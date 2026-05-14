@@ -73,7 +73,7 @@ function installCert(type) { window.open(`/api/public/cert/install-script?script
     <div v-if="isExpanded" class="fixed inset-0 bg-white/40 dark:bg-black/60 backdrop-blur-xl z-40 transition-all duration-500" @click="toggleExpand"></div>
 
     <!-- 3. MAIN UI CONTENT -->
-    <div class="flex-grow flex flex-col items-center justify-start pt-10 pb-20 sm:py-12 md:justify-center px-4 sm:px-6 relative z-10 w-full max-w-6xl mx-auto min-h-screen">
+    <div class="grow flex flex-col items-center justify-start pt-10 pb-20 sm:py-12 md:justify-center px-4 sm:px-6 relative z-10 w-full max-w-6xl mx-auto min-h-screen">
       
       <!-- BRANDING & ACTIONS (This container blurs when a fact is expanded) -->
       <div class="w-full flex flex-col items-center transition-all duration-700" :class="{'scale-90 opacity-10 blur-2xl pointer-events-none': isExpanded}">
@@ -122,7 +122,7 @@ function installCert(type) { window.open(`/api/public/cert/install-script?script
               <div class="relative flex flex-col bg-white/90 dark:bg-gray-900/90 backdrop-blur-3xl rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl border border-white/20 dark:border-gray-800 p-6 sm:p-10 md:p-12 overflow-hidden" :style="funFactStyle">
                   <div class="flex items-center gap-3 sm:gap-6 mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
                       <span class="text-2xl sm:text-4xl filter drop-shadow-lg">✨</span>
-                      <h3 class="font-black text-gray-800 dark:text-gray-100 uppercase tracking-[0.2em] text-[8px] sm:text-[10px] flex-grow text-left">
+                      <h3 class="font-black text-gray-800 dark:text-gray-100 uppercase tracking-[0.2em] text-[8px] sm:text-[10px] grow text-left">
                             {{ funFactCategory || 'Knowledge Bit' }}
                       </h3>
                       <div class="flex items-center gap-4">
@@ -159,6 +159,8 @@ function installCert(type) { window.open(`/api/public/cert/install-script?script
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 @keyframes blob {
   0% { transform: translate(0px, 0px) scale(1); }
   33% { transform: translate(30px, -40px) scale(1.1); }
@@ -173,7 +175,7 @@ function installCert(type) { window.open(`/api/public/cert/install-script?script
 .footer-link { @apply flex items-center justify-center gap-2 sm:gap-3 hover:text-blue-600 dark:hover:text-blue-400 transition-all transform hover:scale-105 cursor-pointer; }
 
 @media (max-height: 550px) {
-    .flex-grow { justify-content: flex-start !important; padding-top: 1.5rem !important; }
+    .grow { justify-content: flex-start !important; padding-top: 1.5rem !important; }
     .welcome-logo { height: 3.5rem !important; }
     .main-title { font-size: 2rem !important; }
 }

@@ -112,7 +112,7 @@ function closeMentionBox() {
 <template>
   <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
     <div class="flex space-x-4">
-      <div class="flex-shrink-0">
+      <div class="shrink-0">
         <UserAvatar v-if="user" :icon="user.icon" :username="user.username || 'User'" size-class="h-10 w-10" />
       </div>
 

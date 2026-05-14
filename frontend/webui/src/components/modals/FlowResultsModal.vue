@@ -87,7 +87,7 @@ function handleClose() {
                             <div v-for="(value, key) in nodeResult" :key="key" class="space-y-2">
                                 <div class="flex items-center gap-2">
                                     <span class="text-[10px] font-black uppercase text-blue-500 tracking-widest">{{ key }}</span>
-                                    <div class="h-px flex-grow bg-gray-100 dark:bg-gray-700"></div>
+                                    <div class="h-px grow bg-gray-100 dark:bg-gray-700"></div>
                                 </div>
 
                                 <!-- IMAGE RENDERING -->
@@ -136,6 +136,8 @@ function handleClose() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .result-panel {
     @apply bg-white dark:bg-gray-800/50 rounded-2xl shadow-lg border dark:border-gray-700 overflow-hidden;
 }

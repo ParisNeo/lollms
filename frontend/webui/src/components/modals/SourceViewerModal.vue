@@ -73,7 +73,7 @@ function navigateSearch(direction) {
         <template #body>
             <div class="space-y-4 p-4">
                 <div v-if="score !== null" class="flex items-center gap-3">
-                    <span class="text-sm font-medium flex-shrink-0">Similarity:</span>
+                    <span class="text-sm font-medium shrink-0">Similarity:</span>
                     <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4 relative overflow-hidden">
                         <div class="h-4 rounded-full text-white text-xs flex items-center justify-center transition-all duration-300" :class="scoreColor" :style="{ width: score + '%' }">
                             <span v-if="score > 10">{{ score }}%</span>

@@ -215,7 +215,7 @@ onUnmounted(() => {
                         </p>
                     </div>
                     <div class="ml-auto">
-                         <button @click="maintenanceMode = !maintenanceMode" type="button" :class="[maintenanceMode ? 'bg-orange-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-8 w-14 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                         <button @click="maintenanceMode = !maintenanceMode" type="button" :class="[maintenanceMode ? 'bg-orange-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-8 w-14 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                             <span :class="[maintenanceMode ? 'translate-x-6' : 'translate-x-0', 'pointer-events-none inline-block h-7 w-7 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>

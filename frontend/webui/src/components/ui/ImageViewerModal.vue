@@ -278,6 +278,8 @@ watch(isOpen, (newVal) => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .btn-viewer {
     @apply p-2 rounded-lg hover:bg-white/20 transition-all active:scale-95 flex items-center justify-center;
 }

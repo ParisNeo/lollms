@@ -37,7 +37,7 @@ function closeModal() {
             <div class="space-y-6">
                 <div class="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-4 rounded-md">
                     <div class="flex">
-                        <div class="flex-shrink-0">
+                        <div class="shrink-0">
                             <IconInfo class="h-5 w-5 text-yellow-400" />
                         </div>
                         <div class="ml-3">

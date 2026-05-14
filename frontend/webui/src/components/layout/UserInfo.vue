@@ -305,6 +305,8 @@ const vOnClickOutside = {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .menu-item { 
     @apply px-4 py-2.5 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer w-full text-left flex items-center;
 }

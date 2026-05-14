@@ -61,6 +61,8 @@ const wordCount = computed(() => {
 </script>
 
 <style scoped>
+@reference "tailwindcss";
+
 .mode-button {
     @apply px-2 py-0.5 text-xs rounded-md focus:outline-none focus:ring-1 focus:ring-blue-400 flex items-center gap-1.5;
 }

@@ -50,9 +50,9 @@ function handleDelete() {
             :title="mcp.active ? 'Active' : 'Inactive'">
         </span>
 
-        <div class="flex-grow">
+        <div class="grow">
             <div class="flex items-center gap-x-4">
-                <div class="h-12 w-12 rounded-md flex-shrink-0 bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
+                <div class="h-12 w-12 rounded-md shrink-0 bg-gray-200 dark:bg-gray-700 flex items-center justify-center overflow-hidden">
                     <img v-if="mcp.icon && !imageLoadFailed" 
                          :src="mcp.icon" 
                          @error="handleImageError" 

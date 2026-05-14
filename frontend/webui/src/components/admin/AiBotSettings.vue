@@ -298,6 +298,7 @@ async function triggerFullRemoderation() {
 }
 </script>
 <style scoped>
+@reference "tailwindcss";
 .toggle-switch-sm { @apply relative inline-flex items-center cursor-pointer; }
 .toggle-switch-sm input { @apply sr-only; }
 .toggle-switch-sm .slider-sm { @apply w-8 h-4 bg-gray-300 dark:bg-gray-600 rounded-full transition-colors; }
@@ -320,11 +321,11 @@ async function triggerFullRemoderation() {
             <div class="space-y-8">
                 <!-- General Settings -->
                 <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <span class="flex-grow flex flex-col">
+                    <span class="grow flex flex-col">
                         <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable AI Bot Responses</span>
                         <span class="text-sm text-gray-500 dark:text-gray-400">Allow the bot to reply to @lollms mentions.</span>
                     </span>
-                    <button @click="form.ai_bot_enabled = !form.ai_bot_enabled" type="button" :class="[form.ai_bot_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                    <button @click="form.ai_bot_enabled = !form.ai_bot_enabled" type="button" :class="[form.ai_bot_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                         <span :class="[form.ai_bot_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                     </button>
                 </div>
@@ -365,40 +366,40 @@ async function triggerFullRemoderation() {
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <!-- DuckDuckGo -->
                         <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <span class="flex-grow flex flex-col">
+                            <span class="grow flex flex-col">
                                 <span class="text-sm font-medium">DuckDuckGo Search</span>
                             </span>
-                            <button @click="form.ai_bot_tool_ddg_enabled = !form.ai_bot_tool_ddg_enabled" type="button" :class="[form.ai_bot_tool_ddg_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <button @click="form.ai_bot_tool_ddg_enabled = !form.ai_bot_tool_ddg_enabled" type="button" :class="[form.ai_bot_tool_ddg_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                 <span :class="[form.ai_bot_tool_ddg_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
 
                         <!-- ArXiv -->
                         <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <span class="flex-grow flex flex-col">
+                            <span class="grow flex flex-col">
                                 <span class="text-sm font-medium">ArXiv Research</span>
                             </span>
-                            <button @click="form.ai_bot_tool_arxiv_enabled = !form.ai_bot_tool_arxiv_enabled" type="button" :class="[form.ai_bot_tool_arxiv_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <button @click="form.ai_bot_tool_arxiv_enabled = !form.ai_bot_tool_arxiv_enabled" type="button" :class="[form.ai_bot_tool_arxiv_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                 <span :class="[form.ai_bot_tool_arxiv_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
 
                         <!-- Web Scraper -->
                         <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <span class="flex-grow flex flex-col">
+                            <span class="grow flex flex-col">
                                 <span class="text-sm font-medium">Web Scraper</span>
                             </span>
-                            <button @click="form.ai_bot_tool_scraper_enabled = !form.ai_bot_tool_scraper_enabled" type="button" :class="[form.ai_bot_tool_scraper_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <button @click="form.ai_bot_tool_scraper_enabled = !form.ai_bot_tool_scraper_enabled" type="button" :class="[form.ai_bot_tool_scraper_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                 <span :class="[form.ai_bot_tool_scraper_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
 
                         <!-- RSS Feeds -->
                         <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <span class="flex-grow flex flex-col">
+                            <span class="grow flex flex-col">
                                 <span class="text-sm font-medium">RSS Feeds Knowledge</span>
                             </span>
-                            <button @click="form.ai_bot_tool_rss_enabled = !form.ai_bot_tool_rss_enabled" type="button" :class="[form.ai_bot_tool_rss_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <button @click="form.ai_bot_tool_rss_enabled = !form.ai_bot_tool_rss_enabled" type="button" :class="[form.ai_bot_tool_rss_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                 <span :class="[form.ai_bot_tool_rss_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
@@ -408,7 +409,7 @@ async function triggerFullRemoderation() {
                     <div class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
                         <div class="flex items-center justify-between mb-4">
                             <span class="text-sm font-medium">Google Custom Search</span>
-                            <button @click="form.ai_bot_tool_google_enabled = !form.ai_bot_tool_google_enabled" type="button" :class="[form.ai_bot_tool_google_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                            <button @click="form.ai_bot_tool_google_enabled = !form.ai_bot_tool_google_enabled" type="button" :class="[form.ai_bot_tool_google_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                 <span :class="[form.ai_bot_tool_google_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
@@ -458,11 +459,11 @@ async function triggerFullRemoderation() {
                     </div>
 
                     <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <span class="flex-grow flex flex-col">
+                        <span class="grow flex flex-col">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Enable Moderation</span>
                             <span class="text-sm text-gray-500 dark:text-gray-400">Bot will scan new posts/comments and remove violations.</span>
                         </span>
-                        <button @click="form.ai_bot_moderation_enabled = !form.ai_bot_moderation_enabled" type="button" :class="[form.ai_bot_moderation_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                        <button @click="form.ai_bot_moderation_enabled = !form.ai_bot_moderation_enabled" type="button" :class="[form.ai_bot_moderation_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                             <span :class="[form.ai_bot_moderation_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
@@ -480,7 +481,7 @@ async function triggerFullRemoderation() {
                             <h4 class="text-lg font-medium text-gray-900 dark:text-white">Scheduled Tasks (CRON)</h4>
                             <p class="text-sm text-gray-500 dark:text-gray-400">Set up tasks for the bot to run at specific times (e.g. RSS feed checking, log reports).</p>
                         </div>
-                        <button type="button" @click="addScheduledTask" class="btn btn-secondary btn-sm flex items-center gap-2 flex-shrink-0">
+                        <button type="button" @click="addScheduledTask" class="btn btn-secondary btn-sm flex items-center gap-2 shrink-0">
                             <IconPlus class="w-4 h-4" /> Add Task
                         </button>
                     </div>

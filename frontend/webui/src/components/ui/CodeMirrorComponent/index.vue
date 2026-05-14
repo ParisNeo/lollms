@@ -2,7 +2,7 @@
     <div :class="['markdown-editor-container flex flex-col h-full min-h-0 border border-gray-300 dark:border-gray-600 rounded-md', editorClass]">
         <Toolbar
             v-if="currentMode === 'edit'"
-            :toolbarClass="[toolbarClass, 'flex-shrink-0']"
+            :toolbarClass="[toolbarClass, 'shrink-0']"
             :buttonClass="buttonClass"
             :language="language"
             :currentMode="currentMode"
@@ -34,7 +34,7 @@
             :allowedModes="allowedModes"
             :currentMode="currentMode"
             @set-mode="setMode"
-            class="flex-shrink-0"
+            class="shrink-0"
         />
     </div>
 </template>

@@ -165,9 +165,10 @@ async function triggerManualPrune() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .toggle-container { @apply flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg; }
-.toggle-label { @apply flex-grow flex flex-col text-sm font-medium text-gray-900 dark:text-gray-100; }
+.toggle-label { @apply grow flex flex-col text-sm font-medium text-gray-900 dark:text-gray-100; }
 .toggle-description { @apply text-xs text-gray-500 dark:text-gray-400 font-normal mt-1; }
-.toggle-switch { @apply relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500; }
+.toggle-switch { @apply relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500; }
 .toggle-knob { @apply pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out; }
 </style>

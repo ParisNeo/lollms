@@ -154,7 +154,7 @@ function handleClickOutside() {
        ]">
     
     <!-- Content Section -->
-    <div class="flex-grow min-w-0">
+    <div class="grow min-w-0">
       <div v-if="isTitleGenerating" class="flex items-center space-x-2">
         <div class="generating-spinner"></div>
         <span class="text-sm text-blue-600 dark:text-blue-400 font-medium">Generating title...</span>

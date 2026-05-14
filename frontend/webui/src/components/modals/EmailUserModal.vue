@@ -72,7 +72,7 @@ async function handleSubmit() {
         <template #body>
             <form v-if="user" @submit.prevent="handleSubmit" class="p-6 space-y-6">
                 <div class="flex items-center gap-4">
-                    <div class="flex-grow">
+                    <div class="grow">
                         <label for="user-email-subject" class="block text-sm font-medium">Subject</label>
                         <input id="user-email-subject" v-model="subject" type="text" class="input-field mt-1" required />
                     </div>
@@ -90,13 +90,13 @@ async function handleSubmit() {
                 <div class="space-y-4">
                     <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <label for="user-send-as-text" class="text-sm font-medium text-gray-900 dark:text-gray-100">Send as plain text</label>
-                        <button @click="sendAsText = !sendAsText" type="button" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out" :class="sendAsText ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'">
+                        <button @click="sendAsText = !sendAsText" type="button" class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out" :class="sendAsText ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'">
                             <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition" :class="sendAsText ? 'translate-x-5' : 'translate-x-0'"></span>
                         </button>
                     </div>
                     <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                         <label for="user-show-custom-prompt" class="text-sm font-medium text-gray-900 dark:text-gray-100">Use Custom AI Prompt</label>
-                        <button @click="showCustomPrompt = !showCustomPrompt" type="button" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out" :class="showCustomPrompt ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'">
+                        <button @click="showCustomPrompt = !showCustomPrompt" type="button" class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out" :class="showCustomPrompt ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'">
                             <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition" :class="showCustomPrompt ? 'translate-x-5' : 'translate-x-0'"></span>
                         </button>
                     </div>

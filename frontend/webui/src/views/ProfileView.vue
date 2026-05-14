@@ -81,7 +81,7 @@ watch(() => route.params.username, (newUsername) => {
 </script>
 
 <template>
-  <div class="flex-grow bg-gray-100 dark:bg-gray-900 overflow-y-auto">
+  <div class="grow bg-gray-100 dark:bg-gray-900 overflow-y-auto">
     <div class="max-w-3xl mx-auto py-6 px-4">
         
         <router-link to="/" class="inline-flex items-center space-x-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white mb-4">
@@ -100,7 +100,7 @@ watch(() => route.params.username, (newUsername) => {
             <header class="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6 mb-6">
                 <div class="flex flex-col sm:flex-row items-center sm:items-start space-y-4 sm:space-y-0 sm:space-x-6">
                     <UserAvatar :icon="profileUser.icon" :username="profileUser.username" size-class="h-24 w-24 text-4xl" />
-                    <div class="flex-grow text-center sm:text-left">
+                    <div class="grow text-center sm:text-left">
                         <h1 class="text-3xl font-bold text-gray-900 dark:text-gray-100">{{ profileUser.username }}</h1>
                         <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ profileUser.bio || 'This user has not set a bio yet.' }}</p>
 

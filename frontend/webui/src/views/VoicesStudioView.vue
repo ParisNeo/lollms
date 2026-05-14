@@ -2,25 +2,25 @@
     <PageViewLayout title="Voices Studio" :title-icon="IconMicrophone">
         <template #sidebar>
             <div class="h-full flex flex-col min-h-0">
-                <button @click="showAddForm" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 transition-colors flex-shrink-0">
-                    <IconPlus class="w-5 h-5 flex-shrink-0" />
+                <button @click="showAddForm" class="w-full flex items-center space-x-3 text-left px-3 py-2.5 rounded-lg text-sm font-medium text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/50 transition-colors shrink-0">
+                    <IconPlus class="w-5 h-5 shrink-0" />
                     <span>New Voice</span>
                 </button>
             
-                <div class="mt-4 flex-shrink-0">
+                <div class="mt-4 shrink-0">
                     <h3 class="text-sm font-semibold uppercase text-gray-500 dark:text-gray-400 px-3">Your Voices</h3>
                 </div>
                 
-                <div class="overflow-y-auto custom-scrollbar flex-grow mt-2">
+                <div class="overflow-y-auto custom-scrollbar grow mt-2">
                     <div v-if="isLoading" class="p-4 text-center">Loading...</div>
                     <ul v-else class="space-y-1">
                         <li v-for="voice in voices" :key="voice.id">
                             <div class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors group flex justify-between items-center"
                                  :class="{'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300': selectedVoiceId === voice.id && !isAddFormVisible, 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700': selectedVoiceId !== voice.id || isAddFormVisible}">
-                                <button @click="selectVoice(voice.id)" class="flex-grow text-left truncate">
+                                <button @click="selectVoice(voice.id)" class="grow text-left truncate">
                                     {{ voice.alias }}
                                 </button>
-                                 <div class="flex items-center flex-shrink-0">
+                                 <div class="flex items-center shrink-0">
                                     <span v-if="user && user.active_voice_id === voice.id" class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300">Active</span>
                                     <div class="flex items-center opacity-0 group-hover:opacity-100 transition-opacity ml-2">
                                         <button @click="selectVoice(voice.id)" title="Edit" class="p-1 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-md"><IconPencil class="w-4 h-4" /></button>

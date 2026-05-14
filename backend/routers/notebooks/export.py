@@ -1,19 +1,85 @@
 # backend/routers/notebooks/export.py
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 import json
 import os
 import io
 import zipfile
-import traceback
+import re
 from pathlib import Path
 from werkzeug.utils import secure_filename
 from backend.db import get_db
 from backend.db.models.notebook import Notebook as DBNotebook
 from backend.models import UserAuthDetails, TaskInfo
-from backend.session import get_current_active_user, get_user_notebook_assets_path
+from backend.session import get_current_active_user, get_user_notebook_assets_path, build_lollms_client_from_params
 
 from backend.settings import settings
+from concurrent.futures import ThreadPoolExecutor
+
+# Create a thread pool for blocking TTS operations
+tts_executor = ThreadPoolExecutor(max_workers=4)
+
+def _clean_text_for_tts(text: str) -> str:
+    if not text: return ""
+    # Remove markdown bold/italic (*) and headers (#)
+    text = re.sub(r'[*#]', '', text)
+    # Remove unicode emojis (Supplementary Multilingual Plane)
+    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
+    return text.strip()
+
+def _extract_notebook_text(notebook) -> str:
+    """Extract all readable text content from notebook tabs for TTS."""
+    text_parts = []
+
+    if notebook.title:
+        text_parts.append(f"Title: {notebook.title}")
+        text_parts.append("")
+
+    for tab in notebook.tabs:
+        tab_title = tab.get("title", "")
+        tab_content = tab.get("content", "")
+        tab_type = tab.get("type", "markdown")
+
+        if tab_title:
+            text_parts.append(tab_title)
+            text_parts.append("")
+
+        if not tab_content:
+            continue
+
+        if tab_type == "markdown":
+            text_parts.append(tab_content)
+            text_parts.append("")
+        elif tab_type == "slides":
+            try:
+                import json
+                slide_data = json.loads(tab_content)
+                slides = slide_data.get("slides_data", [])
+                for slide in slides:
+                    if slide.get("title"):
+                        text_parts.append(slide["title"])
+                    for bullet in slide.get("bullets", []):
+                        text_parts.append(bullet)
+                    if slide.get("notes"):
+                        text_parts.append(f"Notes: {slide['notes']}")
+                    text_parts.append("")
+            except Exception:
+                pass
+        elif tab_type == "html":
+            # Strip HTML tags for plain text
+            import html
+            clean = re.sub(r'<[^>]+>', '', tab_content)
+            clean = html.unescape(clean)
+            text_parts.append(clean)
+            text_parts.append("")
+        elif tab_type in ("code", "youtube_script", "book_plan"):
+            # Include code/script content as-is
+            text_parts.append(tab_content)
+            text_parts.append("")
+
+    return "\n".join(text_parts).strip()
+
 # Try imports for PDF generation and auto-install if missing
 try:
     from reportlab.lib.pagesizes import letter, landscape
@@ -297,6 +363,92 @@ async def export_notebook(
             prs.save(bio)
             file_content = bio.getvalue()
             media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+
+        # ---------------- AUDIO (TTS) ----------------
+        elif export_format in ("wav", "audio"):
+            loop = asyncio.get_running_loop()
+            try:
+                lc = await loop.run_in_executor(
+                    tts_executor,
+                    lambda: build_lollms_client_from_params(
+                        username=current_user.username,
+                        load_llm=False,
+                        load_tts=True
+                    )
+                )
+
+                if not lc.tts:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Text-to-Speech (TTS) is not configured for this user."
+                    )
+
+                # Extract all text from the notebook
+                full_text = _extract_notebook_text(notebook)
+
+                if not full_text:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No text content found in notebook to convert to speech."
+                    )
+
+                # Clean text for TTS
+                cleaned_text = _clean_text_for_tts(full_text)
+
+                # Determine voice and language
+                voice_to_use = None
+                language_to_use = None
+
+                # Check for user's active custom voice
+                db_user = db.query(DBUser).filter(DBUser.id == current_user.id).first()
+                if db_user and db_user.active_voice_id:
+                    from backend.db.models.voice import UserVoice as DBUserVoice
+                    from backend.session import get_user_data_root
+                    active_voice = db.query(DBUserVoice).filter(DBUserVoice.id == db_user.active_voice_id).first()
+                    if active_voice:
+                        user_voices_path = get_user_data_root(current_user.username) / "voices"
+                        voice_file_path = user_voices_path / Path(active_voice.file_path)
+                        if voice_file_path.exists():
+                            voice_to_use = str(voice_file_path.resolve())
+                            language_to_use = active_voice.language
+
+                # Fallback to user's language preference
+                if not language_to_use and db_user and db_user.ai_response_language and db_user.ai_response_language.lower() != "auto":
+                    language_to_use = db_user.ai_response_language
+
+                # Final fallback to English
+                if not language_to_use:
+                    language_to_use = 'en'
+
+                # Determine model to use
+                model_to_use = None
+                user_tts_model_full = current_user.tts_binding_model_name
+                if user_tts_model_full and '/' in user_tts_model_full:
+                    _, model_name = user_tts_model_full.split('/', 1)
+                    model_to_use = model_name
+
+                def _generate_audio():
+                    return lc.tts.generate_audio(
+                        text=cleaned_text,
+                        voice=voice_to_use,
+                        model=model_to_use,
+                        language=language_to_use
+                    )
+
+                audio_bytes = await loop.run_in_executor(tts_executor, _generate_audio)
+
+                file_content = audio_bytes
+                media_type = "audio/wav"
+                filename = f"{secure_filename(notebook.title)}.wav"
+
+            except HTTPException as e:
+                raise e
+            except Exception as e:
+                trace_exception(e)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"TTS generation failed: {str(e)}"
+                )
 
         else:
             raise HTTPException(status_code=400, detail="Unsupported export format")

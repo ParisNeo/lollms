@@ -32,7 +32,7 @@ function refreshFeed() {
 
 <template>
   <div class="flex flex-col h-full">
-    <div class="flex-grow bg-gray-100 dark:bg-gray-900 overflow-y-auto">
+    <div class="grow bg-gray-100 dark:bg-gray-900 overflow-y-auto">
       <div class="mx-auto py-6 px-4">
         <div class="flex items-center justify-between mb-6">
             <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">

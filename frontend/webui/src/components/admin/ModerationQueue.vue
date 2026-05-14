@@ -106,7 +106,7 @@ function formatDate(dateStr) {
             </div>
         </div>
 
-        <div class="flex-grow overflow-y-auto p-0">
+        <div class="grow overflow-y-auto p-0">
             <div v-if="isLoading" class="text-center py-10 text-gray-500">Loading queue...</div>
             <div v-else-if="items.length === 0" class="text-center py-10 text-gray-500">
                 <p>No content pending moderation.</p>
@@ -116,7 +116,7 @@ function formatDate(dateStr) {
                     <div class="p-4 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors">
                         <div class="flex items-start gap-4">
                             <!-- Author -->
-                            <div class="flex-shrink-0 pt-1">
+                            <div class="shrink-0 pt-1">
                                 <UserAvatar 
                                     v-if="item.author" 
                                     :username="item.author.username" 
@@ -129,7 +129,7 @@ function formatDate(dateStr) {
                             </div>
                             
                             <!-- Content -->
-                            <div class="flex-grow min-w-0">
+                            <div class="grow min-w-0">
                                 <div class="flex items-center justify-between mb-1">
                                     <div class="flex items-center gap-2">
                                         <span class="font-bold text-sm">
@@ -151,7 +151,7 @@ function formatDate(dateStr) {
                             </div>
 
                             <!-- Actions -->
-                            <div class="flex flex-col gap-2 flex-shrink-0 ml-2">
+                            <div class="flex flex-col gap-2 shrink-0 ml-2">
                                 <button @click="handleApprove(item)" class="btn btn-success btn-sm flex items-center gap-1" title="Validate (Safe)">
                                     <IconCheckCircle class="w-4 h-4" /> Valid
                                 </button>

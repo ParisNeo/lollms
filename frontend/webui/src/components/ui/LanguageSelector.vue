@@ -116,7 +116,7 @@ onMounted(() => {
               class="input-field-sm w-full"
             />
           </div>
-          <div class="flex-grow overflow-y-auto">
+          <div class="grow overflow-y-auto">
             <div v-if="isLoading" class="p-4 text-center text-sm text-gray-500">Loading...</div>
             <div v-else-if="filteredLanguages.length === 0" class="p-4 text-center text-sm text-gray-500">No matches found.</div>
             <ul v-else class="py-1">

@@ -1,14 +1,15 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue';
-import { useEditor, EditorContent } from '@tiptap/vue-3';
-import StarterKit from '@tiptap/starter-kit';
-import Link from '@tiptap/extension-link';
-import Table from '@tiptap/extension-table';
-import TableRow from '@tiptap/extension-table-row';
-import TableCell from '@tiptap/extension-table-cell';
-import TableHeader from '@tiptap/extension-table-header';
-import CodeBlockLowlight from '@tiptap/extension-code-block-lowlight';
-import Image from '@tiptap/extension-image';
+import { useEditor, EditorContent } from '@tiptap/vue-3'
+import { StarterKit } from '@tiptap/starter-kit';
+import { Link } from '@tiptap/extension-link';
+import { Table } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
+import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight';
+import { Image } from '@tiptap/extension-image';
+
 import { createLowlight } from 'lowlight';
 import html from 'highlight.js/lib/languages/xml';
 import css from 'highlight.js/lib/languages/css';
@@ -17,7 +18,7 @@ import python from 'highlight.js/lib/languages/python';
 import json from 'highlight.js/lib/languages/json';
 import 'highlight.js/styles/github-dark.css';
 import CodeMirrorEditor from './CodeMirrorComponent/index.vue';
-import { useUiStore } from '../../stores/ui'; // Import UI store
+import { useUiStore } from '../../stores/ui';
 import InsertImageModal from '../modals/InsertImageModal.vue';
 
 const uiStore = useUiStore(); // Initialize UI store
@@ -187,7 +188,7 @@ const toolbarActions = ref([
 
 <template>
   <div v-if="editor" class="border border-gray-300 dark:border-gray-600 rounded-md flex flex-col h-full max-h-[50vh]">
-    <div class="toolbar-container flex-shrink-0">
+    <div class="toolbar-container shrink-0">
         <div class="flex border-b border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800/50">
             <button type="button" @click="activeTab = 'design'" :class="['tab-btn', { 'active': activeTab === 'design' }]">Design</button>
             <button type="button" @click="activeTab = 'code'" :class="['tab-btn', { 'active': activeTab === 'code' }]">Code</button>
@@ -214,7 +215,7 @@ const toolbarActions = ref([
             </template>
         </div>
     </div>
-    <div class="overflow-y-auto flex-grow">
+    <div class="overflow-y-auto grow">
       <editor-content v-show="activeTab === 'design'" :editor="editor" />
       <CodeMirrorEditor v-show="activeTab === 'code'" v-model="localContent" class="h-full" />
     </div>
@@ -223,6 +224,8 @@ const toolbarActions = ref([
 </template>
 
 <style>
+@reference "tailwindcss";
+
 .tab-btn {
     @apply px-4 py-2 text-sm font-medium border-b-2 transition-colors;
 }

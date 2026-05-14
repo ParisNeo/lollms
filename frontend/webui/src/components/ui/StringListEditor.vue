@@ -58,13 +58,13 @@ function moveItem(index, direction) {
 <template>
   <div class="space-y-2">
     <div v-for="(item, index) in items" :key="index" class="flex items-center gap-2">
-      <input type="text" :value="item" @input="event => { const newItems = [...items]; newItems[index] = event.target.value; items = newItems; }" class="input-field flex-grow" />
+      <input type="text" :value="item" @input="event => { const newItems = [...items]; newItems[index] = event.target.value; items = newItems; }" class="input-field grow" />
       <button @click="moveItem(index, -1)" :disabled="index === 0" class="btn-icon" type="button" title="Move Up"><IconArrowUp class="w-4 h-4" /></button>
       <button @click="moveItem(index, 1)" :disabled="index === items.length - 1" class="btn-icon" type="button" title="Move Down"><IconArrowDown class="w-4 h-4" /></button>
       <button @click="removeItem(index)" class="btn-icon-danger" type="button" title="Remove"><IconTrash class="w-4 h-4" /></button>
     </div>
     <div class="flex items-center gap-2">
-      <input type="text" v-model="newItem" @keyup.enter.prevent="addItem" class="input-field flex-grow" placeholder="Add new origin" />
+      <input type="text" v-model="newItem" @keyup.enter.prevent="addItem" class="input-field grow" placeholder="Add new origin" />
       <button @click="addItem" class="btn btn-secondary" type="button"><IconPlus class="w-4 h-4 mr-1" /> Add</button>
     </div>
   </div>

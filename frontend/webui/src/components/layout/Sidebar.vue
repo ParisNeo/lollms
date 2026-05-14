@@ -144,7 +144,7 @@ async function handlePlusClick() {
 </script>
 
 <template>
-  <aside ref="sidebarRef" class="flex-shrink-0 flex flex-col h-full bg-white dark:bg-gray-900 border-r border-slate-200 dark:border-gray-700 transition-all duration-300 ease-in-out" 
+  <aside ref="sidebarRef" class="shrink-0 flex flex-col h-full bg-white dark:bg-gray-900 border-r border-slate-200 dark:border-gray-700 transition-all duration-300 ease-in-out" 
          :class="isSidebarOpen ? 'w-80' : 'w-16'">
     
     <!-- Main Content Area -->

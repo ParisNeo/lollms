@@ -128,8 +128,8 @@ onUnmounted(() => {
             <IconClose class="w-3.5 h-3.5" />
         </button>
 
-        <div class="flex items-center flex-grow min-w-0">
-          <div class="flex-shrink-0 w-6 h-6 flex items-center justify-center">
+        <div class="flex items-center grow min-w-0">
+          <div class="shrink-0 w-6 h-6 flex items-center justify-center">
             <component :is="getIcon(notification.type)" class="h-5 w-5" />
           </div>
           <div class="ml-3 text-sm font-medium break-words">
@@ -140,7 +140,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div class="ml-4 flex-shrink-0 flex space-x-2">
+        <div class="ml-4 shrink-0 flex space-x-2">
           <button
             class="p-1 rounded-full hover:bg-black/20 focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
             @click="copyMessage(notification.message)"

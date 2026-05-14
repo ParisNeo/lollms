@@ -435,7 +435,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                 </div>
 
                 <!-- Logs Console -->
-                <div class="flex-grow bg-black rounded-2xl overflow-hidden flex flex-col shadow-2xl border border-gray-800">
+                <div class="grow bg-black rounded-2xl overflow-hidden flex flex-col shadow-2xl border border-gray-800">
                     <div class="px-4 py-3 bg-gray-900 border-b border-gray-800 flex items-center justify-between">
                         <span class="text-[10px] font-black uppercase text-gray-500 tracking-widest">Build Log</span>
                         <div class="flex gap-1.5">
@@ -444,7 +444,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                             <div class="w-2 h-2 rounded-full bg-green-500/50"></div>
                         </div>
                     </div>
-                    <div class="flex-grow overflow-y-auto p-4 font-mono text-xs space-y-1 custom-scrollbar">
+                    <div class="grow overflow-y-auto p-4 font-mono text-xs space-y-1 custom-scrollbar">
                         <div v-for="(log, i) in buildingLogs" :key="i" class="flex gap-3">
                             <span class="text-gray-600 shrink-0">[{{ new Date(log.timestamp).toLocaleTimeString() }}]</span>
                             <span :class="{
@@ -473,7 +473,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
             <!-- NORMAL WIZARD FLOW -->
             <template v-else>
                 <!-- Progress Stepper -->
-                <div class="flex items-center justify-center mb-8 flex-shrink-0">
+                <div class="flex items-center justify-center mb-8 shrink-0">
                     <div class="flex items-center">
                         <div class="relative"><div class="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-300" :class="currentStep >= 1 ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-500'"><IconCheckCircle v-if="currentStep > 1" class="w-5 h-5" /><span v-else>1</span></div></div>
                         <div class="w-20 h-1 bg-gray-200 mx-2"><div class="h-full bg-blue-600 transition-all duration-500" :style="{width: currentStep > 1 ? '100%' : '0%'}"></div></div>
@@ -484,7 +484,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                 </div>
 
                 <!-- STEP 1: Type & Title -->
-                <div v-if="currentStep === 1" class="flex-grow overflow-y-auto custom-scrollbar px-2 mt-4">
+                <div v-if="currentStep === 1" class="grow overflow-y-auto custom-scrollbar px-2 mt-4">
                     <div class="text-center mb-8"><h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Choose Project Type</h2></div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
                         <div v-for="type in projectTypes" :key="type.id" @click="wizardData.type = type.id"
@@ -501,7 +501,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                 </div>
 
                 <!-- STEP 2: Sources -->
-                <div v-if="currentStep === 2" class="flex-grow overflow-y-auto custom-scrollbar px-2">
+                <div v-if="currentStep === 2" class="grow overflow-y-auto custom-scrollbar px-2">
                     <div class="text-center mb-6"><h2 class="text-2xl font-bold text-gray-900 dark:text-white">Knowledge Sources</h2><p class="text-sm text-gray-500">Optional context for the AI</p></div>
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                         <!-- Left Column -->
@@ -511,7 +511,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                             <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg flex flex-col gap-3">
                                 <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">📄 Arxiv Papers</label>
                                 <div class="flex gap-2">
-                                    <input v-model="arxivQuery" @keyup.enter="handleArxivSearch" class="input-field flex-grow text-sm" placeholder="Search topic (e.g. 'transformer attention')..." />
+                                    <input v-model="arxivQuery" @keyup.enter="handleArxivSearch" class="input-field grow text-sm" placeholder="Search topic (e.g. 'transformer attention')..." />
                                     <button @click="handleArxivSearch" class="btn btn-primary px-3" :disabled="isSearchingArxiv">
                                         <IconAnimateSpin v-if="isSearchingArxiv" class="w-4 h-4 animate-spin"/>
                                         <IconMagnifyingGlass v-else class="w-4 h-4"/>
@@ -522,7 +522,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                                 <div v-if="arxivResults.length > 0" class="max-h-60 overflow-y-auto custom-scrollbar space-y-2 border-t dark:border-gray-700 pt-2">
                                     <div v-for="res in arxivResults" :key="res.entry_id" class="p-3 bg-white dark:bg-gray-700 rounded-lg text-xs shadow-sm border border-transparent hover:border-blue-300 transition-colors">
                                         <div class="flex justify-between items-start gap-2">
-                                            <div class="flex items-start gap-2 flex-grow">
+                                            <div class="flex items-start gap-2 grow">
                                                 <input type="checkbox" :checked="isArxivSelected(res.entry_id)" @change="handleArxivCheck(res)" class="mt-1 rounded text-blue-600 focus:ring-blue-500" />
                                                 <div>
                                                     <p class="font-bold text-gray-900 dark:text-white leading-tight">{{ res.title }}</p>
@@ -557,7 +557,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
 
                             <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
                                 <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">🌐 Web Links</label>
-                                <div class="flex gap-2 my-2"><input v-model="newUrl" @keyup.enter="addUrl" class="input-field flex-grow text-sm" placeholder="https://..." /><button @click="addUrl" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                                <div class="flex gap-2 my-2"><input v-model="newUrl" @keyup.enter="addUrl" class="input-field grow text-sm" placeholder="https://..." /><button @click="addUrl" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                                 <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in wizardData.urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                             </div>
 
@@ -571,18 +571,18 @@ watch(() => tasksStore.tasks, (newTasks) => {
                         <div class="space-y-5">
                             <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
                                 <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">🔍 Google Search</label>
-                                <div class="flex gap-2 my-2"><input v-model="newGoogle" @keyup.enter="addGoogle" class="input-field flex-grow text-sm" placeholder="Query..." /><button @click="addGoogle" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                                <div class="flex gap-2 my-2"><input v-model="newGoogle" @keyup.enter="addGoogle" class="input-field grow text-sm" placeholder="Query..." /><button @click="addGoogle" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                                 <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in wizardData.google_search_queries" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('google_search_queries', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                             </div>
 
                             <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
                                 <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">🎥 YouTube Videos</label>
-                                <div class="flex gap-2 my-2"><input v-model="newYoutube" @keyup.enter="addYoutube" class="input-field flex-grow text-sm" placeholder="URL..." /><button @click="addYoutube" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                                <div class="flex gap-2 my-2"><input v-model="newYoutube" @keyup.enter="addYoutube" class="input-field grow text-sm" placeholder="URL..." /><button @click="addYoutube" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                                 <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in wizardData.youtube_urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('youtube_urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                             </div>
                             <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
                                 <label class="text-xs font-black text-gray-600 dark:text-gray-400 uppercase">📚 Wikipedia</label>
-                                <div class="flex gap-2 my-2"><input v-model="newWiki" @keyup.enter="addWiki" class="input-field flex-grow text-sm" placeholder="Article Title..." /><button @click="addWiki" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
+                                <div class="flex gap-2 my-2"><input v-model="newWiki" @keyup.enter="addWiki" class="input-field grow text-sm" placeholder="Article Title..." /><button @click="addWiki" class="btn btn-primary px-3"><IconPlus class="w-4 h-4"/></button></div>
                                 <ul class="space-y-2 max-h-32 overflow-y-auto custom-scrollbar"><li v-for="(item, idx) in wizardData.wikipedia_urls" :key="idx" class="flex justify-between items-center text-xs bg-white dark:bg-gray-700 px-3 py-2 rounded-lg"><span class="truncate pr-2">{{ item }}</span><button @click="removeItem('wikipedia_urls', idx)" class="text-red-500"><IconTrash class="w-4 h-4"/></button></li></ul>
                             </div>
                             <div class="bg-gray-50 dark:bg-gray-800/50 p-4 rounded-lg">
@@ -596,7 +596,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                 </div>
 
                 <!-- STEP 3: Configuration & Prompt -->
-                <div v-if="currentStep === 3" class="flex-grow flex flex-col px-2 overflow-y-auto custom-scrollbar">
+                <div v-if="currentStep === 3" class="grow flex flex-col px-2 overflow-y-auto custom-scrollbar">
                     <div class="text-center mb-6"><h2 class="text-2xl font-bold text-gray-900 dark:text-white">Configuration</h2></div>
 
                     <!-- SLIDES CONFIG -->
@@ -629,7 +629,7 @@ watch(() => tasksStore.tasks, (newTasks) => {
                         </div>
                     </div>
 
-                    <div class="flex-grow flex flex-col bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4">
+                    <div class="grow flex flex-col bg-gray-50 dark:bg-gray-800/50 rounded-lg p-4">
                         <div class="flex justify-between items-center mb-2">
                              <label class="text-xs font-bold uppercase text-gray-500">Instructions for AI (Optional)</label>
                              <button @click="getSuggestedPrompt" class="text-xs text-blue-600 font-bold hover:underline">✨ Auto-Fill</button>
@@ -674,6 +674,8 @@ watch(() => tasksStore.tasks, (newTasks) => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 .toggle-checkbox:checked { @apply right-0 border-blue-600; }

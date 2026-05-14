@@ -115,7 +115,7 @@ onMounted(fetchFeeds);
                         <p class="font-semibold">{{ feed.name }} <span class="text-xs px-2 py-0.5 rounded-full ml-2" :class="feed.is_active ? 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300' : 'bg-gray-200 text-gray-800 dark:bg-gray-600 dark:text-gray-300'">{{ feed.is_active ? 'Active' : 'Inactive' }}</span></p>
                         <p class="text-sm text-gray-500 font-mono">{{ feed.url }}</p>
                     </div>
-                    <div class="flex gap-2 flex-shrink-0">
+                    <div class="flex gap-2 shrink-0">
                         <button @click="showEditForm(feed)" class="btn-icon" title="Edit"><IconPencil class="w-4 h-4" /></button>
                         <button @click="handleDelete(feed)" class="btn-icon-danger" title="Delete"><IconTrash class="w-4 h-4" /></button>
                     </div>

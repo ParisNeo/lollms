@@ -56,7 +56,7 @@ async function handleDelete() {
 <template>
   <div class="flex space-x-3 py-2">
     <!-- Avatar -->
-    <div class="flex-shrink-0">
+    <div class="shrink-0">
       <router-link :to="`/profile/${comment.author.username}`">
         <UserAvatar :icon="comment.author.icon" :username="comment.author.username" size-class="h-8 w-8" />
       </router-link>

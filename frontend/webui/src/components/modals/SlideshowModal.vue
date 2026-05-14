@@ -15,12 +15,12 @@
         @keydown.esc="close"
       >
         <!-- Sidebar Thumbnails -->
-        <div v-if="showThumbnails" class="w-64 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col h-full z-20">
+        <div v-if="showThumbnails" class="w-64 shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col h-full z-20">
             <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
                 <h3 class="font-bold text-xs uppercase tracking-wider text-gray-400">Slide Deck</h3>
                 <span class="text-[10px] font-mono opacity-50">{{ currentIndex + 1 }} / {{ slides.length }}</span>
             </div>
-            <div class="flex-grow overflow-y-auto custom-scrollbar p-2 space-y-2">
+            <div class="grow overflow-y-auto custom-scrollbar p-2 space-y-2">
                 <div v-for="(slide, index) in slides" :key="index" 
                     @click="goToSlide(index)"
                     class="relative aspect-video rounded border-2 transition-all cursor-pointer overflow-hidden group"
@@ -34,7 +34,7 @@
         </div>
 
         <!-- Main Content -->
-        <div class="flex-grow relative flex flex-col h-full bg-black min-w-0">
+        <div class="grow relative flex flex-col h-full bg-black min-w-0">
             <!-- Header Controls -->
             <div class="absolute top-0 left-0 right-0 p-6 flex justify-between items-start z-30 opacity-0 hover:opacity-100 transition-opacity duration-300">
                 <div class="bg-black/40 backdrop-blur-md rounded-full px-4 py-2 text-sm font-black border border-white/10 shadow-xl">
@@ -56,7 +56,7 @@
             </div>
 
             <!-- Central Image Display -->
-            <div class="flex-grow flex items-center justify-center p-4 md:p-12 relative group">
+            <div class="grow flex items-center justify-center p-4 md:p-12 relative group">
                 <button v-if="hasPrevious" @click.stop="prevSlide" class="absolute left-6 z-20 p-4 rounded-full bg-black/20 hover:bg-black/60 transition-all text-white/50 hover:text-white">
                     <IconArrowLeft class="w-10 h-10" />
                 </button>

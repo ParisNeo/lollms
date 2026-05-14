@@ -167,7 +167,7 @@ function toggleSelectAll() {
                 <div v-else>
                     <!-- Create Key Form -->
                     <form @submit.prevent="handleCreateKey" class="flex flex-col sm:flex-row items-start sm:items-end gap-4">
-                        <div class="flex-grow w-full">
+                        <div class="grow w-full">
                             <label for="keyAlias" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Key Alias</label>
                             <input
                                 type="text"
@@ -218,7 +218,7 @@ function toggleSelectAll() {
                                     @click.stop
                                     class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
                                 >
-                                <div class="flex-grow ml-2">
+                                <div class="grow ml-2">
                                     <p class="text-sm font-semibold text-gray-900 dark:text-white">{{ key.alias }}</p>
                                     <p class="text-sm text-gray-500 dark:text-gray-400 font-mono">{{ key.key_prefix }}<span>...</span>
                                     </p>

@@ -106,6 +106,7 @@ onMounted(fetchDashboardData);
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .metric-card { @apply bg-white dark:bg-gray-800 rounded-xl shadow-sm p-6 border border-gray-100 dark:border-gray-700 flex items-center justify-between; }
 .metric-label { @apply text-sm font-medium text-gray-500 dark:text-gray-400; }
 .metric-value { @apply text-3xl font-bold text-gray-900 dark:text-white mt-1; }

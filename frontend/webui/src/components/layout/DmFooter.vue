@@ -105,7 +105,7 @@ const contactList = computed(() => {
                             v-for="contact in contactList"
                             :key="contact.id"
                             @click="openDm(contact)"
-                            class="relative flex-shrink-0"
+                            class="relative shrink-0"
                             :title="contact.username"
                         >
                             <UserAvatar :username="contact.username" :icon="contact.icon" size-class="h-10 w-10" />

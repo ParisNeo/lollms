@@ -90,12 +90,12 @@ watch(isOpen, (val) => {
             </div>
 
             <!-- Active Conversation View -->
-            <div v-if="activeConversation" class="flex-grow flex flex-col overflow-hidden">
+            <div v-if="activeConversation" class="grow flex flex-col overflow-hidden">
                  <DmWindow :conversation="activeConversation" :compact="true" @back="backToList" />
             </div>
 
             <!-- List View -->
-            <div v-else class="flex-grow flex flex-col overflow-hidden">
+            <div v-else class="grow flex flex-col overflow-hidden">
                 <!-- Tabs -->
                 <div class="flex border-b dark:border-gray-700">
                     <button @click="activeTab='chats'" class="flex-1 py-2 text-sm font-medium" :class="activeTab==='chats'?'border-b-2 border-blue-500 text-blue-600':'text-gray-500'">Chats</button>

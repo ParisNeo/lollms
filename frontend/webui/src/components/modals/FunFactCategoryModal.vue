@@ -53,7 +53,7 @@ async function handleSubmit() {
                 </div>
                 <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                     <label for="cat-active" class="text-sm font-medium">Active</label>
-                    <button @click="form.is_active = !form.is_active" type="button" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors" :class="form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'">
+                    <button @click="form.is_active = !form.is_active" type="button" class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors" :class="form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600'">
                         <span :class="form.is_active ? 'translate-x-5' : 'translate-x-0'" class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition"></span>
                     </button>
                 </div>

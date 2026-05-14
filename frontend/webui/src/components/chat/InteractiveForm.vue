@@ -184,7 +184,7 @@ async function submitForm() {
                         <div class="flex items-center gap-6">
                             <input type="range" :min="field.min || 0" :max="field.max || 100" :step="field.step || 1" 
                                    v-model.number="answers[field.name]" 
-                                   class="flex-grow h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-600" 
+                                   class="grow h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-600" 
                                    :disabled="isDone">
                             <div class="min-w-[4rem] text-center px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl font-mono font-black text-sm border border-blue-100 dark:border-blue-800">
                                 {{ answers[field.name] }}
@@ -236,6 +236,7 @@ async function submitForm() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .input-field {
     @apply w-full px-5 py-3.5 bg-gray-50 dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 rounded-2xl text-gray-900 dark:text-white placeholder-gray-400 transition-all outline-none;
 }

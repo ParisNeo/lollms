@@ -203,7 +203,7 @@ async function toggleCategoryActive(category) {
                             <span class="text-sm font-bold text-yellow-800 dark:text-yellow-400 uppercase tracking-widest">System-wide Announcement</span>
                             <span class="text-xs text-gray-600 dark:text-gray-400 mt-1">Replace random fun facts with a specific message for all users.</span>
                         </div>
-                        <button @click="form.force_welcome_message = !form.force_welcome_message" type="button" :class="[form.force_welcome_message ? 'bg-yellow-500' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                        <button @click="form.force_welcome_message = !form.force_welcome_message" type="button" :class="[form.force_welcome_message ? 'bg-yellow-500' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                             <span :class="[form.force_welcome_message ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
@@ -254,7 +254,7 @@ async function toggleCategoryActive(category) {
 
         <!-- Fun Facts Management (Normal Flow) -->
         <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg flex flex-col h-[800px]">
-            <div class="p-6 border-b dark:border-gray-700 flex justify-between items-center flex-wrap gap-2 flex-shrink-0">
+            <div class="p-6 border-b dark:border-gray-700 flex justify-between items-center flex-wrap gap-2 shrink-0">
                 <h3 class="text-xl font-semibold">Fun Facts Repository</h3>
                 <div class="flex gap-2">
                     <button @click="$refs.importInput.click()" class="btn btn-secondary btn-sm">Import Category</button>
@@ -263,22 +263,22 @@ async function toggleCategoryActive(category) {
                 </div>
             </div>
             
-            <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8 flex-grow min-h-0">
+            <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8 grow min-h-0">
                 <!-- Categories List -->
                 <div class="flex flex-col min-h-0 h-full">
-                    <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                    <div class="flex justify-between items-center mb-4 shrink-0">
                         <h4 class="font-semibold text-lg">Categories</h4>
                         <div class="flex items-center gap-2">
                             <button @click="openGenerateFunFactsModal(5)" class="btn btn-secondary btn-sm"><IconSparkles class="w-4 h-4 mr-1"/> AI Generate</button>
                             <button @click="openCategoryModal()" class="btn btn-secondary btn-sm"><IconPlus class="w-4 h-4 mr-1"/>New</button>
                         </div>
                     </div>
-                    <div class="border rounded-lg overflow-hidden dark:border-gray-700 flex-grow min-h-0 bg-gray-50 dark:bg-gray-900/50">
+                    <div class="border rounded-lg overflow-hidden dark:border-gray-700 grow min-h-0 bg-gray-50 dark:bg-gray-900/50">
                         <div v-if="isLoadingFunFactCategories" class="p-4 text-center text-gray-500">Loading...</div>
                         <ul v-else class="divide-y dark:divide-gray-700 overflow-y-auto h-full">
                             <li v-for="cat in funFactCategories" :key="cat.id" @click="selectedCategoryId = cat.id" class="p-3 flex items-center gap-3 cursor-pointer transition-colors group" :class="selectedCategoryId === cat.id ? 'bg-blue-100 dark:bg-blue-900/50' : 'hover:bg-gray-100 dark:hover:bg-gray-800'">
                                 <!-- Actions on the LEFT -->
-                                <div class="flex items-center gap-2 flex-shrink-0">
+                                <div class="flex items-center gap-2 shrink-0">
                                      <!-- Activation Toggle -->
                                     <button @click.stop="toggleCategoryActive(cat)" class="focus:outline-none relative" :title="cat.is_active ? 'Deactivate Pack' : 'Activate Pack'">
                                         <div class="w-9 h-5 rounded-full transition-colors duration-200 shadow-sm border dark:border-gray-600" :class="cat.is_active ? 'bg-green-500 border-green-600' : 'bg-gray-200 dark:bg-gray-700'">
@@ -300,8 +300,8 @@ async function toggleCategoryActive(category) {
                                 </div>
                                 
                                 <!-- Content -->
-                                <div class="flex items-center gap-3 min-w-0 flex-grow pl-2 border-l dark:border-gray-700 ml-1">
-                                    <span class="w-4 h-4 rounded-full flex-shrink-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10" :style="{ backgroundColor: cat.color }"></span>
+                                <div class="flex items-center gap-3 min-w-0 grow pl-2 border-l dark:border-gray-700 ml-1">
+                                    <span class="w-4 h-4 rounded-full shrink-0 shadow-sm ring-1 ring-black/5 dark:ring-white/10" :style="{ backgroundColor: cat.color }"></span>
                                     <span class="font-medium text-sm truncate" :class="{'line-through opacity-50': !cat.is_active}">{{ cat.name }}</span>
                                 </div>
                             </li>
@@ -311,14 +311,14 @@ async function toggleCategoryActive(category) {
 
                 <!-- Facts List -->
                 <div class="flex flex-col min-h-0 h-full">
-                    <div class="flex justify-between items-center mb-4 flex-shrink-0">
+                    <div class="flex justify-between items-center mb-4 shrink-0">
                         <h4 class="font-semibold text-lg truncate pr-2">{{ selectedCategoryName }}</h4>
                         <div class="flex items-center gap-2">
                              <button @click="openGenerateFunFactsModal(1)" :disabled="!selectedCategoryId" class="btn btn-secondary btn-sm"><IconSparkles class="w-4 h-4 mr-1"/> Generate 1</button>
                             <button @click="openFactModal()" :disabled="!selectedCategoryId" class="btn btn-secondary btn-sm"><IconPlus class="w-4 h-4 mr-1"/>New</button>
                         </div>
                     </div>
-                    <div class="border rounded-lg overflow-hidden dark:border-gray-700 flex-grow min-h-0 bg-gray-50 dark:bg-gray-900/50">
+                    <div class="border rounded-lg overflow-hidden dark:border-gray-700 grow min-h-0 bg-gray-50 dark:bg-gray-900/50">
                         <div v-if="isLoadingFunFacts" class="p-4 text-center text-gray-500">Loading...</div>
                         <div v-else-if="!selectedCategoryId" class="p-10 text-center text-gray-500 italic flex flex-col items-center justify-center h-full">
                             <IconInfo class="w-10 h-10 mb-2 opacity-50"/>
@@ -327,7 +327,7 @@ async function toggleCategoryActive(category) {
                         <ul v-else class="divide-y dark:divide-gray-700 overflow-y-auto h-full">
                             <li v-for="fact in filteredFacts" :key="fact.id" class="p-3 flex items-start gap-3 hover:bg-gray-100 dark:hover:bg-gray-800 group transition-colors">
                                 <!-- Actions on LEFT -->
-                                <div class="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                                <div class="flex items-center gap-1 shrink-0 mt-0.5">
                                     <button @click="openFactModal(fact)" class="p-1.5 rounded-full hover:bg-blue-200 dark:hover:bg-blue-800 text-gray-400 hover:text-blue-600 dark:text-gray-500 dark:hover:text-blue-300 transition-colors" title="Edit Fact">
                                         <IconPencil class="w-4 h-4"/>
                                     </button>
@@ -335,7 +335,7 @@ async function toggleCategoryActive(category) {
                                         <IconTrash class="w-4 h-4"/>
                                     </button>
                                 </div>
-                                <p class="text-sm flex-grow leading-relaxed border-l dark:border-gray-700 pl-3 ml-1">{{ fact.content }}</p>
+                                <p class="text-sm grow leading-relaxed border-l dark:border-gray-700 pl-3 ml-1">{{ fact.content }}</p>
                             </li>
                             <li v-if="filteredFacts.length === 0" class="p-8 text-center text-gray-400 text-sm italic">
                                 No facts in this category yet.
@@ -352,6 +352,7 @@ async function toggleCategoryActive(category) {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .label { @apply block text-sm font-bold text-gray-700 dark:text-gray-300; }
 .animate-fade-in { animation: fadeIn 0.4s ease-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }

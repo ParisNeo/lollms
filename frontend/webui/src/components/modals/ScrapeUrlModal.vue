@@ -376,7 +376,7 @@ async function handleSubmit() {
                 <!-- Unified Search Mode Content (Wikipedia, DDG, Google, GitHub, SO) -->
                 <div v-if="['wikipedia', 'duckduckgo', 'google', 'github', 'stackoverflow'].includes(mode)" class="space-y-4">
                     <div class="flex gap-2">
-                        <div class="relative flex-grow">
+                        <div class="relative grow">
                             <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                                 <IconWikipedia v-if="mode === 'wikipedia'" class="h-4 w-4 text-gray-400" />
                                 <IconServer v-else-if="['github', 'stackoverflow'].includes(mode)" class="h-4 w-4 text-gray-400" />
@@ -446,7 +446,7 @@ async function handleSubmit() {
                              :class="selectedIndices.has(idx) ? 'border-orange-500' : 'dark:border-gray-700'">
                             <div class="flex items-start gap-2">
                                 <input type="checkbox" :checked="selectedIndices.has(idx)" @change="toggleSelection(idx)" class="mt-1 rounded text-orange-600">
-                                <div class="flex-grow min-w-0">
+                                <div class="grow min-w-0">
                                     <div class="font-bold text-xs truncate" :title="res.title">{{ res.title }}</div>
                                     <div class="text-[9px] text-gray-500">{{ res.authors.join(', ') }} ({{ res.year }})</div>
                                     

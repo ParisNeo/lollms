@@ -708,7 +708,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     }">
         <div class="message-content-container">
             <!-- Avatar -->
-            <div class="flex-shrink-0 pt-1">
+            <div class="shrink-0 pt-1">
                 <UserAvatar :icon="isCurrentUser ? user.icon : (isAi ? senderPersonalityIcon : otherUserIcon)" :username="senderName" size-class="h-8 w-8" />
             </div>
 
@@ -962,7 +962,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                     </div>
                                 </div>
                                 <div class="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                    <div v-if="typeof source.score === 'number'" class="font-mono text-[10px] text-gray-500 dark:text-gray-400 flex-shrink-0">{{ (source.score).toFixed(1) }}%</div>
+                                    <div v-if="typeof source.score === 'number'" class="font-mono text-[10px] text-gray-500 dark:text-gray-400 shrink-0">{{ (source.score).toFixed(1) }}%</div>
                                     <!-- Web Link -->
                                     <a v-if="isUrl(source.source)" :href="source.source" target="_blank" @click.stop class="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-500 transition-colors" title="Open Website">
                                         <IconGlobeAlt class="w-3.5 h-3.5" />
@@ -990,7 +990,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                 
                 <!-- Footer -->
                 <div class="message-footer">
-                    <div class="flex-grow flex items-center flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div class="grow flex items-center flex-wrap gap-2 text-xs text-gray-500 dark:text-gray-400">
                         <div v-if="branchInfo" class="detail-badge branch-badge-nav">
                             <button @click="navigateBranch(-1)" class="p-1 rounded-full hover:bg-black/10 dark:hover:bg-white/10" title="Previous Branch">
                                 <IconChevronRight class="w-3.5 h-3.5 rotate-180" />
@@ -1002,7 +1002,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                         </div>
                         <div v-if="isAi && message.token_count" class="detail-badge"><IconToken class="w-3.5 h-3.5" /><span>{{ message.token_count }}</span></div>
                     </div>
-                    <div v-if="!isEditing" class="flex-shrink-0 flex items-center gap-1">
+                    <div v-if="!isEditing" class="shrink-0 flex items-center gap-1">
                         <div class="actions flex items-center space-x-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                             <!-- Debug Metadata Button -->
                             <button v-if="isTtsActive && isAi" @click="handleSpeak" :title="messageTtsState.isLoading ? 'Generating...' : 'Speak'" class="action-btn" :disabled="messageTtsState.isLoading">
@@ -1034,6 +1034,8 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     </div>
 </template>
 <style scoped>
+@reference "tailwindcss";
+@reference "@/assets/css/main.css";
 .message-prose {
     @apply prose prose-base dark:prose-invert max-w-none break-words;
     font-size: var(--message-font-size, 14px);

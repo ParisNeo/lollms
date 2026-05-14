@@ -132,7 +132,7 @@ onMounted(() => {
 <template>
   <div class="flex flex-col h-full gap-3 overflow-hidden">
     <!-- Header with Actions -->
-    <div class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-2 rounded-lg shadow-sm flex-shrink-0">
+    <div class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-2 rounded-lg shadow-sm shrink-0">
         <input type="text" v-model="memorySearchTerm" placeholder="Filter bank..." 
                class="w-32 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border-none focus:ring-1 focus:ring-blue-500 rounded" />
         <button @click="handleMemorize" class="btn btn-primary btn-xs py-1 px-3 shadow-sm" :disabled="isMemorizing">
@@ -164,7 +164,7 @@ onMounted(() => {
         </div>
 
         <!-- Bank List -->
-        <div class="h-64 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 flex flex-col shadow-sm overflow-hidden flex-shrink-0">
+        <div class="h-64 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 flex flex-col shadow-sm overflow-hidden shrink-0">
             <div class="p-2 border-b dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-800/30">
                 <span class="text-[10px] font-black uppercase text-gray-500">Memory Bank ({{ filteredMemories.length }})</span>
                 <button @click="handleCreateMemory" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-blue-500" title="Manual Memory Entry"><IconPlus class="w-4 h-4" /></button>
@@ -182,7 +182,7 @@ onMounted(() => {
                             <span class="text-[10px] font-mono text-gray-400 font-bold w-5 text-center shrink-0">#{{ index + 1 }}</span>
                             
                             <button @click="loadedMemoryTitles.has(mem.title) ? handleUnloadMemory(mem.title) : handleLoadMemory(mem.title)" 
-                                    class="flex-shrink-0 transition-colors" :class="loadedMemoryTitles.has(mem.title) ? 'text-green-500' : 'text-gray-300 hover:text-gray-400'">
+                                    class="shrink-0 transition-colors" :class="loadedMemoryTitles.has(mem.title) ? 'text-green-500' : 'text-gray-300 hover:text-gray-400'">
                                 <IconCheckCircle v-if="loadedMemoryTitles.has(mem.title)" class="w-5 h-5" />
                                 <IconCircle v-else class="w-5 h-5" />
                             </button>
@@ -206,6 +206,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .custom-scrollbar::-webkit-scrollbar { width: 3px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 .prose-xs { @apply text-xs leading-relaxed text-gray-600 dark:text-gray-400; }

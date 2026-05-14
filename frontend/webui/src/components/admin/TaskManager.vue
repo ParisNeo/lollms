@@ -187,14 +187,14 @@ function copyLogs() {
 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-6 h-[60vh]">
                     <div class="md:col-span-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden flex flex-col">
-                        <div class="p-4 border-b dark:border-gray-700 flex-shrink-0 space-y-3">
+                        <div class="p-4 border-b dark:border-gray-700 shrink-0 space-y-3">
                             <h3 class="font-semibold">Tasks</h3>
                             <div class="relative">
                                 <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"><IconMagnifyingGlass class="h-4 w-4 text-gray-400" /></div>
                                 <input type="text" v-model="searchTerm" placeholder="Search tasks..." class="w-full text-sm pl-9 pr-4 py-1.5 rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
                             </div>
                         </div>
-                        <div class="flex-grow overflow-y-auto">
+                        <div class="grow overflow-y-auto">
                             <div v-if="isLoadingTasks && sortedTasks.length === 0" class="p-4 text-center text-gray-500">Loading...</div>
                             <div v-else-if="filteredTasks.length === 0" class="p-4 text-center text-gray-500">No tasks found.</div>
                             <ul v-else class="divide-y dark:divide-gray-700">
@@ -218,23 +218,23 @@ function copyLogs() {
                         </div>
                         <div v-else class="flex flex-col h-full">
                             <!-- Header -->
-                            <div class="p-4 border-b dark:border-gray-700 flex-shrink-0">
+                            <div class="p-4 border-b dark:border-gray-700 shrink-0">
                                 <h3 class="font-semibold truncate" :title="selectedTask.name">{{ selectedTask.name }}</h3>
                                 <div class="text-xs text-gray-500 dark:text-gray-400 flex items-center">ID: <code class="ml-1 mr-2">{{ selectedTask.id }}</code><button @click="uiStore.copyToClipboard(selectedTask.id)" class="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600"><IconCopy class="w-3 h-3" /></button></div>
                             </div>
                             
                             <!-- Body (Details + Logs) -->
-                            <div class="flex-grow min-h-0 flex flex-col p-4 space-y-4 overflow-y-auto">
+                            <div class="grow min-h-0 flex flex-col p-4 space-y-4 overflow-y-auto">
                                 <!-- Status & Metadata -->
-                                <div class="space-y-3 text-sm flex-shrink-0">
+                                <div class="space-y-3 text-sm shrink-0">
                                     <div class="p-3 rounded-lg flex items-center" :class="{ 'bg-blue-50 dark:bg-blue-900/20': selectedTask.status === 'running' || selectedTask.status === 'pending', 'bg-green-50 dark:bg-green-900/20': selectedTask.status === 'completed', 'bg-red-50 dark:bg-red-900/20': selectedTask.status === 'failed', 'bg-yellow-50 dark:bg-yellow-900/20': selectedTask.status === 'cancelled' }">
-                                        <div class="flex-shrink-0 mr-4">
+                                        <div class="shrink-0 mr-4">
                                             <IconError v-if="selectedTask.status==='failed'" class="w-8 h-8 text-red-400"/>
                                             <IconCheckCircle v-else-if="selectedTask.status==='completed'" class="w-8 h-8 text-green-400"/>
                                             <IconXMark v-else-if="selectedTask.status==='cancelled'" class="w-8 h-8 text-yellow-400"/>
                                             <IconAnimateSpin v-else class="w-8 h-8 text-blue-400 animate-spin"/>
                                         </div>
-                                        <div class="flex-grow">
+                                        <div class="grow">
                                             <span class="font-semibold">Status:</span> {{ getStatusInfo(selectedTask.status).text }}
                                         </div>
                                         <button v-if="(selectedTask.status === 'running' || selectedTask.status === 'pending') && (authStore.isAdmin || selectedTask.owner_username === authStore.user.username)" @click="tasksStore.cancelTask(selectedTask.id)" class="btn btn-warning btn-sm">
@@ -260,12 +260,12 @@ function copyLogs() {
                                 </div>
 
                                 <!-- Logs -->
-                                <div class="flex-grow min-h-0 flex flex-col pt-4 border-t dark:border-gray-700">
-                                    <h4 class="font-semibold mb-2 flex-shrink-0 flex items-center justify-between">
+                                <div class="grow min-h-0 flex flex-col pt-4 border-t dark:border-gray-700">
+                                    <h4 class="font-semibold mb-2 shrink-0 flex items-center justify-between">
                                         <span>Logs</span>
                                         <button @click="copyLogs" class="btn btn-secondary btn-sm"><IconCopy class="w-4 h-4" /> Copy Logs</button>
                                     </h4>
-                                    <div ref="logsContainer" class="flex-grow bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-y-auto text-xs">
+                                    <div ref="logsContainer" class="grow bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-y-auto text-xs">
                                         <div v-for="(log, index) in selectedTask.logs" :key="index" class="log-entry" :class="getLogLevelClass(log.level)">
                                             <span class="log-timestamp font-mono">{{ new Date(log.timestamp).toLocaleTimeString([], { hour12: false }) }}</span>
                                             <component :is="getLogLevelIcon(log.level)" class="log-icon" />
@@ -289,6 +289,7 @@ function copyLogs() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .info-details { @apply text-xs; }
 .info-details summary { @apply font-semibold cursor-pointer select-none; }
 .info-details pre { @apply whitespace-pre-wrap font-mono text-xs mt-1 p-2 bg-gray-100 dark:bg-gray-900 rounded; }
@@ -297,13 +298,13 @@ function copyLogs() {
     @apply flex items-start gap-2 py-0.5;
 }
 .log-timestamp {
-    @apply text-gray-400 select-none flex-shrink-0 w-20;
+    @apply text-gray-400 select-none shrink-0 w-20;
 }
 .log-icon {
-    @apply w-4 h-4 mt-0.5 flex-shrink-0;
+    @apply w-4 h-4 mt-0.5 shrink-0;
 }
 .log-message-wrapper {
-    @apply flex-grow min-w-0;
+    @apply grow min-w-0;
 }
 .log-message :deep(p),
 .log-message :deep(ul),

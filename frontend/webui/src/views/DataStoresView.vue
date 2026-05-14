@@ -813,7 +813,7 @@ async function handleImportStore() {
             <Teleport to="#global-header-title-target" v-if="isComponentMounted">
                 <div class="flex items-center gap-4 h-full max-w-full overflow-hidden">
                     <div class="flex items-center gap-2 min-w-0">
-                        <IconDatabase class="w-5 h-5 text-green-500 flex-shrink-0" />
+                        <IconDatabase class="w-5 h-5 text-green-500 shrink-0" />
                         <h2 class="text-lg font-bold text-gray-800 dark:text-gray-100 truncate max-w-[200px]">{{ currentSelectedStore.name }}</h2>
                     </div>
                     <div class="h-5 w-px bg-gray-300 dark:border-gray-600 hidden md:block"></div>
@@ -841,7 +841,7 @@ async function handleImportStore() {
         </template>
 
         <!-- Main Content Area -->
-        <div class="p-4 overflow-y-auto flex-grow h-full w-full">
+        <div class="p-4 overflow-y-auto grow h-full w-full">
             <div v-if="isAddFormVisible" class="p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
                 <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Create New Data Store</h2>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">A Data Store turns your documents into a queryable knowledge base.</p>
@@ -930,7 +930,7 @@ async function handleImportStore() {
             </div>
             <div v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-md h-full overflow-hidden flex flex-col">
                 <!-- Content Area Tabs -->
-                <div v-show="activeTab === 'documents'" class="p-6 flex-grow overflow-y-auto space-y-8">
+                <div v-show="activeTab === 'documents'" class="p-6 grow overflow-y-auto space-y-8">
                     <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">
                         <div class="flex justify-between items-center">
                             <h3 class="text-xl font-semibold text-gray-900 dark:text-white">Add Documents</h3>
@@ -1017,10 +1017,10 @@ async function handleImportStore() {
                                 <h4 class="text-sm font-semibold mb-3 flex items-center gap-2">
                                     <IconGlobeAlt class="w-4 h-4"/> Add from URL
                                 </h4>
-                                <div class="space-y-3 flex-grow">
+                                <div class="space-y-3 grow">
                                     <input type="text" v-model="scrapeUrl" placeholder="https://example.com/docs" class="input-field text-sm">
                                     <div class="flex items-center gap-4">
-                                        <div class="flex-grow">
+                                        <div class="grow">
                                             <label class="text-xs text-gray-500 uppercase font-bold">Depth</label>
                                             <input type="number" v-model.number="scrapeDepth" min="0" max="5" class="input-field text-sm mt-1">
                                         </div>
@@ -1119,9 +1119,9 @@ async function handleImportStore() {
                                     type="checkbox" 
                                     @change="toggleFileSelection(file.filename)" 
                                     :checked="selectedFilesToDelete.has(file.filename)" 
-                                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-4 flex-shrink-0"
+                                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-4 shrink-0"
                                 >
-                                <div class="flex-grow min-w-0">
+                                <div class="grow min-w-0">
                                     <div class="flex items-center gap-2">
                                         <span 
                                             class="text-sm font-medium truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors" 
@@ -1130,7 +1130,7 @@ async function handleImportStore() {
                                         >
                                             {{ file.filename }}
                                         </span>
-                                        <IconAnimateSpin v-if="loadingFileContent === file.filename" class="w-4 h-4 text-blue-500 animate-spin flex-shrink-0" />
+                                        <IconAnimateSpin v-if="loadingFileContent === file.filename" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
                                     </div>
                                     <details v-if="file.metadata && Object.keys(file.metadata).length > 0" class="mt-2 text-xs">
                                         <summary class="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">View Metadata</summary>
@@ -1143,8 +1143,8 @@ async function handleImportStore() {
                         </ul>
                     </div>
                 </div>
-                <div v-if="activeTab === 'query'" class="p-6 flex-grow overflow-y-auto flex flex-col">
-                    <div class="flex-shrink-0 space-y-4">
+                <div v-if="activeTab === 'query'" class="p-6 grow overflow-y-auto flex flex-col">
+                    <div class="shrink-0 space-y-4">
                         <h3 class="text-xl font-semibold">Query Data Store</h3>
                         <form @submit.prevent="handleQueryStore" class="space-y-4">
                             <div>
@@ -1169,7 +1169,7 @@ async function handleImportStore() {
                             </div>
                         </form>
                     </div>
-                    <div class="flex-grow min-h-0 mt-6 border-t dark:border-gray-700 pt-6">
+                    <div class="grow min-h-0 mt-6 border-t dark:border-gray-700 pt-6">
                         <div class="flex justify-between items-center mb-4">
                             <h4 class="text-lg font-semibold">Results ({{ queryResults.length }})</h4>
                             <div v-if="queryResults.length > 0" class="flex items-center gap-2">
@@ -1206,7 +1206,7 @@ async function handleImportStore() {
                         </div>
                     </div>
                 </div>
-                <div v-if="activeTab === 'graph'" class="p-6 flex-grow overflow-y-auto">
+                <div v-if="activeTab === 'graph'" class="p-6 grow overflow-y-auto">
                     <DataStoreGraphManager :store="currentSelectedStore" :task="currentGraphTask" />
                 </div>
             </div>
@@ -1373,6 +1373,8 @@ async function handleImportStore() {
 </template>
 
 <style>
+@reference "tailwindcss";
+
 .current-search-highlight {
     background-color: #ff9632 !important;
     color: black !important;

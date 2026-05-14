@@ -167,7 +167,7 @@ function formatTokens(val) {
 
                     <!-- Pressure Warning -->
                     <div v-if="usagePercent > 80" class="mt-4 flex items-center gap-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-xl animate-pulse">
-                        <IconInfo class="w-5 h-5 text-red-500 flex-shrink-0" />
+                        <IconInfo class="w-5 h-5 text-red-500 shrink-0" />
                         <span class="text-xs font-bold text-red-700 dark:text-red-300 uppercase tracking-tight">Warning: High Context Pressure. Auto-pruning imminent.</span>
                     </div>
                 </div>
@@ -252,6 +252,8 @@ function formatTokens(val) {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 

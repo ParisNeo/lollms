@@ -40,8 +40,8 @@ const links = computed(() => {
         <template #body>
             <div v-if="app" class="space-y-6">
                 <div class="flex items-start gap-4">
-                    <img v-if="app.icon" :src="app.icon" class="h-20 w-20 rounded-lg object-cover flex-shrink-0" alt="App Icon">
-                    <div class="flex-grow">
+                    <img v-if="app.icon" :src="app.icon" class="h-20 w-20 rounded-lg object-cover shrink-0" alt="App Icon">
+                    <div class="grow">
                         <p class="text-lg text-gray-600 dark:text-gray-300">{{ app.description }}</p>
                     </div>
                 </div>
@@ -55,7 +55,7 @@ const links = computed(() => {
                 
                 <div v-if="details.length" class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
                     <div v-for="detail in details" :key="detail.label" class="flex">
-                        <span class="font-semibold w-28 flex-shrink-0 text-gray-800 dark:text-gray-200">{{ detail.label }}:</span>
+                        <span class="font-semibold w-28 shrink-0 text-gray-800 dark:text-gray-200">{{ detail.label }}:</span>
                         <span class="text-gray-600 dark:text-gray-400 truncate" :title="detail.value">{{ detail.value }}</span>
                     </div>
                 </div>

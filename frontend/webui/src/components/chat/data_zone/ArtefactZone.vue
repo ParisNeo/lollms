@@ -143,7 +143,7 @@ function handleCreateNew() {
 </script>
 
 <template>
-    <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop.prevent="handleDrop" class="p-2 flex flex-col flex-grow min-h-0 relative">
+    <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop.prevent="handleDrop" class="p-2 flex flex-col grow min-h-0 relative">
         <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
         
         <!-- Drop Overlay -->
@@ -151,7 +151,7 @@ function handleCreateNew() {
             <p class="text-sm font-bold text-blue-600">Drop to Add</p>
         </div>
 
-        <div class="flex justify-between items-center p-3 mb-2 flex-shrink-0 bg-gray-50 dark:bg-gray-800/50 rounded-lg border dark:border-gray-700">
+        <div class="flex justify-between items-center p-3 mb-2 shrink-0 bg-gray-50 dark:bg-gray-800/50 rounded-lg border dark:border-gray-700">
             <div class="flex items-center gap-2">
                 <IconPlus class="w-4 h-4 text-emerald-500 cursor-pointer" @click="handleCreateArtefact" />
                 <span class="text-xs font-bold uppercase tracking-widest text-gray-500">Repository</span>
@@ -169,7 +169,7 @@ function handleCreateNew() {
                  <button @click="handleRefreshArtefacts" class="p-1.5 hover:text-blue-500 transition-colors" title="Refresh List"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" /></button>
             </div>
         </div>
-        <div v-if="!isArtefactsCollapsed" class="flex-grow overflow-y-auto custom-scrollbar">
+        <div v-if="!isArtefactsCollapsed" class="grow overflow-y-auto custom-scrollbar">
             <div v-if="isLoadingArtefacts" class="text-center py-10"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
             <div v-else-if="groupedArtefacts.length === 0" class="text-center py-10 text-gray-400 text-[10px] uppercase font-bold tracking-widest opacity-50">Empty</div>
             <div v-else class="space-y-1">
@@ -187,6 +187,7 @@ function handleCreateNew() {
 </template>
 
 <style scoped>
+@reference "tailwindcss";
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 </style>

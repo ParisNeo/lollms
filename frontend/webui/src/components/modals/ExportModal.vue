@@ -116,7 +116,7 @@ const vOnClickOutside = {
               type="text" 
               v-model="searchQuery"
               placeholder="Search..." 
-              class="input-field flex-grow"
+              class="input-field grow"
             >
             <div class="relative">
                 <button @click="isSortMenuOpen = !isSortMenuOpen" class="btn btn-secondary !px-3" title="Sort options">

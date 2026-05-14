@@ -114,29 +114,29 @@ onMounted(() => {
             <form v-if="user" @submit.prevent="handleSubmit" class="p-6 space-y-6">
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                     <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <span class="flex-grow flex flex-col">
+                        <span class="grow flex flex-col">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Administrator</span>
                             <span class="text-sm text-gray-500 dark:text-gray-400">Grants full system access.</span>
                         </span>
-                        <button @click="form.is_admin = !form.is_admin" type="button" :class="[form.is_admin ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                        <button @click="form.is_admin = !form.is_admin" type="button" :class="[form.is_admin ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                             <span :class="[form.is_admin ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
                     <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <span class="flex-grow flex flex-col">
+                        <span class="grow flex flex-col">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Moderator</span>
                             <span class="text-sm text-gray-500 dark:text-gray-400">Can delete user content.</span>
                         </span>
-                        <button @click="form.is_moderator = !form.is_moderator" type="button" :disabled="form.is_admin" :class="[form.is_moderator ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800', {'opacity-50 cursor-not-allowed': form.is_admin}]">
+                        <button @click="form.is_moderator = !form.is_moderator" type="button" :disabled="form.is_admin" :class="[form.is_moderator ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800', {'opacity-50 cursor-not-allowed': form.is_admin}]">
                             <span :class="[form.is_moderator ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>
                     <div class="relative flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <span class="flex-grow flex flex-col">
+                        <span class="grow flex flex-col">
                             <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Account Active</span>
                             <span class="text-sm text-gray-500 dark:text-gray-400">Allows the user to log in.</span>
                         </span>
-                        <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                        <button @click="form.is_active = !form.is_active" type="button" :class="[form.is_active ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
                             <span :class="[form.is_active ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                         </button>
                     </div>

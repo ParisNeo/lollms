@@ -178,7 +178,7 @@ const stepCounter = computed(() => {
                 class="flex items-center justify-between px-4 py-3 cursor-pointer select-none"
             >
                 <div class="flex items-center gap-3 min-w-0">
-                    <div class="relative flex-shrink-0">
+                    <div class="relative shrink-0">
                         <div class="p-2 rounded-lg bg-white dark:bg-gray-800 shadow-sm" :class="typeConfig.colorClass">
                             <component :is="typeConfig.icon" class="w-4 h-4" />
                         </div>
@@ -283,7 +283,7 @@ const stepCounter = computed(() => {
                             class="flex items-start gap-2.5 pl-1 group/line font-mono"
                         >
                             <!-- Step Indicator -->
-                            <div class="flex items-center justify-center w-5 h-5 flex-shrink-0 mt-0.5">
+                            <div class="flex items-center justify-center w-5 h-5 shrink-0 mt-0.5">
                                 <!-- Active / Last step -->
                                 <div 
                                     v-if="line === displayLines[displayLines.length - 1] && !isClosed"
@@ -326,7 +326,7 @@ const stepCounter = computed(() => {
                                 <!-- Count Badge -->
                                 <span 
                                     v-if="line.count > 1"
-                                    class="flex-shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 tabular-nums"
+                                    class="shrink-0 text-[10px] font-black px-1.5 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 tabular-nums"
                                 >
                                     ×{{ line.count }}
                                 </span>
@@ -335,7 +335,7 @@ const stepCounter = computed(() => {
 
                         <!-- Live cursor for active process -->
                         <div v-if="!isClosed && rawLines.length > 0" class="flex items-center gap-2.5 pl-1 mt-1">
-                            <div class="w-5 flex-shrink-0 flex justify-center">
+                            <div class="w-5 shrink-0 flex justify-center">
                                 <div 
                                     class="w-2 h-4 rounded-sm animate-pulse"
                                     :class="typeConfig.barClass"

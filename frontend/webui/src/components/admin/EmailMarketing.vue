@@ -191,7 +191,7 @@ function getStatusClass(status) {
             <button @click="activeTab = 'topics'" :class="['py-3 px-1 text-sm font-medium border-b-2 transition-all', activeTab === 'topics' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700']">AI Research Topics</button>
         </div>
 
-        <div class="flex-grow overflow-y-auto p-6">
+        <div class="grow overflow-y-auto p-6">
             
             <!-- DRAFTS -->
             <div v-if="activeTab === 'drafts'" class="space-y-6">
@@ -211,7 +211,7 @@ function getStatusClass(status) {
                     </div>
                     <div v-else class="p-5">
                         <div class="flex justify-between items-start mb-4">
-                            <div class="flex-grow">
+                            <div class="grow">
                                 <div class="flex items-center gap-2 mb-2">
                                     <span :class="['px-2 py-0.5 text-[9px] font-black uppercase rounded tracking-wider', getStatusClass(p.status)]">
                                         {{ p.status.replace('_', ' ') }}
@@ -282,7 +282,7 @@ function getStatusClass(status) {
             <!-- TOPICS -->
             <div v-if="activeTab === 'topics'" class="max-w-2xl mx-auto space-y-6">
                 <div class="flex gap-2">
-                    <input v-model="newTopic" placeholder="Suggest a research topic for the AI..." class="input-field flex-grow" @keyup.enter="addTopic" />
+                    <input v-model="newTopic" placeholder="Suggest a research topic for the AI..." class="input-field grow" @keyup.enter="addTopic" />
                     <button @click="addTopic" class="btn btn-primary px-6">Add Topic</button>
                 </div>
                 <div class="border dark:border-gray-700 rounded-2xl overflow-hidden bg-white dark:bg-gray-900/40">

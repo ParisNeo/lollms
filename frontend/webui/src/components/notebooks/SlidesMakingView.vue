@@ -506,7 +506,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                     <div class="w-full bg-slate-800 h-3 rounded-full overflow-hidden mb-10"><div class="h-full bg-blue-500 transition-all duration-500 progress-bar-animated" :style="{width: activeTask.progress + '%'}"></div></div>
                     <div class="bg-black rounded-2xl border border-slate-800 overflow-hidden h-64 flex flex-col">
                         <div class="px-4 py-2 bg-slate-800 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-700">Studio Log Output</div>
-                        <div ref="logsContainerRef" class="flex-grow overflow-y-auto p-4 font-mono text-[11px] text-slate-400 space-y-1 custom-scrollbar">
+                        <div ref="logsContainerRef" class="grow overflow-y-auto p-4 font-mono text-[11px] text-slate-400 space-y-1 custom-scrollbar">
                             <div v-for="(log, i) in activeTask.logs" :key="i" class="flex gap-4">
                                 <span class="opacity-30 shrink-0">[{{ new Date(log.timestamp).toLocaleTimeString() }}]</span>
                                 <span :class="{'text-red-400': log.level === 'ERROR', 'text-blue-400': log.level === 'INFO'}">{{ log.message }}</span>
@@ -561,9 +561,9 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
         </Teleport>
 
         <!-- TOP THUMBNAILS NAV -->
-        <div class="h-28 flex-shrink-0 bg-white dark:bg-slate-900 border-b dark:border-slate-800 flex items-center px-4 gap-3 overflow-x-auto no-scrollbar shadow-sm z-20">
+        <div class="h-28 shrink-0 bg-white dark:bg-slate-900 border-b dark:border-slate-800 flex items-center px-4 gap-3 overflow-x-auto no-scrollbar shadow-sm z-20">
             <div v-for="(s, i) in slideData.slides_data" :key="s.id" @click="selectedSlideIdx = i"
-                 class="h-20 aspect-video flex-shrink-0 rounded-lg border-2 cursor-pointer overflow-hidden transition-all relative group shadow-sm"
+                 class="h-20 aspect-video shrink-0 rounded-lg border-2 cursor-pointer overflow-hidden transition-all relative group shadow-sm"
                  :class="selectedSlideIdx === i ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-slate-200 dark:border-slate-800 opacity-60 hover:opacity-100'">
                 <AuthenticatedImage v-if="s.images?.length" :src="s.images[s.selected_image_index || 0].path" img-class="object-cover" class="w-full h-full" />
                 <div v-else class="w-full h-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-300 font-mono text-xs">{{ i + 1 }}</div>
@@ -572,9 +572,9 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
             <button @click="openWizard" class="h-20 aspect-video border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-lg flex flex-col items-center justify-center text-slate-400 hover:border-blue-500 hover:text-blue-500 transition-colors"><IconPlus class="w-6 h-6 mb-1"/><span class="text-[9px] font-black uppercase">Add Slide</span></button>
         </div>
 
-        <div class="flex-grow flex overflow-hidden">
+        <div class="grow flex overflow-hidden">
             <!-- THE STAGE (16:9) -->
-            <div class="flex-grow flex flex-col items-center p-6 md:p-10 overflow-hidden relative">
+            <div class="grow flex flex-col items-center p-6 md:p-10 overflow-hidden relative">
                 
                 <!-- Deck Video Overlay -->
                 <div v-if="slideData.video_src" class="w-full max-w-5xl mb-4 bg-black rounded-xl overflow-hidden shadow-2xl relative group/video">
@@ -585,7 +585,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                 </div>
 
                 <div v-if="currentSlide" class="w-full max-w-5xl aspect-video bg-white shadow-2xl rounded-xl overflow-hidden flex flex-col border border-slate-200 dark:border-slate-800 relative group/canvas">
-                    <div class="flex-grow flex p-12 gap-10 overflow-hidden relative">
+                    <div class="grow flex p-12 gap-10 overflow-hidden relative">
                         <!-- Switchable Mode: Graphic or Image -->
                         <template v-if="viewMode === 'html' && currentSlide.html_content">
                             <iframe :src="currentHtmlSrc" class="w-full h-full border-none bg-white"></iframe>
@@ -602,7 +602,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                                     <div v-if="currentImage" class="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 opacity-0 group-hover/canvas:opacity-100 transition-opacity"><button @click.stop="navImage(-1)" class="p-2 bg-black/60 rounded-full text-white hover:bg-black"><IconChevronLeft class="w-4 h-4"/></button><button @click.stop="navImage(1)" class="p-2 bg-black/60 rounded-full text-white hover:bg-black"><IconChevronRight class="w-4 h-4"/></button></div>
                                 </div>
                             </template>
-                            <template v-else><div class="flex-grow flex flex-col"><h1 class="text-5xl font-black text-slate-900 mb-12 border-b-8 border-blue-500 pb-4 inline-block self-start uppercase tracking-tighter">{{ currentSlide.title }}</h1><ul v-if="currentSlide.layout === 'TextOnly'" class="space-y-6"><li v-for="(b, i) in currentSlide.bullets" :key="i" class="flex gap-6 text-2xl text-slate-800 font-bold leading-tight"><span class="text-blue-600 font-black">▶</span><span>{{ b }}</span></li></ul></div></template>
+                            <template v-else><div class="grow flex flex-col"><h1 class="text-5xl font-black text-slate-900 mb-12 border-b-8 border-blue-500 pb-4 inline-block self-start uppercase tracking-tighter">{{ currentSlide.title }}</h1><ul v-if="currentSlide.layout === 'TextOnly'" class="space-y-6"><li v-for="(b, i) in currentSlide.bullets" :key="i" class="flex gap-6 text-2xl text-slate-800 font-bold leading-tight"><span class="text-blue-600 font-black">▶</span><span>{{ b }}</span></li></ul></div></template>
                         </template>
                     </div>
                     <!-- Controls Overlay on Stage -->
@@ -622,7 +622,7 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                 <div v-if="currentSlide" class="w-full max-w-5xl mt-4 flex items-end gap-4 overflow-x-auto no-scrollbar pb-2">
                     <div v-if="currentSlide.images?.length" class="flex gap-2">
                         <div v-for="(img, idx) in currentSlide.images" :key="idx" @click="selectVariant(idx)" 
-                             class="h-14 w-24 flex-shrink-0 rounded border-2 transition-all relative group/thumb overflow-hidden cursor-pointer" 
+                             class="h-14 w-24 shrink-0 rounded border-2 transition-all relative group/thumb overflow-hidden cursor-pointer" 
                              :class="idx === (currentSlide.selected_image_index || 0) ? 'border-blue-500' : 'border-transparent opacity-50'">
                             <AuthenticatedImage :src="img.path" class="w-full h-full object-cover" />
                             <div class="absolute inset-0 flex items-center justify-center gap-1 opacity-0 group-hover/thumb:opacity-100 bg-black/40 transition-opacity">
@@ -631,16 +631,16 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                             </div>
                         </div>
                     </div>
-                    <button @click="triggerImport" class="h-14 w-24 flex-shrink-0 rounded border-2 border-dashed border-slate-300 dark:border-slate-800 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-500 transition-colors"><IconArrowDownTray class="w-5 h-5"/></button>
+                    <button @click="triggerImport" class="h-14 w-24 shrink-0 rounded border-2 border-dashed border-slate-300 dark:border-slate-800 flex items-center justify-center text-slate-400 hover:text-blue-500 hover:border-blue-500 transition-colors"><IconArrowDownTray class="w-5 h-5"/></button>
                     <input type="file" ref="fileInput" @change="handleFileUpload" class="hidden" accept="image/*" />
                 </div>
             </div>
 
             <!-- RIGHT BAR -->
             <transition enter-active-class="transition duration-300 transform translate-x-full" enter-to-class="translate-x-0">
-                <div v-if="isDiscussionVisible" class="w-80 border-l dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col flex-shrink-0 z-30 shadow-2xl">
+                <div v-if="isDiscussionVisible" class="w-80 border-l dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 z-30 shadow-2xl">
                     <div class="p-4 border-b flex items-center justify-between"><div class="flex items-center gap-2"><IconChatBubbleLeftRight class="w-4 h-4 text-blue-500" /><h3 class="font-black text-[10px] uppercase tracking-widest">Intelligence</h3></div><button @click="isDiscussionVisible = false" class="btn-icon-flat"><IconXMark class="w-5 h-5"/></button></div>
-                    <div class="flex-grow overflow-y-auto custom-scrollbar p-4 space-y-4" ref="messagesContainerRef">
+                    <div class="grow overflow-y-auto custom-scrollbar p-4 space-y-4" ref="messagesContainerRef">
                         <div v-for="(msg, mIdx) in currentSlide?.messages" :key="mIdx" class="flex flex-col gap-1" :class="{'items-end': msg.role === 'user'}"><div class="p-3 rounded-2xl text-xs max-w-[90%]" :class="msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300'"><MessageContentRenderer :content="msg.content" /></div></div>
                     </div>
                     <div class="p-4 border-t flex gap-2"><textarea v-model="slideChatMessage" @keyup.enter.exact="sendSlideChat" class="input-field w-full text-xs h-20 resize-none" placeholder="Ask AI..." :disabled="isSendingMessage"></textarea><button @click="sendSlideChat" class="btn btn-primary h-20" :disabled="isSendingMessage"><IconSend class="w-4 h-4"/></button></div>
@@ -654,19 +654,19 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
                 <div v-if="currentSlide" class="space-y-4">
                     <div class="flex items-center justify-between"><h3 class="text-[10px] font-black uppercase text-slate-400 tracking-widest flex items-center gap-2"><IconPencil class="w-3 h-3"/> Content Editor</h3><select :value="currentSlide.layout" @change="updateSlideField('layout', $event.target.value)" class="text-[10px] font-bold bg-slate-100 dark:bg-slate-800 border-none rounded px-3 py-1 focus:ring-1 ring-blue-500 transition-all"><option v-for="opt in layoutOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option></select></div>
                     <input :value="currentSlide.title" @change="updateSlideField('title', $event.target.value)" placeholder="Slide Title..." class="w-full text-2xl font-black bg-transparent border-b-2 border-slate-100 dark:border-slate-800 focus:border-blue-500 p-0 transition-all outline-none" />
-                    <div class="space-y-3 max-h-40 overflow-y-auto custom-scrollbar pr-2"><div v-for="(bullet, bIdx) in (currentSlide.bullets || [])" :key="bIdx" class="flex items-start gap-3 group"><span class="text-blue-500 font-black mt-1.5">●</span><textarea :value="bullet" @change="updateSlideField('bullets', currentSlide.bullets.map((b, i) => i === bIdx ? $event.target.value : b))" class="flex-grow bg-transparent text-sm border-none focus:ring-0 p-0 resize-none min-h-[24px]" rows="1"></textarea><button @click="updateSlideField('bullets', currentSlide.bullets.filter((_, i) => i !== bIdx))" class="opacity-0 group-hover:opacity-100 text-red-500 transition-opacity p-1"><IconTrash class="w-3.5 h-3.5"/></button></div><button @click="updateSlideField('bullets', [...(currentSlide.bullets || []), 'New point...'])" class="text-[10px] font-black uppercase text-blue-500 hover:underline">+ Add Point</button></div>
+                    <div class="space-y-3 max-h-40 overflow-y-auto custom-scrollbar pr-2"><div v-for="(bullet, bIdx) in (currentSlide.bullets || [])" :key="bIdx" class="flex items-start gap-3 group"><span class="text-blue-500 font-black mt-1.5">●</span><textarea :value="bullet" @change="updateSlideField('bullets', currentSlide.bullets.map((b, i) => i === bIdx ? $event.target.value : b))" class="grow bg-transparent text-sm border-none focus:ring-0 p-0 resize-none min-h-[24px]" rows="1"></textarea><button @click="updateSlideField('bullets', currentSlide.bullets.filter((_, i) => i !== bIdx))" class="opacity-0 group-hover:opacity-100 text-red-500 transition-opacity p-1"><IconTrash class="w-3.5 h-3.5"/></button></div><button @click="updateSlideField('bullets', [...(currentSlide.bullets || []), 'New point...'])" class="text-[10px] font-black uppercase text-blue-500 hover:underline">+ Add Point</button></div>
                 </div>
                 <div class="flex flex-col gap-4">
-                    <div v-if="currentSlide" class="flex-grow flex flex-col bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 border dark:border-slate-800 relative group/notes">
+                    <div v-if="currentSlide" class="grow flex flex-col bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 border dark:border-slate-800 relative group/notes">
                         <div class="flex justify-between items-center mb-2"><div class="flex items-center gap-2"><IconMicrophone class="w-3.5 h-3.5 text-slate-400"/><label class="text-[10px] font-black uppercase text-slate-500 tracking-widest">Speaker Script</label><button @click="toggleDictation('notes')" class="p-1 rounded-full transition-all" :class="isRecording ? 'text-red-600 bg-red-100' : 'text-blue-500'"><IconMicrophone class="w-4 h-4" /></button></div><div class="flex gap-2">
                                 <button @click="handleGenerateAudio" class="btn btn-secondary btn-xs" :disabled="isAudioGenerating">TTS</button>
                                 <button @click="handleAutoNotes" class="btn btn-secondary btn-xs" :disabled="isNotesGenerating">AI Gen</button>
                                 <button v-if="currentSlide.audio_src" @click="handleDeleteAudio" class="text-red-500 p-1 hover:bg-red-50 rounded"><IconTrash class="w-3.5 h-3.5"/></button>
                             </div></div>
-                        <textarea :value="currentSlide.notes" @change="updateSlideField('notes', $event.target.value)" class="flex-grow bg-transparent border-none focus:ring-0 text-xs leading-relaxed resize-none p-0 custom-scrollbar" placeholder="Type script..."></textarea>
-                        <div v-if="currentSlide.audio_src" class="mt-2 bg-blue-50 dark:bg-blue-900/20 rounded-xl p-2 flex items-center gap-2"><AuthenticatedAudio :src="currentSlide.audio_src" class="flex-grow"/></div>
+                        <textarea :value="currentSlide.notes" @change="updateSlideField('notes', $event.target.value)" class="grow bg-transparent border-none focus:ring-0 text-xs leading-relaxed resize-none p-0 custom-scrollbar" placeholder="Type script..."></textarea>
+                        <div v-if="currentSlide.audio_src" class="mt-2 bg-blue-50 dark:bg-blue-900/20 rounded-xl p-2 flex items-center gap-2"><AuthenticatedAudio :src="currentSlide.audio_src" class="grow"/></div>
                     </div>
-                    <div class="flex gap-3 mt-auto"><input v-model="aiPrompt" @keyup.enter="handleProcess" placeholder="Add slides or refine deck..." class="input-field flex-grow h-12 rounded-2xl border-2" /><button @click="handleProcess" :disabled="!aiPrompt.trim() || activeTask" class="btn btn-primary px-8 rounded-2xl h-12 shadow-xl"><IconSparkles class="w-5 h-5 mr-2"/><span class="font-bold">Process</span></button></div>
+                    <div class="flex gap-3 mt-auto"><input v-model="aiPrompt" @keyup.enter="handleProcess" placeholder="Add slides or refine deck..." class="input-field grow h-12 rounded-2xl border-2" /><button @click="handleProcess" :disabled="!aiPrompt.trim() || activeTask" class="btn btn-primary px-8 rounded-2xl h-12 shadow-xl"><IconSparkles class="w-5 h-5 mr-2"/><span class="font-bold">Process</span></button></div>
                 </div>
             </div>
         </div>
@@ -693,12 +693,14 @@ onUnmounted(() => { if (recognition && isRecording.value) recognition.stop(); })
             </div>
         </transition>
 
-        <transition name="fade"><div v-if="editingArtefact" class="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center"><div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden"><div class="p-4 border-b flex justify-between items-center bg-slate-50"><h3 class="font-black text-xs uppercase tracking-widest">Edit Knowledge Source</h3><button @click="editingArtefact = null"><IconXMark class="w-5 h-5"/></button></div><div class="flex-grow p-6 flex flex-col gap-4"><input v-model="editingArtefact.name" class="input-field font-bold"/><textarea v-model="editingArtefact.content" class="flex-grow input-field font-mono text-xs p-4 resize-none"></textarea></div><div class="p-4 border-t flex justify-end gap-2"><button @click="editingArtefact = null" class="btn btn-secondary">Cancel</button><button @click="saveArtefactEdit" class="btn btn-primary">Update Artefact</button></div></div></div></transition>
+        <transition name="fade"><div v-if="editingArtefact" class="fixed inset-0 z-[100] bg-slate-900/60 flex items-center justify-center"><div class="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden"><div class="p-4 border-b flex justify-between items-center bg-slate-50"><h3 class="font-black text-xs uppercase tracking-widest">Edit Knowledge Source</h3><button @click="editingArtefact = null"><IconXMark class="w-5 h-5"/></button></div><div class="grow p-6 flex flex-col gap-4"><input v-model="editingArtefact.name" class="input-field font-bold"/><textarea v-model="editingArtefact.content" class="grow input-field font-mono text-xs p-4 resize-none"></textarea></div><div class="p-4 border-t flex justify-end gap-2"><button @click="editingArtefact = null" class="btn btn-secondary">Cancel</button><button @click="saveArtefactEdit" class="btn btn-primary">Update Artefact</button></div></div></div></transition>
 
     </div>
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .aspect-video { aspect-ratio: 16 / 9; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .custom-scrollbar::-webkit-scrollbar { width: 5px; height: 5px; }

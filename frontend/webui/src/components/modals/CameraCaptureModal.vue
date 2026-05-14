@@ -22,7 +22,7 @@
         </template>
         <template #footer>
             <button @click="uiStore.closeModal('cameraCapture')" class="btn btn-secondary">Cancel</button>
-            <div class="flex-grow"></div>
+            <div class="grow"></div>
             <button v-if="cameraState === 'streaming'" @click="capturePhoto" class="btn btn-primary">Take Photo</button>
             <button v-if="cameraState === 'captured'" @click="retakePhoto" class="btn btn-secondary">Retake</button>
             <button v-if="cameraState === 'captured'" @click="savePhoto" class="btn btn-primary" :disabled="isSaving">

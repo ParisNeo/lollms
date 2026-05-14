@@ -114,7 +114,7 @@ function handleClone(e) {
             <!-- Header: Icon + Name + Star -->
             <div class="flex items-start gap-3 mb-3">
                 <!-- Avatar -->
-                <div class="relative flex-shrink-0">
+                <div class="relative shrink-0">
                     <div 
                         class="w-14 h-14 rounded-xl overflow-hidden bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-600 flex items-center justify-center shadow-inner"
                         :class="{ 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-800': isActive }"
@@ -144,7 +144,7 @@ function handleClone(e) {
                         </h4>
                         <span 
                             v-if="isShared"
-                            class="flex-shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
+                            class="shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300"
                             title="Shared by {{ sharedBy }}"
                         >
                             📤
@@ -170,7 +170,7 @@ function handleClone(e) {
                 <!-- Star Button -->
                 <button 
                     @click="handleStar"
-                    class="flex-shrink-0 p-1.5 rounded-lg transition-all hover:scale-110"
+                    class="shrink-0 p-1.5 rounded-lg transition-all hover:scale-110"
                     :class="isStarred ? 'text-yellow-500' : 'text-gray-300 dark:text-gray-600 hover:text-yellow-400'"
                     title="Toggle favorite"
                 >

@@ -27,10 +27,10 @@
             </div>
 
             <!-- Main Content Area -->
-            <div class="flex-grow flex flex-col min-h-0 bg-gray-50 dark:bg-gray-900">
+            <div class="grow flex flex-col min-h-0 bg-gray-50 dark:bg-gray-900">
                 
                 <!-- STEP 1: INPUTS -->
-                <div v-if="step === 'inputs'" class="flex-grow overflow-y-auto p-6 space-y-6">
+                <div v-if="step === 'inputs'" class="grow overflow-y-auto p-6 space-y-6">
                     <div class="max-w-3xl mx-auto">
                         <div class="flex items-center gap-3 mb-6">
                             <div class="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600">
@@ -67,7 +67,7 @@
                                 
                                 <div v-else-if="inp.type === 'boolean'" class="flex items-center gap-3 py-2">
                                     <button @click="inputValues[inp.nodeId][inp.inputName] = !inputValues[inp.nodeId][inp.inputName]" 
-                                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200" 
+                                        class="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200" 
                                         :class="inputValues[inp.nodeId][inp.inputName] ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-700'">
                                         <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200" :class="inputValues[inp.nodeId][inp.inputName] ? 'translate-x-5' : 'translate-x-0'"></span>
                                     </button>
@@ -81,7 +81,7 @@
                 </div>
 
                 <!-- STEP 2: RESULTS -->
-                <div v-if="step === 'results'" class="flex-grow flex flex-col min-h-0">
+                <div v-if="step === 'results'" class="grow flex flex-col min-h-0">
                     
                     <!-- Progress Bar (Always visible during run) -->
                     <div v-if="isRunning" class="px-6 py-4 bg-white dark:bg-gray-800 border-b dark:border-gray-700">
@@ -94,14 +94,14 @@
                         </div>
                     </div>
 
-                    <div class="flex-grow overflow-y-auto p-6">
+                    <div class="grow overflow-y-auto p-6">
                         <div class="max-w-4xl mx-auto space-y-6">
                             
                             <!-- Error Alert -->
                             <div v-if="executionError" class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-2xl p-5 animate-in slide-in-from-top-2">
                                 <div class="flex items-start gap-4">
                                     <IconError class="w-6 h-6 text-red-500 mt-1" />
-                                    <div class="flex-grow min-w-0">
+                                    <div class="grow min-w-0">
                                         <h4 class="font-bold text-red-700 dark:text-red-400">Execution Error</h4>
                                         <pre class="mt-3 text-xs font-mono whitespace-pre-wrap overflow-x-auto bg-black/5 dark:bg-black/40 p-4 rounded-xl border dark:border-red-900/30 text-red-900 dark:text-red-300 max-h-80">{{ executionError }}</pre>
                                         <button @click="step = 'inputs'" class="mt-4 btn btn-secondary btn-sm">Adjust Inputs & Retry</button>
@@ -124,9 +124,9 @@
                                         <div v-if="getNodeResult(node.id)" class="space-y-8">
                                             <div v-for="(val, outKey) in getNodeResult(node.id)" :key="outKey" class="group">
                                                 <div class="flex items-center gap-2 mb-3">
-                                                    <div class="h-px flex-grow bg-gray-100 dark:bg-gray-700"></div>
+                                                    <div class="h-px grow bg-gray-100 dark:bg-gray-700"></div>
                                                     <span class="text-[9px] font-black uppercase text-gray-400 tracking-[0.2em] whitespace-nowrap">{{ outKey }}</span>
-                                                    <div class="h-px flex-grow bg-gray-100 dark:bg-gray-700"></div>
+                                                    <div class="h-px grow bg-gray-100 dark:bg-gray-700"></div>
                                                 </div>
                                                 
                                                 <!-- IMAGE RENDERER (ENHANCED) -->
@@ -353,6 +353,8 @@ onMounted(() => {
 </script>
 
 <style scoped>
+@reference "tailwindcss";
+
 .input-field {
     @apply bg-gray-50 dark:bg-gray-900/50 border-gray-200 dark:border-gray-700 rounded-xl focus:ring-blue-500 focus:border-blue-500;
 }

@@ -28,10 +28,10 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
     <div class="card">
         <div class="card-header">
             <img :src="prompt.icon || defaultIcon" :alt="prompt.name" class="card-icon" />
-            <div class="flex-grow min-w-0">
+            <div class="grow min-w-0">
                 <div class="flex justify-between items-start">
                     <h3 class="card-title" :title="prompt.name">{{ prompt.name }}</h3>
-                    <button @click.stop="$emit('star')" class="p-1.5 rounded-full transition-colors flex-shrink-0" :class="isStarred ? 'bg-yellow-400/20 text-yellow-500' : 'text-gray-400 hover:text-yellow-500'">
+                    <button @click.stop="$emit('star')" class="p-1.5 rounded-full transition-colors shrink-0" :class="isStarred ? 'bg-yellow-400/20 text-yellow-500' : 'text-gray-400 hover:text-yellow-500'">
                         <IconStarFilled v-if="isStarred" class="w-5 h-5" />
                         <IconStar v-else class="w-5 h-5" />
                     </button>
@@ -73,7 +73,7 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
                 </div>
             </div>
 
-            <div class="flex-shrink-0 flex gap-1">
+            <div class="shrink-0 flex gap-1">
                 <button v-if="prompt.has_readme" @click="$emit('help', prompt)" class="btn btn-secondary p-2" title="Help">
                     <IconBookOpen class="w-4 h-4" />
                 </button>
@@ -86,10 +86,12 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
 </template>
 
 <style scoped>
+@reference "tailwindcss";
+
 .card { @apply bg-white dark:bg-gray-800 rounded-lg shadow-md flex flex-col overflow-hidden transition-shadow hover:shadow-lg h-full; }
 .card-header { @apply flex items-start p-4 gap-4; }
-.card-icon { @apply w-12 h-12 object-cover rounded-md flex-shrink-0 bg-gray-200 dark:bg-gray-700 p-1; }
-.card-body { @apply px-4 pb-4 flex-grow; }
+.card-icon { @apply w-12 h-12 object-cover rounded-md shrink-0 bg-gray-200 dark:bg-gray-700 p-1; }
+.card-body { @apply px-4 pb-4 grow; }
 .card-title { @apply font-bold text-base leading-tight; }
 .card-tags { @apply flex flex-wrap gap-x-2 gap-y-1 mt-1; }
 .tag { @apply text-xs bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300 capitalize; }
