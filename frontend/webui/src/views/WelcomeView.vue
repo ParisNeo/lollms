@@ -90,24 +90,25 @@ function installCert(type) { window.open(`/api/public/cert/install-script?script
         </div>
         
         <!-- Title & Slogan -->
-        <div class="text-center animate-fade-in-up">
-            <h1 class="main-title font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-500 dark:from-blue-400 dark:via-indigo-400 dark:to-blue-300 tracking-tighter mb-4 filter drop-shadow-sm leading-tight" style="font-family: 'Exo 2', sans-serif;">
-            {{ welcomeText }}
+        <div class="text-center animate-fade-in-up max-w-5xl mx-auto mb-12">
+            <h1 class="splash-title">
+              {{ welcomeText }}
             </h1>
-            <p class="text-base sm:text-xl md:text-2xl lg:text-3xl text-gray-500 dark:text-gray-400 font-extralight max-w-4xl mx-auto leading-tight italic tracking-wide px-4">
-            {{ welcomeSlogan }}
+            <p class="welcome-slogan opacity-60">
+              {{ welcomeSlogan }}
             </p>
         </div>
 
         <!-- Auth Buttons -->
-        <div class="mt-10 sm:mt-16 lg:mt-24 flex flex-col sm:flex-row justify-center items-center gap-4 sm:gap-6 w-full max-w-lg mx-auto sm:max-w-none px-4 mb-10">
-          <button @click="openLogin" class="btn-welcome w-full sm:w-56 md:w-64 bg-blue-600 hover:bg-blue-700 text-white shadow-xl">Sign In</button>
-          <button @click="openRegister" class="btn-welcome w-full sm:w-56 md:w-64 bg-gray-900 hover:bg-black dark:bg-gray-800 dark:hover:bg-gray-700 text-white shadow-lg">Register</button>
-          <button v-if="ssoClientConfig.enabled" @click="ssoLogin" class="btn-welcome w-full sm:w-56 md:w-64 bg-white hover:bg-gray-50 text-gray-900 border border-gray-100 shadow-xl">
-              <img v-if="ssoClientConfig.icon_url" :src="ssoClientConfig.icon_url" alt="" class="w-5 h-5 sm:w-6 sm:h-6">
+        <div class="mt-16 lg:mt-24 flex flex-col sm:flex-row justify-center items-center gap-6 w-full max-w-4xl px-4 mb-10">
+          <button @click="openLogin" class="welcome-btn w-full sm:w-64 bg-blue-600 text-white">Sign In</button>
+          <button @click="openRegister" class="welcome-btn w-full sm:w-64 bg-gray-950 dark:bg-white dark:text-gray-950 text-white">Register</button>
+          <button v-if="ssoClientConfig.enabled" @click="ssoLogin" class="welcome-btn w-full sm:w-64 bg-white dark:bg-gray-800 text-gray-900 dark:text-white border border-gray-100 dark:border-gray-700">
+              <img v-if="ssoClientConfig.icon_url" :src="ssoClientConfig.icon_url" alt="" class="w-5 h-5">
               <span>{{ ssoClientConfig.display_name }}</span>
           </button>
         </div>
+
       </div>
 
       <!-- FUN FACT CARD (Sits outside the blur container, on top of the backdrop) -->
@@ -119,40 +120,54 @@ function installCert(type) { window.open(`/api/public/cert/install-script?script
             :class="isExpanded ? 'scale-100 max-w-4xl animate-fade-in-up' : 'cursor-pointer hover:-translate-y-1'"
           >
               <div class="absolute -inset-1 bg-gradient-to-br from-blue-500 to-indigo-700 rounded-[1.5rem] sm:rounded-[2.5rem] blur opacity-10 group-hover:opacity-20 transition duration-700"></div>
-              <div class="relative flex flex-col bg-white/90 dark:bg-gray-900/90 backdrop-blur-3xl rounded-[1.5rem] sm:rounded-[2.5rem] shadow-2xl border border-white/20 dark:border-gray-800 p-6 sm:p-10 md:p-12 overflow-hidden" :style="funFactStyle">
-                  <div class="flex items-center gap-3 sm:gap-6 mb-4 border-b border-gray-100 dark:border-gray-800 pb-4">
-                      <span class="text-2xl sm:text-4xl filter drop-shadow-lg">✨</span>
-                      <h3 class="font-black text-gray-800 dark:text-gray-100 uppercase tracking-[0.2em] text-[8px] sm:text-[10px] grow text-left">
-                            {{ funFactCategory || 'Knowledge Bit' }}
-                      </h3>
-                      <div class="flex items-center gap-4">
-                          <button v-if="isExpanded" @click.stop="authStore.fetchNewFunFact()" class="p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-full text-blue-600 transition-all" :disabled="isFetchingFunFact">
-                              <IconAnimateSpin v-if="isFetchingFunFact" class="w-5 h-5 sm:w-7 sm:h-7 animate-spin" />
-                              <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 sm:w-7 sm:h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              <div class="relative flex flex-col bg-white dark:bg-gray-900 rounded-[2rem] shadow-2xl border border-gray-200/50 dark:border-gray-700/50 p-8 sm:p-12 overflow-hidden" :style="funFactStyle">
+                  <div class="flex items-start justify-between mb-8">
+                      <div class="flex flex-col gap-1">
+                          <span class="modal-tag !mb-0">{{ funFactCategory || 'Knowledge Bit' }}</span>
+                          <div class="flex items-center gap-2">
+                             <span class="text-xl">✨</span>
+                             <span v-if="!isExpanded" class="text-[9px] font-black text-blue-500 uppercase tracking-widest animate-pulse">Discovery awaits</span>
+                          </div>
+                      </div>
+                      
+                      <div class="flex items-center gap-3">
+                          <button v-if="isExpanded" @click.stop="authStore.fetchNewFunFact()" class="modal-close-btn" :disabled="isFetchingFunFact">
+                              <IconAnimateSpin v-if="isFetchingFunFact" class="w-5 h-5 animate-spin" />
+                              <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
                           </button>
-                          <button v-if="isExpanded" @click.stop="toggleExpand" class="p-2 hover:bg-red-50 dark:hover:bg-red-900/30 text-red-500 rounded-full transition-all hover:rotate-90">
-                              <IconXMark class="w-6 h-6 sm:w-8 sm:h-8" />
+                          <button v-if="isExpanded" @click.stop="toggleExpand" class="modal-close-btn !text-red-500">
+                              <IconXMark class="w-6 h-6" />
                           </button>
-                          <span v-else class="text-[8px] sm:text-[9px] font-black text-blue-500 uppercase tracking-[0.2em] animate-pulse">Learn More</span>
                       </div>
                   </div>
-                  <div class="max-h-[20vh] sm:max-h-[50vh] overflow-y-auto custom-scrollbar pr-2">
-                      <!-- ADDED :key to prevent DOM patching crash -->
-                      <MessageContentRenderer :key="funFact" :content="funFact" class="text-sm sm:text-base text-gray-700 dark:text-gray-100" />
+
+                  <div class="max-h-[50vh] overflow-y-auto custom-scrollbar">
+                      <MessageContentRenderer :key="funFact" :content="funFact" class="text-gray-800 dark:text-gray-100" />
                   </div>
               </div>
           </div>
       </div>
     </div>
     
-    <!-- Footer -->
-    <footer class="relative z-10 w-full py-8 text-center text-[9px] sm:text-[10px] font-black uppercase tracking-[0.3em] text-gray-400 dark:text-gray-600 border-t border-gray-200/10 dark:border-gray-800/10 backdrop-blur-md bg-white/5 dark:bg-black/5 px-4" :class="{'opacity-0 pointer-events-none': isExpanded}">
-        <div class="flex flex-col items-center gap-6">
-            <div v-if="isHttpsEnabled" class="flex flex-col sm:flex-row gap-4 sm:gap-10">
-                <button @click="installCert('windows')" class="footer-link"><IconLock class="w-3.5 h-3.5" /> Trusted Cert (Win)</button>
-                <button @click="installCert('linux')" class="footer-link"><IconLock class="w-3.5 h-3.5" /> Trusted Cert (Linux)</button>
+    <!-- Enhanced Loading Footer -->
+    <footer class="relative z-10 w-full max-w-2xl mx-auto py-12 px-6" :class="{'opacity-0': isExpanded}">
+        <div class="flex flex-col gap-4">
+            <div class="flex items-end justify-between">
+                <div class="flex flex-col gap-1">
+                    <span class="splash-loading-label">System Initialization</span>
+                    <span class="text-[10px] font-mono text-gray-400 italic">Loading AI models & personalities...</span>
+                </div>
+                <span class="text-[10px] font-black text-gray-400">50%</span>
             </div>
-            <div class="opacity-40"><span>LoLLMs v{{ appVersion }} &middot; ParisNeo 2025</span></div>
+            
+            <div class="splash-progress-track">
+                <div class="splash-progress-fill" style="width: 50%"></div>
+            </div>
+
+            <div class="flex justify-center gap-8 mt-6 opacity-30">
+                <div class="text-[8px] font-black uppercase tracking-[0.3em] text-gray-400">v{{ appVersion }}</div>
+                <div class="text-[8px] font-black uppercase tracking-[0.3em] text-gray-400">ParisNeo &copy; 2025</div>
+            </div>
         </div>
     </footer>
   </div>

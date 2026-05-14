@@ -320,6 +320,62 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .dark .overflow-container::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,0.2); }
 .dark .error-entry .ui-key, .dark .error-entry .ui-value { @apply !text-red-400; }
 
+/* Modal & Overlay System */
+.modal-overlay { @apply fixed inset-0 bg-gray-900/40 backdrop-blur-md z-40; }
+.modal-panel { @apply bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200/50 dark:border-gray-700/50 overflow-hidden transition-all duration-300; }
+.modal-header { @apply flex items-start justify-between px-10 pt-10 pb-6 shrink-0; }
+.modal-title { @apply text-3xl font-bold text-gray-900 dark:text-white leading-tight tracking-tight; font-family: Georgia, serif; }
+.modal-body { @apply px-10 pb-10 overflow-y-auto flex-1; }
+
+.modal-tag { 
+    @apply text-[9px] font-black uppercase tracking-[0.3em] text-gray-400 mb-2 block; 
+    font-family: system-ui, -apple-system, sans-serif;
+}
+.modal-footer { @apply flex items-center justify-end px-10 py-6 gap-4 bg-gray-50/30 dark:bg-gray-900/50 border-t border-gray-100 dark:border-gray-800 shrink-0; }
+
+/* Refined Close Button for Modal */
+.modal-close-btn {
+    @apply p-2 rounded-full text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 transition-all duration-300;
+}
+
+/* Welcome / Hero Typography */
+.welcome-title {
+    @apply text-gray-900 dark:text-white leading-tight tracking-tighter;
+    font-family: Georgia, Cambria, serif;
+    font-size: clamp(2.5rem, 8vw, 6rem);
+}
+
+.welcome-slogan {
+    @apply text-gray-500 dark:text-gray-400 italic font-medium;
+    font-family: Georgia, serif;
+    font-size: clamp(1rem, 2vw, 1.5rem);
+}
+
+.welcome-btn {
+    @apply flex items-center justify-center gap-3 px-8 py-4 rounded-2xl font-black uppercase tracking-[0.2em] text-[11px] transition-all duration-300 transform hover:-translate-y-1 active:translate-y-0 shadow-lg hover:shadow-xl;
+    font-family: system-ui, sans-serif;
+}
+
+/* Splash / Loading Specifics */
+.splash-title {
+    @apply text-gray-900 dark:text-white leading-none tracking-tighter mb-2;
+    font-family: Georgia, Cambria, serif;
+    font-size: clamp(3rem, 12vw, 8rem);
+}
+
+.splash-loading-label {
+    @apply text-[9px] font-black uppercase tracking-[0.4em] text-gray-400 dark:text-gray-500 mb-2;
+    font-family: system-ui, sans-serif;
+}
+
+.splash-progress-track {
+    @apply h-0.5 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden relative;
+}
+
+.splash-progress-fill {
+    @apply h-full bg-blue-600 dark:bg-blue-500 transition-all duration-500 ease-out shadow-[0_0_10px_rgba(59,130,246,0.5)];
+}
+
 /* From: GlobalHeader.vue */
 .toolbox-select { @apply w-full text-left text-sm bg-gray-50 dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500; }
 .menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2; }
@@ -372,14 +428,12 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 
 /* Message renderer stuff */
 /* Force artefact content to be contained within this component */
-.document-content :deep(*) {
-    /* Reset common aggressive resets from user content */
+.document-content * {
     all: revert; 
-    /* But keep structural layout */
     display: block;
 }
 /* Re-enable prose styling inside the scope */
-.document-content :deep(.prose) {
+.document-content .prose {
     all: unset;
 }
 .message-prose {
@@ -445,49 +499,58 @@ details[open].document-block > .document-summary { @apply border-b border-gray-2
 .note-block[open] .summary-arrow {
   transform: rotate(90deg);
 }
-.note-content :deep(p) { @apply my-2 leading-relaxed; font-family: Georgia, serif; }
-.note-content :deep(h1),
-.note-content :deep(h2),
-.note-content :deep(h3) { @apply font-bold text-gray-900 dark:text-gray-100 mt-4 mb-2; font-family: system-ui, sans-serif; }
-.note-content :deep(ul),
-.note-content :deep(ol) { @apply my-1.5 pl-5; }
-.note-content :deep(li) { @apply my-0.5; }
-.note-content :deep(code) { @apply bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 px-1 py-0.5 rounded text-xs; }
-.note-content :deep(pre) { @apply bg-amber-100/60 dark:bg-amber-900/30 rounded-lg p-3 my-2 overflow-auto; }
-.note-content :deep(blockquote) { @apply border-l-2 border-amber-400 pl-3 italic text-gray-600 dark:text-gray-400 my-2; }
-.note-content :deep(hr) { @apply border-amber-200 dark:border-amber-800 my-3; }
-.note-content :deep(table) { @apply w-full text-sm my-2; }
-.note-content :deep(th) { @apply bg-amber-100 dark:bg-amber-900/40 font-semibold px-2 py-1 text-left; }
-.note-content :deep(td) { @apply border-t border-amber-100 dark:border-amber-900/30 px-2 py-1; }
+.note-content p { @apply my-2 leading-relaxed; font-family: Georgia, serif; }
+.note-content h1,
+.note-content h2,
+.note-content h3 { @apply font-bold text-gray-900 dark:text-gray-100 mt-4 mb-2; font-family: system-ui, sans-serif; }
+.note-content ul,
+.note-content ol { @apply my-1.5 pl-5; }
+.note-content li { @apply my-0.5; }
+.note-content code { @apply bg-amber-100 dark:bg-amber-900/40 text-amber-900 dark:text-amber-200 px-1 py-0.5 rounded text-xs; }
+.note-content pre { @apply bg-amber-100/60 dark:bg-amber-900/30 rounded-lg p-3 my-2 overflow-auto; }
+.note-content blockquote { @apply border-l-2 border-amber-400 pl-3 italic text-gray-600 dark:text-gray-400 my-2; }
+.note-content hr { @apply border-amber-200 dark:border-amber-800 my-3; }
+.note-content table { @apply w-full text-sm my-2; }
+.note-content th { @apply bg-amber-100 dark:bg-amber-900/40 font-semibold px-2 py-1 text-left; }
+.note-content td { @apply border-t border-amber-100 dark:border-amber-900/30 px-2 py-1; }
 
-/* Processing Block & Job Cards */
-.processing-block-wrapper {
-    @apply w-full my-4;
+/* Processing Block & Status Streams */
+.processing-block-root {
+    @apply my-3 font-sans overflow-visible;
 }
 
+/* Discreet Trigger State */
+.processing-block-root button {
+    /* Removed 'group' from @apply. Ensure 'group' is in your Vue template's class list instead. */
+    @apply flex items-center gap-1.5 text-left transition-colors focus:outline-none whitespace-nowrap;
+}
+
+/* SVG Icon constraints to prevent giant chevrons */
+.processing-block-root svg {
+    @apply shrink-0 pointer-events-none;
+}
+
+/* Detailed Terminal Card revealed on click */
+.processing-terminal-card {
+    @apply mt-2 pl-3 border-l border-gray-200 dark:border-gray-800 transition-all duration-300;
+}
+
+.processing-terminal-inner {
+    @apply bg-white/50 dark:bg-gray-900/40 rounded border border-gray-200/50 dark:border-gray-700/50 p-3 max-w-2xl shadow-sm;
+}
+
+/* The "Job Card" style for standalone processes */
 .processing-card {
-    @apply relative bg-white dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300;
+    @apply relative bg-white dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 w-full my-4;
 }
 
-.processing-content {
-    @apply p-5 flex flex-col gap-3;
+.processing-card-header {
+    @apply flex items-center justify-between gap-4 p-5;
 }
 
-.processing-header {
-    @apply flex items-center justify-between gap-4;
-}
-
-.processing-status-group {
-    @apply flex items-center gap-3 min-w-0;
-}
-
-.processing-label {
-    @apply text-[10px] font-black uppercase tracking-[0.2em] text-gray-400 dark:text-gray-500 font-sans;
-}
-
-.processing-title {
+.processing-card-title {
     @apply text-lg font-bold text-gray-900 dark:text-gray-100 truncate;
-    font-family: Georgia, serif; /* High-end serif title as requested */
+    font-family: Georgia, serif;
 }
 
 .processing-meta-right {

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-14 12:59]
+
+- build(frontend): regenerate production bundle and update processing block
+
 ## [2026-05-14 10:31]
 
 - build(frontend): regenerate dist assets after CodeMirror and message renderer updates

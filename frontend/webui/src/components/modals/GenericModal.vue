@@ -55,47 +55,44 @@ onUnmounted(() => {
       leave-from-class="opacity-100"
       leave-to-class="opacity-0"
     >
-      <div v-if="isVisible" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-40" @click="allowOverlayClose ? handleClose() : null"></div>
+      <div v-if="isVisible" class="modal-overlay" @click="allowOverlayClose ? handleClose() : null"></div>
     </Transition>
 
     <Transition
-      enter-active-class="transition ease-out duration-300"
-      enter-from-class="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
-      enter-to-class="opacity-100 translate-y-0 sm:scale-100"
+      enter-active-class="transition ease-out duration-400"
+      enter-from-class="opacity-0 scale-95 translate-y-8"
+      enter-to-class="opacity-100 scale-100 translate-y-0"
       leave-active-class="transition ease-in duration-200"
-      leave-from-class="opacity-100 translate-y-0 sm:scale-100"
-      leave-to-class="opacity-0 translate-y-4 sm:translate-y-0 sm:scale-95"
+      leave-from-class="opacity-100 scale-100 translate-y-0"
+      leave-to-class="opacity-0 scale-95 translate-y-8"
     >
-      <div v-if="isVisible" class="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+      <div v-if="isVisible" class="fixed inset-0 z-50 flex items-center justify-center p-6 pointer-events-none">
         <div 
-          class="modal-panel bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full flex flex-col pointer-events-auto transition-all" 
-          :class="[maxWidthClass, maxWidthClass.includes('max-w-full') ? 'max-h-full h-full !rounded-none' : 'max-h-[90vh]']"
+          class="modal-panel w-full flex flex-col pointer-events-auto" 
+          :class="[maxWidthClass, maxWidthClass.includes('max-w-full') ? 'max-h-full h-full !rounded-none' : 'max-h-[85vh]']"
         >
-          <header 
-            class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 shrink-0"
-            :class="[maxWidthClass.includes('max-w-full') ? 'p-2 bg-gray-950/50 border-gray-800' : 'p-4']"
-          >
-            <h2 
-                class="font-semibold"
-                :class="[maxWidthClass.includes('max-w-full') ? 'text-xs text-gray-400 px-2' : 'text-lg text-gray-900 dark:text-gray-100']"
-            >
-                {{ title }}
-            </h2>
-            <button v-if="showCloseButton" @click="handleClose" class="p-1 rounded-full text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+          <!-- Enhanced Header -->
+          <header class="modal-header">
+            <div class="flex-1 min-w-0 pr-8">
+              <span class="modal-tag">Details</span>
+              <h2 class="modal-title">{{ title }}</h2>
+            </div>
+            
+            <button v-if="showCloseButton" @click="handleClose" class="modal-close-btn">
               <IconClose class="w-6 h-6" />
             </button>
           </header>
           
-          <main 
-            class="overflow-y-auto flex-1"
-            :class="[maxWidthClass.includes('max-w-full') ? 'p-0' : 'p-6']"
-          >
-             <slot name="body">
-                <slot></slot>
-             </slot>
+          <main class="modal-body custom-scrollbar">
+             <div class="message-prose">
+                <slot name="body">
+                    <slot></slot>
+                </slot>
+             </div>
           </main>
           
-          <footer v-if="$slots.footer" class="flex items-center justify-end p-4 space-x-3 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-200 dark:border-gray-700 shrink-0">
+          <!-- Enhanced Footer -->
+          <footer v-if="$slots.footer" class="modal-footer">
             <slot name="footer"></slot>
           </footer>
         </div>
