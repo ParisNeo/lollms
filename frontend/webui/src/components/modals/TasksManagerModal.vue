@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
+import { ref, computed, watch, nextTick } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useTasksStore } from '../../stores/tasks';
 import { useUiStore } from '../../stores/ui';
@@ -23,8 +23,6 @@ const uiStore = useUiStore();
 const authStore = useAuthStore();
 
 const props = computed(() => uiStore.modalData('tasksManager'));
-const initialTaskId = computed(() => props.value?.initialTaskId);
-
 const { tasks, isLoadingTasks, activeTasksCount, isClearingTasks } = storeToRefs(tasksStore);
 
 const selectedTask = ref(null);
@@ -32,256 +30,142 @@ const logsContainer = ref(null);
 const ownerFilter = ref('all');
 const searchTerm = ref('');
 
-const sortedTasks = computed(() => {
-    return [...tasks.value].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-});
-
 const filteredTasks = computed(() => {
-    if (!searchTerm.value) {
-        return sortedTasks.value;
+    let list = [...tasks.value].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    if (searchTerm.value) {
+        const term = searchTerm.value.toLowerCase();
+        list = list.filter(t => t.name?.toLowerCase().includes(term) || t.id?.toLowerCase().includes(term));
     }
-    const lowerCaseSearch = searchTerm.value.toLowerCase();
-    return sortedTasks.value.filter(task =>
-        (task.name && task.name.toLowerCase().includes(lowerCaseSearch)) ||
-        (task.id && task.id.toLowerCase().includes(lowerCaseSearch)) ||
-        (task.owner_username && task.owner_username.toLowerCase().includes(lowerCaseSearch))
-    );
+    return list;
 });
 
-watch(() => uiStore.isModalOpen('tasksManager'), (isOpen) => {
-    if (isOpen) {
-        tasksStore.fetchTasks(ownerFilter.value);
-        if (initialTaskId.value && sortedTasks.value.length > 0) {
-            selectedTask.value = sortedTasks.value.find(t => t.id === initialTaskId.value) || sortedTasks.value[0];
-        } else if (sortedTasks.value.length > 0) {
-            selectedTask.value = sortedTasks.value[0];
-        } else {
-            selectedTask.value = null;
-        }
-    }
-});
-
-watch(ownerFilter, (newFilter) => {
-    tasksStore.fetchTasks(newFilter);
-});
-
-watch(sortedTasks, (newTasks) => {
-    if (selectedTask.value) {
-        const updatedTask = newTasks.find(t => t.id === selectedTask.value.id);
-        if (updatedTask) {
-            if (JSON.stringify(selectedTask.value.logs) !== JSON.stringify(updatedTask.logs)) {
-                selectedTask.value = updatedTask;
-            } else {
-                Object.assign(selectedTask.value, updatedTask);
-            }
-        } else {
-            selectedTask.value = newTasks.length > 0 ? newTasks[0] : null;
-        }
-    } else if (newTasks.length > 0) {
-        selectedTask.value = newTasks[0];
-    }
-});
-
+// Auto-scroll logs
 watch(() => selectedTask.value?.logs, () => {
     nextTick(() => {
-        if (logsContainer.value) {
-            logsContainer.value.scrollTop = logsContainer.value.scrollHeight;
-        }
+        if (logsContainer.value) logsContainer.value.scrollTop = logsContainer.value.scrollHeight;
     });
 }, { deep: true });
 
-function formatDateTime(isoString) {
-    if (!isoString) return 'N/A';
-    return new Date(isoString).toLocaleString();
-}
-
-function getStatusInfo(status) {
-    switch (status) {
-        case 'running': return { text: 'Running' };
-        case 'completed': return { text: 'Completed', icon: IconCheckCircle, color: 'text-green-500' };
-        case 'failed': return { text: 'Failed', icon: IconError, color: 'text-red-500' };
-        case 'cancelled': return { text: 'Cancelled', icon: IconXMark, color: 'text-yellow-500' };
-        case 'pending':
-        default: return { text: 'Pending' };
-    }
-}
-
-function getLogLevelClass(level) {
-    switch (level?.toUpperCase()) {
-        case 'ERROR':
-        case 'CRITICAL':
-            return 'text-red-500 dark:text-red-400';
-        case 'WARNING':
-            return 'text-yellow-500 dark:text-yellow-400';
-        default:
-            return 'text-gray-600 dark:text-gray-300';
-    }
-}
-
-const getLogLevelIcon = (level) => {
-    switch (level?.toUpperCase()) {
-        case 'ERROR':
-        case 'CRITICAL':
-            return IconError;
-        case 'WARNING':
-            return IconInfo; // Replace with a specific warning icon if available
-        default:
-            return IconInfo;
-    }
-};
+function formatDateTime(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
 
 async function handleCancelAllTasks() {
     const confirmed = await uiStore.showConfirmation({
-        title: 'Cancel All Active Tasks',
-        message: `Are you sure you want to cancel all ${activeTasksCount.value} active background tasks?`,
-        confirmText: 'Cancel All'
+        title: 'Terminate All Processes',
+        message: `This will stop all ${activeTasksCount.value} active tasks immediately.`,
+        confirmText: 'Terminate All'
     });
-    if (confirmed.confirmed) {
-        await tasksStore.cancelAllTasks();
-    }
+    if (confirmed.confirmed) await tasksStore.cancelAllTasks();
 }
 
 function copyLogs() {
-    if (!selectedTask.value || !selectedTask.value.logs) return;
-    const logsContent = selectedTask.value.logs.map(log => {
-        const time = new Date(log.timestamp).toLocaleTimeString();
-        const level = log.level.toUpperCase();
-        return `[${time}] [${level}] ${log.message}`;
-    }).join('\n');
-    uiStore.copyToClipboard(logsContent, 'Logs copied to clipboard!');
+    if (!selectedTask.value?.logs) return;
+    const content = selectedTask.value.logs.map(l => `[${l.timestamp}] ${l.message}`).join('\n');
+    uiStore.copyToClipboard(content, 'Logs copied');
 }
 </script>
 
 <template>
-    <GenericModal modal-name="tasksManager" title="Background Tasks" max-width-class="max-w-6xl">
+    <GenericModal modal-name="tasksManager" title="Command Center" max-width-class="max-w-7xl">
         <template #body>
-            <div class="space-y-4">
-                <div class="flex items-center justify-between flex-wrap gap-2">
-                    <p class="text-sm text-gray-500">Monitor your background processes.</p>
-                    <div class="flex items-center gap-2">
-                        <button @click="tasksStore.fetchTasks(ownerFilter)" class="btn btn-secondary btn-sm" :disabled="isLoadingTasks">
-                            <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingTasks}" />
-                        </button>
-                        <button @click="handleCancelAllTasks" class="btn btn-warning btn-sm" :disabled="activeTasksCount === 0 || isClearingTasks">
-                            <IconXMark class="w-4 h-4 mr-1" /> Cancel All ({{ activeTasksCount }})
-                        </button>
-                        <button @click="tasksStore.clearCompletedTasks" class="btn btn-danger btn-sm" :disabled="isClearingTasks">
-                            <IconAnimateSpin v-if="isClearingTasks" class="w-4 h-4 mr-1 animate-spin" />
-                            <IconTrash v-else class="w-4 h-4 mr-1" />
-                            Clear Completed
-                        </button>
-                    </div>
-                </div>
-
-                <div v-if="authStore.isAdmin" class="p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg border dark:border-gray-600">
-                    <div class="flex items-center justify-start space-x-6">
-                        <span class="text-sm font-medium">Show tasks for:</span>
-                        <div class="flex items-center space-x-4">
-                            <label class="flex items-center text-sm"><input type="radio" v-model="ownerFilter" value="all" class="form-radio"><span class="ml-2">All Users</span></label>
-                            <label class="flex items-center text-sm"><input type="radio" v-model="ownerFilter" value="me" class="form-radio"><span class="ml-2">My Tasks</span></label>
-                            <label class="flex items-center text-sm"><input type="radio" v-model="ownerFilter" value="others" class="form-radio"><span class="ml-2">Other Users</span></label>
+            <div class="flex h-[70vh] -m-10 overflow-hidden">
+                <!-- Sidebar: Task List -->
+                <aside class="dashboard-sidebar">
+                    <div class="p-6 border-b border-gray-100 dark:border-gray-800 space-y-4">
+                        <div class="relative">
+                            <IconMagnifyingGlass class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                            <input v-model="searchTerm" type="text" placeholder="Search processes..." class="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-xl py-2.5 pl-10 pr-4 text-xs focus:ring-2 focus:ring-blue-500/20">
+                        </div>
+                        
+                        <div v-if="authStore.isAdmin" class="flex items-center gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                            <button v-for="opt in ['all', 'me']" :key="opt" @click="ownerFilter = opt" 
+                                class="flex-1 py-1 text-[9px] font-black uppercase tracking-widest rounded-md transition-all"
+                                :class="ownerFilter === opt ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600' : 'text-gray-400'">
+                                {{ opt }}
+                            </button>
                         </div>
                     </div>
-                </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6 h-[60vh]">
-                    <div class="md:col-span-1 bg-white dark:bg-gray-800 rounded-lg shadow-sm overflow-hidden flex flex-col">
-                        <div class="p-4 border-b dark:border-gray-700 shrink-0 space-y-3">
-                            <h3 class="font-semibold">Tasks</h3>
-                            <div class="relative">
-                                <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"><IconMagnifyingGlass class="h-4 w-4 text-gray-400" /></div>
-                                <input type="text" v-model="searchTerm" placeholder="Search tasks..." class="w-full text-sm pl-9 pr-4 py-1.5 rounded-md border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700">
+                    <div class="flex-1 overflow-y-auto custom-scrollbar">
+                        <button v-for="task in filteredTasks" :key="task.id" 
+                            @click="selectedTask = task"
+                            class="task-item-card group"
+                            :class="{ 'selected': selectedTask?.id === task.id }">
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="text-[11px] font-bold text-gray-800 dark:text-gray-200 truncate pr-4">{{ task.name }}</span>
+                                <span class="shrink-0 w-2 h-2 rounded-full mt-1" 
+                                    :class="task.status === 'running' ? 'bg-blue-500 animate-pulse' : 'bg-gray-300 dark:bg-gray-600'"></span>
                             </div>
-                        </div>
-                        <div class="grow overflow-y-auto">
-                            <div v-if="isLoadingTasks && sortedTasks.length === 0" class="p-4 text-center text-gray-500">Loading...</div>
-                            <div v-else-if="filteredTasks.length === 0" class="p-4 text-center text-gray-500">No tasks found.</div>
-                            <ul v-else class="divide-y dark:divide-gray-700">
-                                <li v-for="task in filteredTasks" :key="task.id">
-                                    <button @click="selectedTask = task" class="w-full text-left p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors" :class="{'bg-blue-50 dark:bg-blue-900/30': selectedTask && selectedTask.id === task.id}">
-                                        <div class="flex justify-between items-center mb-1">
-                                            <p class="font-medium truncate text-sm" :title="task.name">{{ task.name }}</p>
-                                            <span class="text-xs px-2 py-0.5 rounded-full" :class="{ 'bg-blue-100 text-blue-800 dark:bg-blue-900/50 dark:text-blue-300': task.status === 'running' || task.status === 'pending', 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300': task.status === 'completed', 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300': task.status === 'failed', 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/50 dark:text-yellow-300': task.status === 'cancelled' }">{{ getStatusInfo(task.status).text }}</span>
-                                        </div>
-                                        <div class="w-full bg-gray-200 rounded-full h-1.5 dark:bg-gray-600 mb-2"><div class="h-1.5 rounded-full" :class="{'bg-blue-500': task.status==='running' || task.status==='pending', 'bg-green-500': task.status==='completed', 'bg-red-500': task.status==='failed', 'bg-yellow-500': task.status==='cancelled'}" :style="{ width: task.progress + '%' }"></div></div>
-                                        <div v-if="authStore.isAdmin" class="flex items-center text-xs text-gray-500 dark:text-gray-400"><IconUser class="w-3 h-3 mr-1.5" /><span>{{ task.owner_username || 'System' }}</span></div>
-                                    </button>
-                                </li>
-                            </ul>
-                        </div>
+                            <div class="h-1 w-full bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden mb-2">
+                                <div class="h-full bg-blue-500 transition-all duration-500" :style="{ width: task.progress + '%' }"></div>
+                            </div>
+                            <div class="flex items-center justify-between">
+                                <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">{{ task.owner_username || 'system' }}</span>
+                                <span class="text-[9px] font-mono text-gray-300">{{ task.progress }}%</span>
+                            </div>
+                        </button>
                     </div>
+                </aside>
 
-                    <div class="md:col-span-2 bg-white dark:bg-gray-800 rounded-lg shadow-sm flex flex-col h-full overflow-hidden">
-                        <div v-if="!selectedTask" class="h-full flex items-center justify-center text-center p-4">
-                            <p class="text-gray-500">Select a task to view its details and logs.</p>
-                        </div>
-                        <div v-else class="flex flex-col h-full">
-                            <!-- Header -->
-                            <div class="p-4 border-b dark:border-gray-700 shrink-0">
-                                <h3 class="font-semibold truncate" :title="selectedTask.name">{{ selectedTask.name }}</h3>
-                                <div class="text-xs text-gray-500 dark:text-gray-400 flex items-center">ID: <code class="ml-1 mr-2">{{ selectedTask.id }}</code><button @click="uiStore.copyToClipboard(selectedTask.id)" class="p-0.5 rounded hover:bg-gray-200 dark:hover:bg-gray-600"><IconCopy class="w-3 h-3" /></button></div>
+                <!-- Detail Pane -->
+                <main class="dashboard-content">
+                    <div v-if="selectedTask" class="flex flex-col h-full p-8">
+                        <!-- Header & Info -->
+                        <div class="flex items-start justify-between mb-8">
+                            <div class="flex-1 min-w-0">
+                                <span class="modal-tag">Process Insight</span>
+                                <h2 class="text-2xl font-bold font-serif mb-2">{{ selectedTask.name }}</h2>
+                                <div class="flex items-center gap-3 text-[10px] text-gray-400 font-mono">
+                                    <span>ID: {{ selectedTask.id }}</span>
+                                    <button @click="uiStore.copyToClipboard(selectedTask.id)" class="hover:text-blue-500"><IconCopy class="w-3 h-3" /></button>
+                                </div>
                             </div>
                             
-                            <!-- Body (Details + Logs) -->
-                            <div class="grow min-h-0 flex flex-col p-4 space-y-4 overflow-y-auto">
-                                <!-- Status & Metadata -->
-                                <div class="space-y-3 text-sm shrink-0">
-                                    <div class="p-3 rounded-lg flex items-center" :class="{ 'bg-blue-50 dark:bg-blue-900/20': selectedTask.status === 'running' || selectedTask.status === 'pending', 'bg-green-50 dark:bg-green-900/20': selectedTask.status === 'completed', 'bg-red-50 dark:bg-red-900/20': selectedTask.status === 'failed', 'bg-yellow-50 dark:bg-yellow-900/20': selectedTask.status === 'cancelled' }">
-                                        <div class="shrink-0 mr-4">
-                                            <IconError v-if="selectedTask.status==='failed'" class="w-8 h-8 text-red-400"/>
-                                            <IconCheckCircle v-else-if="selectedTask.status==='completed'" class="w-8 h-8 text-green-400"/>
-                                            <IconXMark v-else-if="selectedTask.status==='cancelled'" class="w-8 h-8 text-yellow-400"/>
-                                            <IconAnimateSpin v-else class="w-8 h-8 text-blue-400 animate-spin"/>
-                                        </div>
-                                        <div class="grow">
-                                            <span class="font-semibold">Status:</span> {{ getStatusInfo(selectedTask.status).text }}
-                                        </div>
-                                        <button v-if="(selectedTask.status === 'running' || selectedTask.status === 'pending') && (authStore.isAdmin || selectedTask.owner_username === authStore.user.username)" @click="tasksStore.cancelTask(selectedTask.id)" class="btn btn-warning btn-sm">
-                                            <IconStopCircle class="w-4 h-4 mr-1" />Cancel Task
-                                        </button>
-                                    </div>
-                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2">
-                                        <p><strong>Owner:</strong> {{ selectedTask.owner_username || 'System' }}</p>
-                                        <p><strong>Created:</strong> {{ formatDateTime(selectedTask.created_at) }}</p>
-                                        <p><strong>Started:</strong> {{ formatDateTime(selectedTask.started_at) }}</p>
-                                        <p><strong>Completed:</strong> {{ formatDateTime(selectedTask.completed_at) }}</p>
-                                    </div>
-                                    
-                                    <details v-if="selectedTask.error" class="info-details error" open>
-                                        <summary>Error Details</summary>
-                                        <pre>{{ selectedTask.error }}</pre>
-                                    </details>
-                                    <details v-if="selectedTask.result" class="info-details success">
-                                        <summary>Result Data</summary>
-                                        <pre>{{ JSON.stringify(selectedTask.result, null, 2) }}</pre>
-                                    </details>
-                                </div>
+                            <div class="flex gap-2">
+                                <button @click="tasksStore.fetchTasks(ownerFilter)" class="modal-close-btn"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingTasks}" /></button>
+                                <button v-if="selectedTask.status === 'running'" @click="tasksStore.cancelTask(selectedTask.id)" class="welcome-btn !py-2 !px-4 !bg-red-500 text-white">Cancel</button>
+                            </div>
+                        </div>
 
-                                <!-- Logs -->
-                                <div class="grow min-h-0 flex flex-col pt-4 border-t dark:border-gray-700">
-                                    <h4 class="font-semibold mb-2 shrink-0 flex items-center justify-between">
-                                        <span>Logs</span>
-                                        <button @click="copyLogs" class="btn btn-secondary btn-sm"><IconCopy class="w-4 h-4" /> Copy Logs</button>
-                                    </h4>
-                                    <div ref="logsContainer" class="grow bg-gray-100 dark:bg-gray-900 rounded p-2 overflow-y-auto text-xs">
-                                        <div v-for="(log, index) in selectedTask.logs" :key="index" class="log-entry" :class="getLogLevelClass(log.level)">
-                                            <span class="log-timestamp font-mono">{{ new Date(log.timestamp).toLocaleTimeString([], { hour12: false }) }}</span>
-                                            <component :is="getLogLevelIcon(log.level)" class="log-icon" />
-                                            <div class="log-message-wrapper">
-                                                <MessageContentRenderer :content="log.message" class="log-message prose dark:prose-invert prose-sm max-w-none"/>
-                                            </div>
-                                        </div>
-                                        <div v-if="!selectedTask.logs || selectedTask.logs.length === 0" class="text-gray-400 italic">No logs for this task yet.</div>
-                                    </div>
+                        <!-- Stats Grid -->
+                        <div class="grid grid-cols-4 gap-6 mb-8 border-y border-gray-50 dark:border-gray-800 py-6">
+                            <div v-for="(val, label) in { 'Status': selectedTask.status, 'Created': formatDateTime(selectedTask.created_at), 'Started': formatDateTime(selectedTask.started_at), 'User': selectedTask.owner_username || 'System' }" :key="label">
+                                <span class="modal-tag !mb-1">{{ label }}</span>
+                                <span class="text-xs font-bold text-gray-700 dark:text-gray-300 capitalize">{{ val }}</span>
+                            </div>
+                        </div>
+
+                        <!-- Log Terminal -->
+                        <div class="terminal-log-window">
+                            <div class="terminal-header">
+                                <div class="flex items-center gap-2">
+                                    <IconTerminal class="w-3 h-3 text-gray-400" />
+                                    <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">Stream Output</span>
                                 </div>
+                                <button @click="copyLogs" class="text-[9px] font-black uppercase tracking-widest text-blue-500 hover:text-blue-600 transition-colors">Copy Logs</button>
+                            </div>
+                            <div ref="logsContainer" class="terminal-body">
+                                <div v-for="(log, i) in selectedTask.logs" :key="i" class="flex gap-4 mb-1.5 group/log">
+                                    <span class="text-gray-300 dark:text-gray-700 shrink-0 select-none w-16">{{ new Date(log.timestamp).toLocaleTimeString() }}</span>
+                                    <span class="text-gray-600 dark:text-gray-400" :class="{ 'text-red-500': log.level === 'error' }">{{ log.message }}</span>
+                                </div>
+                                <div v-if="!selectedTask.logs?.length" class="text-gray-400 italic">No activity recorded...</div>
                             </div>
                         </div>
                     </div>
-                </div>
+
+                    <div v-else class="flex-1 flex flex-col items-center justify-center opacity-30">
+                        <IconCpuChip class="w-16 h-16 mb-4" />
+                        <span class="modal-tag">Select a process to inspect</span>
+                    </div>
+                </main>
             </div>
         </template>
         <template #footer>
-            <button @click="uiStore.closeModal('tasksManager')" class="btn btn-primary">Close</button>
+            <div class="flex items-center gap-4 mr-auto">
+                <button @click="handleCancelAllTasks" class="utility-link !text-red-500" :disabled="activeTasksCount === 0">Terminate All ({{ activeTasksCount }})</button>
+                <button @click="tasksStore.clearCompletedTasks" class="utility-link" :disabled="isClearingTasks">Clear Completed History</button>
+            </div>
+            <button @click="uiStore.closeModal('tasksManager')" class="welcome-btn !bg-gray-100 dark:!bg-gray-800 text-gray-900 dark:text-white">Done</button>
         </template>
     </GenericModal>
 </template>
@@ -289,27 +173,5 @@ function copyLogs() {
 <style scoped>
 @reference "tailwindcss";
 
-.info-details { @apply text-xs; }
-.info-details summary { @apply font-semibold cursor-pointer select-none; }
-.info-details pre { @apply whitespace-pre-wrap font-mono text-xs mt-1 p-2 bg-gray-100 dark:bg-gray-900 rounded; }
-.info-details.error pre { @apply text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/20; }
-.info-details.success pre { @apply text-green-700 dark:text-green-300 bg-green-50 dark:bg-green-900/20; }
-.log-entry {
-    @apply flex items-start gap-2 py-0.5;
-}
-.log-timestamp {
-    @apply text-gray-400 select-none shrink-0 w-20;
-}
-.log-icon {
-    @apply w-4 h-4 mt-0.5 shrink-0;
-}
-.log-message-wrapper {
-    @apply grow min-w-0;
-}
-.log-message :deep(p),
-.log-message :deep(ul),
-.log-message :deep(ol),
-.log-message :deep(pre) {
-    @apply my-0;
-}
+/* Scrollbar is now handled globally in main.css via the .custom-scrollbar class used in the template */
 </style>

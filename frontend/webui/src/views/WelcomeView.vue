@@ -164,9 +164,25 @@ function installCert(type) { window.open(`/api/public/cert/install-script?script
                 <div class="splash-progress-fill" style="width: 50%"></div>
             </div>
 
-            <div class="flex justify-center gap-8 mt-6 opacity-30">
-                <div class="text-[8px] font-black uppercase tracking-[0.3em] text-gray-400">v{{ appVersion }}</div>
-                <div class="text-[8px] font-black uppercase tracking-[0.3em] text-gray-400">ParisNeo &copy; 2025</div>
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-6 mt-6">
+                <!-- Certificate Utilities (Discrete) -->
+                <div v-if="isHttpsEnabled" class="flex items-center gap-6">
+                    <button @click="installCert('windows')" class="utility-link">
+                        <IconLock class="w-3 h-3 opacity-50" />
+                        <span>Trust Cert (Win)</span>
+                    </button>
+                    <button @click="installCert('linux')" class="utility-link">
+                        <IconLock class="w-3 h-3 opacity-50" />
+                        <span>Trust Cert (Linux)</span>
+                    </button>
+                </div>
+                <div v-else></div> <!-- Spacer -->
+
+                <!-- Metadata Footer -->
+                <div class="flex items-center gap-8 opacity-40">
+                    <div class="text-[8px] font-black uppercase tracking-[0.3em] text-gray-400">v{{ appVersion }}</div>
+                    <div class="text-[8px] font-black uppercase tracking-[0.3em] text-gray-400">ParisNeo &copy; 2025</div>
+                </div>
             </div>
         </div>
     </footer>

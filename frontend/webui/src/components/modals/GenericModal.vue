@@ -73,11 +73,6 @@ onUnmounted(() => {
         >
           <!-- Enhanced Header -->
           <header class="modal-header">
-            <div class="flex-1 min-w-0 pr-8">
-              <span class="modal-tag">Details</span>
-              <h2 class="modal-title">{{ title }}</h2>
-            </div>
-            
             <button v-if="showCloseButton" @click="handleClose" class="modal-close-btn">
               <IconClose class="w-6 h-6" />
             </button>
