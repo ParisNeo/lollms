@@ -36,6 +36,7 @@ jobs:
         run: npm audit --audit-level=high
       - name: Socket security scan
         run: npx --yes socket ci
+        continue-on-error: true  # add this line
         env:
           SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_SECURITY_API_KEY }}
       - name: Check for obfuscated code

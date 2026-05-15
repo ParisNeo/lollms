@@ -130,15 +130,8 @@ const tasksStore = useTasksStore();
 const { currentModelVisionSupport, ttsState } = storeToRefs(discussionsStore);
 const { imageGenerationTasks } = storeToRefs(tasksStore);
 
-// Auto-expand timeline if the message is currently streaming/generating
-const isEventsCollapsed = ref(!props.message.isStreaming);
-
-// [NEW] Keep timeline expanded and scrolling during generation
-watch(() => props.message.events?.length, () => {
-    if (props.message.isStreaming) {
-        isEventsCollapsed.value = false;
-    }
-});
+// Execution timeline is strictly collapsed by default
+const isEventsCollapsed = ref(true);
 const isEditing = ref(false);
 const editedContent = ref('');
 const codeMirrorView = ref(null);
@@ -276,11 +269,6 @@ onMounted(() => {
         isSourcesVisible.value = false;
     } else {
         isSourcesVisible.value = true;
-    }
-
-    // Auto-expand timeline in Herd Mode
-    if (authStore.user?.herd_mode_enabled && hasEvents.value) {
-        isEventsCollapsed.value = false;
     }
 
     if (props.message.startInEditMode) {
@@ -454,20 +442,6 @@ function handleRegenerateImage(index) {
 function selectView(groupId, index) {
     selectedViewIndices.value[groupId] = index;
 }
-
-// Ensure events are visible during live generation
-watch(() => props.message.isStreaming, (isStreaming) => {
-    if (isStreaming && hasEvents.value) {
-        isEventsCollapsed.value = false;
-    }
-});
-
-// Ensure events are visible during live generation
-watch(() => props.message.isStreaming, (isStreaming) => {
-    if (isStreaming && hasEvents.value) {
-        isEventsCollapsed.value = false;
-    }
-});
 
 watch(() => props.message.image_references, (newRefs, oldRefs) => {
     if (newRefs && oldRefs && newRefs.length > oldRefs.length) {
