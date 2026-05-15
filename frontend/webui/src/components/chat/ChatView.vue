@@ -77,20 +77,55 @@ async function handlePaste(event) {
         @drop.stop="handleDrop"
         @paste="handlePaste"
     >
-        <div v-if="isDraggingOver" class="absolute inset-0 bg-blue-500/20 border-4 border-dashed border-blue-500 rounded-lg z-30 flex items-center justify-center m-4 pointer-events-none">
-            <p class="text-2xl font-bold text-blue-600">Drop files to attach</p>
+        <!-- Editorial Drop Zone -->
+        <div v-if="isDraggingOver" class="absolute inset-0 bg-white/60 dark:bg-gray-900/60 backdrop-blur-md border-2 border-dashed border-blue-500/50 rounded-2xl z-30 flex items-center justify-center m-6 pointer-events-none transition-all duration-500">
+            <div class="text-center">
+                <span class="modal-tag">Workspace</span>
+                <p class="text-3xl font-serif text-gray-900 dark:text-white">Release to attach files</p>
+            </div>
         </div>
+
         <div class="flex-1 flex flex-row h-full overflow-hidden relative">
             <!-- Main Chat Area -->
-            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r dark:border-gray-700 transition-all duration-300"
+            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r border-gray-100 dark:border-gray-800 transition-all duration-300"
                  :class="{ 'border-r-0': isDataZoneVisible }">
-                <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-800/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center">
-                    <IconAnimateSpin class="w-16 h-16 text-blue-500 animate-spin" />
-                    <p class="mt-4 text-lg font-semibold text-gray-600 dark:text-gray-400">Loading Discussion...</p>
+                
+                <!-- Editorial Loading State -->
+                <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-900 z-20 flex flex-col items-center justify-center">
+                    <div class="relative mb-8">
+                        <IconAnimateSpin class="w-12 h-12 text-blue-500 animate-spin" />
+                        <div class="absolute inset-0 blur-xl bg-blue-500/20 animate-pulse"></div>
+                    </div>
+                    <span class="modal-tag">Synchronization</span>
+                    <p class="text-xl font-serif text-gray-600 dark:text-gray-400 italic">Preparing discussion...</p>
                 </div>
                 
-                <div v-show="!isLoadingMessages" class="flex-1 flex flex-col min-h-0 h-full">
+                <div v-show="!isLoadingMessages" class="flex-1 flex flex-col min-h-0 h-full relative">
                     <MessageArea class="flex-1 overflow-y-auto" />
+                    
+                    <!-- New Messages FAB (Editorial Style) -->
+                    <Transition
+                        enter-active-class="transition-all duration-500 ease-out"
+                        enter-from-class="opacity-0 translate-y-4 scale-95"
+                        enter-to-class="opacity-100 translate-y-0 scale-100"
+                        leave-active-class="transition-all duration-300 ease-in"
+                        leave-from-class="opacity-100 translate-y-0"
+                        leave-to-class="opacity-0 translate-y-4 scale-95"
+                    >
+                        <button 
+                            v-if="uiStore.showNewMessagesButton" 
+                            @click="emit('scroll-chat-to-bottom')" 
+                            class="fab-editorial absolute bottom-28 left-1/2 -translate-x-1/2"
+                        >
+                            <span class="fab-label">Go to bottom</span>
+                            <div class="fab-icon-container">
+                                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
+                                    <path fill-rule="evenodd" d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z" clip-rule="evenodd" />
+                                </svg>
+                            </div>
+                        </button>
+                    </Transition>
+
                     <ChatInput />
                 </div>
             </div>

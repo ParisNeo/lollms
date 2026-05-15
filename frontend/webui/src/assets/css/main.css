@@ -28,9 +28,9 @@
     font-family: Georgia, Cambria, "Times New Roman", Times, serif;
     line-height: 1.6;
     overscroll-behavior-y: none;
-    @apply bg-gray-100 text-gray-900 dark:bg-gray-900 dark:text-gray-100;
+    @apply bg-white text-gray-900 dark:bg-gray-950 dark:text-gray-100;
     margin: 0;
-    transition: background-color 0.3s ease, color 0.3s ease;
+    transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), color 0.4s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   /* Custom scrollbar for webkit browsers */
@@ -47,10 +47,13 @@
 @layer components {
     /* --- Input Fields --- */
     .input-field {
-        @apply block w-full px-3 py-2 border rounded-md shadow-sm sm:text-sm;
-        @apply bg-gray-50 border-gray-300 placeholder-gray-400;
-        @apply dark:bg-gray-700/50 dark:border-gray-600 dark:placeholder-gray-400;
-        @apply transition-colors duration-150 ease-in-out;
+        @apply block w-full px-3 py-2 border rounded-xl shadow-sm sm:text-sm;
+        @apply bg-gray-50 border-gray-200 placeholder-gray-400;
+        @apply dark:bg-gray-800 dark:border-gray-700 dark:placeholder-gray-500 dark:text-white;
+        @apply transition-all duration-200 ease-in-out;
+    }
+    .input-field:focus {
+        @apply ring-4 ring-blue-500/10 border-blue-500 dark:border-blue-500/50;
     }
     .input-field:focus {
         @apply ring-2 ring-blue-500/50 border-blue-500;
@@ -113,9 +116,18 @@
 .message-content-container { @apply max-w-7xl xl:max-w-[90%] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-start space-x-4; }
 
 .user-bubble { @apply self-end rounded-br-md bg-blue-50 text-blue-900 dark:bg-blue-800 dark:text-blue-100; width: 100%; }
-.ai-bubble { @apply self-start rounded-bl-md bg-white text-gray-800 border border-gray-200 dark:bg-gray-700 dark:text-gray-100 dark:border-gray-600; }
+.ai-bubble { 
+    @apply self-start rounded-bl-md bg-white text-gray-800 border border-gray-100 
+           dark:bg-gray-900 dark:text-gray-100 dark:border-gray-800 shadow-sm; 
+}
 .system-bubble { @apply self-center italic text-sm text-center max-w-full md:max-w-[80%] rounded-lg px-4 py-2 bg-yellow-50 text-yellow-800 border border-yellow-200 dark:bg-yellow-900/50 dark:text-yellow-200 dark:border-yellow-700/50 shadow-none; }
 
+.message-row { 
+    @apply w-full transition-colors duration-300; 
+}
+.message-row.is-ai {
+    @apply bg-gray-50/50 dark:bg-gray-900/20 border-y border-transparent dark:border-gray-800/30;
+}
 .date-separator { @apply flex items-center my-4 gap-4; }
 .list-move, .list-enter-active, .list-leave-active { transition: all 0.5s ease; }
 .list-enter-from { opacity: 0; transform: translateY(30px); }
@@ -339,11 +351,15 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 }
 
 /* Tasks Manager & Sidebar Dashboard */
-.dashboard-sidebar { @apply w-80 shrink-0 border-r border-gray-100 dark:border-gray-800 flex flex-col bg-gray-50/30 dark:bg-gray-950/20; }
-.dashboard-content { @apply flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900; }
+.dashboard-sidebar { 
+    @apply w-80 shrink-0 border-r border-gray-100 dark:border-gray-800 flex flex-col bg-gray-50/40 dark:bg-gray-950/60; 
+}
+.dashboard-content { 
+    @apply flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900; 
+}
 
 .task-item-card {
-    @apply w-full text-left p-4 transition-all duration-200 border-b border-gray-50 dark:border-gray-800/50;
+    @apply w-full text-left p-4 transition-all duration-200 border-b border-gray-50 dark:border-gray-800/40;
 }
 .task-item-card.selected {
     @apply bg-white dark:bg-gray-800 shadow-[inset_4px_0_0_0_#3b82f6] dark:shadow-[inset_4px_0_0_0_#3b82f6];
@@ -406,6 +422,20 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .utility-link {
     @apply flex items-center gap-2 text-[9px] font-black uppercase tracking-[0.3em] text-gray-400 hover:text-blue-500 transition-colors duration-300;
     font-family: system-ui, sans-serif;
+}
+
+/* Editorial Floating Action Button (New Messages) */
+.fab-editorial {
+    @apply z-40 flex items-center gap-4 px-6 py-3.5 bg-blue-600 text-white rounded-2xl shadow-2xl shadow-blue-500/40 hover:shadow-blue-500/60 transform hover:-translate-y-1 active:scale-95 transition-all duration-300;
+}
+
+.fab-label {
+    @apply text-[10px] font-black uppercase tracking-[0.25em] whitespace-nowrap;
+    font-family: system-ui, sans-serif;
+}
+
+.fab-icon-container {
+    @apply flex items-center justify-center w-5 h-5 border-l border-white/20 pl-4 ml-1;
 }
 
 /* From: GlobalHeader.vue */
@@ -573,7 +603,7 @@ details[open].document-block > .document-summary { @apply border-b border-gray-2
 
 /* The "Job Card" style for standalone processes */
 .processing-card {
-    @apply relative bg-white dark:bg-gray-800/40 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 w-full my-4;
+    @apply relative bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all duration-300 w-full my-4;
 }
 
 .processing-card-header {
