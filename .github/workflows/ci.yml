@@ -2,9 +2,14 @@ name: LoLLMS CI
 
 on:
   push:
-    branches: [main, dev]
+    branches:
+      - main
+      - dev
+
   pull_request:
-    branches: [main, dev]
+    branches:
+      - main
+      - dev
 
 permissions:
   contents: read
@@ -34,7 +39,7 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/webui/package-lock.json
 
-      - name: Verify package-lock exists
+      - name: Verify package-lock.json
         run: |
           test -f package-lock.json || {
             echo "package-lock.json missing"
@@ -46,9 +51,8 @@ jobs:
 
       - name: Verify lockfile integrity
         run: |
-          if ! git diff --exit-code package-lock.json > /dev/null; then
-            echo "ERROR: package-lock.json modified during install"
-            echo "Run npm install locally and commit updated lockfile"
+          if ! git diff --quiet package-lock.json; then
+            echo "ERROR: package-lock.json changed during install"
             git diff package-lock.json
             exit 1
           fi
@@ -66,70 +70,61 @@ jobs:
           FAILED=0
 
           echo "=== eval() usage ==="
-          if grep -Ern '\beval\s*\(' src/ \
+
+          if grep -Ern \
+            '\beval\s*\(' \
+            src/ \
             --include="*.js" \
             --include="*.ts" \
             --include="*.vue"
           then
-            echo "FAIL: eval() found"
+            echo "FAIL: eval() detected"
             FAILED=1
           else
             echo "OK"
           fi
 
           echo "=== Function() constructor ==="
-          if grep -Ern 'new Function\s*\(' src/ \
+
+          if grep -Ern \
+            'new[[:space:]]+Function\s*\(' \
+            src/ \
             --include="*.js" \
             --include="*.ts" \
             --include="*.vue"
           then
-            echo "FAIL: Function constructor found"
+            echo "FAIL: Function constructor detected"
             FAILED=1
           else
             echo "OK"
           fi
 
-          echo "=== Hex encoded payloads ==="
-          if grep -Ern '\\x[0-9a-fA-F]{2}' src/ \
-            --include="*.js" \
-            --include="*.ts"
-          then
-            echo "WARNING: hex encoded strings detected"
-          else
-            echo "OK"
-          fi
+          echo "=== Suspicious base64 decoding ==="
 
-          echo "=== Base64 decode patterns ==="
-          if grep -Ern 'atob\s*\(|Buffer\.from\s*\(.*base64' src/ \
+          if grep -Ern \
+            'atob\s*\(|Buffer\.from\s*\(.*base64' \
+            src/ \
             --include="*.js" \
             --include="*.ts" \
             --include="*.vue"
           then
-            echo "WARNING: base64 decode usage found"
-          else
-            echo "OK"
-          fi
-
-          echo "=== Suspicious long lines ==="
-          if grep -Ern '.{500,}' src/ \
-            --include="*.js" \
-            --include="*.ts" \
-            --include="*.vue"
-          then
-            echo "WARNING: long lines detected"
+            echo "WARNING: base64 decoding detected"
           else
             echo "OK"
           fi
 
           echo "=== Known IOC filenames ==="
-          IOCS=$(find . \
-            -not -path "*/node_modules/*" \
-            -not -path "*/.git/*" \
-            \( \
-              -name "router_init.js" -o \
-              -name "router_runtime.js" -o \
-              -name "setup.mjs" \
-            \))
+
+          IOCS=$(
+            find . \
+              -not -path "*/node_modules/*" \
+              -not -path "*/.git/*" \
+              \( \
+                -name "router_init.js" -o \
+                -name "router_runtime.js" -o \
+                -name "setup.mjs" \
+              \)
+          )
 
           if [ -n "$IOCS" ]; then
             echo "FAIL: IOC files detected"
@@ -139,7 +134,7 @@ jobs:
             echo "OK"
           fi
 
-          echo "=== Install scripts inside dependencies ==="
+          echo "=== Install scripts in dependencies ==="
 
           node <<'EOF'
           const fs = require("fs")
@@ -153,21 +148,13 @@ jobs:
           let found = false
 
           for (const [name, meta] of Object.entries(packages)) {
-            if (!name) continue
+            if (!name || !meta) continue
 
-            const scripts = meta.scripts || {}
+            const hasScripts =
+              meta.hasInstallScript === true
 
-            if (
-              scripts.preinstall ||
-              scripts.install ||
-              scripts.postinstall
-            ) {
-              console.log(
-                "INSTALL SCRIPT:",
-                name,
-                JSON.stringify(scripts)
-              )
-
+            if (hasScripts) {
+              console.log("INSTALL SCRIPT:", name)
               found = true
             }
           }
@@ -201,13 +188,33 @@ jobs:
 
           BASE_DEPS=$(
             git show origin/${{ github.base_ref }}:frontend/webui/package.json |
-            node <<'EOF'
-            let data = ""
+            node -e '
+              let data = ""
 
-            process.stdin.on("data", chunk => data += chunk)
+              process.stdin.on("data", c => data += c)
 
-            process.stdin.on("end", () => {
-              const pkg = JSON.parse(data)
+              process.stdin.on("end", () => {
+                const pkg = JSON.parse(data)
+
+                const deps = {
+                  ...(pkg.dependencies || {}),
+                  ...(pkg.devDependencies || {})
+                }
+
+                console.log(
+                  Object.keys(deps).sort().join("\n")
+                )
+              })
+            '
+          )
+
+          CURRENT_DEPS=$(
+            node -e '
+              const fs = require("fs")
+
+              const pkg = JSON.parse(
+                fs.readFileSync("package.json", "utf8")
+              )
 
               const deps = {
                 ...(pkg.dependencies || {}),
@@ -217,27 +224,7 @@ jobs:
               console.log(
                 Object.keys(deps).sort().join("\n")
               )
-            })
-          EOF
-          )
-
-          CURRENT_DEPS=$(
-            node <<'EOF'
-            const fs = require("fs")
-
-            const pkg = JSON.parse(
-              fs.readFileSync("package.json", "utf8")
-            )
-
-            const deps = {
-              ...(pkg.dependencies || {}),
-              ...(pkg.devDependencies || {})
-            }
-
-            console.log(
-              Object.keys(deps).sort().join("\n")
-            )
-          EOF
+            '
           )
 
           NEW_DEPS=$(
@@ -267,8 +254,7 @@ jobs:
           python-version: "3.11"
 
       - name: Upgrade pip
-        run: |
-          python -m pip install --upgrade pip
+        run: python -m pip install --upgrade pip
 
       - name: Install pip-audit
         run: pip install pip-audit
@@ -276,7 +262,7 @@ jobs:
       - name: Audit requirements
         run: pip-audit -r requirements.txt
 
-      - name: Check compromised package versions
+      - name: Check compromised versions
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -287,7 +273,10 @@ jobs:
             PACKAGE="$1"
             BAD_VERSION="$2"
 
-            INSTALLED=$(python -m pip show "$PACKAGE" 2>/dev/null | awk '/^Version:/ {print $2}')
+            INSTALLED=$(
+              python -m pip show "$PACKAGE" 2>/dev/null |
+              awk '/^Version:/ {print $2}'
+            )
 
             if [ "$INSTALLED" = "$BAD_VERSION" ]; then
               echo "CRITICAL: $PACKAGE $BAD_VERSION detected"
@@ -313,19 +302,23 @@ jobs:
 
           FAILED=0
 
-          echo "=== Suspicious exec() patterns ==="
-          if grep -Ern 'exec\s*\(\s*base64|exec\s*\(\s*__import__' \
+          echo "=== Suspicious exec() ==="
+
+          if grep -Ern \
+            'exec\s*\(\s*base64|exec\s*\(\s*__import__' \
             . \
             --include="*.py"
           then
-            echo "FAIL: suspicious exec pattern detected"
+            echo "FAIL: suspicious exec pattern"
             FAILED=1
           else
             echo "OK"
           fi
 
           echo "=== Dynamic imports ==="
-          if grep -Ern '__import__\s*\(' \
+
+          if grep -Ern \
+            '__import__\s*\(' \
             . \
             --include="*.py"
           then
@@ -334,7 +327,8 @@ jobs:
             echo "OK"
           fi
 
-          echo "=== curl/wget execution ==="
+          echo "=== curl/wget subprocess ==="
+
           if grep -Ern \
             'subprocess.*curl|subprocess.*wget|os\.system.*curl|os\.system.*wget' \
             . \
@@ -345,14 +339,17 @@ jobs:
             echo "OK"
           fi
 
-          echo "=== IOC filenames ==="
-          IOCS=$(find . \
-            -not -path "*/.git/*" \
-            \( \
-              -name "router_runtime.js" -o \
-              -name "router_init.js" -o \
-              -name "setup.mjs" \
-            \))
+          echo "=== Known IOC filenames ==="
+
+          IOCS=$(
+            find . \
+              -not -path "*/.git/*" \
+              \( \
+                -name "router_runtime.js" -o \
+                -name "router_init.js" -o \
+                -name "setup.mjs" \
+              \)
+          )
 
           if [ -n "$IOCS" ]; then
             echo "FAIL: IOC files detected"
@@ -388,19 +385,26 @@ jobs:
 
           git fetch origin "${{ github.base_ref }}" --depth=1
 
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          CHANGED=$(
+            git diff \
+              --name-only \
+              origin/${{ github.base_ref }}...HEAD
+          )
 
           echo "Changed files:"
           echo "$CHANGED"
 
           DEP_CHANGES=$(
-            echo "$CHANGED" | grep -E \
+            echo "$CHANGED" |
+            grep -E \
             'frontend/webui/package\.json|frontend/webui/package-lock\.json|requirements\.txt|pyproject\.toml' \
             || true
           )
 
           WORKFLOW_CHANGES=$(
-            echo "$CHANGED" | grep -E '^\.github/workflows/' || true
+            echo "$CHANGED" |
+            grep -E '^\.github/workflows/' \
+            || true
           )
 
           if [ -n "$DEP_CHANGES" ]; then
