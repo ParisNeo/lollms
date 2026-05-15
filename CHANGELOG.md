@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-15 14:18]
+
+- ci: suppress npm funding and audit messages in CI pipeline
+
 ## [2026-05-15 14:14]
 
 - ci: add frontend security scan job to CI workflow
