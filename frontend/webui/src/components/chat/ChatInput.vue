@@ -56,6 +56,7 @@ import IconMap from '../../assets/icons/IconMap.vue';
 import IconGoogleDrive from '../../assets/icons/IconGoogleDrive.vue';
 import IconCalendar from '../../assets/icons/IconCalendar.vue';
 import IconGoogle from '../../assets/icons/IconGoogle.vue';
+import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();

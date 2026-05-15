@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-15 17:25]
+
+- build(frontend): regenerate production assets after ChatInput.vue update
+
 ## [2026-05-15 14:58]
 
 - ci: remove LoLLMS CI GitHub workflow
