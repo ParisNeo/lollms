@@ -975,55 +975,62 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     ></audio>
                 </div>
 
-
-                <!-- Sources -->
-                <div v-if="hasSources" class="mt-2 border-t border-gray-200 dark:border-gray-700/50 pt-2">
-                    <div class="flex items-center gap-2">
-                        <button @click="isSourcesVisible = !isSourcesVisible" class="flex items-center gap-2 text-xs font-semibold text-gray-500 dark:text-gray-400 cursor-pointer select-none">
-                            <IconChevronRight class="toggle-icon" :class="{'rotate-90': isSourcesVisible}" />
-                            <span>Sources ({{sortedSources.length}})</span>
+                <!-- Unified Editorial Sources Grid -->
+                <div v-if="hasSources" class="mt-8 border-t border-gray-100 dark:border-gray-800/50 pt-8">
+                    <div class="flex items-center gap-3 mb-6">
+                        <button @click="isSourcesVisible = !isSourcesVisible" class="utility-link">
+                            <IconGlobeAlt class="w-3 h-3" />
+                            <span>References ({{ sortedSources.length }})</span>
+                            <IconChevronRight class="w-2.5 h-2.5 transition-transform" :class="{'rotate-90': isSourcesVisible}" />
                         </button>
-                        <button @click="openAllSourcesSearch" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600" title="Search all sources">
-                            <IconMagnifyingGlass class="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                        <button @click="openAllSourcesSearch" class="modal-close-btn" title="Search all sources">
+                            <IconMagnifyingGlass class="w-3.5 h-3.5" />
                         </button>
                     </div>
 
-                    <div v-if="isSourcesVisible" class="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 pl-4">
-                        <div v-for="(source, index) in sortedSources" :key="source.source || source.title || `source-${index}`" :ref="el => { if(el) sourceRefs[index] = el }" class="flex flex-col gap-1 transition-all duration-300">
-                             <div class="flex items-center justify-between p-3 rounded-xl bg-gray-50/50 dark:bg-gray-900/30 border border-gray-100 dark:border-gray-800 hover:border-blue-500/30 transition-all cursor-pointer group shadow-sm" @click="showSourceDetails(source)">
-                                <div class="flex items-center gap-2 min-w-0">
-                                    <div class="similarity-chip" :class="getSimilarityColor(source.score)" :title="typeof source.score === 'number' ? `Similarity: ${(source.score).toFixed(1)}%` : 'Similarity: N/A'"></div>
-                                    <div class="truncate text-xs text-gray-700 dark:text-gray-300" :title="source.title">
-                                        <span v-if="source.index" class="font-mono font-bold mr-1">[{{ source.index }}]</span>
-                                        {{ source.title }}
+                    <div v-if="isSourcesVisible" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div v-for="(source, index) in sortedSources" :key="index" 
+                                class="flex flex-col gap-2 group/source transition-all duration-300">
+                                
+                            <div @click="showSourceDetails(source)" 
+                                    class="p-4 bg-gray-50/50 dark:bg-gray-900/40 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-blue-500/30 cursor-pointer shadow-sm hover:shadow-md transition-all">
+                                
+                                <div class="flex items-start justify-between gap-3 mb-2">
+                                    <div class="flex items-center gap-2 min-w-0">
+                                        <div class="w-1.5 h-1.5 rounded-full shrink-0" :class="getSimilarityColor(source.score)"></div>
+                                        <span class="text-[11px] font-bold text-gray-800 dark:text-gray-200 truncate">{{ source.title }}</span>
+                                    </div>
+                                    
+                                    <!-- Source Quick Actions -->
+                                    <div class="flex items-center gap-1 opacity-0 group-hover/source:opacity-100 transition-opacity">
+                                        <a v-if="isUrl(source.source)" :href="source.source" target="_blank" @click.stop class="p-1.5 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 transition-colors">
+                                            <IconGlobeAlt class="w-3.5 h-3.5" />
+                                        </a>
+                                        <button v-if="isUrl(source.source)" @click.stop="togglePreview(index)" class="p-1.5 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 text-purple-500 transition-colors">
+                                            <IconEye class="w-3.5 h-3.5" />
+                                        </button>
                                     </div>
                                 </div>
-                                <div class="flex items-center gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                                    <div v-if="typeof source.score === 'number'" class="font-mono text-[10px] text-gray-500 dark:text-gray-400 shrink-0">{{ (source.score).toFixed(1) }}%</div>
-                                    <!-- Web Link -->
-                                    <a v-if="isUrl(source.source)" :href="source.source" target="_blank" @click.stop class="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900 text-blue-500 transition-colors" title="Open Website">
-                                        <IconGlobeAlt class="w-3.5 h-3.5" />
-                                    </a>
-                                    <!-- Sneak Peek -->
-                                    <button v-if="isUrl(source.source)" @click.stop="togglePreview(index)" class="p-1 rounded hover:bg-purple-100 dark:hover:bg-purple-900 text-purple-500 transition-colors" :class="{'bg-purple-100 dark:bg-purple-900': previewMap[index]}" title="Toggle Preview">
-                                        <IconEye class="w-3.5 h-3.5" />
+                                
+                                <div class="flex items-center justify-between">
+                                    <span class="text-[9px] font-mono text-gray-400 truncate pr-4">{{ source.source }}</span>
+                                    <span v-if="source.score" class="text-[9px] font-black text-gray-300 tabular-nums">{{ source.score.toFixed(0) }}%</span>
+                                </div>
+                            </div>
+
+                            <!-- Integrated Preview iframe -->
+                            <Transition enter-active-class="transition-all duration-300">
+                                <div v-if="previewMap[index]" class="w-full h-80 rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-black overflow-hidden relative shadow-2xl z-10 animate-in zoom-in-95">
+                                    <iframe :src="source.source" class="w-full h-full" sandbox="allow-scripts allow-same-origin"></iframe>
+                                    <button @click="togglePreview(index)" class="absolute top-3 right-3 p-1.5 bg-gray-900/50 text-white rounded-full hover:bg-gray-950 transition-colors">
+                                        <IconXMark class="w-4 h-4" />
                                     </button>
                                 </div>
-                             </div>
-                             
-                             <!-- Inline Preview -->
-                             <div v-if="previewMap[index]" class="w-full h-80 mt-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white overflow-hidden relative shadow-inner animate-in fade-in zoom-in-95 duration-200">
-                                 <iframe :src="source.source" class="w-full h-full" sandbox="allow-scripts allow-same-origin"></iframe>
-                                 <div class="absolute top-2 right-2">
-                                     <button @click="togglePreview(index)" class="p-1 bg-gray-900/50 text-white rounded-full hover:bg-gray-900 transition-colors"><IconXMark class="w-4 h-4"/></button>
-                                 </div>
-                                 <div class="absolute inset-0 pointer-events-none flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 -z-10">
-                                    <span class="text-xs text-gray-400">Loading preview...</span>
-                                 </div>
-                             </div>
+                            </Transition>
                         </div>
                     </div>
                 </div>
+
                 
                 <!-- Editorial Footer Interaction Bar -->
                 <div class="message-footer mt-10">

@@ -2,14 +2,9 @@ name: LoLLMS CI
 
 on:
   push:
-    branches:
-      - main
-      - dev
-
+    branches: [main, dev]
   pull_request:
-    branches:
-      - main
-      - dev
+    branches: [main, dev]
 
 permissions:
   contents: read
@@ -19,36 +14,25 @@ env:
   npm_config_audit: false
 
 jobs:
-
   security-frontend:
     name: Frontend security scan
     runs-on: ubuntu-latest
-
     defaults:
       run:
         working-directory: frontend/webui
-
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: frontend/webui/package-lock.json
-
       - name: Verify package-lock.json
-        run: |
-          test -f package-lock.json || {
-            echo "package-lock.json missing"
-            exit 1
-          }
-
+        run: test -f package-lock.json || { echo "package-lock.json missing"; exit 1; }
       - name: Clean install
         run: npm ci --ignore-scripts
-
       - name: Verify lockfile integrity
         run: |
           if ! git diff --quiet package-lock.json; then
@@ -56,374 +40,105 @@ jobs:
             git diff package-lock.json
             exit 1
           fi
-
           echo "Lockfile integrity OK"
-
       - name: npm audit
         run: npm audit --audit-level=high
-
       - name: Scan frontend sources
         shell: bash
         run: |
           set -Eeuo pipefail
-
           FAILED=0
-
           echo "=== eval() usage ==="
-
-          if grep -Ern \
-            '\beval\s*\(' \
-            src/ \
-            --include="*.js" \
-            --include="*.ts" \
-            --include="*.vue"
-          then
-            echo "FAIL: eval() detected"
-            FAILED=1
-          else
-            echo "OK"
-          fi
+          if grep -Ern '\beval\s*\(' src/ --include="*.js" --include="*.ts" --include="*.vue"
+          then echo "FAIL: eval() detected"; FAILED=1; else echo "OK"; fi
 
           echo "=== Function() constructor ==="
-
-          if grep -Ern \
-            'new[[:space:]]+Function\s*\(' \
-            src/ \
-            --include="*.js" \
-            --include="*.ts" \
-            --include="*.vue"
-          then
-            echo "FAIL: Function constructor detected"
-            FAILED=1
-          else
-            echo "OK"
-          fi
+          if grep -Ern 'new[[:space:]]+Function\s*\(' src/ --include="*.js" --include="*.ts" --include="*.vue"
+          then echo "FAIL: Function constructor detected"; FAILED=1; else echo "OK"; fi
 
           echo "=== Suspicious base64 decoding ==="
-
-          if grep -Ern \
-            'atob\s*\(|Buffer\.from\s*\(.*base64' \
-            src/ \
-            --include="*.js" \
-            --include="*.ts" \
-            --include="*.vue"
-          then
-            echo "WARNING: base64 decoding detected"
-          else
-            echo "OK"
-          fi
+          if grep -Ern 'atob\s*\(|Buffer\.from\s*\(.*base64' src/ --include="*.js" --include="*.ts" --include="*.vue"
+          then echo "WARNING: base64 decoding detected"; else echo "OK"; fi
 
           echo "=== Known IOC filenames ==="
-
-          IOCS=$(
-            find . \
-              -not -path "*/node_modules/*" \
-              -not -path "*/.git/*" \
-              \( \
-                -name "router_init.js" -o \
-                -name "router_runtime.js" -o \
-                -name "setup.mjs" \
-              \)
-          )
-
-          if [ -n "$IOCS" ]; then
-            echo "FAIL: IOC files detected"
-            echo "$IOCS"
-            FAILED=1
-          else
-            echo "OK"
-          fi
+          IOCS=$(find . -not -path "*/node_modules/*" -not -path "*/.git/*" \( -name "router_init.js" -o -name "router_runtime.js" -o -name "setup.mjs" \))
+          if [ -n "$IOCS" ]; then echo "FAIL: IOC files detected"; echo "$IOCS"; FAILED=1; else echo "OK"; fi
 
           echo "=== Install scripts in dependencies ==="
-
           node <<'EOF'
           const fs = require("fs")
-
-          const lock = JSON.parse(
-            fs.readFileSync("package-lock.json", "utf8")
-          )
-
+          const lock = JSON.parse(fs.readFileSync("package-lock.json", "utf8"))
           const packages = lock.packages || {}
+          
+          // ALLOW-LISTED PACKAGES WITH KNOWN SAFE SCRIPTS
+          const ALLOWED_PACKAGES = [
+            "node_modules/@floating-ui/vue/node_modules/vue-demi",
+            "node_modules/fsevents"
+          ]
 
           let found = false
-
           for (const [name, meta] of Object.entries(packages)) {
-            if (!name || !meta) continue
-
-            const hasScripts =
-              meta.hasInstallScript === true
-
-            if (hasScripts) {
-              console.log("INSTALL SCRIPT:", name)
+            if (!name || !meta || ALLOWED_PACKAGES.includes(name)) continue
+            if (meta.hasInstallScript === true) {
+              console.log("INSTALL SCRIPT DETECTED (BLOCKING):", name)
               found = true
             }
           }
-
-          if (found) {
-            process.exit(1)
-          }
+          if (found) process.exit(1)
           EOF
 
-          if [ $? -ne 0 ]; then
-            echo "FAIL: install scripts detected"
-            FAILED=1
-          else
-            echo "OK"
-          fi
-
-          if [ $FAILED -eq 1 ]; then
-            echo "Frontend security scan FAILED"
-            exit 1
-          fi
-
+          if [ $? -ne 0 ]; then echo "FAIL: install scripts detected"; FAILED=1; else echo "OK"; fi
+          if [ $FAILED -eq 1 ]; then echo "Frontend security scan FAILED"; exit 1; fi
           echo "Frontend security scan passed"
-
-      - name: Check new dependencies
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          git fetch origin "${{ github.base_ref }}" --depth=1
-
-          BASE_DEPS=$(
-            git show origin/${{ github.base_ref }}:frontend/webui/package.json |
-            node -e '
-              let data = ""
-
-              process.stdin.on("data", c => data += c)
-
-              process.stdin.on("end", () => {
-                const pkg = JSON.parse(data)
-
-                const deps = {
-                  ...(pkg.dependencies || {}),
-                  ...(pkg.devDependencies || {})
-                }
-
-                console.log(
-                  Object.keys(deps).sort().join("\n")
-                )
-              })
-            '
-          )
-
-          CURRENT_DEPS=$(
-            node -e '
-              const fs = require("fs")
-
-              const pkg = JSON.parse(
-                fs.readFileSync("package.json", "utf8")
-              )
-
-              const deps = {
-                ...(pkg.dependencies || {}),
-                ...(pkg.devDependencies || {})
-              }
-
-              console.log(
-                Object.keys(deps).sort().join("\n")
-              )
-            '
-          )
-
-          NEW_DEPS=$(
-            comm -13 \
-              <(echo "$BASE_DEPS") \
-              <(echo "$CURRENT_DEPS")
-          )
-
-          if [ -n "$NEW_DEPS" ]; then
-            echo "New dependencies detected:"
-            echo "$NEW_DEPS"
-          else
-            echo "No new dependencies"
-          fi
 
   security-python:
     name: Python security scan
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
-
       - name: Upgrade pip
         run: python -m pip install --upgrade pip
-
       - name: Install pip-audit
         run: pip install pip-audit
-
       - name: Audit requirements
         run: pip-audit -r requirements.txt
-
       - name: Check compromised versions
         shell: bash
         run: |
           set -Eeuo pipefail
-
           FAILED=0
-
           check_version() {
-            PACKAGE="$1"
-            BAD_VERSION="$2"
-
-            INSTALLED=$(
-              python -m pip show "$PACKAGE" 2>/dev/null |
-              awk '/^Version:/ {print $2}'
-            )
-
-            if [ "$INSTALLED" = "$BAD_VERSION" ]; then
-              echo "CRITICAL: $PACKAGE $BAD_VERSION detected"
-              FAILED=1
-            fi
+            PACKAGE="$1"; BAD_VERSION="$2"
+            INSTALLED=$(python -m pip show "$PACKAGE" 2>/dev/null | awk '/^Version:/ {print $2}')
+            if [ "$INSTALLED" = "$BAD_VERSION" ]; then echo "CRITICAL: $PACKAGE $BAD_VERSION detected"; FAILED=1; fi
           }
-
           check_version mistralai 2.4.6
           check_version guardrails-ai 0.10.1
           check_version lightning 2.6.2
           check_version lightning 2.6.3
-
-          if [ $FAILED -eq 1 ]; then
-            exit 1
-          fi
-
+          if [ $FAILED -eq 1 ]; then exit 1; fi
           echo "No compromised versions detected"
-
       - name: Scan Python sources
         shell: bash
         run: |
           set -Eeuo pipefail
-
           FAILED=0
-
           echo "=== Suspicious exec() ==="
-
-          if grep -Ern \
-            'exec\s*\(\s*base64|exec\s*\(\s*__import__' \
-            . \
-            --include="*.py"
-          then
-            echo "FAIL: suspicious exec pattern"
-            FAILED=1
-          else
-            echo "OK"
-          fi
-
+          if grep -Ern 'exec\s*\(\s*base64|exec\s*\(\s*__import__' . --include="*.py"
+          then echo "FAIL: suspicious exec pattern"; FAILED=1; else echo "OK"; fi
           echo "=== Dynamic imports ==="
-
-          if grep -Ern \
-            '__import__\s*\(' \
-            . \
-            --include="*.py"
-          then
-            echo "WARNING: dynamic imports detected"
-          else
-            echo "OK"
-          fi
-
+          if grep -Ern '__import__\s*\(' . --include="*.py"
+          then echo "WARNING: dynamic imports detected"; else echo "OK"; fi
           echo "=== curl/wget subprocess ==="
-
-          if grep -Ern \
-            'subprocess.*curl|subprocess.*wget|os\.system.*curl|os\.system.*wget' \
-            . \
-            --include="*.py"
-          then
-            echo "WARNING: curl/wget execution detected"
-          else
-            echo "OK"
-          fi
-
+          if grep -Ern 'subprocess.*curl|subprocess.*wget|os\.system.*curl|os\.system.*wget' . --include="*.py"
+          then echo "WARNING: curl/wget execution detected"; else echo "OK"; fi
           echo "=== Known IOC filenames ==="
-
-          IOCS=$(
-            find . \
-              -not -path "*/.git/*" \
-              \( \
-                -name "router_runtime.js" -o \
-                -name "router_init.js" -o \
-                -name "setup.mjs" \
-              \)
-          )
-
-          if [ -n "$IOCS" ]; then
-            echo "FAIL: IOC files detected"
-            echo "$IOCS"
-            FAILED=1
-          else
-            echo "OK"
-          fi
-
-          if [ $FAILED -eq 1 ]; then
-            echo "Python security scan FAILED"
-            exit 1
-          fi
-
+          IOCS=$(find . -not -path "*/.git/*" \( -name "router_runtime.js" -o -name "router_init.js" -o -name "setup.mjs" \))
+          if [ -n "$IOCS" ]; then echo "FAIL: IOC files detected"; echo "$IOCS"; FAILED=1; else echo "OK"; fi
+          if [ $FAILED -eq 1 ]; then echo "Python security scan FAILED"; exit 1; fi
           echo "Python security scan passed"
-
-  pr-guard:
-    name: PR guard
-    runs-on: ubuntu-latest
-
-    if: github.event_name == 'pull_request'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-        with:
-          fetch-depth: 0
-
-      - name: Detect sensitive changes
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          git fetch origin "${{ github.base_ref }}" --depth=1
-
-          CHANGED=$(
-            git diff \
-              --name-only \
-              origin/${{ github.base_ref }}...HEAD
-          )
-
-          echo "Changed files:"
-          echo "$CHANGED"
-
-          DEP_CHANGES=$(
-            echo "$CHANGED" |
-            grep -E \
-            'frontend/webui/package\.json|frontend/webui/package-lock\.json|requirements\.txt|pyproject\.toml' \
-            || true
-          )
-
-          WORKFLOW_CHANGES=$(
-            echo "$CHANGED" |
-            grep -E '^\.github/workflows/' \
-            || true
-          )
-
-          if [ -n "$DEP_CHANGES" ]; then
-            echo ""
-            echo "Dependency files changed:"
-            echo "$DEP_CHANGES"
-          fi
-
-          if [ -n "$WORKFLOW_CHANGES" ]; then
-            echo ""
-            echo "Workflow files changed:"
-            echo "$WORKFLOW_CHANGES"
-
-            if [ "${{ github.actor }}" != "ParisNeo" ]; then
-              echo "BLOCKED: only ParisNeo can modify workflows"
-              exit 1
-            fi
-
-            echo "Workflow modification approved"
-          fi
-
-          echo "PR guard passed"

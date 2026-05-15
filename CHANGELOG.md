@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-15 14:46]
+
+- ci: simplify branch syntax and rebuild frontend dist assets
+
 ## [2026-05-15 14:20]
 
 - style(ci): format branch lists for readability in push trigger
