@@ -11,101 +11,261 @@ permissions:
 
 jobs:
 
+  # ─────────────────────────────────────────────
+  # 1. Frontend security scan — zero external tools
+  # ─────────────────────────────────────────────
   security-frontend:
     name: Frontend security scan
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: frontend/webui
+
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481
-        with:
-          egress-policy: audit
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: frontend/webui/package-lock.json
-      - name: Install (clean)
+
+      - name: Install (clean, no scripts)
         run: npm ci --ignore-scripts
+
       - name: npm audit
         run: npm audit --audit-level=high
-      - name: Socket security scan
-        run: npx --yes socket ci
-        continue-on-error: true  # add this line
-        env:
-          SOCKET_SECURITY_API_KEY: ${{ secrets.SOCKET_SECURITY_API_KEY }}
-      - name: Check for obfuscated code
+
+      - name: Scan for obfuscated code
         run: |
-          grep -rn '\beval\s*(' src/ --include="*.js" --include="*.ts" --include="*.vue" && exit 1 || true
-          grep -rn '\\x[0-9a-fA-F]\{4,\}' src/ --include="*.js" --include="*.ts" && exit 1 || true
-          find . -not -path "*/node_modules/*" \( -name "router_init.js" -o -name "router_runtime.js" -o -name "setup.mjs" \) && exit 1 || true
-          grep -rn '.\{500\}' src/ --include="*.js" --include="*.ts" && echo "WARNING: long lines" || true
+          FAILED=0
+
+          echo "=== eval() usage ==="
+          if grep -rn '\beval\s*(' src/ --include="*.js" --include="*.ts" --include="*.vue"; then
+            echo "FAIL: eval() found in source" && FAILED=1
+          else
+            echo "OK"
+          fi
+
+          echo "=== hex-encoded payloads ==="
+          if grep -rn '\\x[0-9a-fA-F]\{4,\}' src/ --include="*.js" --include="*.ts"; then
+            echo "FAIL: hex-encoded strings found" && FAILED=1
+          else
+            echo "OK"
+          fi
+
+          echo "=== base64 decode + exec pattern ==="
+          if grep -rn 'atob\s*(\|Buffer\.from.*base64' src/ --include="*.js" --include="*.ts" --include="*.vue"; then
+            echo "WARNING: base64 decode found — review manually"
+          else
+            echo "OK"
+          fi
+
+          echo "=== suspicious long lines (obfuscation hallmark) ==="
+          if grep -rn '.\{500\}' src/ --include="*.js" --include="*.ts"; then
+            echo "WARNING: lines >500 chars found — review manually"
+          else
+            echo "OK"
+          fi
+
+          echo "=== known IOC filenames (Mini Shai-Hulud campaign) ==="
+          IOCS=$(find . -not -path "*/node_modules/*" -not -path "*/.git/*" \( \
+            -name "router_init.js" -o \
+            -name "router_runtime.js" -o \
+            -name "setup.mjs" \
+          \))
+          if [ -n "$IOCS" ]; then
+            echo "FAIL: IOC files found: $IOCS" && FAILED=1
+          else
+            echo "OK"
+          fi
+
+          echo "=== postinstall scripts in dependencies ==="
+          node -e "
+            const lock = require('./package-lock.json');
+            const pkgs = lock.packages || {};
+            let found = false;
+            for (const [name, meta] of Object.entries(pkgs)) {
+              if (name === '') continue;
+              if (meta.scripts && (meta.scripts.postinstall || meta.scripts.install || meta.scripts.preinstall)) {
+                console.log('INSTALL SCRIPT:', name, JSON.stringify(meta.scripts));
+                found = true;
+              }
+            }
+            if (found) process.exit(1);
+          " || FAILED=1
+
+          [ $FAILED -eq 1 ] && echo "Security scan FAILED" && exit 1
+          echo "All checks passed."
+
       - name: Check lockfile integrity
         run: |
           cp package-lock.json package-lock.json.orig
           npm install --package-lock-only --ignore-scripts
-          diff package-lock.json.orig package-lock.json || (echo "ERROR: lockfile out of sync" && exit 1)
+          if ! diff -q package-lock.json.orig package-lock.json > /dev/null; then
+            echo "ERROR: package-lock.json is out of sync with package.json"
+            echo "This can indicate a manually tampered lockfile."
+            diff package-lock.json.orig package-lock.json
+            exit 1
+          fi
+          echo "Lockfile integrity OK."
 
+      - name: Check for new dependencies added without review
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1
+          BASE_DEPS=$(git show origin/${{ github.base_ref }}:frontend/webui/package.json | node -e "
+            const d = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
+            const all = {...(d.dependencies||{}), ...(d.devDependencies||{})};
+            console.log(Object.keys(all).join('\n'));
+          ")
+          CURRENT_DEPS=$(node -e "
+            const d = JSON.parse(require('fs').readFileSync('package.json','utf8'));
+            const all = {...(d.dependencies||{}), ...(d.devDependencies||{})};
+            console.log(Object.keys(all).join('\n'));
+          ")
+          NEW_DEPS=$(comm -13 <(echo "$BASE_DEPS" | sort) <(echo "$CURRENT_DEPS" | sort))
+          if [ -n "$NEW_DEPS" ]; then
+            echo "⚠️  New dependencies added in this PR:"
+            echo "$NEW_DEPS"
+            echo "These require manual review by @ParisNeo before merge."
+          else
+            echo "No new dependencies added."
+          fi
+
+  # ─────────────────────────────────────────────
+  # 2. Python security scan — zero external tools
+  # ─────────────────────────────────────────────
   security-python:
     name: Python security scan
     runs-on: ubuntu-latest
+
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481
-        with:
-          egress-policy: audit
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.11"
+
       - name: Install pip-audit
+        # pip-audit is maintained by PyPA (Python Packaging Authority)
+        # queries the OSV vulnerability database — no account needed
         run: pip install pip-audit
+
       - name: Audit requirements.txt
         run: pip-audit -r requirements.txt
-      - name: Check known-compromised versions
-        run: |
-          pip show mistralai 2>/dev/null | grep -E "^Version: 2\.4\.6$" && exit 1 || true
-          pip show guardrails-ai 2>/dev/null | grep -E "^Version: 0\.10\.1$" && exit 1 || true
-          pip show lightning 2>/dev/null | grep -E "^Version: 2\.6\.[23]$" && exit 1 || true
-      - name: Check suspicious Python patterns
-        run: |
-          grep -rn 'exec\s*(\s*base64' --include="*.py" . && exit 1 || true
-          grep -rn '__import__\s*(' --include="*.py" . && echo "WARNING: dynamic __import__" || true
 
-  pr-lockfile-guard:
-    name: PR lockfile guard
+      - name: Check known-compromised versions (Mini Shai-Hulud campaign)
+        run: |
+          FAILED=0
+
+          check_version() {
+            PKG=$1; BAD=$2
+            INSTALLED=$(pip show "$PKG" 2>/dev/null | grep "^Version:" | awk '{print $2}')
+            if [ "$INSTALLED" = "$BAD" ]; then
+              echo "CRITICAL: $PKG $BAD is a known-compromised version"
+              return 1
+            fi
+            return 0
+          }
+
+          check_version mistralai    2.4.6  || FAILED=1
+          check_version guardrails-ai 0.10.1 || FAILED=1
+          check_version lightning    2.6.2  || FAILED=1
+          check_version lightning    2.6.3  || FAILED=1
+
+          [ $FAILED -eq 1 ] && exit 1
+          echo "No known-compromised versions detected."
+
+      - name: Scan for suspicious Python patterns
+        run: |
+          FAILED=0
+
+          echo "=== exec() with encoded input ==="
+          if grep -rn 'exec\s*(\s*base64\|exec\s*(\s*__import__' --include="*.py" .; then
+            echo "FAIL: suspicious exec() pattern" && FAILED=1
+          else
+            echo "OK"
+          fi
+
+          echo "=== dynamic __import__() ==="
+          if grep -rn '__import__\s*(' --include="*.py" .; then
+            echo "WARNING: dynamic __import__ found — review manually"
+          else
+            echo "OK"
+          fi
+
+          echo "=== subprocess calling curl/wget (potential exfiltration) ==="
+          if grep -rn 'subprocess.*curl\|subprocess.*wget\|os\.system.*curl\|os\.system.*wget' --include="*.py" .; then
+            echo "WARNING: subprocess curl/wget found — review manually"
+          else
+            echo "OK"
+          fi
+
+          echo "=== IOC filenames ==="
+          IOCS=$(find . -not -path "*/.git/*" \( \
+            -name "router_runtime.js" -o \
+            -name "router_init.js" -o \
+            -name "setup.mjs" \
+          \))
+          if [ -n "$IOCS" ]; then
+            echo "FAIL: IOC files found: $IOCS" && FAILED=1
+          else
+            echo "OK"
+          fi
+
+          [ $FAILED -eq 1 ] && exit 1
+          echo "All Python pattern checks passed."
+
+  # ─────────────────────────────────────────────
+  # 3. PR guard — pure bash, no external actions
+  # ─────────────────────────────────────────────
+  pr-guard:
+    name: PR guard
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@4d991eb9b905ef189e4c376166672c3f2f230481
-        with:
-          egress-policy: audit
-      - name: Checkout
+      - name: Checkout (full history)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - name: Check sensitive file changes
-        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36
-        id: changes
         with:
-          filters: |
-            deps:
-              - 'frontend/webui/package.json'
-              - 'frontend/webui/package-lock.json'
-              - 'requirements.txt'
-            actions:
-              - '.github/workflows/**'
-      - name: Warn on dependency changes
-        if: steps.changes.outputs.deps == 'true'
-        run: echo "⚠️ Dependency files changed — maintainer review required."
-      - name: Block workflow changes from non-maintainers
-        if: steps.changes.outputs.actions == 'true' && github.actor != 'ParisNeo'
+          fetch-depth: 0
+
+      - name: Detect sensitive file changes
         run: |
-          echo "BLOCKED: Workflow changes require @ParisNeo approval."
-          exit 1
+          git fetch origin ${{ github.base_ref }} --depth=1
+
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD)
+          echo "Changed files:"
+          echo "$CHANGED"
+
+          # Dependency files
+          DEP_CHANGES=$(echo "$CHANGED" | grep -E \
+            'frontend/webui/package\.json|frontend/webui/package-lock\.json|requirements\.txt|pyproject\.toml' \
+          || true)
+
+          # Workflow files
+          WORKFLOW_CHANGES=$(echo "$CHANGED" | grep -E '\.github/workflows/' || true)
+
+          if [ -n "$DEP_CHANGES" ]; then
+            echo ""
+            echo "⚠️  DEPENDENCY FILES CHANGED:"
+            echo "$DEP_CHANGES"
+            echo "    @ParisNeo must review before merge."
+          fi
+
+          if [ -n "$WORKFLOW_CHANGES" ]; then
+            echo ""
+            echo "🔴 WORKFLOW FILES CHANGED:"
+            echo "$WORKFLOW_CHANGES"
+            if [ "${{ github.actor }}" != "ParisNeo" ]; then
+              echo "BLOCKED: Only @ParisNeo can modify .github/workflows files."
+              exit 1
+            else
+              echo "Approved: @ParisNeo is the author."
+            fi
+          fi
