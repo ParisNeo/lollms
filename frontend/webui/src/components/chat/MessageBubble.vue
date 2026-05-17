@@ -209,11 +209,11 @@ function handleExport(format) {
 }
 
 function handleSpeak() {
-    if (messageTtsState.value.audioUrl) {
-    } else if (!messageTtsState.value.isLoading) {
-        const textToSpeak = props.message.content.replace(/```[\s\S]*?```/g, 'Code block.').replace(/<think>[\s\S]*?<\/think>/g, '');
-        discussionsStore.generateTTSForMessage(props.message.id, textToSpeak);
-    }
+    // If we already have a URL, the player is shown. 
+    // If a task is running, don't trigger again.
+    if (props.message.metadata?.audio_url || props.message.isGeneratingAudio) return;
+    
+    discussionsStore.generateTTSForMessage(props.message.id);
 }
 
 function isUrl(str) {
@@ -627,12 +627,27 @@ function toggleEdit() {
 }
 
 async function handleSaveEdit() {
-    if (isNewManualMessage.value) {
-        await discussionsStore.saveManualMessage({ tempId: props.message.id, content: editedContent.value });
-    } else {
-        const keptImagesB64 = editedImages.value.filter(img => !img.isNew).map(img => img.url);
-        await discussionsStore.saveMessageChanges({ messageId: props.message.id, newContent: editedContent.value, keptImagesB64: keptImagesB64, newImageFiles: newImageFiles.value });
-        isEditing.value = false;
+    try {
+        if (isNewManualMessage.value) {
+            await discussionsStore.saveManualMessage({ tempId: props.message.id, content: editedContent.value });
+            // Manual message logic handles its own closure or transition
+        } else {
+            const keptImagesB64 = editedImages.value.filter(img => !img.isNew).map(img => img.url);
+
+            // Wait for store to finish successfully
+            await discussionsStore.saveMessageChanges({ 
+                messageId: props.message.id, 
+                newContent: editedContent.value, 
+                keptImagesB64: keptImagesB64, 
+                newImageFiles: newImageFiles.value 
+            });
+
+            // Only close UI if no error was thrown
+            isEditing.value = false;
+        }
+    } catch (e) {
+        // UI stays in edit mode if save fails
+        console.error("Edit UI handled error:", e);
     }
 }
 
@@ -669,6 +684,15 @@ function handleGrade(change) { discussionsStore.gradeMessage({ messageId: props.
 function handleExportCode() { discussionsStore.exportMessageCodeToZip({ content: props.message.content, title: discussionsStore.activeDiscussion?.title || 'discussion' }); }
 function handleBuildNewDiscussion(event) { event.stopPropagation(); discussionsStore.createDiscussionFromMessage({ discussionId: discussionsStore.currentDiscussionId, messageId: props.message.id }); }
 
+function getFavicon(url) {
+    if (!url) return null;
+    try {
+        const domain = new URL(url).hostname;
+        return `https://www.google.com/s2/favicons?sz=64&domain=${domain}`;
+    } catch (e) {
+        return null;
+    }
+}
 
 function handleBranchOrRegenerate() {
     discussionsStore.initiateBranch(props.message);
@@ -956,34 +980,41 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     </div>
                 </div>
 
-                 <!-- TTS Player -->
-                 <div v-if="isAi && isTtsActive && (messageTtsState.audioUrl || messageTtsState.isLoading)" class="mt-3">
-                    <div v-if="messageTtsState.isLoading" class="flex items-center gap-2 text-sm text-gray-500">
-                        <IconAnimateSpin class="w-4 h-4 animate-spin" />
-                        <span>Generating audio...</span>
+                 <!-- TTS Player (Background Task Driven) -->
+                 <div v-if="isAi && isTtsActive" class="mt-4 animate-in fade-in slide-in-from-top-1">
+                    <!-- Task Running State -->
+                    <div v-if="message.isGeneratingAudio && !message.metadata?.audio_url" class="flex items-center gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100/50 dark:border-blue-800/30">
+                        <IconAnimateSpin class="w-4 h-4 text-blue-500 animate-spin" />
+                        <span class="text-xs font-bold text-gray-500 dark:text-gray-400">Synthesizing Voice...</span>
                     </div>
-                    <div v-else-if="messageTtsState.error" class="text-sm text-red-500">{{ messageTtsState.error }}</div>
-                    <audio
-                        v-else-if="messageTtsState.audioUrl"
-                        ref="audioPlayerRef"
-                        :src="messageTtsState.audioUrl"
-                        controls
-                        class="w-full h-10"
-                        @play="discussionsStore.playAudio(message.id, $event.target)"
-                        @pause="discussionsStore.onAudioPausedOrEnded(message.id)"
-                        @ended="discussionsStore.onAudioPausedOrEnded(message.id)"
-                    ></audio>
+
+                    <!-- Completed State: Player -->
+                    <div v-else-if="message.metadata?.audio_url" class="flex flex-col gap-2">
+                        <div class="flex items-center gap-2 mb-1">
+                            <IconSpeakerWave class="w-3 h-3 text-blue-500" />
+                            <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">Audio Response</span>
+                        </div>
+                        <audio
+                            ref="audioPlayerRef"
+                            :src="message.metadata.audio_url"
+                            controls
+                            class="w-full h-10 rounded-xl"
+                            @play="discussionsStore.playAudio(message.id, $event.target)"
+                            @pause="discussionsStore.onAudioPausedOrEnded(message.id)"
+                            @ended="discussionsStore.onAudioPausedOrEnded(message.id)"
+                        ></audio>
+                    </div>
                 </div>
 
                 <!-- Unified Editorial Sources Grid -->
-                <div v-if="hasSources" class="mt-8 border-t border-gray-100 dark:border-gray-800/50 pt-8">
-                    <div class="flex items-center gap-3 mb-6">
+                <div v-if="hasSources" class="mt-8 border-t border-gray-100 dark:border-gray-800/50 pt-8 animate-in fade-in slide-in-from-bottom-2">
+                    <div class="flex items-center justify-between mb-6">
                         <button @click="isSourcesVisible = !isSourcesVisible" class="utility-link">
-                            <IconGlobeAlt class="w-3 h-3" />
-                            <span>References ({{ sortedSources.length }})</span>
+                            <IconGather class="w-4 h-4" />
+                            <span>Sources & References ({{ sortedSources.length }})</span>
                             <IconChevronRight class="w-2.5 h-2.5 transition-transform" :class="{'rotate-90': isSourcesVisible}" />
                         </button>
-                        <button @click="openAllSourcesSearch" class="modal-close-btn" title="Search all sources">
+                        <button @click="openAllSourcesSearch" class="modal-close-btn" title="Filter sources">
                             <IconMagnifyingGlass class="w-3.5 h-3.5" />
                         </button>
                     </div>
@@ -991,40 +1022,64 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     <div v-if="isSourcesVisible" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div v-for="(source, index) in sortedSources" :key="index" 
                                 class="flex flex-col gap-2 group/source transition-all duration-300">
-                                
+
                             <div @click="showSourceDetails(source)" 
-                                    class="p-4 bg-gray-50/50 dark:bg-gray-900/40 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-blue-500/30 cursor-pointer shadow-sm hover:shadow-md transition-all">
-                                
-                                <div class="flex items-start justify-between gap-3 mb-2">
-                                    <div class="flex items-center gap-2 min-w-0">
-                                        <div class="w-1.5 h-1.5 rounded-full shrink-0" :class="getSimilarityColor(source.score)"></div>
-                                        <span class="text-[11px] font-bold text-gray-800 dark:text-gray-200 truncate">{{ source.title }}</span>
+                                    class="p-4 bg-gray-50/50 dark:bg-gray-900/40 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-blue-500/30 cursor-pointer shadow-sm hover:shadow-md transition-all relative overflow-hidden">
+
+                                <div class="flex items-start justify-between gap-3 mb-2 relative z-10">
+                                    <div class="flex items-center gap-2.5 min-w-0">
+                                        <!-- Favicon for Web / Index for RAG -->
+                                        <img v-if="isUrl(source.source)" :src="getFavicon(source.source)" class="w-6 h-6 rounded-lg bg-white p-0.5 shadow-sm shrink-0 border dark:border-gray-600" alt="" />
+                                        <div v-else class="shrink-0 w-6 h-6 flex items-center justify-center bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-black">
+                                            {{ source.index || index + 1 }}
+                                        </div>
+
+                                        <span class="font-bold text-sm truncate text-gray-800 dark:text-gray-100 group-hover/source:text-blue-600 transition-colors">{{ source.title || 'Untitled Source' }}</span>
                                     </div>
-                                    
-                                    <!-- Source Quick Actions -->
-                                    <div class="flex items-center gap-1 opacity-0 group-hover/source:opacity-100 transition-opacity">
-                                        <a v-if="isUrl(source.source)" :href="source.source" target="_blank" @click.stop class="p-1.5 rounded-lg hover:bg-blue-100 dark:hover:bg-blue-900/50 text-blue-500 transition-colors">
-                                            <IconGlobeAlt class="w-3.5 h-3.5" />
-                                        </a>
-                                        <button v-if="isUrl(source.source)" @click.stop="togglePreview(index)" class="p-1.5 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 text-purple-500 transition-colors">
+
+                                    <div v-if="source.score" class="shrink-0 text-[9px] font-mono font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800/50">
+                                        {{ Math.round(source.score > 1 ? source.score : source.score * 100) }}%
+                                    </div>
+                                </div>
+
+                                <!-- Hint / Snippet Preview -->
+                                <p v-if="source.content" class="mt-2 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed italic relative z-10">
+                                    "{{ source.content }}"
+                                </p>
+
+                                <div class="mt-3 flex items-center justify-between relative z-10">
+                                    <span class="text-[8px] font-mono text-gray-400 truncate max-w-[70%] opacity-60">{{ source.source }}</span>
+                                    <div class="flex items-center gap-1">
+                                        <button v-if="isUrl(source.source)" @click.stop="togglePreview(index)" class="p-1 text-gray-400 hover:text-purple-500 transition-colors" title="Instant Preview">
                                             <IconEye class="w-3.5 h-3.5" />
                                         </button>
+                                        <span class="text-[9px] font-black text-blue-500 uppercase tracking-widest opacity-0 group-hover/source:opacity-100 transform translate-x-2 group-hover/source:translate-x-0 transition-all">Details &rarr;</span>
                                     </div>
                                 </div>
-                                
-                                <div class="flex items-center justify-between">
-                                    <span class="text-[9px] font-mono text-gray-400 truncate pr-4">{{ source.source }}</span>
-                                    <span v-if="source.score" class="text-[9px] font-black text-gray-300 tabular-nums">{{ source.score.toFixed(0) }}%</span>
-                                </div>
+
+                                <!-- Decorative subtle bg blur -->
+                                <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-blue-500/5 rounded-full blur-2xl group-hover/source:bg-blue-500/10 transition-colors"></div>
                             </div>
 
                             <!-- Integrated Preview iframe -->
-                            <Transition enter-active-class="transition-all duration-300">
-                                <div v-if="previewMap[index]" class="w-full h-80 rounded-2xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-black overflow-hidden relative shadow-2xl z-10 animate-in zoom-in-95">
+                            <Transition 
+                                enter-active-class="transition-all duration-500 ease-out"
+                                enter-from-class="opacity-0 scale-95 -translate-y-4"
+                                enter-to-class="opacity-100 scale-100 translate-y-0"
+                                leave-active-class="transition-all duration-300 ease-in"
+                                leave-from-class="opacity-100 scale-100"
+                                leave-to-class="opacity-0 scale-95"
+                            >
+                                <div v-if="previewMap[index]" class="w-full h-96 rounded-2xl border-2 border-blue-500/30 bg-white dark:bg-black overflow-hidden relative shadow-2xl z-20">
                                     <iframe :src="source.source" class="w-full h-full" sandbox="allow-scripts allow-same-origin"></iframe>
-                                    <button @click="togglePreview(index)" class="absolute top-3 right-3 p-1.5 bg-gray-900/50 text-white rounded-full hover:bg-gray-950 transition-colors">
-                                        <IconXMark class="w-4 h-4" />
-                                    </button>
+                                    <div class="absolute top-3 right-3 flex gap-2">
+                                        <a :href="source.source" target="_blank" class="p-2 bg-gray-900/80 text-white rounded-full hover:bg-black transition-colors shadow-lg">
+                                            <IconGlobeAlt class="w-4 h-4" />
+                                        </a>
+                                        <button @click="togglePreview(index)" class="p-2 bg-red-600 text-white rounded-full hover:bg-red-700 transition-colors shadow-lg">
+                                            <IconXMark class="w-4 h-4" />
+                                        </button>
+                                    </div>
                                 </div>
                             </Transition>
                         </div>

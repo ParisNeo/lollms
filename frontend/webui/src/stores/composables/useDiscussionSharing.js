@@ -7,8 +7,12 @@ export function useDiscussionSharing(state, stores, getActions) {
 
     async function fetchSharedWithMe() {
         try {
+            // Force a clean fetch of the shared discussions list
             const response = await apiClient.get('/api/discussions/shared');
             sharedWithMe.value = response.data;
+
+            // Log for debugging visibility
+            console.log(`[useDiscussionSharing] Synced ${sharedWithMe.value.length} shared discussions.`);
         } catch (error) {
             console.error("Failed to fetch shared discussions:", error);
             sharedWithMe.value = [];

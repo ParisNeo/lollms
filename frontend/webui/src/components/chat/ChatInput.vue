@@ -37,6 +37,7 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconLollms from '../../assets/icons/IconLollms.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconToken from '../../assets/icons/IconToken.vue';
+import IconSquares2x2 from '../../assets/icons/IconSquares2x2.vue';
 import IconCircle from '../../assets/icons/IconCircle.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
@@ -346,17 +347,8 @@ function navigateToContextSettings() {
 }
 
 function showFeatureInfo(feature) {
-    if (!feature.modalTitle && !feature.modalDescription) return;
-    
-    let content = `### Description\n${feature.modalDescription}\n`;
-    if (feature.systemPrompt) {
-        content += `\n### System Prompt Addition\n\`\`\`text\n${feature.systemPrompt}\n\`\`\``;
-    }
-    
-    uiStore.openModal('interactiveOutput', {
-        title: feature.modalTitle || feature.label,
-        content: content
-    });
+    // We now use a dedicated modal for a richer editorial experience
+    uiStore.openModal('featureInfo', feature);
 }
 
 function showHiddenFeaturesModal() {
@@ -385,10 +377,10 @@ const activeFeatures = computed(() => {
         features.push({
             id: 'herd',
             icon: IconUserGroup,
-            label: `Herd (${user.value.herd_rounds} rnds)`,
+            label: `Herd Mode (${user.value.herd_rounds} rounds)`,
             colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800',
             title: `Herd Mode Active.`,
-            modalTitle: 'Herd Mode',
+            modalTitle: 'Herd Mode Orchestration',
             modalDescription: 'A collaborative multi-agent workflow. Your request is processed by a "Pre-code" crew (Brainstorming), synthesized by a Leader, critiqued by a "Post-code" crew, and refined into a final answer.',
             systemPrompt: '(Dynamic Context) The system orchestrates multiple agent interactions. It injects specific system prompts for each agent (e.g., "You are a creative thinker...") and manages the debate history context.'
         });
@@ -685,7 +677,24 @@ async function toggleArtefactLoad(file) {
             version: file.version 
         }); 
 }
-async function removeArtefact(file) { if (!activeDiscussion.value) return; const confirmed = await uiStore.showConfirmation({ title: 'Remove File?', message: `Remove "${file.title}" from the discussion?`, confirmText: 'Remove' }); if (confirmed.confirmed) await discussionsStore.deleteArtefact({ discussionId: activeDiscussion.value.id, artefactTitle: file.title }); }
+async function removeArtefact(file) { 
+    if (!activeDiscussion.value) return; 
+    const confirmed = await uiStore.showConfirmation({ 
+        title: 'Delete Document', 
+        message: `Are you sure you want to permanently delete "${file.title}" and all its versions from this discussion?`, 
+        confirmText: 'Delete',
+        danger: true
+    }); 
+
+    if (confirmed.confirmed) {
+        // We don't 'await' here so the modal closes and the chip disappears instantly 
+        // while the background request in the store handles the rest.
+        discussionsStore.deleteArtefact({ 
+            discussionId: activeDiscussion.value.id, 
+            artefactTitle: file.title 
+        }); 
+    }
+}
 function removeStagedImage(index) { const removed = stagedImages.value.splice(index, 1)[0]; if (removed && removed.previewUrl) URL.revokeObjectURL(removed.previewUrl); }
 function triggerFileUpload(mode = 'text_and_embedded_images') { currentUploadPdfMode.value = mode; fileInput.value?.click(); }
 function triggerImageUpload() { imageInput.value?.click(); }
@@ -886,20 +895,35 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 
                 <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 shrink-0" v-if="showContextBar && activeFeatures.length > 0"></div>
 
-                <div class="flex items-center gap-1.5 shrink-0" v-if="activeFeatures.length > 0">
-                    <div v-for="feat in visibleFeatures" :key="feat.id" 
-                         @click="showFeatureInfo(feat)"
-                         :class="['flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer hover:opacity-80', feat.colorClass]"
-                         :title="feat.title">
-                        <div class="w-3 h-3 shrink-0 flex items-center justify-center">
-                            <component :is="feat.icon" class="w-full h-full fill-current" />
-                        </div>
-                        <span class="hidden md:inline">{{ feat.label }}</span>
-                    </div>
-
-                    <button v-if="hiddenFeatures.length > 0" @click="showHiddenFeaturesModal" class="flex items-center gap-1 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider transition-colors cursor-pointer bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700">
-                            <span>+{{ hiddenFeatures.length }}</span>
+                <!-- Vertical Badge Menu -->
+                <div class="relative group/badge-menu shrink-0" v-if="activeFeatures.length > 0">
+                    <!-- Menu Trigger Button -->
+                    <button class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-blue-500 transition-all active:scale-95">
+                        <IconSquares2x2 class="w-3.5 h-3.5" />
+                        <span>{{ activeFeatures.length }} Active</span>
                     </button>
+
+                    <!-- Floating Vertical Menu (Viewport Aware) -->
+                    <div class="absolute bottom-full left-0 mb-2 w-56 opacity-0 translate-y-2 pointer-events-none group-hover/badge-menu:opacity-100 group-hover/badge-menu:translate-y-0 group-hover/badge-menu:pointer-events-auto transition-all duration-300 z-50">
+                        <!-- Max height set to 70% of viewport to prevent top overflow, with custom scrollbar -->
+                        <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-y-auto custom-scrollbar p-2 space-y-1 max-h-[70vh]">
+                            <div class="sticky top-0 bg-white dark:bg-gray-900 z-10 px-3 py-2 text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] border-b dark:border-gray-800 mb-1">Intelligence Stack</div>
+
+                            <button v-for="feat in activeFeatures" :key="feat.id" 
+                                 @click="showFeatureInfo(feat)"
+                                 class="w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left hover:bg-gray-50 dark:hover:bg-gray-800 group/feat-item">
+                                <div :class="['p-1.5 rounded-lg border shadow-sm transition-transform group-hover/feat-item:scale-110 shrink-0', feat.colorClass]">
+                                    <component :is="feat.icon" class="w-4 h-4 fill-current" />
+                                </div>
+                                <div class="flex flex-col min-w-0">
+                                    <span class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{{ feat.label }}</span>
+                                    <span class="text-[9px] text-gray-400 uppercase tracking-tighter">Click for info</span>
+                                </div>
+                            </button>
+                        </div>
+                        <!-- Tooltip Arrow -->
+                        <div class="absolute left-6 top-full -mt-1 w-3 h-3 bg-white dark:bg-gray-900 border-r border-b border-gray-200 dark:border-gray-700 transform rotate-45"></div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -46,11 +46,21 @@ export function useDiscussionCore(state, stores, getActions) {
          * Loads a discussion and sets the active view to a specific branch/leaf.
          */
         const isSameDiscussion = currentDiscussionId.value === discussionId;
-        
+
         // If we are already on this discussion, only proceed if we are jumping 
         // to a specific branch or explicitly forced.
         if (isSameDiscussion && !branchId && !forceReload) {
             return;
+        }
+
+        // --- CONTEXT SWITCH CLEANUP ---
+        // Reset the active workspace file when switching discussions
+        uiStore.activeSplitArtefactTitle = null;
+
+        // If the user was in the Workspace editor, bring them back to the Files list
+        // so they can choose a relevant document for the new discussion.
+        if (uiStore.dataZoneTab === 'workspace') {
+            uiStore.dataZoneTab = 'files';
         }
 
         currentDiscussionId.value = discussionId;

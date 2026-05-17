@@ -7,6 +7,7 @@ import NoteGroupItem from './NoteGroupItem.vue';
 
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
@@ -104,7 +105,15 @@ function handleBulkEmail() {
 </script>
 
 <template>
-  <div class="space-y-1">
+  <div class="space-y-1 h-full flex flex-col">
+      <!-- Header with Refresh -->
+      <div class="flex justify-between items-center mb-2 px-2 shrink-0">
+          <span class="text-xs font-bold text-gray-500 uppercase tracking-widest">My Notes</span>
+          <button @click="notesStore.fetchNotes()" class="text-xs text-gray-400 hover:text-blue-500 transition-colors" title="Refresh Notes">
+              <IconRefresh class="w-3.5 h-3.5" :class="{'animate-spin': notesStore.isLoading}" />
+          </button>
+      </div>
+
       <!-- Selection Toolbar -->
       <div v-if="notesStore.notes.length > 0" class="flex items-center justify-between px-2 py-1 mb-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
           <button @click="isSelectionMode = !isSelectionMode" class="text-[10px] font-black uppercase tracking-widest" :class="isSelectionMode ? 'text-blue-600' : 'text-gray-500'">

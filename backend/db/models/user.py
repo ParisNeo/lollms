@@ -156,7 +156,8 @@ class User(Base):
 
     put_thoughts_in_context = Column(Boolean, default=False, nullable=False, server_default='0')
     include_memory_date_in_context = Column(Boolean, default=False, nullable=False, server_default='0')
-    discussion_sorting_mode = Column(String, default="alpha", nullable=False, server_default="'alpha'") # 'alpha' or 'activity'
+    discussion_sorting_mode = Column(String, default="date", nullable=False, server_default="'date'") 
+    discussion_sorting_order = Column(String, default="desc", nullable=False, server_default="'desc'") # 'asc' or 'desc'
 
     rag_top_k = Column(Integer, nullable=True)
     max_rag_len = Column(Integer, nullable=True)

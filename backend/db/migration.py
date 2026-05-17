@@ -818,6 +818,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "image_annotation_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "image_editing_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "inline_widgets_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
+            "discussion_sorting_mode": "VARCHAR DEFAULT 'date' NOT NULL",
+            "discussion_sorting_order": "VARCHAR DEFAULT 'desc' NOT NULL",
             "reasoning_activation": "BOOLEAN DEFAULT 0",
             "reasoning_effort": "VARCHAR",
             "reasoning_summary": "BOOLEAN DEFAULT 0",
@@ -850,16 +852,17 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
         if 'discussion_sorting_mode' not in user_columns_db:
             try:
-                connection.execute(text("ALTER TABLE users ADD COLUMN discussion_sorting_mode VARCHAR DEFAULT 'alpha' NOT NULL"))
+                connection.execute(text("ALTER TABLE users ADD COLUMN discussion_sorting_mode VARCHAR DEFAULT 'date' NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
 
-        if 'discussion_sorting_mode' not in user_columns_db:
+        if 'discussion_sorting_order' not in user_columns_db:
             try:
-                connection.execute(text("ALTER TABLE users ADD COLUMN discussion_sorting_mode VARCHAR DEFAULT 'alpha' NOT NULL"))
+                connection.execute(text("ALTER TABLE users ADD COLUMN discussion_sorting_order VARCHAR DEFAULT 'desc' NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
-        elif 'chat_active' in user_columns_db:
+
+        if 'chat_active' in user_columns_db:
              connection.execute(text("UPDATE users SET chat_active = 1 WHERE chat_active = 0"))
              connection.commit()
 

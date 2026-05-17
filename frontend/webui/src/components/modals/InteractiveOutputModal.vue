@@ -14,6 +14,7 @@ import IconCopy from '../../assets/icons/IconCopy.vue';
 
 const uiStore = useUiStore();
 const modalProps = computed(() => uiStore.modalData('interactiveOutput'));
+const isIframeLoading = ref(true);
 
 const title = computed(() => modalProps.value?.title || 'Execution Results');
 const results = computed(() => {
@@ -174,7 +175,19 @@ function handleClose() {
                                          'html-result-container w-full border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative',
                                          modalProps?.fullScreen ? 'flex-1 !h-full !rounded-none !border-none' : 'h-[600px]'
                                      ]">
-                                    <iframe :srcdoc="value" class="w-full h-full" sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" referrerpolicy="no-referrer"></iframe>
+                                    <!-- Modal Spinner -->
+                                    <div v-if="isIframeLoading" class="absolute inset-0 z-20 bg-white dark:bg-gray-900 flex flex-col items-center justify-center">
+                                        <IconAnimateSpin class="w-12 h-12 text-blue-500 animate-spin mb-4" />
+                                        <span class="text-xs font-black uppercase tracking-widest text-gray-400">Rendering Content...</span>
+                                    </div>
+
+                                    <iframe 
+                                        :srcdoc="value" 
+                                        class="w-full h-full" 
+                                        @load="isIframeLoading = false"
+                                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
+                                        referrerpolicy="no-referrer"
+                                    ></iframe>
                                     <!-- Actions Overlay -->
                                     <div class="absolute top-2 right-2 flex gap-2 z-10" v-if="!modalProps?.fullScreen">
                                         <button @click="openHtmlFullscreen(value)" class="p-2 bg-white/80 dark:bg-black/50 hover:bg-white dark:hover:bg-black text-gray-700 dark:text-gray-200 rounded-full shadow-sm backdrop-blur-sm transition-all border dark:border-gray-600" title="Open in New Tab">

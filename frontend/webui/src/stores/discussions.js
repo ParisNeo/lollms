@@ -44,6 +44,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activeDiscussionContextStatus = ref(null);
     const activeAiTasks = ref({});
     const activeDiscussionArtefacts = ref([]);
+    const allUserArtefacts = ref([]);
     const isLoadingArtefacts = ref(false);
     const liveDataZoneTokens = ref({ discussion: 0, user: 0, personality: 0, memory: 0 });
     const promptInsertionText = ref('');
@@ -70,9 +71,44 @@ export const useDiscussionsStore = defineStore('discussions', () => {
      */
 
     // --- WATCHER for task updates ---
-    // [OPTIMIZATION] Removed { deep: true } to prevent performance freeze on large task lists.
-    // The tasks store uses shallowRef and replaces the array reference on updates, so deep watch is unnecessary.
     watch(tasks, async (newTasks) => {
+        // 1. Handle Artefact Audio Export (Auto-download)
+        const artefactAudioTask = newTasks.find(t => t.name.startsWith('Audio Export:') && t.status === 'completed' && t.result?.download_url);
+        if (artefactAudioTask && !artefactAudioTask._processed_for_download) {
+            artefactAudioTask._processed_for_download = true; 
+            const downloadUrl = `${apiClient.defaults.baseURL}${artefactAudioTask.result.download_url}`;
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = artefactAudioTask.result.filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            uiStore.addNotification(`Audio file ready: ${artefactAudioTask.result.filename}`, 'success');
+        }
+
+        // 2. Handle Message Audio Task (Metadata Sync)
+        const msgAudioTask = newTasks.find(t => t.name === 'Generating Audio for Message' && (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'));
+        if (msgAudioTask && !msgAudioTask._processed_for_ui) {
+            msgAudioTask._processed_for_ui = true;
+
+            // Look up message ID from task result or log parse
+            const messageId = msgAudioTask.result?.message_id;
+            if (messageId) {
+                const msg = messages.value.find(m => m.id === messageId);
+                if (msg) {
+                    msg.isGeneratingAudio = false;
+                    if (msgAudioTask.status === 'completed' && msgAudioTask.result?.audio_url) {
+                        if (!msg.metadata) msg.metadata = {};
+                        msg.metadata.audio_url = `${apiClient.defaults.baseURL}${msgAudioTask.result.audio_url}`;
+                        uiStore.addNotification('Voice synthesis complete.', 'success');
+                    }
+                    // Force reactivity
+                    const idx = messages.value.indexOf(msg);
+                    messages.value.splice(idx, 1, { ...msg });
+                }
+            }
+        }
+
         const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
         if (activeTrackedTaskIds.length === 0) return;
 
@@ -172,38 +208,70 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     const discussionGroupsTree = computed(() => {
+        // 1. Get Sort Preference (Default to 'date')
+        const sortMode = authStore.user?.discussion_sorting_mode || 'date';
+        const sortOrder = authStore.user?.discussion_sorting_order || 'desc';
+        const isAsc = sortOrder === 'asc';
+
+        // 2. Prepare Data
         const groups = JSON.parse(JSON.stringify(discussionGroups.value));
-        const allDiscussions = sortedDiscussions.value;
-        const sortMode = authStore.user?.discussion_sorting_mode || 'alpha';
-        
+        const allDiscussions = Object.values(discussions.value);
+
         const starred = allDiscussions.filter(d => d.is_starred);
         const nonStarredDiscussions = allDiscussions.filter(d => !d.is_starred);
 
-        // Helper to get effective activity time for a group (recursive)
-        const getGroupActivity = (group) => {
-            let latest = new Date(group.updated_at || group.created_at).getTime();
-            group.discussions?.forEach(d => {
-                const dt = new Date(d.last_activity_at || d.created_at).getTime();
-                if (dt > latest) latest = dt;
-            });
-            group.children?.forEach(child => {
-                const dt = getGroupActivity(child);
-                if (dt > latest) latest = dt;
-            });
-            return latest;
+        // 3. Define Sorting Functions
+        const sortDiscussionsFn = (a, b) => {
+            let res = 0;
+            if (sortMode === 'alpha') res = a.title.localeCompare(b.title);
+            else if (sortMode === 'activity') {
+                const timeA = new Date(a.last_activity_at || a.created_at).getTime();
+                const timeB = new Date(b.last_activity_at || b.created_at).getTime();
+                res = timeA - timeB;
+            } else {
+                // 'date' (Created At)
+                res = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+            }
+            return isAsc ? res : -res;
         };
 
+        const getGroupSortValue = (group) => {
+            if (sortMode === 'alpha') return group.name;
+
+            let bestTime = new Date(group.created_at).getTime();
+
+            const checkItem = (d) => {
+                const t = new Date(sortMode === 'activity' ? (d.last_activity_at || d.created_at) : d.created_at).getTime();
+                if (t > bestTime) bestTime = t;
+            };
+
+            group.discussions?.forEach(checkItem);
+            group.children?.forEach(c => {
+                const childTime = getGroupSortValue(c);
+                if (typeof childTime === 'number' && childTime > bestTime) bestTime = childTime;
+            });
+            return bestTime;
+        };
+
+        const sortGroupsFn = (a, b) => {
+            let res = 0;
+            if (sortMode === 'alpha') res = a.name.localeCompare(b.name);
+            else res = getGroupSortValue(a) - getGroupSortValue(b);
+            return isAsc ? res : -res;
+        };
+
+        // 4. Build Tree
         const groupsMap = new Map(groups.map(g => [g.id, { ...g, children: [], discussions: [] }]));
-        
+
         nonStarredDiscussions.forEach(d => {
             if (d.group_id && groupsMap.has(d.group_id)) {
                 groupsMap.get(d.group_id).discussions.push(d);
             }
         });
-        
+
         const tree = [];
         for (const group of groupsMap.values()) {
-            group.discussions.sort((a,b)=>new Date(b.last_activity_at || b.created_at) - new Date(a.last_activity_at || a.created_at));
+            group.discussions.sort(sortDiscussionsFn);
             if (group.parent_id && groupsMap.has(group.parent_id)) {
                 groupsMap.get(group.parent_id).children.push(group);
             } else {
@@ -211,25 +279,17 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
 
-        const sortFn = (a, b) => {
-            if (sortMode === 'activity') {
-                return getGroupActivity(b) - getGroupActivity(a);
-            }
-            if (sortMode === 'date') {
-                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
-            }
-            return a.name.localeCompare(b.name);
-        };
-
+        // 5. Finalize Sorting
         for (const group of groupsMap.values()) {
-            group.children.sort(sortFn);
+            group.children.sort(sortGroupsFn);
         }
-        
-        const sortedTree = tree.sort(sortFn);
-        const ungrouped = nonStarredDiscussions.filter(d => !d.group_id);
+
+        const sortedTree = tree.sort(sortGroupsFn);
+        const ungrouped = nonStarredDiscussions.filter(d => !d.group_id).sort(sortDiscussionsFn);
+        const sortedStarred = starred.sort(sortDiscussionsFn);
 
         return {
-            starred,
+            starred: sortedStarred,
             groups: sortedTree,
             ungrouped
         };
@@ -243,7 +303,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         discussions, discussionGroups, sharedWithMe, isLoadingDiscussions, currentDiscussionId, currentGroupId, messages,
         isLoadingMessages, 
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
-        activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
+        activeDiscussionArtefacts, allUserArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
         promptLoadedArtefacts, attachedSkills, activeUpdatingArtefacts, liveArtefactBuffers, // Added missing refs
         _clearActiveAiTask, activeDiscussion, activePersonality, emit,
         activeDiscussionParticipants, generationState, imageGenerationSystemPrompt,
@@ -276,24 +336,36 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         };
     }
 
-    async function generateTTSForMessage(messageId, text) {
-        if (ttsState.value[messageId]?.isLoading) return;
-    
-        ttsState.value = { ...ttsState.value, [messageId]: { isLoading: true, audioUrl: null, error: null } };
-    
+    /**
+     * Generic TTS generation that returns a raw blob.
+     * Useful for exports or on-demand playback outside of message bubbles.
+     */
+    async function generateTTSRaw(text) {
+        const response = await apiClient.post('/api/discussions/generate_tts', 
+            { text },
+            { responseType: 'blob' }
+        );
+        return new Blob([response.data], { type: 'audio/wav' });
+    }
+
+    async function generateTTSForMessage(messageId) {
+        if (!currentDiscussionId.value) return;
+
         try {
-            const response = await apiClient.post('/api/discussions/generate_tts', 
-                { text },
-                { responseType: 'blob' }
-            );
-            const audioBlob = new Blob([response.data], { type: 'audio/wav' });
-            const audioUrl = URL.createObjectURL(audioBlob);
-            
-            ttsState.value[messageId] = { isLoading: false, audioUrl: audioUrl, error: null };
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/generate_audio`);
+            const task = response.data;
+            tasksStore.addTask(task);
+
+            // Mark message as generating audio locally for UI feedback
+            const msg = messages.value.find(m => m.id === messageId);
+            if (msg) {
+                msg.isGeneratingAudio = true;
+                msg.audioTaskId = task.id;
+            }
+
+            uiStore.addNotification('Voice synthesis started in background...', 'info');
         } catch (error) {
-            uiStore.addNotification('Failed to generate speech.', 'error');
-            console.error("TTS generation failed:", error);
-            ttsState.value[messageId] = { isLoading: false, audioUrl: null, error: 'Failed to generate audio.' };
+            uiStore.addNotification('Failed to start speech generation.', 'error');
         }
     }
 
@@ -449,13 +521,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         currentDiscussionId.value = null;
         currentGroupId.value = null;
         messages.value = [];
+        isLoadingMessages.value = []; // Strict array
         isLoadingMessages.value = false;
         generationInProgress.value = false;
         generationState.value = { status: 'idle', details: '' };
         titleGenerationInProgressId.value = null;
         activeDiscussionContextStatus.value = null;
         activeAiTasks.value = {};
-        activeDiscussionArtefacts.value = [];
+        activeDiscussionArtefacts.value = []; // Strict array
+        allUserArtefacts.value = []; // Strict array
         isLoadingArtefacts.value = false;
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
         promptInsertionText.value = '';
@@ -498,6 +572,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         // Store-level methods
         attachSkill,
         detachSkill,
+        generateTTSRaw,
         generateTTSForMessage,
         transcribeAudio,
         playAudio,

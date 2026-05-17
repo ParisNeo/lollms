@@ -10,20 +10,32 @@ import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
+import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconMinimize from '../../assets/icons/IconMinimize.vue';
 import IconError from '../../assets/icons/IconError.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import { useAuthStore } from '../../stores/auth';
+import { useDataStore } from '../../stores/data';
 
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const discussionsStore = useDiscussionsStore();
 const notesStore = useNotesStore();
 const skillsStore = useSkillsStore();
+const dataStore = useDataStore(); // ADDED: Required for isTtsActive check
 
 const title = computed(() => uiStore.activeSplitArtefactTitle);
 const isFullscreen = ref(false);
+
+const isTtsActive = computed(() => {
+    return !!authStore.user?.tts_binding_model_name && 
+           authStore.user.tts_binding_model_name.includes('/') && 
+           dataStore.availableTtsModels.length > 0;
+});
 
 const exportFormats = computed(() => {
     const formats = [];
@@ -35,11 +47,27 @@ const exportFormats = computed(() => {
     return formats;
 });
 
-function handleExport(format) {
-    if (!dbContent.value && format !== 'pdf') {
+async function handleExport(format) {
+    if (!dbContent.value) {
         uiStore.addNotification("Nothing to export.", "warning");
         return;
     }
+
+    if (format === 'wav') {
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/export_audio`, {
+                title: title.value,
+                content: dbContent.value
+            });
+            uiStore.addNotification("Audio generation started in background.", "info");
+            // Open task manager so user can see progress
+            uiStore.openModal('tasksManager', { initialTaskId: response.data.id });
+        } catch (e) {
+            uiStore.addNotification("Failed to start background task.", "error");
+        }
+        return;
+    }
+
     discussionsStore.exportRawContent({ 
         content: dbContent.value, 
         format: format,
@@ -108,6 +136,7 @@ const selectedVersion = ref(null);
 const dbContent = ref('');
 const isSaving = ref(false);
 const isFetching = ref(false);
+const isGeneratingAudio = ref(false);
 const loadError = ref(null);
 
 
@@ -302,15 +331,33 @@ async function handleSave(forceType = null) {
 async function handleUndo() {
     if (!artefactGroup.value || artefactGroup.value.versions.length < 2) return;
     const prevVersion = artefactGroup.value.versions[1].version;
-    
+
     await discussionsStore.revertArtefact({
         discussionId: discussionsStore.currentDiscussionId,
         artefactTitle: title.value,
         version: prevVersion
     });
-    
+
     selectedVersion.value = prevVersion;
     await loadVersion(prevVersion);
+}
+
+async function handleCreateDiscussionFromVersion() {
+    if (!selectedVersion.value || !title.value) return;
+
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Start New Chat?',
+        message: `Create a new discussion and pre-load it with v${selectedVersion.value} of "${title.value}"?`,
+        confirmText: 'Start Chat'
+    });
+
+    if (confirmed.confirmed) {
+        await discussionsStore.createDiscussionWithArtefactVersion({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: title.value,
+            version: selectedVersion.value
+        });
+    }
 }
 
 async function handlePushToLibrary(type) {
@@ -438,13 +485,27 @@ function download() {
                 <IconArrowPath class="w-3.5 h-3.5 mr-1" />
                 Undo
             </button>
-            
+
+            <button @click="handleCreateDiscussionFromVersion" :disabled="!selectedVersion || isSaving" 
+                    class="btn btn-secondary btn-xs h-8" title="Start new chat with this version">
+                <IconGitBranch class="w-3.5 h-3.5 mr-1" />
+                New Chat
+            </button>
+
             <div class="grow"></div>
             
             <!-- Export Dropdown -->
             <DropdownMenu v-if="exportFormats.length > 0" title="Export" icon="ticket" button-class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" collection="ui">
                 <button v-for="format in exportFormats" :key="format.value" @click="handleExport(format.value)" class="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm">
                     {{ format.label }}
+                </button>
+                <div v-if="isTtsActive" class="menu-divider"></div>
+                <button v-if="isTtsActive" @click="handleExport('wav')" class="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 text-sm flex items-center justify-between" :disabled="isGeneratingAudio">
+                    <div class="flex items-center">
+                        <IconSpeakerWave class="w-4 h-4 mr-2 text-blue-500" />
+                        <span>Audio (.wav)</span>
+                    </div>
+                    <IconAnimateSpin v-if="isGeneratingAudio" class="w-3.5 h-3.5 animate-spin" />
                 </button>
             </DropdownMenu>
 
@@ -493,12 +554,12 @@ function download() {
 
             <!-- Primary Action Button -->
             <div class="flex gap-1">
-                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" @click="handleSave()" class="btn btn-warning btn-sm h-8 flex items-center gap-2 shadow-sm" :disabled="isSaving || isLiveUpdating">
-                    <IconSave class="w-3.5 h-3.5" />
+                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" @click="handlePushToLibrary('note')" class="btn btn-warning btn-sm h-8 flex items-center gap-2 shadow-sm" :disabled="isSaving || isLiveUpdating">
+                    <IconPencil class="w-3.5 h-3.5" />
                     <span>Save Note</span>
                 </button>
-                <button v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" @click="handleSave()" class="btn btn-success btn-sm h-8 flex items-center gap-2 shadow-sm" :disabled="isSaving || isLiveUpdating">
-                    <IconCheckCircle class="w-3.5 h-3.5" />
+                <button v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" @click="handlePushToLibrary('skill')" class="btn btn-success btn-sm h-8 flex items-center gap-2 shadow-sm" :disabled="isSaving || isLiveUpdating">
+                    <IconSparkles class="w-3.5 h-3.5" />
                     <span>Save Skill</span>
                 </button>
                 <button v-else @click="handleSave()" class="btn btn-primary btn-sm h-8 flex items-center gap-2 shadow-lg shadow-blue-500/10" :disabled="isSaving || isLiveUpdating">

@@ -105,8 +105,14 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
         max_context_size=max_context_size,
         autosave=True
     )
-    
+
     if discussion:
+        # CRITICAL FIX: Ensure the discussion object pulls messages from the DB
+        # Shared discussions often appear empty because the in-memory object 
+        # is fresh while the DB contains the history.
+        if hasattr(discussion, 'load_messages'):
+            discussion.load_messages()
+
         discussion.lollms_client = lc
         discussion.max_context_size = max_context_size
         

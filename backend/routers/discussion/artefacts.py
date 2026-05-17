@@ -3,7 +3,7 @@
 import base64
 import io
 import asyncio
-import json
+import uuid
 import requests
 import re
 import os
@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from ascii_colors import trace_exception
 
 from backend.db import get_db
-from backend.models import UserAuthDetails, ArtefactInfo, ArtefactCreateManual, ArtefactUpdate, ExportContextRequest, LoadArtefactRequest, TaskInfo, UnloadArtefactRequest, UrlImportRequest, ArtefactAndDataZoneUpdateResponse
+from backend.models import DiscussionInfo, UserAuthDetails, ArtefactInfo, ArtefactCreateManual, ArtefactUpdate, ExportContextRequest, LoadArtefactRequest, TaskInfo, UnloadArtefactRequest, UrlImportRequest, ArtefactAndDataZoneUpdateResponse
 from backend.models.discussion import ArtefactUploadResponse
 from backend.session import get_current_active_user, get_user_lollms_client
 from backend.discussion import get_user_discussion
@@ -112,6 +112,10 @@ class StackOverflowImportRequest(BaseModel):
 class ArtefactRenameRequest(BaseModel):
     new_title: str
 
+class AudioExportRequest(BaseModel):
+    title: str
+    content: str
+
 def _map_artefact_for_ui(art: dict, discussion_id: str = None) -> dict:
     """
     Standardizes Artefact metadata for the UI.
@@ -180,7 +184,7 @@ def build_artefacts_router(router: APIRouter):
         
         return results
 
-     # safe_store is needed for RAG callbacks
+    # safe_store is needed for RAG callbacks
     @router.get("/{discussion_id}/artefacts", response_model=List[ArtefactInfo])
     async def list_discussion_artefacts(
         discussion_id: str,
@@ -1054,6 +1058,56 @@ def build_artefacts_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=str(e))
 
+    @router.post("/{discussion_id}/artefacts/{artefact_title}/create_discussion_with_version", response_model=DiscussionInfo)
+    async def create_discussion_from_artefact_version(
+        discussion_id: str,
+        artefact_title: str,
+        version: int = Query(...),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Creates a brand new discussion and pre-loads it with a specific version 
+        of an artefact from an existing discussion.
+        """
+        from urllib.parse import unquote
+        title = unquote(artefact_title)
+
+        # 1. Get the source discussion and artefact
+        source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        source_art = source_discussion.get_artefact(title=title, version=version)
+
+        if not source_art:
+            raise HTTPException(status_code=404, detail="Source artefact version not found.")
+
+        # 2. Create the target discussion
+        new_discussion_id = str(uuid.uuid4())
+        target_discussion = get_user_discussion(current_user.username, new_discussion_id, create_if_missing=True)
+
+        # 3. Copy the artefact content and metadata
+        # We use add_artefact to create Version 1 in the new discussion using source data
+        target_discussion.add_artefact(
+            title=title,
+            content=source_art.get('content', ''),
+            images=source_art.get('images', []),
+            author=current_user.username,
+            active=True, # Auto-load it into context
+            artefact_type=source_art.get('artefact_type', 'document')
+        )
+
+        target_discussion.set_metadata_item('title', f"Chat about {title}")
+        target_discussion.commit()
+
+        metadata = target_discussion.metadata or {}
+        return DiscussionInfo(
+            id=new_discussion_id,
+            title=metadata.get('title'),
+            is_starred=False,
+            active_tools=[],
+            created_at=target_discussion.created_at,
+            last_activity_at=target_discussion.updated_at
+        )
+
     @router.post("/{discussion_id}/artefacts/manual", response_model=ArtefactAndDataZoneUpdateResponse, status_code=status.HTTP_201_CREATED)
     async def create_manual_artefact(
         discussion_id: str,
@@ -1368,6 +1422,22 @@ def build_artefacts_router(router: APIRouter):
             target=_import_artefact_from_url_task,
             args=(owner_username, discussion_id, request.url, request.depth, request.process_with_ai),
             description=f"Scraping content (depth {request.depth}) and saving as artefact.",
+            owner_username=current_user.username
+        )
+        return task
+
+    @router.post("/{discussion_id}/artefacts/export_audio", response_model=TaskInfo, status_code=202)
+    async def export_artefact_as_audio(
+        discussion_id: str,
+        payload: AudioExportRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user)
+    ):
+        from backend.tasks.artefact_tasks import _export_audio_task
+        task = task_manager.submit_task(
+            name=f"Audio Export: {payload.title}",
+            target=_export_audio_task,
+            args=(current_user.username, payload.title, payload.content),
+            description="Generating high-fidelity audio from document text.",
             owner_username=current_user.username
         )
         return task

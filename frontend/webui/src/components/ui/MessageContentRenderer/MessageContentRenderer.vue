@@ -1,7 +1,6 @@
 <script setup>
-import { ref, computed, watch, onMounted, nextTick } from 'vue';
+import { ref, computed, watch, onMounted, nextTick, onUnmounted } from 'vue';
 import { parsedMarkdown as rawParsedMarkdown, getContentTokensWithMathProtection } from '../../../services/markdownParser';
-
 import CodeBlock from './CodeBlock.vue';
 import ProcessingBlock from './ProcessingBlock.vue';
 import MermaidViewer from '../../modals/InteractiveMermaid.vue';
@@ -60,6 +59,77 @@ const { activeAiTasks, liveArtefactBuffers } = storeToRefs(discussionsStore);
 const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
 
+
+/**
+ * Wraps the raw widget source in a sandboxed HTML environment.
+ * Includes a resize script that talks to the parent component.
+ */
+function wrapInIsolatedShell(source, partId) {
+    if (!source) return '';
+    
+    const isDarkMode = uiStore.currentTheme === 'dark';
+    
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { 
+            margin: 0; 
+            padding: 16px; 
+            font-family: system-ui, -apple-system, sans-serif; 
+            overflow: hidden;
+            background: ${isDarkMode ? 'transparent' : '#ffffff'};
+            color: ${isDarkMode ? '#f3f4f6' : '#111827'};
+        }
+        /* Scoped Reset to prevent leaks */
+        * { box-sizing: border-box; }
+    </style>
+<\/head>
+<body>
+    <div id="lollms-widget-root">${source}</div>
+    
+    <script>
+        // Auto-resizer
+        const sendHeight = () => {
+            const height = document.documentElement.scrollHeight;
+            window.parent.postMessage({ 
+                type: 'lollms-widget-resize', 
+                height: height,
+                partId: '${partId}'
+            }, '*');
+        };
+        
+        // Watch for content changes
+        const observer = new ResizeObserver(sendHeight);
+        observer.observe(document.body);
+        
+        // Initial call
+        window.onload = sendHeight;
+        
+        // Security: intercept link clicks to open in new tab
+        document.addEventListener('click', (e) => {
+            const link = e.target.closest('a');
+            if (link && link.href && !link.href.startsWith('javascript:')) {
+                e.preventDefault();
+                window.open(link.href, '_blank');
+            }
+        });
+    <\/script>
+<\/body>
+<\/html>`;
+}
+
+function handleWidgetMessage(event) {
+    if (event.data?.type === 'lollms-widget-resize' && event.data.height && event.data.partId) {
+        const frame = messageContentRef.value?.querySelector(`iframe[data-part-id="${event.data.partId}"]`);
+        if (frame) {
+            frame.style.height = (event.data.height + 10) + 'px';
+        }
+    }
+}
 function renderMath() {
   // Critical Fix: Do not mutate DOM with KaTeX while Vue is actively streaming tokens, 
   // otherwise Vue loses track of its virtual nodes and crashes.
@@ -92,8 +162,13 @@ watch(() => props.content, async () => {
 }, { flush: 'post' });
 
 onMounted(async () => {
+  window.addEventListener('message', handleWidgetMessage);
   await nextTick();
   renderMath();
+});
+
+onUnmounted(() => {
+  window.removeEventListener('message', handleWidgetMessage);
 });
 
 const parsedMarkdown = (content) => {
@@ -350,11 +425,27 @@ const parsedStreamingContent = computed(() => {
             raw 
         };
     }
-    else if (match[27]) { // <lollms_inline>
-        const raw = match[27];
-        const title = raw.match(/title=["']([^"']+)["']/)?.[1] || 'Widget';
-        const content = raw.match(/<lollms_inline[^>]*>([\s\S]*?)<\/lollms_inline>/)?.[1] || '';
-        return { type: 'interactive_widget', widget: { title, source: content }, raw };
+    else if (match[12] || match[27]) { // <lollms_inline>
+        const fullTag = match[12] || match[27];
+        // Regex to extract inner content without any markdown escaping
+        const innerContentMatch = fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/i);
+        const innerContent = innerContentMatch ? innerContentMatch[1] : '';
+        
+        const titleMatch = fullTag.match(/title=["']([^"']+)["']/i);
+        const title = titleMatch ? titleMatch[1] : 'Interactive Widget';
+        
+        const isLoading = !fullTag.includes('</lollms_inline>');
+        
+        return { 
+            type: 'interactive_widget', 
+            widget: { 
+                id: title, 
+                title: title, 
+                source: innerContent, 
+                is_loading: isLoading 
+            }, 
+            raw: fullTag 
+        };
     }
 
     return { type: 'content', content: rawBlock };
@@ -877,20 +968,18 @@ function openWidgetFullscreen(widget) {
     });
 }
 
-/**
- * Creates a standalone HTML document from the widget source 
- * and opens it in a new browser tab.
- */
+
+
 function openWidgetInNewTab(widget) {
     if (!widget) return;
     const source = getWidgetContent(widget);
     if (!source) return;
 
-    const blob = new Blob([source], { type: 'text/html' });
+    const fullHtml = wrapInIsolatedShell(source);
+    const blob = new Blob([fullHtml], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
-    
-    // Revoke URL after a minute to free memory
+
     setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
@@ -1323,16 +1412,14 @@ function onMermaidReady({ svg }, partIndex) {
                   </div>
                   
                   <!-- Inline Iframe Viewport -->
-                  <div class="relative w-full h-[400px] bg-white transition-all overflow-hidden border-b dark:border-gray-800">
-                      <!-- [FIX] Stabilized Iframe: 
-                           We use a key that only changes when 'isStreaming' turns false.
-                           This ensures the JS executes once the widget code is complete, 
-                           without being interrupted by subsequent text tokens. -->
+                  <div class="relative w-full bg-white transition-all overflow-hidden border-b dark:border-gray-800" style="min-height: 100px;">
                       <iframe 
                         v-if="getWidgetContent(part.widget)"
+                        :data-part-id="part.id"
                         :key="`${part.id}-${isStreaming ? 'live' : 'stable'}`"
-                        :srcdoc="getWidgetContent(part.widget)" 
-                        class="w-full h-full border-none pointer-events-auto bg-white" 
+                        :srcdoc="wrapInIsolatedShell(getWidgetContent(part.widget), part.id)" 
+                        class="w-full border-none pointer-events-auto bg-white transition-[height] duration-300" 
+                        style="height: 400px;"
                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>
@@ -1377,53 +1464,6 @@ function onMermaidReady({ svg }, partIndex) {
              </div>
         </div>
       </template>
-    </div>
-
-    <!-- ── Dedicated Sources Area (At the absolute end) ────────────────── -->
-    <div v-if="sources && sources.length > 0" 
-         class="mt-10 border-t-2 border-gray-100 dark:border-gray-800 pt-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-        <details class="group/sources-list">
-            <summary class="flex items-center justify-between cursor-pointer list-none select-none mb-4">
-                <div class="flex items-center gap-3">
-                    <div class="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/20 group-hover:bg-blue-100 transition-colors">
-                        <IconGather class="w-5 h-5 text-blue-500" />
-                    </div>
-                    <h3 class="text-xs font-black uppercase tracking-[0.25em] text-gray-400 dark:text-gray-500">Sources & References ({{ sources.length }})</h3>
-                </div>
-                <IconChevronRight class="w-4 h-4 text-gray-300 group-open/sources-list:rotate-90 transition-transform" />
-            </summary>
-            
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pb-4">
-                <div v-for="(source, sIdx) in sources" :key="sIdx" 
-                     @click="handleSourceClick(source, sIdx)"
-                     class="p-3.5 bg-white dark:bg-gray-800/40 border border-gray-100 dark:border-gray-700/50 rounded-2xl hover:border-blue-500 hover:shadow-md transition-all cursor-pointer group/src shadow-sm relative overflow-hidden">
-                
-                <div class="flex items-start justify-between gap-3 relative z-10">
-                    <div class="flex items-center gap-2.5 min-w-0">
-                        <span class="shrink-0 w-6 h-6 flex items-center justify-center bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-black font-mono">
-                            {{ source.index || sIdx + 1 }}
-                        </span>
-                        <span class="font-bold text-sm truncate text-gray-800 dark:text-gray-100 group-hover/src:text-blue-600 transition-colors">{{ source.title || 'Untitled Source' }}</span>
-                    </div>
-                    <div v-if="source.relevance_score" class="shrink-0 text-[10px] font-mono font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800/50">
-                        {{ Math.round(source.relevance_score > 1 ? source.relevance_score : source.relevance_score * 100) }}%
-                    </div>
-                </div>
-
-                <p v-if="source.content" class="mt-2.5 text-xs text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed">
-                    {{ source.content }}
-                </p>
-
-                <div class="mt-3 flex items-center justify-between">
-                    <span class="text-[8px] font-mono text-gray-400 truncate max-w-[70%] opacity-60">{{ source.source }}</span>
-                    <span class="text-[9px] font-black text-blue-500 uppercase tracking-widest opacity-0 group-hover/src:opacity-100 transform translate-x-2 group-hover/src:translate-x-0 transition-all">Details &rarr;</span>
-                </div>
-
-                <!-- Subtle hover background decoration -->
-                <div class="absolute -right-4 -bottom-4 w-20 h-20 bg-blue-500/5 rounded-full blur-2xl group-hover/src:bg-blue-500/10 transition-colors"></div>
-            </div>
-        </div>
-    </details>
     </div>
   </div>
 </template>

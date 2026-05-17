@@ -253,7 +253,8 @@ class UserAuthDetails(BaseModel):
     force_ai_response_language: bool = False
     fun_mode: bool = False
     show_token_counter: bool = True
-    discussion_sorting_mode: str = "alpha"
+    discussion_sorting_mode: str = "date"
+    discussion_sorting_order: str = "desc"
     
     openai_api_service_enabled: bool = False
     openai_api_require_key: bool = True
@@ -384,6 +385,7 @@ class UserUpdate(BaseModel):
     receive_notification_emails: Optional[bool] = None
     show_token_counter: Optional[bool] = None
     discussion_sorting_mode: Optional[str] = None
+    discussion_sorting_order: Optional[str] = None
     is_searchable: Optional[bool] = None
     first_login_done: Optional[bool] = None
     data_zone: Optional[str] = None

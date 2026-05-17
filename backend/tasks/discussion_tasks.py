@@ -254,6 +254,73 @@ def _clean_discussion_data_zone_task(task: Task, username: str, discussion_id: s
     task.log("Data zone cleaned and re-formatted.")
     return {"discussion_id": discussion_id, "new_content": final_content, "zone": "discussion"}
 
+def _generate_message_audio_task(task: Task, username: str, discussion_id: str, message_id: str):
+    task.log(f"Starting background audio generation for message: {message_id}")
+    task.set_progress(10)
+
+    try:
+        from backend.session import get_user_data_root, build_lollms_client_from_params
+        from backend.discussion import get_user_discussion
+
+        # 1. Fetch the message content
+        discussion = get_user_discussion(username, discussion_id)
+        if not discussion:
+            raise ValueError("Discussion not found.")
+
+        message = discussion.get_message(message_id)
+        if not message:
+            raise ValueError("Message not found.")
+
+        # Clean text: remove markdown artifacts and thinking blocks
+        text = message.content
+        # Remove thinking blocks if present
+        text = re.sub(r'<think>[\s\S]*?<\/think>', '', text)
+        # Strip common markdown
+        clean_text = text.replace('#', '').replace('*', '').replace('```', '').strip()
+
+        if not clean_text:
+            raise ValueError("Message content is empty after cleaning.")
+
+        # 2. Init Client and generate audio
+        lc = build_lollms_client_from_params(username=username, load_llm=False, load_tts=True)
+        if not lc.tts:
+            raise Exception("TTS Service is not configured or available.")
+
+        task.set_progress(30)
+        task.log("Communicating with TTS Engine...")
+
+        audio_bytes = lc.tts.generate_audio(clean_text)
+
+        task.set_progress(80)
+        task.log("Generation complete. Saving file...")
+
+        # 3. Save to user's generated media folder
+        output_dir = get_user_data_root(username) / "generated_audio"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = f"msg_{message_id}_{datetime.now().strftime('%H%M%S')}.wav"
+        file_path = output_dir / filename
+        file_path.write_bytes(audio_bytes)
+
+        # 4. Update Message Metadata in DB so it persists
+        audio_url = f"/api/files/generated_audio/{filename}"
+        message.set_metadata_item('audio_url', audio_url, discussion)
+        discussion.commit()
+
+        task.set_progress(100)
+        task.log(f"Success. Audio linked to message.")
+
+        return {
+            "status": "ready",
+            "message_id": message_id,
+            "audio_url": audio_url
+        }
+
+    except Exception as e:
+        task.log(f"Message audio generation failed: {str(e)}", "ERROR")
+        trace_exception(e)
+        raise e
+
 def _prune_empty_discussions_task(task: Task, username: str):
     task.log("Starting prune of empty and single-message discussions.")
     dm = get_user_discussion_manager(username)

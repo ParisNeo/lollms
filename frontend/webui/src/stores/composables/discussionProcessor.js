@@ -24,12 +24,14 @@ export function processSingleMessage(msg) {
         }
     }
 
-    const binding_name = msg.binding_name || metadata.binding;
-    const model_name = msg.model_name || metadata.model;
-    
-    const modelUsedId = `${binding_name}/${model_name}`;
-    const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelUsedId);
-    
+    const binding_name = (msg && typeof msg.binding_name === 'string') ? msg.binding_name : (metadata && typeof metadata.binding === 'string' ? metadata.binding : '');
+    const model_name = (msg && typeof msg.model_name === 'string') ? msg.model_name : (metadata && typeof metadata.model === 'string' ? metadata.model : '');
+
+    const modelUsedId = (binding_name && model_name) ? `${binding_name}/${model_name}` : null;
+    const modelInfo = (modelUsedId && Array.isArray(dataStore.availableLollmsModels)) 
+        ? dataStore.availableLollmsModels.find(m => m.id === modelUsedId) 
+        : null;
+
     // Default to true if model info is not found (e.g., for older messages)
     const visionSupport = modelInfo?.alias?.has_vision ?? true;
     

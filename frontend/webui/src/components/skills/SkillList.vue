@@ -6,6 +6,7 @@ import { useUiStore } from '../../stores/ui';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconTrash from '../../assets/icons/IconTrash.vue';
+import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
@@ -99,10 +100,10 @@ async function handleFileImport(event) {
     <div class="h-full flex flex-col">
         <div class="flex justify-between items-center mb-2 px-2">
             <span class="text-xs font-bold text-gray-500 uppercase tracking-widest">My Skills</span>
-            <div class="flex gap-3">
+            <div class="flex gap-3 items-center">
                 <button @click="triggerImport" class="text-xs text-blue-500 hover:underline font-bold">Import</button>
-                <button @click="skillsStore.fetchSkills()" class="text-xs text-gray-400 hover:text-blue-500" title="Refresh">
-                    <IconSparkles class="w-3 h-3" :class="{'animate-spin': skillsStore.isLoading}" />
+                <button @click="skillsStore.fetchSkills()" class="text-xs text-gray-400 hover:text-blue-500 transition-colors" title="Refresh Skills">
+                    <IconRefresh class="w-3.5 h-3.5" :class="{'animate-spin': skillsStore.isLoading}" />
                 </button>
             </div>
             <input type="file" ref="fileInput" @change="handleFileImport" class="hidden" accept=".xml,.md">

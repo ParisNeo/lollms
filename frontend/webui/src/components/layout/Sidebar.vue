@@ -181,6 +181,14 @@ async function handlePlusClick() {
           <IconHome class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </button>
 
+        <button 
+          @click="activeTab = 'artefacts'; uiStore.openSidebar();" 
+          class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          title="Artefacts"
+        >
+          <IconFileText class="w-5 h-5 text-blue-500" />
+        </button>
+
         <router-link
           to="/notebooks"
           class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 

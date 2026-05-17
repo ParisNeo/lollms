@@ -101,9 +101,12 @@ function normalizeTables(text) {
 
 function sanitizeDangerousTags(html) {
     if (!html) return html;
-    
+
+    // Check if we are inside a widget context (handled by MessageContentRenderer)
+    // If not specifically flagged, we continue stripping.
+
     // 1. Aggressively strip style and script blocks, even if unclosed (prevents global CSS leaks)
-    // This removes the tag AND everything inside it from the chat bubble.
+    // Note: lollms_inline contents are extracted RAW in the renderer to bypass this.
     let clean = html.replace(/<style[\s\S]*?(?:<\/style>|$)/gi, '');
     clean = clean.replace(/<script[\s\S]*?(?:<\/script>|$)/gi, '');
     

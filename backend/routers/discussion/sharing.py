@@ -68,6 +68,19 @@ def build_discussion_sharing_router(router: APIRouter):
             if existing_link.permission_level != share_request.permission_level:
                 existing_link.permission_level = share_request.permission_level
                 db.commit()
+                # Notify recipient of permission change
+                manager.send_personal_message_sync(
+                    {
+                        "type": "new_shared_discussion", 
+                        "data": {
+                            "from_user": current_user.username, 
+                            "discussion_title": existing_link.discussion_title,
+                            "discussion_id": discussion_id,
+                            "update_type": "permission_change"
+                        }
+                    },
+                    target_user_db.id
+                )
                 return {"message": f"Permission updated for {target_user_db.username}."}
             raise HTTPException(status_code=409, detail="Discussion already shared with this user with the same permission.")
 
@@ -81,8 +94,17 @@ def build_discussion_sharing_router(router: APIRouter):
         try:
             db.add(new_link)
             db.commit()
+            # Notify recipient of brand new share
             manager.send_personal_message_sync(
-                {"type": "new_shared_discussion", "data": {"from_user": current_user.username, "discussion_title": new_link.discussion_title}},
+                {
+                    "type": "new_shared_discussion", 
+                    "data": {
+                        "from_user": current_user.username, 
+                        "discussion_title": new_link.discussion_title,
+                        "discussion_id": discussion_id,
+                        "update_type": "new_share"
+                    }
+                },
                 target_user_db.id
             )
             return {"message": f"Discussion shared with {target_user_db.username}."}

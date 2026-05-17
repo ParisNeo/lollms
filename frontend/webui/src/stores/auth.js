@@ -191,9 +191,19 @@ export const useAuthStore = defineStore('auth', () => {
                     uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon); 
                     break;
                 case 'new_shared_discussion': 
-                    getDiscussionsStore().then(s => {
-                        s.fetchSharedWithMe(); 
-                        uiStore.addNotification(`'${data.data.discussion_title}' was shared by ${data.data.from_user}.`, 'info');
+                    getDiscussionsStore().then(async (s) => {
+                        // 1. Immediately trigger the fetch to update the sidebar list
+                        await s.fetchSharedWithMe(); 
+
+                        // 2. Determine message based on update type
+                        const isUpdate = data.data.update_type === 'permission_change';
+                        const verb = isUpdate ? 'updated permissions for' : 'shared a new discussion:';
+
+                        uiStore.addNotification(
+                            `${data.data.from_user} ${verb} '${data.data.discussion_title}'`, 
+                            'info',
+                            6000 // Show for slightly longer (6s)
+                        );
                     });
                     break;
                 case 'discussion_updated':
@@ -507,28 +517,33 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function updateUserPreferences(preferences, notify = true) {
-        // 0. Equality Guard: Prevent infinite loops if the values match the current state
+        // 0. Robust Equality Guard: Prevent infinite loops and TypeErrors
         if (user.value) {
             let isActualChange = false;
             for (const [key, value] of Object.entries(preferences)) {
-                // Perform a simple comparison. For objects/arrays, we check JSON equality.
                 const currentVal = user.value[key];
-                if (typeof value === 'object' && value !== null) {
-                    if (JSON.stringify(currentVal) !== JSON.stringify(value)) {
-                        isActualChange = true;
-                        break;
-                    }
-                } else if (currentVal !== value) {
+
+                // Deep comparison for Objects/Arrays
+                if (value !== null && typeof value === 'object') {
+                    try {
+                        if (JSON.stringify(currentVal) !== JSON.stringify(value)) {
+                            isActualChange = true;
+                            break;
+                        }
+                    } catch (e) { isActualChange = true; break; }
+                } 
+                // Simple comparison for primitives
+                else if (currentVal !== value) {
                     isActualChange = true;
                     break;
                 }
             }
-            if (!isActualChange) return; // Exit immediately to prevent recursion
+            if (!isActualChange) return;
         }
 
-        // --- NEW LOGIC: Handle Personality Requirements ---
-        const { useDataStore } = await import('./data');
-        const dataStore = useDataStore();
+        // --- Handle Personality Requirements ---
+        // Use the existing stores if already available, otherwise dynamic import
+        const dataStore = (await import('./data')).useDataStore();
         const uiStore = useUiStore();
 
         // Determine the personality we are evaluating (either the one we are switching to, or the current one)

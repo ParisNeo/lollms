@@ -27,8 +27,9 @@ import IconType from './ui/IconType.vue';
 import IconImage from '../icons/IconPhoto.vue'; // Alias for consistency
 import IconArrowUpTray from '../icons/IconArrowUpTray.vue';
 import IconFolder from '../icons/IconFolder.vue';
-import IconWrapText from  '../icons/IconWrapText.vue'
-import IconMenu from  '../icons/IconMenu.vue'
+import IconWrapText from  '../icons/IconWrapText.vue';
+import IconMenu from  '../icons/IconMenu.vue';
+import IconArrowsUpDown from '../icons/IconArrowsUpDown.vue';
 
 
 
@@ -93,8 +94,9 @@ export const uiIconMap = {
     'folder': IconFolder,
     'wrap-text': IconWrapText,
     'menu': IconMenu,
-    'plus':IconPlus
-};
+    'plus':IconPlus,
+    'arrows-up-down': IconArrowsUpDown
+    };
 
 export const languageIconMap = {
     'angular': IconAngular,

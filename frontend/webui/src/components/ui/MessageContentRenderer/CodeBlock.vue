@@ -278,9 +278,12 @@ async function executeCode() {
             createdFiles.value = result.newFiles || [];
 
         } else if (lang === 'html') {
+            // Give UI a tick to show the spinner on the button
+            await new Promise(resolve => setTimeout(resolve, 50));
             uiStore.openModal('interactiveOutput', { htmlContent: props.code, title: 'HTML Output' });
             executionOutput.value = 'HTML content rendered in a modal canvas.';
         } else if (lang === 'svg') {
+            await new Promise(resolve => setTimeout(resolve, 50));
             const htmlContent = `
                 <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem;">
                     ${props.code}

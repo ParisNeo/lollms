@@ -14,6 +14,7 @@ import DiscussionItem from './DiscussionItem.vue';
 import DiscussionGroupItem from './DiscussionGroupItem.vue';
 import NoteList from '../notes/NoteList.vue';
 import SkillList from '../skills/SkillList.vue';
+import ArtefactGlobalList from './ArtefactGlobalList.vue';
 import AlbumList from '../images/AlbumList.vue';
 import DataStoreItem from '../datastores/DataStoreItem.vue'; // Imported DataStoreItem
 
@@ -71,7 +72,7 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 const welcomeText = computed(() => authStore.welcomeText || 'LoLLMs');
 const welcomeSlogan = computed(() => authStore.welcomeSlogan || 'One tool to rule them all');
 
-const activeTab = ref('chat'); // 'chat', 'notes', 'skills', 'notebooks', 'data', 'images', 'flows'
+const activeTab = ref('chat'); // 'chat', 'notes', 'skills', 'artefacts', 'notebooks', 'data', 'images', 'flows'
 const searchTerm = ref('');
 const isSearchVisible = ref(false);
 const isSharedVisible = ref(false);
@@ -371,6 +372,15 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>SKILL</span>
                 </button>
                 <button 
+                    @click="activeTab = 'artefacts'" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'artefacts' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Artefacts"
+                >
+                    <IconFileText class="w-3.5 h-3.5 mb-0.5" />
+                    <span>ART</span>
+                </button>
+                <button 
                     @click="activeTab = 'images'" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'images' ? 'bg-white dark:bg-gray-900/50 text-pink-600 dark:text-pink-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
@@ -429,18 +439,46 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
 
                     <!-- Sorting Tool -->
                     <div v-if="activeTab === 'chat' && user" @click.stop>
-                        <DropdownMenu icon="arrows-up-down" buttonClass="btn-icon-flat" title="Sort Folders">
-                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'alpha' })" class="menu-item justify-between" :class="{'text-blue-600 font-bold': user.discussion_sorting_mode === 'alpha'}">
-                                <span>Sort by Name</span>
-                                <IconCheckCircle v-if="user.discussion_sorting_mode === 'alpha'" class="w-4 h-4" />
+                        <DropdownMenu icon="arrows-up-down" buttonClass="btn-icon-flat" title="Organization Settings">
+                            <div class="px-3 py-1.5 flex items-center justify-between border-b dark:border-gray-700">
+                                <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Direction</span>
+                                <button @click="authStore.updateUserPreferences({ discussion_sorting_order: user.discussion_sorting_order === 'asc' ? 'desc' : 'asc' })" 
+                                        class="px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-[10px] font-bold text-blue-600 hover:bg-blue-50 transition-colors">
+                                    {{ user.discussion_sorting_order === 'asc' ? 'Ascending' : 'Descending' }}
+                                </button>
+                            </div>
+                            
+                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'date' })" class="menu-item justify-between" :class="{'text-blue-600 bg-blue-50/50 dark:bg-blue-900/10 font-bold': user.discussion_sorting_mode === 'date'}">
+                                <div class="flex items-center gap-3">
+                                    <IconPlus class="w-4 h-4 opacity-50" />
+                                    <div class="flex flex-col">
+                                        <span>Last Created</span>
+                                        <span class="text-[9px] opacity-60">By record creation date</span>
+                                    </div>
+                                </div>
+                                <IconCheckCircle v-if="user.discussion_sorting_mode === 'date'" class="w-4 h-4" />
                             </button>
-                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'activity' })" class="menu-item justify-between" :class="{'text-blue-600 font-bold': user.discussion_sorting_mode === 'activity'}">
-                                <span>Sort by Activity</span>
+
+                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'activity' })" class="menu-item justify-between" :class="{'text-blue-600 bg-blue-50/50 dark:bg-blue-900/10 font-bold': user.discussion_sorting_mode === 'activity'}">
+                                <div class="flex items-center gap-3">
+                                    <IconRefresh class="w-4 h-4 opacity-50" />
+                                    <div class="flex flex-col">
+                                        <span>Last Updated</span>
+                                        <span class="text-[9px] opacity-60">By recent activity/views</span>
+                                    </div>
+                                </div>
                                 <IconCheckCircle v-if="user.discussion_sorting_mode === 'activity'" class="w-4 h-4" />
                             </button>
-                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'date' })" class="menu-item justify-between" :class="{'text-blue-600 font-bold': user.discussion_sorting_mode === 'date'}">
-                                <span>Sort by Date</span>
-                                <IconCheckCircle v-if="user.discussion_sorting_mode === 'date'" class="w-4 h-4" />
+
+                            <button @click="authStore.updateUserPreferences({ discussion_sorting_mode: 'alpha' })" class="menu-item justify-between" :class="{'text-blue-600 bg-blue-50/50 dark:bg-blue-900/10 font-bold': user.discussion_sorting_mode === 'alpha'}">
+                                <div class="flex items-center gap-3">
+                                    <IconFileText class="w-4 h-4 opacity-50" />
+                                    <div class="flex flex-col">
+                                        <span>Alphabetical</span>
+                                        <span class="text-[9px] opacity-60">By discussion title (A-Z)</span>
+                                    </div>
+                                </div>
+                                <IconCheckCircle v-if="user.discussion_sorting_mode === 'alpha'" class="w-4 h-4" />
                             </button>
                         </DropdownMenu>
                     </div>
@@ -568,6 +606,11 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
             <!-- SKILLS TAB -->
             <template v-else-if="activeTab === 'skills'">
                 <SkillList :search-term="searchTerm" />
+            </template>
+
+            <!-- ARTEFACTS TAB -->
+            <template v-else-if="activeTab === 'artefacts'">
+                <ArtefactGlobalList :search-term="searchTerm" />
             </template>
 
             <!-- IMAGES TAB -->

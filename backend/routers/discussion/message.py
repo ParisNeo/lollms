@@ -442,6 +442,29 @@ def build_message_router(router: APIRouter):
             border_id=discussion_obj.active_branch_id
         )
 
+    @router.post("/{discussion_id}/messages/{message_id}/generate_audio", response_model=TaskInfo, status_code=202)
+    async def generate_message_audio_task(
+        discussion_id: str,
+        message_id: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Triggers a background task to generate a WAV file for a specific message.
+        """
+        # Permissions check
+        await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'view')
+
+        from backend.tasks.discussion_tasks import _generate_message_audio_task
+        db_task = task_manager.submit_task(
+            name=f"Generating Audio for Message",
+            target=_generate_message_audio_task,
+            args=(current_user.username, discussion_id, message_id),
+            description=f"AI is synthesizing speech for the selected response.",
+            owner_username=current_user.username
+        )
+        return db_task
+
     @router.delete("/{discussion_id}/messages/{message_id}", status_code=200)
     async def delete_discussion_message(discussion_id: str, message_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         username = current_user.username

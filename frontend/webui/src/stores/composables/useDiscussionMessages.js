@@ -132,17 +132,35 @@ export function useDiscussionMessages(state, stores, getActions) {
 
     async function saveMessageChanges({ messageId, newContent, keptImagesB64, newImageFiles }) {
         if (!currentDiscussionId.value) return;
-        const newImagesAsBase64 = await Promise.all(newImageFiles.map(file => fileToBase64(file)));
-        const payload = { content: newContent, kept_images_b64: keptImagesB64, new_images_b64: newImagesAsBase64 };
+
         try {
+            const newImagesAsBase64 = await Promise.all((newImageFiles || []).map(file => fileToBase64(file)));
+            const payload = { 
+                content: newContent, 
+                kept_images_b64: keptImagesB64 || [], 
+                new_images_b64: newImagesAsBase64 
+            };
+
             const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, payload);
-            const updatedMessage = processSingleMessage(response.data);
+
+            // Process the message. If this fails, the catch block will handle it
+            const processed = processSingleMessage(response.data);
+
             const index = messages.value.findIndex(m => m.id === messageId);
-            if (index !== -1) messages.value.splice(index, 1, updatedMessage);
+            if (index !== -1) {
+                messages.value.splice(index, 1, processed);
+            }
+
             uiStore.addNotification('Message updated.', 'success');
-            await getActions().fetchContextStatus(currentDiscussionId.value);
-        } catch (e) {
-             uiStore.addNotification('Failed to save message changes.', 'error');
+
+            // Refresh context status in background
+            getActions().fetchContextStatus(currentDiscussionId.value);
+
+            return true; // Success
+        } catch (error) {
+            console.error("Save message failed:", error);
+            uiStore.addNotification('Failed to save message changes.', 'error');
+            throw error; // Re-throw to keep isEditing = true in the component
         }
     }
 

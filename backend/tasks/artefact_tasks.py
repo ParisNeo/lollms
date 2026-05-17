@@ -86,3 +86,53 @@ def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str
         task.log(f"Failed to import from URL: {e}", "ERROR")
         trace_exception(e)
         raise e
+
+def _export_audio_task(task: Task, username: str, title: str, text: str):
+    task.log(f"Starting background audio generation for: {title}")
+    task.set_progress(10)
+
+    try:
+        from backend.session import get_user_data_root, build_lollms_client_from_params
+
+        # Clean text
+        clean_text = text.replace('#', '').replace('*', '').strip()
+        if not clean_text:
+            raise ValueError("Document content is empty after cleaning.")
+
+        # Init Client
+        lc = build_lollms_client_from_params(username=username, load_llm=False, load_tts=True)
+        if not lc.tts:
+            raise Exception("TTS Service is not configured or available.")
+
+        task.set_progress(30)
+        task.log("Communicating with TTS Engine... (This may take several minutes for large files)")
+
+        audio_bytes = lc.tts.generate_audio(clean_text)
+
+        task.set_progress(90)
+        task.log("Generation complete. Saving file...")
+
+        # Save to user's generated media folder
+        output_dir = get_user_data_root(username) / "generated_audio"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        safe_title = "".join([c if c.isalnum() else "_" for c in title])
+        filename = f"{safe_title}_{datetime.now().strftime('%H%M%S')}.wav"
+        file_path = output_dir / filename
+
+        file_path.write_bytes(audio_bytes)
+
+        task.set_progress(100)
+        task.log(f"Success. Ready for download.")
+
+        # Return the download path relative to the api/files/generated endpoint
+        return {
+            "status": "ready",
+            "filename": filename,
+            "download_url": f"/api/files/generated_audio/{filename}"
+        }
+
+    except Exception as e:
+        task.log(f"Audio export failed: {str(e)}", "ERROR")
+        trace_exception(e)
+        raise e

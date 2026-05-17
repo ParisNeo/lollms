@@ -4,6 +4,7 @@ import apiClient from '../../services/api';
 export function useDiscussionArtefacts(composableState, stores, getActions) {
     const {
         activeDiscussionArtefacts,
+        allUserArtefacts,
         isLoadingArtefacts,
         currentDiscussionId,
         promptLoadedArtefacts,
@@ -42,6 +43,19 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         } catch (error) {
             console.error("Failed to fetch artefacts:", error);
             activeDiscussionArtefacts.value = [];
+        } finally {
+            isLoadingArtefacts.value = false;
+        }
+    }
+
+    async function fetchAllUserArtefacts() {
+        isLoadingArtefacts.value = true;
+        try {
+            const response = await apiClient.get('/api/discussions/artefacts/all');
+            allUserArtefacts.value = response.data;
+        } catch (error) {
+            console.error("Failed to fetch global artefacts:", error);
+            allUserArtefacts.value = [];
         } finally {
             isLoadingArtefacts.value = false;
         }
@@ -131,26 +145,42 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
     
     async function deleteArtefact({ discussionId, artefactTitle }) {
+        // 1. Capture original state for potential rollback
+        const originalArtefacts = [...activeDiscussionArtefacts.value];
+
+        // 2. OPTIMISTIC UPDATE: Filter out all versions of this title immediately
+        activeDiscussionArtefacts.value = activeDiscussionArtefacts.value.filter(
+            a => a.title !== artefactTitle
+        );
+
+        // 3. UI Cleanup: If the file was being viewed, close it now
+        if (uiStore.activeSplitArtefactTitle === artefactTitle) {
+            uiStore.activeSplitArtefactTitle = null;
+            // If we are in workspace tab and it's now empty, maybe switch back to context
+            if (uiStore.dataZoneTab === 'workspace') {
+                uiStore.dataZoneTab = 'files';
+            }
+        }
+
+        if (promptLoadedArtefacts.value.has(artefactTitle)) {
+            unloadArtefactFromPrompt(artefactTitle);
+        }
+
         try {
-            await apiClient.delete(`/api/discussions/${discussionId}/artefact?artefact_title=${encodeURIComponent(artefactTitle)}`);
-            
-            // 1. Force refresh of the local list
-            await fetchArtefacts(discussionId);
-            
-            // 2. Clean up UI states
-            // Fix: activeSplitArtefactTitle is a direct property of uiStore, not inside state
-            if (uiStore.activeSplitArtefactTitle === artefactTitle) {
-                uiStore.activeSplitArtefactTitle = null;
-            }
-            
-            if (promptLoadedArtefacts.value.has(artefactTitle)) {
-                unloadArtefactFromPrompt(artefactTitle);
-            }
-            
-            uiStore.addNotification(`'${artefactTitle}' deleted.`, 'success');
+            // 4. Perform actual deletion in the background
+            await apiClient.delete(`/api/discussions/${discussionId}/artefact`, {
+                params: { artefact_title: artefactTitle }
+            });
+
+            // Optional: Refresh context status because total tokens decreased
+            getActions().fetchContextStatus(discussionId);
+
+            uiStore.addNotification(`'${artefactTitle}' removed from workspace.`, 'success', 2000);
         } catch (e) {
+            // 5. ROLLBACK: If API fails, restore the items and notify user
             console.error("Delete artefact failed:", e);
-            uiStore.addNotification('Failed to delete artefact.', 'error');
+            activeDiscussionArtefacts.value = originalArtefacts;
+            uiStore.addNotification(`Failed to delete '${artefactTitle}'. Restoring...`, 'error');
         }
     }
 
@@ -294,6 +324,31 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
+    async function createDiscussionWithArtefactVersion({ discussionId, artefactTitle, version }) {
+        uiStore.addNotification('Creating new chat with this document...', 'info');
+        try {
+            const response = await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}/create_discussion_with_version`,
+                null,
+                { params: { version } }
+            );
+
+            const newDiscussion = response.data;
+            // Use the core select action to jump to the new chat
+            await getActions().selectDiscussion(newDiscussion.id);
+
+            // Open the new discussion and ensure the workspace follows
+            uiStore.activeSplitArtefactTitle = artefactTitle;
+            uiStore.dataZoneTab = 'workspace';
+
+            uiStore.addNotification(`New discussion started with '${artefactTitle}'`, 'success');
+            return newDiscussion;
+        } catch (error) {
+            console.error("Failed to create discussion with artefact:", error);
+            uiStore.addNotification('Failed to create new discussion.', 'error');
+        }
+    }
+
     async function revertArtefact({ discussionId, artefactTitle, version }) {
         try {
             await apiClient.post(`/api/discussions/${discussionId}/artefacts/revert`, {
@@ -396,9 +451,11 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
 
     return {
+        createDiscussionWithArtefactVersion,
         revertArtefact,
         renameArtefact,
         fetchArtefacts,
+        fetchAllUserArtefacts,
         addArtefact,
         createManualArtefact,
         updateArtefact,

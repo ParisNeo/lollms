@@ -40,6 +40,7 @@ const AppDetailsModal = defineAsyncComponent(() => import('./AppDetailsModal.vue
 const AppConfigModal = defineAsyncComponent(() => import('./AppConfigModal.vue'));
 const AppEnvConfigModal = defineAsyncComponent(() => import('./AppEnvConfigModal.vue'));
 const AppLogModal = defineAsyncComponent(() => import('./AppLogModal.vue'));
+const FeatureInfoModal = defineAsyncComponent(() => import('./FeatureInfoModal.vue'));
 const CreateFirstAdminModal = defineAsyncComponent(() => import('./CreateFirstAdminModal.vue'));
 const GeneratePersonalityModal = defineAsyncComponent(() => import('./GeneratePersonalityModal.vue'));
 const TasksManagerModal = defineAsyncComponent(() => import('./TasksManagerModal.vue'));
@@ -115,6 +116,7 @@ const EmailNotesModal = defineAsyncComponent(() => import('./EmailNotesModal.vue
     <AppConfigModal v-if="activeModal === 'appConfig'" />
     <AppEnvConfigModal v-if="activeModal === 'appEnvConfig'" />
     <AppLogModal v-if="activeModal === 'appLog'" />
+    <FeatureInfoModal v-if="activeModal === 'featureInfo'" />
     <GeneratePersonalityModal v-if="activeModal === 'generatePersonality'" />
     <TasksManagerModal v-if="activeModal === 'tasksManager'" />
     <EnhancePersonalityPromptModal v-if="activeModal === 'enhancePersonalityPrompt'" />

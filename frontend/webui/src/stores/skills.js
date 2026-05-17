@@ -24,10 +24,11 @@ export const useSkillsStore = defineStore('skills', () => {
 
     async function createSkill(skillData) {
         try {
+            console.log("[SkillsStore] Creating skill:", skillData);
             const response = await apiClient.post('/api/skills', skillData);
             skills.value.push(response.data);
             skills.value.sort((a, b) => a.name.localeCompare(b.name));
-            uiStore.addNotification('Skill created successfully.', 'success');
+            uiStore.addNotification('Skill saved to your library!', 'success');
             return response.data;
         } catch (error) {
             uiStore.addNotification('Failed to create skill.', 'error');
