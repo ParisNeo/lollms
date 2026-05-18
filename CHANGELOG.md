@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-18 21:15]
+
+- build(deps): bump lollms-client from 1.13.18 to 1.13.19
+
 ## [2026-05-18 20:59]
 
 - chore(deps): bump pipmaster from 1.1.11 to 1.1.12
