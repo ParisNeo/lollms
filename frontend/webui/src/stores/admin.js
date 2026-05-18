@@ -499,9 +499,23 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchTtmBindingZoo(id) { const r = await apiClient.get(`/api/admin/ttm-bindings/${id}/zoo`); return r.data; }
     async function installTtmFromZoo(id, index) { const r = await apiClient.post(`/api/admin/ttm-bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
 
-    async function createSystemPrompt(promptData) { const { usePromptsStore } = await import('./prompts.js'); const response = await apiClient.post('/api/prompts_zoo/installed', promptData); await usePromptsStore().fetchPrompts(); return response.data; }
-    async function updateSystemPrompt(promptId, promptData) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); await usePromptsStore().fetchPrompts(); }
-    async function deleteSystemPrompt(promptId) { const { usePromptsStore } = await import('./prompts.js'); await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); await usePromptsStore().fetchPrompts(); await fetchZooPrompts({}, true); }
+    async function createSystemPrompt(promptData) { 
+        const { usePromptsStore } = await import('./prompts.js'); 
+        const response = await apiClient.post('/api/prompts_zoo/installed', promptData); 
+        await usePromptsStore().fetchPrompts(); 
+        return response.data; 
+    }
+    async function updateSystemPrompt(promptId, promptData) { 
+        const { usePromptsStore } = await import('./prompts.js'); 
+        await apiClient.put(`/api/prompts_zoo/installed/${promptId}`, promptData); 
+        await usePromptsStore().fetchPrompts(); 
+    }
+    async function deleteSystemPrompt(promptId) { 
+        const { usePromptsStore } = await import('./prompts.js'); 
+        await apiClient.delete(`/api/prompts_zoo/installed/${promptId}`); 
+        await usePromptsStore().fetchPrompts(); 
+        await fetchZooPrompts({}, true); 
+    }
     async function updateSystemPromptFromZoo(promptId) { const response = await apiClient.post(`/api/prompts_zoo/installed/${promptId}/update`); tasksStore.addTask(response.data); }
     async function generateSystemPrompt(prompt) { const res = await apiClient.post('/api/prompts_zoo/generate_from_prompt', { prompt }); tasksStore.addTask(res.data); return res.data; }
 

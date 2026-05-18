@@ -166,7 +166,7 @@ async function handlePlusClick() {
         <!-- Quick Actions -->
         <button 
           @click="handlePlusClick" 
-          class="p-3 bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-colors" 
           :title="plusButtonTitle"
         >
           <IconPlus class="w-5 h-5" />
@@ -175,7 +175,7 @@ async function handlePlusClick() {
         <button 
           v-if="user && user.user_ui_level >= 2" 
           @click="goToFeed" 
-          class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Feed"
         >
           <IconHome class="w-5 h-5 text-slate-500 dark:text-gray-400" />
@@ -183,7 +183,7 @@ async function handlePlusClick() {
 
         <button 
           @click="activeTab = 'artefacts'; uiStore.openSidebar();" 
-          class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Artefacts"
         >
           <IconFileText class="w-5 h-5 text-blue-500" />
@@ -191,7 +191,7 @@ async function handlePlusClick() {
 
         <router-link
           to="/notebooks"
-          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Notebook Studio"
         >
             <IconServer class="w-5 h-5 text-purple-500" />
@@ -199,7 +199,7 @@ async function handlePlusClick() {
 
         <router-link
           to="/datastores"
-          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Data Studio"
         >
             <IconDatabase class="w-5 h-5 text-green-500" />
@@ -207,7 +207,7 @@ async function handlePlusClick() {
 
         <router-link
           to="/flow-studio"
-          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Flow Studio"
         >
             <IconShare class="w-5 h-5 text-cyan-500" />
@@ -215,7 +215,7 @@ async function handlePlusClick() {
 
         <router-link
           to="/news"
-          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="News"
         >
             <IconFileText class="w-5 h-5 text-slate-500 dark:text-gray-400" />
@@ -223,7 +223,7 @@ async function handlePlusClick() {
 
         <router-link 
           to="/help" 
-          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Help"
         >
           <IconBookOpen class="w-5 h-5 text-slate-500 dark:text-gray-400" />
@@ -231,7 +231,7 @@ async function handlePlusClick() {
 
         <router-link 
           to="/settings" 
-          class="block p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Settings"
         >
           <IconSettings class="w-5 h-5 text-slate-500 dark:text-gray-400" />

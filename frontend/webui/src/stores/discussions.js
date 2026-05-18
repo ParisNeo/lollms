@@ -3,9 +3,6 @@ import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
 import apiClient from '../services/api'; // Import apiClient
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
-import { useDataStore } from './data';
-import { useTasksStore } from './tasks';
-import { useMemoriesStore } from './memories'; // Import MemoriesStore
 import useEventBus from '../services/eventBus';
 
 // Import ALL composables
@@ -21,10 +18,7 @@ import { useDiscussionSharing } from './composables/useDiscussionSharing';
 export const useDiscussionsStore = defineStore('discussions', () => {
     // --- STORES ---
     const uiStore = useUiStore();
-    const tasksStore = useTasksStore();
-    const dataStore = useDataStore();
     const authStore = useAuthStore();
-    const memoriesStore = useMemoriesStore(); // Initialize
     const { user } = storeToRefs(authStore);
     const { tasks } = storeToRefs(tasksStore);
     const { on, off, emit } = useEventBus();
@@ -158,7 +152,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const activePersonality = computed(() => {
         const personalityId = authStore.user?.active_personality_id;
         if (!personalityId) return null;
-        return dataStore.getPersonalityById(personalityId);
+        // Resolved via dataStore (which is often already loaded in the UI)
+        try {
+            const { useDataStore } = require('./data'); 
+            return useDataStore().getPersonalityById(personalityId);
+        } catch(e) {
+            return null;
+        }
     });
 
     /**
@@ -489,14 +489,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     // --- Unified Knowledge Base Listeners ---
     // These trigger the sidebar refresh when AI finishes writing any document type
     const KNOWLEDGE_DONE_EVENTS = ['artefact_done', 'note_done', 'skill_done', 'widget_done', 'artefact_update_done'];
-    
+
     KNOWLEDGE_DONE_EVENTS.forEach(eventName => {
         on(eventName, (data) => {
             // Fallback to active discussion if ID is missing in the raw payload
             const discussionId = data.discussion_id || currentDiscussionId.value;
-            
+
             if (discussionId && discussionId === currentDiscussionId.value) {
-                console.log(`[DiscussionStore] Received ${eventName}, refreshing repository list for ${discussionId}`);
                 getActions().fetchArtefacts(discussionId);
                 getActions().fetchContextStatus(discussionId);
             }

@@ -1235,7 +1235,7 @@ async def create_image_edit(
     ASCIIColors.panel(
         f"[bold]Open AI V1 — Image Edit[/bold]\n"
         f"[bold]User:[/bold] {user.username}\n"
-        f"[bold]Model:[/bold] {model}\n"
+        f"[bold]Model alias:[/bold] {model}\n"
         f"[bold]Images:[/bold] {len(image)}\n"
         f"[bold]Mask:[/bold] {'yes' if mask else 'no'}\n"
         f"[bold]n:[/bold] {n}  [bold]Size:[/bold] {size}  "

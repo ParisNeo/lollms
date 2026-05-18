@@ -13,25 +13,47 @@ export function useDiscussionDataZones(state, stores, getActions) {
         }
     }
 
+    // Deduplication map to prevent bombardment
+    const inFlightContextRequests = new Map();
+
     async function fetchContextStatus(discussionId) {
         if (!discussionId) {
             activeDiscussionContextStatus.value = null;
             return;
         }
-        try {
-            const response = await apiClient.get(`/api/discussions/${discussionId}/context_status`);
-            activeDiscussionContextStatus.value = response.data;
-            
-            const breakdown = response.data?.zones?.system_context?.breakdown || {};
-            updateLiveTokenCount('discussion', breakdown.discussion_data_zone?.tokens || 0);
-            updateLiveTokenCount('user', breakdown.user_data_zone?.tokens || 0);
-            updateLiveTokenCount('personality', breakdown.personality_data_zone?.tokens || 0);
-            updateLiveTokenCount('memory', breakdown.memory?.tokens || 0);
 
-        } catch (error) {
-            console.error("Failed to fetch context status:", error);
-            activeDiscussionContextStatus.value = null;
+        // 1. Deduplication: If a request for this discussion is already running, return its promise
+        if (inFlightContextRequests.has(discussionId)) {
+            return inFlightContextRequests.get(discussionId);
         }
+
+        const requestPromise = (async () => {
+            try {
+                const response = await apiClient.get(`/api/discussions/${discussionId}/context_status`);
+                activeDiscussionContextStatus.value = response.data;
+
+                const breakdown = response.data?.zones?.system_context?.breakdown || {};
+                updateLiveTokenCount('discussion', breakdown.discussion_data_zone?.tokens || 0);
+                updateLiveTokenCount('user', breakdown.user_data_zone?.tokens || 0);
+                updateLiveTokenCount('personality', breakdown.personality_data_zone?.tokens || 0);
+                updateLiveTokenCount('memory', breakdown.memory?.tokens || 0);
+
+                return response.data;
+            } catch (error) {
+                console.error("Failed to fetch context status:", error);
+                // Only reset on persistent errors
+                if (error.response?.status !== 429) {
+                    activeDiscussionContextStatus.value = null;
+                }
+            } finally {
+                // 2. Cooldown: Keep the "in-flight" status for a moment after finishing
+                // to prevent rapid back-to-back triggers from separate components.
+                setTimeout(() => inFlightContextRequests.delete(discussionId), 2000);
+            }
+        })();
+
+        inFlightContextRequests.set(discussionId, requestPromise);
+        return requestPromise;
     }
 
     async function fetchDataZones(discussionId) {
@@ -190,9 +212,9 @@ export function useDiscussionDataZones(state, stores, getActions) {
                     discussion_images: discussion_images !== undefined ? discussion_images : discussion.discussion_images,
                     active_discussion_images: active_discussion_images !== undefined ? active_discussion_images : discussion.active_discussion_images
                 };
-                
+
                 uiStore.addNotification('Data zone has been updated by AI.', 'success');
-                
+
                 if (discussion_id === currentDiscussionId.value) {
                     emit('discussion_zone:processed');
                     await getActions().fetchArtefacts(discussion_id);

@@ -30,6 +30,7 @@ const uiStore = useUiStore();
 const { activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
 
 const isUploadingArtefact = ref(false);
+const uploadingMessage = ref('Processing files...');
 const isArtefactsCollapsed = ref(false);
 const artefactFileInput = ref(null);
 const isDraggingFile = ref(false);
@@ -93,9 +94,17 @@ async function handleArtefactFileUpload(event) {
     if (!files.length || !idToUse.value) return;
 
     isUploadingArtefact.value = true;
+    uploadingMessage.value = 'Uploading and analyzing files...';
+
+    // Set a timer to provide feedback if the backend is slow (likely installing packages)
+    const installHintTimer = setTimeout(() => {
+        uploadingMessage.value = 'Preparing environment (this might involve installing required libraries)...';
+    }, 5000);
+
     try {
         await Promise.all(files.map(file => discussionsStore.addArtefact({ discussionId: idToUse.value, file, extractImages: true, pdfMode: currentUploadPdfMode.value })));
     } finally {
+        clearTimeout(installHintTimer);
         isUploadingArtefact.value = false;
         if (artefactFileInput.value) artefactFileInput.value.value = '';
     }
@@ -171,8 +180,23 @@ function handleCreateNew() {
             </div>
         </div>
         <div v-if="!isArtefactsCollapsed" class="grow overflow-y-auto custom-scrollbar">
-            <div v-if="isLoadingArtefacts" class="text-center py-10"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
-            <div v-else-if="groupedArtefacts.length === 0" class="text-center py-10 text-gray-400 text-[10px] uppercase font-bold tracking-widest opacity-50">Empty</div>
+            <!-- Active Processing Item -->
+            <div v-if="isUploadingArtefact" class="mb-4 animate-in fade-in slide-in-from-top-2">
+                 <div class="flex items-center gap-4 p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-800 shadow-sm">
+                    <div class="w-10 h-10 shrink-0 flex items-center justify-center bg-white dark:bg-gray-800 rounded-lg border dark:border-gray-700">
+                        <IconAnimateSpin class="w-5 h-5 text-blue-500 animate-spin" />
+                    </div>
+                    <div class="flex flex-col min-w-0">
+                        <span class="text-[9px] font-black uppercase tracking-widest text-blue-500 mb-0.5">Workspace Ingestion</span>
+                        <p class="text-[11px] font-bold text-gray-700 dark:text-gray-300 leading-tight">
+                            {{ uploadingMessage }}
+                        </p>
+                    </div>
+                 </div>
+            </div>
+
+            <div v-if="isLoadingArtefacts && !isUploadingArtefact" class="text-center py-10"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
+            <div v-else-if="groupedArtefacts.length === 0 && !isUploadingArtefact" class="text-center py-10 text-gray-400 text-[10px] uppercase font-bold tracking-widest opacity-50">Empty</div>
             <div v-else class="space-y-1">
                 <div 
                     v-for="group in groupedArtefacts" 

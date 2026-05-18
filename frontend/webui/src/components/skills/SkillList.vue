@@ -124,8 +124,8 @@ async function handleFileImport(event) {
                  @click="editSkill(skill)">
                 
                 <div class="flex items-center gap-2 min-w-0 grow">
-                    <div class="p-1.5 rounded bg-green-50 dark:bg-green-900/30 text-green-600 shrink-0 border border-green-100 dark:border-green-800">
-                        <IconSparkles class="w-3.5 h-3.5" />
+                    <div class="w-8 h-8 rounded bg-green-50 dark:bg-green-900/30 text-green-600 shrink-0 border border-green-100 dark:border-green-800 flex items-center justify-center overflow-hidden">
+                        <IconSparkles class="w-4 h-4" />
                     </div>
                     <div class="flex flex-col min-w-0 leading-tight">
                         <span class="text-xs font-bold text-slate-700 dark:text-gray-200 truncate">{{ skill.name }}</span>

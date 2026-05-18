@@ -33,8 +33,8 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
         username = user.username
         ASCIIColors.panel(f"[WebSocket] User '{username}' (ID: {user_id}) authenticated for WebSocket.")
 
-    except HTTPException:
-        ASCIIColors.panel(f"[red][WebSocket] Authentication raised HTTPException for token: ...{token[-6:]}[/red]")
+    except HTTPException as e:
+        ASCIIColors.panel(f"[red][WebSocket] Auth HTTPException: {e.detail} | Token: ...{token[-6:]}[/red]")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
     finally:

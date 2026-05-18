@@ -45,6 +45,12 @@ except ImportError:
 # Global In-Memory Session Cache
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
+# Authentication Cache to prevent DB bombardment during request bursts
+# Maps Token -> (UserObject, Expiry)
+_token_user_cache: Dict[str, tuple] = {}
+_token_cache_lock = threading.Lock()
+TOKEN_CACHE_TTL = 10 # seconds
+
 # Global Client Registry to prevent file descriptor exhaustion
 # Maps Hash(BindingName + Config) -> LollmsClient Instance
 _global_client_registry: Dict[str, LollmsClient] = {}
@@ -74,31 +80,71 @@ async def get_current_db_user_from_token(
     token: str = Depends(oauth2_scheme), 
     db: Session = Depends(get_db)
 ) -> DBUser:
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    # 1. Check Cache First
+    with _token_cache_lock:
+        if token in _token_user_cache:
+            cached_user, expiry = _token_user_cache[token]
+            if now < expiry:
+                # Merge the cached user into the current session to ensure it's attached to the DB
+                return db.merge(cached_user, load=False)
+            else:
+                del _token_user_cache[token]
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    payload = decode_main_access_token(token)
-    if payload is None:
-        raise credentials_exception
-    
-    username: str = payload.get("sub")
-    if username is None:
-        raise credentials_exception
-    token_data = TokenData(username=username)
-    
-    user = db.query(DBUser).filter(DBUser.username == token_data.username).first()
-    if user is None:
-        raise credentials_exception
-    
-    now = datetime.datetime.now(datetime.timezone.utc)
-    last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc) if user.last_activity_at and user.last_activity_at.tzinfo is None else user.last_activity_at
 
-    if not last_activity_aware or (now - last_activity_aware) > datetime.timedelta(seconds=60):
-        user.last_activity_at = now
-    
-    return user
+    try:
+        payload = decode_main_access_token(token)
+        if payload is None:
+            ASCIIColors.error(f"[Auth] Token decoding failed (SECRET_KEY mismatch or malformed). Token: ...{token[-10:]}")
+            raise credentials_exception
+
+        username: str = payload.get("sub")
+        if username is None:
+            ASCIIColors.error(f"[Auth] Payload missing 'sub' (username).")
+            raise credentials_exception
+
+        # 2. Perform DB Lookup
+        user = db.query(DBUser).filter(DBUser.username == username).first()
+        if user is None:
+            ASCIIColors.error(f"[Auth] User '{username}' not found in database.")
+            raise credentials_exception
+
+        # 3. Update Last Activity (Throttled & Defensive)
+        try:
+            last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc) if user.last_activity_at and user.last_activity_at.tzinfo is None else user.last_activity_at
+            if not last_activity_aware or (now - last_activity_aware) > datetime.timedelta(seconds=60):
+                user.last_activity_at = now
+                db.commit()
+                db.refresh(user) # Ensure object is valid for caller
+        except Exception as e:
+            # Telemetry update failure should NOT block the handshake
+            ASCIIColors.warning(f"[Auth] Throttled activity update failed (DB Busy?): {e}")
+            db.rollback()
+
+        # 4. Update Cache
+        with _token_cache_lock:
+            _token_user_cache[token] = (user, now + datetime.timedelta(seconds=TOKEN_CACHE_TTL))
+
+            # Periodic cleanup of expired entries
+            if len(_token_user_cache) > 1000:
+                _token_user_cache.clear()
+
+        return user
+
+    except HTTPException:
+        # Standard HTTP rejections (Expired, Invalid) should be silent
+        raise
+    except Exception as e:
+        # Only log full tracebacks for actual system failures (DB connection errors, etc.)
+        ASCIIColors.error(f"Authentication System Failure: {str(e)}")
+        trace_exception(e)
+        raise credentials_exception
 
 def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_token)) -> UserAuthDetails:
     if not db_user.is_active:

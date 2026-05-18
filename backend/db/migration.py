@@ -678,7 +678,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_status ON users (status)"))
                 
                 # Backfill status based on is_active and activation_token
-                connection.execute(text("UPDATE users SET status = 'active' WHERE is_active = 1"))
+                connection.execute(text("UPDATE users SET status = 'active' WHERE is_active = 1 OR status IS NULL"))
                 connection.execute(text("UPDATE users SET status = 'pending_admin_validation' WHERE is_active = 0 AND activation_token IS NOT NULL"))
                 connection.execute(text("UPDATE users SET status = 'inactivated_by_admin' WHERE is_active = 0 AND activation_token IS NULL"))
                 

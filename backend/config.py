@@ -81,62 +81,60 @@ def _ensure_secure_secret_key():
     Checks if the current SECRET_KEY is weak/default or missing.
     If vulnerable, generates a new CSPRNG key, updates the runtime, and persists it to .env.
     """
-    # 1. Define known weak defaults from previous versions
     weak_keys = [
         "changeme",
         "a_very_secret_key_that_should_be_changed_for_production",
         "a_very_secret_key_for_flask_sessions_or_jwt",
         "your_secret_key_here",
-        "" # Empty key is also a risk
+        "" 
     ]
-    
-    # 2. Get current key directly from environment
+
     current_key = os.environ.get("SECRET_KEY", "")
-    
-    # 3. Check for vulnerability
+
     if not current_key or current_key in weak_keys:
-        ASCIIColors.red("[SECURITY] Vulnerable SECRET_KEY detected. Automatically rotating to a secure key...")
-        
-        # 4. Generate a high-entropy secure key (32 bytes -> 43 base64 chars)
+        ASCIIColors.warning("[Security] SECRET_KEY is missing or weak. Generating a persistent secure key...")
         new_key = secrets.token_urlsafe(32)
-        
-        # 5. Update runtime environment immediately
         os.environ["SECRET_KEY"] = new_key
-        
-        # 6. Persist to .env file for future restarts
+
         try:
+            # Force absolute path for .env to ensure we write to the correct location
+            abs_env_path = env_path.absolute()
             content = ""
-            if env_path.exists():
-                with open(env_path, "r", encoding="utf-8") as f:
+            if abs_env_path.exists():
+                with open(abs_env_path, "r", encoding="utf-8") as f:
                     content = f.read()
-            
-            # Regex to find and replace the existing SECRET_KEY line
-            # Handles: SECRET_KEY=val, SECRET_KEY="val", SECRET_KEY = val
+
             pattern = re.compile(r'^SECRET_KEY\s*=.*$', re.MULTILINE)
-            
+
             if pattern.search(content):
                 content = pattern.sub(f'SECRET_KEY="{new_key}"', content)
             else:
-                # If variable doesn't exist, append it
                 if content and not content.endswith('\n'):
                     content += '\n'
                 content += f'SECRET_KEY="{new_key}"\n'
-                
-            with open(env_path, "w", encoding="utf-8") as f:
+
+            with open(abs_env_path, "w", encoding="utf-8") as f:
                 f.write(content)
-                
-            ASCIIColors.success(f"[SECURITY] Success: .env file updated with new secure SECRET_KEY.")
-            
+
+            ASCIIColors.success(f"[Security] New key persisted to: {abs_env_path}")
+
         except Exception as e:
-            ASCIIColors.error(f"[CRITICAL] Failed to update .env file with secure key: {e}")
-            ASCIIColors.error(f"[CRITICAL] The application is running with a temporary secure key, but it will be lost on restart.")
+            ASCIIColors.error(f"[Security] Persistence failure: {e}. Sessions will reset on next restart.")
 
 # --- Load Environment Variables ---
 _migrate_toml_to_env_if_needed()
-load_dotenv(env_path, override=True)
+# Ensure path is clean before loading
+load_dotenv(dotenv_path=env_path.absolute(), override=True)
 
 # Ensure secure key exists after loading env
 _ensure_secure_secret_key()
+
+# Re-read to ensure the rotated key is the one we use for the rest of the config
+SECRET_KEY = os.environ.get("SECRET_KEY", "")
+if SECRET_KEY:
+    import hashlib
+    fingerprint = hashlib.sha256(SECRET_KEY.encode()).hexdigest()[:8]
+    ASCIIColors.cyan(f"Auth System: Key Fingerprint [{fingerprint}]")
 
 # --- Application Version ---
 APP_VERSION = "2.1.0"
@@ -183,6 +181,10 @@ APP_DB_URL = get_env_var("DATABASE_URL", f"sqlite:///{APP_DATA_DIR / 'app_main.d
 
 # Secret Key is now guaranteed to be secure by _ensure_secure_secret_key
 SECRET_KEY = get_env_var("SECRET_KEY", "")
+if SECRET_KEY:
+    ASCIIColors.cyan(f"INFO: SECRET_KEY loaded (Length: {len(SECRET_KEY)})")
+else:
+    ASCIIColors.error("CRITICAL: SECRET_KEY is empty after initialization!")
 
 APP_SETTINGS = {
     "data_dir": str(APP_DATA_DIR),

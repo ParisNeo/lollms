@@ -1,54 +1,40 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
-import { resolve } from 'path'
+import path from 'path'
 
-// https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
-    tailwindcss(),
     vue(),
+    tailwindcss()
   ],
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),  // add this
-    }
-  },  
-  server: {
-    // Proxy API requests to the backend server to avoid CORS issues during development
-    proxy: {
-      '/api': {
-        target: 'http://localhost:9642',
-        changeOrigin: true,
-      },
-      '/admin': {
-        target: 'http://localhost:9642',
-        changeOrigin: true,
-      },
-      '/locals': {
-        target: 'http://localhost:9642',
-        changeOrigin: true,
-      },
-      '/ws': {
-        target: 'http://localhost:9642',
-        ws: true,
-        changeOrigin: true,
-      },
-      '/favicon.ico': {
-        target: 'http://localhost:9642',
-        changeOrigin: true,
-      },
+      '@': path.resolve(__dirname, './src'),
     },
   },
   build: {
-    // This sets the output directory for the build command.
-    // We use resolve to go one level up from the current directory (`webui`)
-    // and create a 'dist' folder there.
-    // The final output will be in `frontend/dist/`.
-    outDir: resolve(__dirname, '../dist'),
-    assetsDir: 'ui_assets', // Changed from 'assets' to prevent conflict with backend /assets route
-    // This ensures that the output directory is cleared before each build.
-    emptyOutDir: true,
-    chunkSizeWarningLimit: 1000, // raise to 1MB to silence for now
-  },
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        // Advanced manual chunking to isolate heavy libraries
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('mermaid')) return 'vendor-mermaid';
+            if (id.includes('codemirror') || id.includes('@codemirror')) return 'vendor-editor';
+            if (id.includes('highlight.js')) return 'vendor-highlight';
+            if (id.includes('pyodide')) return 'vendor-python';
+            if (id.includes('canvg') || id.includes('pdfjs-dist')) return 'vendor-viz';
+            
+            // Standard vendor chunk for smaller libs
+            return 'vendor';
+          }
+          // Split stores into their own chunk to help with circularity
+          if (id.includes('src/stores/')) {
+            return 'app-stores';
+          }
+        }
+      }
+    }
+  }
 })

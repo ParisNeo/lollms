@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-18 12:56]
+
+- feat: harden auth security, add session cache, and refresh UI build
+
 ## [2026-05-15 17:25]
 
 - build(frontend): regenerate production assets after ChatInput.vue update

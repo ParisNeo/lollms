@@ -88,6 +88,7 @@ const { skills } = storeToRefs(skillsStore);
 
 const messageText = ref('');
 const isUploading = ref(false);
+const uploadingMessage = ref('Processing files...');
 const fileInput = ref(null);
 const imageInput = ref(null);
 const isRecording = ref(false);
@@ -705,7 +706,21 @@ async function handleFilesInput(files) {
     if (images.length > 0) images.forEach(file => { stagedImages.value.push({ file, previewUrl: URL.createObjectURL(file) }); });
     if (others.length > 0) {
         if (!activeDiscussion.value) await discussionsStore.createNewDiscussion();
-        if (activeDiscussion.value) { isUploading.value = true; try { await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true, pdfMode: currentUploadPdfMode.value }))); } finally { isUploading.value = false; } }
+        if (activeDiscussion.value) { 
+            isUploading.value = true; 
+            uploadingMessage.value = 'Adding files to workspace...';
+
+            const hintTimer = setTimeout(() => {
+                uploadingMessage.value = 'Preparing ingestion environment (might be installing required libraries)...';
+            }, 5000);
+
+            try { 
+                await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true, pdfMode: currentUploadPdfMode.value }))); 
+            } finally { 
+                clearTimeout(hintTimer);
+                isUploading.value = false; 
+            } 
+        }
     }
 }
 async function handleFileUpload(event) { const files = Array.from(event.target.files || []); await handleFilesInput(files); event.target.value = ''; }
@@ -821,7 +836,15 @@ const advancedEditorExtensions = computed(() => {
 async function fetchInputTokenCount(text) { if (!text.trim()) { inputTokenCount.value = 0; return; } try { const response = await apiClient.post('/api/discussions/tokenize', { text }); inputTokenCount.value = response.data.tokens; } catch (error) {} }
 function handleStopGeneration() { discussionsStore.stopGeneration(); }
 
-watch(messageText, (newText) => { clearTimeout(tokenizeInputDebounceTimer); if (!newText.trim()) { inputTokenCount.value = 0; } else if (showContextBar.value) { tokenizeInputDebounceTimer = setTimeout(() => fetchInputTokenCount(newText), 500); } });
+watch(messageText, (newText) => { 
+    clearTimeout(tokenizeInputDebounceTimer); 
+    if (!newText.trim()) { 
+        inputTokenCount.value = 0; 
+    } else if (showContextBar.value) { 
+        // Increased debounce from 500ms to 1200ms to reduce backend load while typing
+        tokenizeInputDebounceTimer = setTimeout(() => fetchInputTokenCount(newText), 1200); 
+    } 
+});
 
 onMounted(() => { promptsStore.fetchPrompts(); if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores(); if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools(); on('files-dropped-in-chat', handleFilesInput); on('files-pasted-in-chat', handleFilesInput); });
 onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-pasted-in-chat', handleFilesInput); stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl)); });
@@ -911,9 +934,9 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 
                             <button v-for="feat in activeFeatures" :key="feat.id" 
                                  @click="showFeatureInfo(feat)"
-                                 class="w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left hover:bg-gray-50 dark:hover:bg-gray-800 group/feat-item">
-                                <div :class="['p-1.5 rounded-lg border shadow-sm transition-transform group-hover/feat-item:scale-110 shrink-0', feat.colorClass]">
-                                    <component :is="feat.icon" class="w-4 h-4 fill-current" />
+                                 class="w-full flex items-center gap-3 p-2 rounded-xl transition-all text-left hover:bg-gray-50 dark:hover:bg-gray-800 group/feat-item">
+                                <div :class="['w-9 h-9 rounded-lg border shadow-sm transition-transform group-hover/feat-item:scale-110 shrink-0 flex items-center justify-center overflow-hidden', feat.colorClass]">
+                                    <component :is="feat.icon" class="w-5 h-5 fill-current shrink-0" />
                                 </div>
                                 <div class="flex flex-col min-w-0">
                                     <span class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{{ feat.label }}</span>
@@ -1316,9 +1339,10 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                         />
                     </div>
                     
-                    <div v-if="generationInProgress || currentActiveTask" class="absolute inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none">
-                         <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500" /> 
-                         <span v-if="currentActiveTask">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>
+                    <div v-if="generationInProgress || currentActiveTask || isUploading" class="absolute inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none">
+                         <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500 shrink-0" /> 
+                         <span v-if="isUploading" class="truncate">{{ uploadingMessage }}</span>
+                         <span v-else-if="currentActiveTask">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>
                          <span v-else>{{ generationState.details || 'Thinking...' }}</span>
                     </div>
                 </div>

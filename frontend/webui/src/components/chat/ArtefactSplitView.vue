@@ -578,19 +578,15 @@ function download() {
                 <p class="text-sm font-medium">{{ loadError }}</p>
                 <button @click="loadVersion(selectedVersion)" class="mt-4 btn btn-secondary btn-sm">Retry</button>
             </div>
-            <div v-else-if="!dbContent" class="absolute inset-0 flex flex-col items-center justify-center text-gray-400">
-                <IconPencil class="w-12 h-12 mb-4 opacity-30" />
-                <p class="text-sm font-medium">This file is empty</p>
-                <p class="text-xs mt-1 opacity-60">Start typing to add content</p>
-            </div>
             <CodeMirrorEditor 
                 v-else
                 v-model="dbContent" 
                 class="absolute inset-0 h-full" 
-                :initialMode="'view'"
+                :initialMode="dbContent ? 'view' : 'edit'"
                 :renderable="true"
                 :contentType="detectedContentType"
                 :language="detectedLanguage"
+                placeholder="Start typing to add content or update the document..."
             />
         </div>
         </div>

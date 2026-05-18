@@ -2,6 +2,7 @@ import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
+// Removed specialized static store imports to fix Effective Dynamic Import warnings
 
 export const useAuthStore = defineStore('auth', () => {
     // --- State ---
@@ -110,8 +111,54 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     // --- WebSocket Connection Management ---
+    /**
+     * Checks if the JWT token is expired locally.
+     * Prevents backend bombardment with dead tokens.
+     */
+    function isTokenExpired(tokenStr) {
+        if (!tokenStr) return true;
+        try {
+            const base64Url = tokenStr.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const payload = JSON.parse(window.atob(base64));
+
+            if (!payload.exp) return false;
+            // Add a 60-second grace period for clock skew
+            return (Date.now() / 1000) > (payload.exp - 60);
+        } catch (e) {
+            return true;
+        }
+    }
+    // --- WebSocket Connection Management ---
+    /**
+     * Checks if the JWT token is expired locally.
+     * Prevents backend bombardment with dead tokens.
+     */
+    function isTokenExpired(tokenStr) {
+        if (!tokenStr) return true;
+        try {
+            const base64Url = tokenStr.split('.')[1];
+            const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+            const payload = JSON.parse(window.atob(base64));
+            
+            if (!payload.exp) return false;
+            // Add a 60-second grace period for clock skew
+            return (Date.now() / 1000) > (payload.exp - 60);
+        } catch (e) {
+            return true;
+        }
+    }
+
     function connectWebSocket() {
-        if (!token.value || (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING))) {
+        if (!token.value || isTokenExpired(token.value)) {
+            if (token.value) {
+                console.warn("[WebSocket] Token expired. Aborting connection loop.");
+                clearAuthData(); // Force logout to stop the loop
+            }
+            return;
+        }
+
+        if (ws.value && (ws.value.readyState === WebSocket.OPEN || ws.value.readyState === WebSocket.CONNECTING)) {
             return;
         }
 
@@ -273,19 +320,36 @@ export const useAuthStore = defineStore('auth', () => {
         };
 
         ws.value.onclose = (event) => {
-            if (wsConnected.value) {
+            const wasConnected = wsConnected.value;
+            wsConnected.value = false;
+            ws.value = null;
+            if (heartbeatInterval) clearInterval(heartbeatInterval);
+
+            // Handle abnormal closures
+            if (wasConnected) {
                 const now = Date.now();
-                // Debounce audio: only play if at least 10 seconds passed since last play
                 if (now - lastConnectionLostTime > 10000) {
                     audioLost.play().catch(() => {});
                     lastConnectionLostTime = now;
                 }
                 useUiStore().addNotification('Connection lost', 'error');
             }
-            wsConnected.value = false;
-            ws.value = null;
-            if (heartbeatInterval) clearInterval(heartbeatInterval);
-            if (event.code !== 1000) reconnectTimeout = setTimeout(connectWebSocket, 5000);
+
+            // Stop retrying if the closure implies an authentication failure (1008 Policy Violation)
+            // or if the token is already expired.
+            if (event.code === 1008 || event.code === 4003 || isTokenExpired(token.value)) {
+                console.error("[WebSocket] Permanent Auth Failure (Code " + event.code + "). Clearing session.");
+                useUiStore().addNotification('Your session has expired or the security key changed. Please log in again.', 'error', 10000);
+                clearAuthData(); // Force logout so user can re-authenticate
+                return;
+            }
+
+            // Normal close (1000) doesn't need retry
+            if (event.code !== 1000) {
+                // Implementation of jittered/incremental backoff to prevent bombardment
+                const retryDelay = wasConnected ? 5000 : 15000;
+                reconnectTimeout = setTimeout(connectWebSocket, retryDelay);
+            }
         };
     }
 
@@ -301,19 +365,19 @@ export const useAuthStore = defineStore('auth', () => {
             loadingProgress.value = 10;
             loadingMessage.value = 'Verifying session...';
             await refreshUser();
-            
+
             if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
-            
+
             loadingProgress.value = 20;
             loadingMessage.value = 'Establishing connection...';
             connectWebSocket();
-            
-            // Import stores sequentially to update UI
+
+            // Access stores lazily to prevent initial bundle bloat
             const { useDiscussionsStore } = await import('./discussions');
             const { useDataStore } = await import('./data');
             const { useSocialStore } = await import('./social');
             const { useMemoriesStore } = await import('./memories');
-            
+
             const discussionsStore = useDiscussionsStore();
             const dataStore = useDataStore();
             const socialStore = useSocialStore();
@@ -445,21 +509,17 @@ export const useAuthStore = defineStore('auth', () => {
 
     async function logout() {
         if (!isAuthenticated.value) return;
-        const { useDiscussionsStore } = await import('./discussions');
-        const { useDataStore } = await import('./data');
-        const { useSocialStore } = await import('./social');
-        const { useTasksStore } = await import('./tasks');
-        const { useMemoriesStore } = await import('./memories');
 
         await apiClient.post('/api/auth/logout').catch(() => {});
         clearAuthData();
-        
+
         useDiscussionsStore().$reset();
         useDataStore().$reset();
         useSocialStore().$reset();
         useTasksStore().$reset();
         useMemoriesStore().$reset();
-        
+        useSkillsStore().$reset();
+
         useUiStore().closeModal();
         window.location.href = '/';
     }

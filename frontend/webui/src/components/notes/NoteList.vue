@@ -154,8 +154,8 @@ function handleBulkEmail() {
               </div>
 
               <div class="flex items-center gap-2 min-w-0 grow">
-                  <div class="p-1.5 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 shrink-0 border border-amber-100 dark:border-amber-800">
-                      <IconPencil class="w-3.5 h-3.5" />
+                  <div class="w-8 h-8 rounded bg-amber-50 dark:bg-amber-900/30 text-amber-600 shrink-0 border border-amber-100 dark:border-amber-800 flex items-center justify-center overflow-hidden">
+                      <IconPencil class="w-4 h-4" />
                   </div>
                   <div class="flex flex-col min-w-0 leading-tight">
                       <span class="text-xs font-bold text-slate-700 dark:text-gray-200 truncate">{{ note.title || 'Untitled' }}</span>
