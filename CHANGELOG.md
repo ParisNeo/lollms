@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-18 20:48]
+
+- chore(deps): bump lollms-client from 1.13.15 to 1.13.16
+
 ## [2026-05-18 12:56]
 
 - feat: harden auth security, add session cache, and refresh UI build
