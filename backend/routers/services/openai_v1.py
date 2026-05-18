@@ -770,7 +770,6 @@ async def chat_completions(
 ):
     try:
         binding_alias, model_name = resolve_model_name(db, request.model)
-        ASCIIColors.panel({"model_name":model_name,"binding_alias":binding_alias,"request model":request.model}, "Chat completions")
     except HTTPException as e:
         if e.status_code == 400:
             invalidate_model_cache(db)
@@ -814,7 +813,7 @@ async def chat_completions(
         generation_kwargs["reasoning_effort"] = request.reasoning_effort
 
     stream_style = '\nTools requested in stream mode.' if request.tools else ""
-    ASCIIColors.panel(f"[bold]Open AI V1[/bold]\n[bold]User:[/bold] {user.username}\n[bold]Model:[/bold] {request.model}\n[bold]Stream:[/bold] {request.stream}{stream_style}\n[bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}\n[bold]Received images:[/bold] {len(images)}\n[bold]Max Tokens:[/bold] {request.max_tokens}", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
+    ASCIIColors.panel(f"[bold]Request:[/bold]Open AI V1\n[bold]User:[/bold] {user.username}\n[bold]Model:[/bold] {request.model}\n[bold]Bonding alias:[/bold] {binding_alias}\n[bold]Model name:[/bold] {model_name}\n[bold]Stream:[/bold] {request.stream}{stream_style}\n[bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}\n[bold]Received images:[/bold] {len(images)}\n[bold]Max Tokens:[/bold] {request.max_tokens}", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
     if request.stream:
             async def stream_generator():
                 main_loop = asyncio.get_running_loop()

@@ -12,15 +12,8 @@ from pathlib import Path
 from urllib.parse import urlparse, unquote
 from typing import List, Optional, Dict, Any
 import pipmaster as pm
-try:
-    from docx import Document as DocxDocument
-    from pptx import Presentation
-    import pandas as pd
-    import fitz
-    from docx2python import docx2python
-except ImportError:
-    pd = None
-    docx2python = None
+import shutil
+import tempfile
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, Form, status, Body
 from sqlalchemy.orm import Session
 from ascii_colors import trace_exception
@@ -204,245 +197,62 @@ def build_artefacts_router(router: APIRouter):
         discussion_id: str,
         file: UploadFile = File(...),
         extract_images: bool = Form(True),
-        pdf_mode: str = Form("text_and_embedded_images"),
+        pdf_mode: str = Form("text_images"),
         auto_load: bool = Form(True),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db) 
     ):
+        """
+        Imports a file into the discussion's artefact system using the library's unified import mechanism.
+        """
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
-        
+
+        # Map frontend modes to library modes
+        # UI: text_and_embedded_images, text_only, embedded_images, render_pages, ocr
+        mode_map = {
+            "text_and_embedded_images": "text_images",
+            "render_pages": "text_images",
+            "text_only": "text",
+            "embedded_images": "images_only",
+            "ocr": "ocr"
+        }
+
+        import_mode = mode_map.get(pdf_mode, pdf_mode) # Default to literal if not in map
+
+        # Save to temporary file so the library can read it via path
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = Path(tmp.name)
+
         try:
-            content_bytes = await file.read()
-            title = file.filename
-            extension = Path(title).suffix.lower()
-            
-            content = ""
-            images: List[str] = []
-            
-            image_mimetypes = ["image/jpeg", "image/png", "image/gif", "image/webp"]
-            if file.content_type in image_mimetypes:
-                images.append(base64.b64encode(content_bytes).decode('utf-8'))
-                content = ""
-            else:
-                CODE_EXTENSIONS = {
-                    ".py": "python", ".js": "javascript", ".ts": "typescript", ".html": "html", ".css": "css",
-                    ".c": "c", ".cpp": "cpp", ".h": "cpp", ".hpp": "cpp", ".cs": "csharp", ".java": "java",
-                    ".json": "json", ".xml": "xml", ".sh": "bash", ".md": "markdown", ".vhd": "vhdl", ".v": "verilog",
-                    ".rb": "ruby", ".php": "php", ".go": "go", ".rs": "rust", ".swift": "swift", ".kt": "kotlin"
-                }
+            # Delegate to library
+            result = discussion.import_file(
+                path=tmp_path,
+                mode=import_mode,
+                title=file.filename,
+                activate=auto_load
+            )
 
-                if extension == ".pdf":
-                    pdf_doc = fitz.open(stream=content_bytes, filetype="pdf")
-                    pages_md = []
-                    extracted_images = []
-                    
-                    for i, page in enumerate(pdf_doc):
-                        page_md = f"## Page {i+1}\n\n"
-                        
-                        if pdf_mode == "render_pages":
-                            pix = page.get_pixmap(dpi=150)
-                            img_bytes = pix.tobytes("png")
-                            img_b64 = base64.b64encode(img_bytes).decode('utf-8')
-                            extracted_images.append(img_b64)
-                            page_md += f'<artefact_image id="{title}::{len(extracted_images)-1}" />\n\n'
-                            
-                        elif pdf_mode in ["embedded_images", "text_and_embedded_images"]:
-                            img_list = page.get_images(full=True)
-                            for img_info in img_list:
-                                xref = img_info[0]
-                                try:
-                                    base_image = pdf_doc.extract_image(xref)
-                                    img_b64 = base64.b64encode(base_image["image"]).decode('utf-8')
-                                    extracted_images.append(img_b64)
-                                    page_md += f'<artefact_image id="{title}::{len(extracted_images)-1}" />\n\n'
-                                except Exception as e:
-                                    pass
-
-                        if pdf_mode != "embedded_images":
-                            page_text = page.get_text().strip()
-                            if page_text:
-                                page_md += f"{page_text}\n\n"
-                                
-                        if page_md.strip() != f"## Page {i+1}":
-                            pages_md.append(page_md.strip())
-
-                    content = "\n\n---\n\n".join(pages_md)
-                    images = extracted_images
-                    pdf_doc.close()
-
-                elif extension == ".docx":
-                    if docx2python is None:
-                        content = "Error: docx2python library is not installed, so tables cannot be extracted."
-                    else:
-                        with io.BytesIO(content_bytes) as docx_io:
-                            result = docx2python(docx_io)
-                            content = result.text
-                            if extract_images and result.images:
-                                for image_bytes in result.images.values():
-                                    images.append(base64.b64encode(image_bytes).decode("utf-8"))
-
-                elif extension == ".xlsx" or "spreadsheetml" in file.content_type:
-                    try:
-                        xls = pd.read_excel(io.BytesIO(content_bytes), sheet_name=None)
-                        md_parts = []
-                        for sheet_name, df in xls.items():
-                            md_parts.append(f"### {sheet_name}\n\n{df.to_markdown(index=False)}")
-                        content = "\n\n".join(md_parts)
-                    except Exception as e:
-                        trace_exception(e)
-                        content = f"Error processing XLSX file: {e}"
-
-                elif extension == ".pptx":
-                    try:
-                        with io.BytesIO(content_bytes) as pptx_io:
-                            prs = Presentation(pptx_io)
-                            slide_texts: List[str] = []
-                            for idx, slide in enumerate(prs.slides, start=1):
-                                slide_parts: List[str] = []
-                                for shape in slide.shapes:
-                                    if hasattr(shape, "text"):
-                                        txt = (shape.text or "").strip()
-                                        if txt:
-                                            slide_parts.append(txt)
-                                if slide_parts:
-                                    slide_texts.append(f"--- Slide {idx} ---\n" + "\n".join(slide_parts))
-                            content = "\n\n".join(slide_texts)
-                            if extract_images:                            
-                                from pptx.enum.shapes import MSO_SHAPE_TYPE
-                                for slide in prs.slides:
-                                    for shape in slide.shapes:
-                                        if shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
-                                            image_blob = shape.image.blob
-                                            images.append(base64.b64encode(image_blob).decode("utf-8"))
-                    except Exception as e:
-                        trace_exception(e)
-                        content = f"Error processing PPTX file: {e}"
-
-                elif extension == ".msg":
-                    if extract_msg is None:
-                        content = "Error: extract-msg library is not installed."
-                    else:
-                        try:
-                            with io.BytesIO(content_bytes) as bio:
-                                import tempfile, os
-                                with tempfile.NamedTemporaryFile(delete=False, suffix=".msg") as tf:
-                                    tf.write(bio.getvalue())
-                                    temp_path = tf.name
-                            try:
-                                msg = extract_msg.Message(temp_path)
-                                msg_sender = getattr(msg, "sender", None) or getattr(msg, "from_", None) or ""
-                                msg_to = getattr(msg, "to", "") or ""
-                                msg_cc = getattr(msg, "cc", "") or ""
-                                msg_date = getattr(msg, "date", "")
-                                msg_subject = getattr(msg, "subject", "") or title
-                                msg_body = (getattr(msg, "body", "") or "").strip()
-                                html_body = getattr(msg, "htmlBody", None)
-                                if not msg_body and html_body:
-                                    try:
-                                        from bs4 import BeautifulSoup
-                                        msg_body = BeautifulSoup(html_body, "html.parser").get_text()
-                                    except Exception:
-                                        pass
-
-                                header_lines = []
-                                if msg_subject: header_lines.append(f"# {msg_subject}")
-                                meta = []
-                                if msg_sender: meta.append(f"From: {msg_sender}")
-                                if msg_to: meta.append(f"To: {msg_to}")
-                                if msg_cc: meta.append(f"CC: {msg_cc}")
-                                if msg_date: meta.append(f"Date: {msg_date}")
-                                if meta: header_lines.append("\n".join(meta))
-                                header = "\n\n".join(header_lines)
-
-                                attachment_text_parts: List[str] = []
-                                for att in msg.attachments:
-                                    att_name = getattr(att, "longFilename", None) or getattr(att, "shortFilename", None) or "attachment"
-                                    att_bytes = att.data or b""
-                                    att_ext = Path(att_name).suffix.lower()
-
-                                    if extract_images:
-                                        if att_ext in [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"]:
-                                            images.append(base64.b64encode(att_bytes).decode("utf-8"))
-                                            continue
-
-                                    try:
-                                        text_guess = att_bytes.decode("utf-8")
-                                    except UnicodeDecodeError:
-                                        try:
-                                            text_guess = att_bytes.decode("latin-1", errors="replace")
-                                        except Exception:
-                                            text_guess = ""
-
-                                    if att_ext in [".txt", ".md", ".py", ".json", ".csv", ".log", ".yaml", ".yml", ".xml", ".html", ".js", ".ts", ".css"]:
-                                        lang = {
-                                            ".md": "markdown", ".py": "python", ".json": "json", ".csv": "csv",
-                                            ".yaml": "yaml", ".yml": "yaml", ".xml": "xml", ".html": "html",
-                                            ".js": "javascript", ".ts": "typescript", ".css": "css"
-                                        }.get(att_ext, "")
-                                        fence = f"````{lang}\n{text_guess}\n````"
-                                        attachment_text_parts.append(f"### Attachment: {att_name}\n\n{fence}")
-                                    else:
-                                        attachment_text_parts.append(f"- Attachment: {att_name} ({len(att_bytes)} bytes)")
-
-                                attachments_md = "\n\n".join(attachment_text_parts)
-                                content = "\n\n".join([p for p in [header, msg_body, attachments_md] if p])
-
-                            finally:
-                                os.unlink(temp_path)
-                        except Exception as e:
-                            trace_exception(e)
-                            content = f"Error processing MSG file: {e}"
-
-                elif extension in CODE_EXTENSIONS:
-                    lang = CODE_EXTENSIONS[extension]
-                    text_content = content_bytes.decode('utf-8', errors='replace')
-                    content = f"````{lang}\n{text_content}\n````"
-                else:
-                    try:
-                        content = content_bytes.decode('utf-8')
-                    except UnicodeDecodeError:
-                        content = content_bytes.decode('latin-1', errors='replace')
-
-            # Determine type: Code stays code, everything else is a 'file' (custom registered type)
-            target_type = "code" if extension in ['.py', '.js', '.ts', '.html', '.css'] else "file"
-
-            # Check if an artefact with this title already exists in the discussion
-            existing_artefact = discussion.get_artefact(title=title)
-
-            if existing_artefact:
-                # Increment version
-                artefact_info = discussion.update_artefact(
-                    title,
-                    content,
-                    new_images=images,
-                    author=current_user.username,
-                    active=auto_load,
-                    artefact_type=target_type
-                )
-            else:
-                # Initial creation (Version 1)
-                artefact_info = discussion.add_artefact(
-                    title,
-                    content,
-                    images=images,
-                    author=current_user.username,
-                    active=auto_load,
-                    artefact_type=target_type
-                )
-            
             discussion.commit()
 
+            text_art = result.get("text_artefact")
+            img_art = result.get("image_artefact")
+
+            # Identify the primary artefact info to return
+            primary_art = text_art or img_art
+
+            if not primary_art:
+                 raise RuntimeError("Library failed to create any artefacts from the provided file.")
+
+            # Map for UI compatibility
+            mapped_info = _map_artefact_for_ui(primary_art, discussion_id)
+
             all_images_info = discussion.get_discussion_images()
-            
-            if isinstance(artefact_info.get('created_at'), datetime):
-                artefact_info['created_at'] = artefact_info['created_at'].isoformat()
-            if isinstance(artefact_info.get('updated_at'), datetime):
-                artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
 
             return {
-                "new_artefact_info": artefact_info,
+                "new_artefact_info": mapped_info,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }

@@ -163,6 +163,7 @@ function handleCreateNew() {
                          <button @click="triggerArtefactFileUpload('text_only')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
                          <button @click="triggerArtefactFileUpload('embedded_images')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
                          <button @click="triggerArtefactFileUpload('render_pages')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-pink-500" /> <span>Render Pages (For Scans)</span></button>
+                         <button @click="triggerArtefactFileUpload('ocr')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
                      </div>
                  </DropdownMenu>
                  <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 transition-colors" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
