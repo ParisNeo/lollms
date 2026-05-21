@@ -137,8 +137,8 @@ const formatDate = (iso) => new Date(iso).toLocaleString();
                                 <td class="px-4 py-3 text-right space-x-2">
                                     <button 
                                         @click="handleSquashToTarget(v.version)" 
-                                        class="p-1.5 rounded hover:bg-blue-50 dark:hover:bg-blue-900/30 text-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" 
-                                        title="Squash to this baseline"
+                                        class="p-1.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800 transition-all" 
+                                        title="Set as baseline (Delete others)"
                                     >
                                         <IconRefresh class="w-4 h-4" />
                                     </button>

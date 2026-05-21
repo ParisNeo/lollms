@@ -495,6 +495,10 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         importGithubArtefact,
         importStackOverflowArtefact,
         importYoutubeTranscript,
-        importSourceToArtefacts
+        importSourceToArtefacts,
+        // --- Added Version Management Exports ---
+        fetchArtefactHistory,
+        squashArtefactVersions,
+        deleteArtefactVersion
     };
 }

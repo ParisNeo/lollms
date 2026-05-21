@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-21 01:46]
+
+- build(frontend): regenerate dist assets after source changes
+
 ## [2026-05-21 01:20]
 
 - feat(artefacts): add StackOverflow import support and optimize WebSocket payloads
