@@ -238,3 +238,4 @@ In friends create groups
 
 Allow collaboration on notes.
 A note must be versionnable.
+make sure to add a new option in the user context and in the chat input ui along with the user database, the user model and the router for deactivating the artefact
