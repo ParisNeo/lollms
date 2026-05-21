@@ -70,6 +70,7 @@ const SystemLogModal = defineAsyncComponent(() => import('./SystemLogModal.vue')
 const ScrapeUrlModal = defineAsyncComponent(() => import('./ScrapeUrlModal.vue'));
 const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactImportWizardModal.vue'));
 const RenameArtefactModal = defineAsyncComponent(() => import('./RenameArtefactModal.vue'));
+const ArtefactVersionManagerModal = defineAsyncComponent(() => import('./ArtefactVersionManagerModal.vue'));
 // Registered the NotebookWizardModal here
 const NotebookWizardModal = defineAsyncComponent(() => import('./NotebookWizardModal.vue'));
 const AdminCreateUserModal = defineAsyncComponent(() => import('./AdminCreateUserModal.vue'));
@@ -145,6 +146,7 @@ const EmailNotesModal = defineAsyncComponent(() => import('./EmailNotesModal.vue
     <ScrapeUrlModal v-if="activeModal === 'scrapeUrl'" />
     <ArtefactImportWizardModal v-if="activeModal === 'artefactImportWizard'" />
     <RenameArtefactModal v-if="activeModal === 'renameArtefact'" />
+    <ArtefactVersionManagerModal v-if="activeModal === 'artefactVersionManager'" />
     <!-- Added the modal here -->
     <NotebookWizardModal v-if="activeModal === 'notebookWizard'" />
     <AdminCreateUserModal v-if="activeModal === 'adminCreateUser'" />

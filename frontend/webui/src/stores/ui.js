@@ -9,6 +9,7 @@ export const useUiStore = defineStore('ui', {
     modalProps: {},
     notifications: [],
     currentTheme: localStorage.getItem('lollms-theme') || 'light',
+    currentVibe: localStorage.getItem('lollms-vibe') || 'default',
     currentLanguage: localStorage.getItem('lollms-language') || 'en',
     message_font_size: 14,
     imageViewer: {
@@ -191,12 +192,29 @@ export const useUiStore = defineStore('ui', {
         document.documentElement.classList.toggle('dark', theme === 'dark');
     },
 
+    setVibe(vibe) {
+        // Clean all vibe classes from the root HTML element
+        const root = document.documentElement;
+        const vibeClasses = Array.from(root.classList).filter(c => c.startsWith('vibe-'));
+        vibeClasses.forEach(c => root.classList.remove(c));
+
+        this.currentVibe = vibe;
+        localStorage.setItem('lollms-vibe', vibe);
+
+        if (vibe && vibe !== 'default') {
+            root.classList.add(`vibe-${vibe}`);
+        }
+
+        console.log(`[UI] Vibe applied: ${vibe || 'default'}. Active classes:`, root.className);
+    },
+
     toggleTheme() {
         this.setTheme(this.currentTheme === 'light' ? 'dark' : 'light');
     },
-    
+
     initializeTheme() {
         this.setTheme(this.currentTheme);
+        this.setVibe(this.currentVibe);
     },
 
     setLanguage(langCode) {

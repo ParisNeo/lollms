@@ -87,7 +87,7 @@ async function handlePaste(event) {
 
         <div class="flex-1 flex flex-row h-full overflow-hidden relative">
             <!-- Main Chat Area -->
-            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r border-gray-100 dark:border-gray-800 transition-all duration-300"
+            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r border-border-main transition-all duration-300"
                  :class="{ 'border-r-0': isDataZoneVisible }">
                 
                 <!-- Editorial Loading State -->

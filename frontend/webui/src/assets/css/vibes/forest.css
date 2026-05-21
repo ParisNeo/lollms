@@ -1,0 +1,19 @@
+/* Forest Vibe */
+.vibe-forest {
+  --brand-primary: #10b981;
+  --brand-primary-hover: #059669;
+  --brand-accent: #84cc16;
+  --brand-bg-app: #f0fdf4;
+  --brand-bg-card: #ffffff;
+  --brand-border-main: #dcfce7;
+  --brand-text-main: #064e3b;
+  --brand-text-dim: #059669;
+}
+
+.dark.vibe-forest {
+  --brand-bg-app: #022c22;
+  --brand-bg-card: #064e3b;
+  --brand-border-main: #065f46;
+  --brand-text-main: #ecfdf5;
+  --brand-text-dim: #34d399;
+}

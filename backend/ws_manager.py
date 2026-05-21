@@ -284,15 +284,21 @@ class ConnectionManager:
             # with large objects via WebSockets during high-frequency updates.
             if payload_size > 1048576: 
                 msg_type = message_data.get("type", "unknown")
-                # Extract diagnostics to help developers find the source of the bloat
-                bloated_fields = []
+
+                # EMERGENCY STRIP: If the payload is too big, try to strip images before dropping
                 if "data" in message_data and isinstance(message_data["data"], dict):
-                    for k, v in message_data["data"].items():
-                        s = len(json.dumps(v))
-                        if s > 102400: # 100KB
-                            bloated_fields.append(f"{k}: {s//1024}KB")
-                
-                ASCIIColors.warning(f"⚠️  DROPPED PAYLOAD [{msg_type}]: {payload_size//1024}KB. Bloat: {', '.join(bloated_fields)}")
+                    # Look for common image keys and nullify them to save the text part
+                    for key in ["image_references", "images", "discussion_images"]:
+                        if key in message_data["data"]:
+                            message_data["data"][key] = []
+
+                    # Re-calculate size after stripping images
+                    new_payload_json = json.dumps(message_data)
+                    if len(new_payload_json) < 1048576:
+                        ASCIIColors.warning(f"✂️  STRIPPED IMAGES from [{msg_type}] to fit quota.")
+                        return self.broadcast_sync(message_data)
+
+                ASCIIColors.warning(f"⚠️  DROPPED PAYLOAD [{msg_type}]: {payload_size//1024}KB. Size exceeds browser write limits.")
                 return # DROP THE MESSAGE
         except Exception:
             # If we can't even JSON encode it, it's definitely too dangerous to send

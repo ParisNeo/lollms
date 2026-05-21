@@ -554,7 +554,7 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Books: Use <artifact type="book" title="Title">...</artifact> using semantic HTML5.'
         });
     }
-    if (user.value && user.value.inline_widgets_enabled !== false) {
+    if (user.value && user.value.inline_widgets_enabled === true) {
         features.push({ 
             id: 'widgets', 
             icon: IconCpuChip, 
@@ -765,10 +765,9 @@ async function handleSendMessage() {
     if (generationInProgress.value) return;
     const text = messageText.value.trim();
     if (!text && attachedFiles.value.length === 0 && stagedImages.value.length === 0) return;
-    
-    // Reset editor mode and height after sending
-    isAdvancedEditor.value = false;
-    if (textareaRef.value) textareaRef.value.style.height = 'auto';
+
+    // Reset height after sending
+    if (textareaRef.value) textareaRef.value.style.height = '42px';
     const imagesToUpload = stagedImages.value.map(item => item.file);
     const localPreviews = stagedImages.value.map(item => item.previewUrl);
     messageText.value = '';
@@ -777,62 +776,28 @@ async function handleSendMessage() {
     try { await discussionsStore.sendMessage({ prompt: text, image_server_paths: [], localImageUrls: localPreviews, image_files: imagesToUpload, webSearchEnabled: isWebSearchActive.value }); } catch(err) { console.error("SendMessage failed:", err); uiStore.addNotification('Failed to send message.', 'error'); messageText.value = text; imagesToUpload.forEach((file, i) => { stagedImages.value.push({ file, previewUrl: localPreviews[i] }); }); }
 }
 
-async function handleKeyDown(event) { 
+function handleKeyDown(event) { 
     if (event.key === 'Enter') {
-        if (event.shiftKey) {
-            // Shift+Enter triggers Advanced Editor
-            event.preventDefault();
-            
-            // Add the newline manually before switching modes
-            const cursorPos = event.target.selectionStart;
-            const textBefore = messageText.value.substring(0, cursorPos);
-            const textAfter = messageText.value.substring(event.target.selectionEnd);
-            messageText.value = textBefore + '\n' + textAfter;
-            
-            isAdvancedEditor.value = true;
-            
-            // We use nextTick to wait for CodeMirror to mount, then focus it
-            await nextTick();
-            textareaRef.value?.focus();
-        } else {
-            // Regular Enter sends message
+        if (!event.shiftKey) {
+            // Regular Enter = Validate/Send
             event.preventDefault();
             handleSendMessage();
         }
+        // Shift+Enter falls through to native behavior (New Line)
     }
 }
 
 const adjustTextareaHeight = () => {
     const el = textareaRef.value;
     if (el) {
+        // Reset height to calculate true scrollHeight
         el.style.height = 'auto';
-        el.style.height = (el.scrollHeight) + 'px';
+
+        // Cap growth at a reasonable height (e.g., 300px)
+        const newHeight = Math.min(el.scrollHeight, 300);
+        el.style.height = newHeight + 'px';
     }
 };
-
-const advancedEditorExtensions = computed(() => {
-    return [
-        keymap.of([{
-            key: "Enter",
-            run: () => {
-                handleSendMessage();
-                return true;
-            }
-        }, {
-            key: "Shift-Enter",
-            run: (view) => {
-                // Allow new lines with Shift+Enter in advanced mode
-                return false; 
-            }
-        }, {
-            key: "Escape",
-            run: () => {
-                isAdvancedEditor.value = false;
-                return true;
-            }
-        }])
-    ];
-});
 async function fetchInputTokenCount(text) { if (!text.trim()) { inputTokenCount.value = 0; return; } try { const response = await apiClient.post('/api/discussions/tokenize', { text }); inputTokenCount.value = response.data.tokens; } catch (error) {} }
 function handleStopGeneration() { discussionsStore.stopGeneration(); }
 
@@ -1308,38 +1273,21 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
                 </div>
 
-                <div class="grow min-w-0 relative flex flex-col">
+                <div class="grow min-w-0 relative flex items-center">
                     <!-- Standard Auto-Growing Textarea -->
                     <textarea 
-                        v-if="!isAdvancedEditor"
                         ref="textareaRef"
                         v-model="messageText" 
                         @keydown="handleKeyDown" 
                         @input="adjustTextareaHeight"
                         @paste="handlePaste" 
                         rows="1" 
-                        class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-64 overflow-y-auto text-sm leading-relaxed transition-all duration-100" 
+                        class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-80 overflow-y-auto text-sm leading-relaxed transition-all duration-100 min-h-[42px]" 
                         :class="{ 'opacity-0 pointer-events-none': generationInProgress }"
-                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message... (Shift+Enter for Advanced Editor)'" 
+                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message... (Shift+Enter for new line)'" 
                     ></textarea>
 
-                    <!-- Advanced Editor (CodeMirror) -->
-                    <div v-else class="w-full border-b dark:border-gray-700 animate-in fade-in zoom-in-95 duration-200">
-                        <div class="flex items-center justify-between px-3 py-1 bg-gray-100 dark:bg-gray-800 text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                            <span>Advanced Editor</span>
-                            <button @click="isAdvancedEditor = false" class="hover:text-red-500">Close</button>
-                        </div>
-                        <CodeMirrorEditor 
-                            v-model="messageText"
-                            :autofocus="true"
-                            :isChatMode="true"
-                            @submit="handleSendMessage"
-                            editorClass="max-h-96 min-h-[120px]"
-                            placeholder="Type your structured content... (Enter to send, Shift+Enter for new line)"
-                        />
-                    </div>
-                    
-                    <div v-if="generationInProgress || currentActiveTask || isUploading" class="absolute inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none">
+                    <div v-if="generationInProgress || currentActiveTask || isUploading" class="absolute inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none rounded-xl">
                          <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500 shrink-0" /> 
                          <span v-if="isUploading" class="truncate">{{ uploadingMessage }}</span>
                          <span v-else-if="currentActiveTask">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>

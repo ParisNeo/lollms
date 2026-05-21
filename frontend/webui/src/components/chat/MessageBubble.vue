@@ -735,8 +735,8 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
         <div class="system-bubble" v-html="parsedMarkdown(message.content)"></div>
     </div>
     <div v-else class="message-row group" :class="{
-        'bg-white dark:bg-slate-800': isAi || isOtherUser,
-        'border-t border-gray-200 dark:border-gray-700/50': isAi || isOtherUser
+        'bg-white dark:bg-gray-900/40': isAi || isOtherUser,
+        'border-t border-gray-200 dark:border-gray-800/50': isAi || isOtherUser
     }">
         <div class="message-content-container">
             <!-- Avatar -->
@@ -1136,10 +1136,10 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
 @reference "@/assets/css/main.css";
 
 .message-prose {
-    @apply prose prose-base dark:prose-invert max-w-none break-words;
+    @apply prose prose-lg dark:prose-invert max-w-none break-words;
     font-family: Georgia, serif;
-    font-size: var(--message-font-size, 1.05rem);
-    line-height: 1.65;
+    font-size: var(--message-font-size, 1.2rem);
+    line-height: 1.7;
 }
 
 .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }

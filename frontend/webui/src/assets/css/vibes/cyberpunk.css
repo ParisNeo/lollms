@@ -1,0 +1,11 @@
+/* Cyberpunk Vibe */
+.vibe-cyberpunk {
+  --brand-primary: #f0abfc;
+  --brand-primary-hover: #e879f9;
+  --brand-accent: #22d3ee;
+  --brand-bg-app: #020617;
+  --brand-bg-card: #000000;
+  --brand-border-main: #f0abfc44;
+  --brand-text-main: #f0abfc;
+  --brand-text-dim: #22d3ee;
+}

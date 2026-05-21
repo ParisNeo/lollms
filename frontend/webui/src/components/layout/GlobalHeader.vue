@@ -8,10 +8,10 @@ import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useSocialStore } from '../../stores/social';
 
-import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
+import DropdownSubmenu from '../ui/DropDownMenu/DropdownSubmenu.vue';
 import TasksManagerButton from './TasksManagerButton.vue';
 import NotificationBell from '../ui/NotificationBell.vue';
-import ThemeToggle from '../ui/ThemeToggle.vue';
+import ThemeSelector from '../ui/ThemeSelector.vue';
 import UserInfo from './UserInfo.vue';
 import logoDefault from '../../assets/logo.png';
 
@@ -44,7 +44,6 @@ const wsConnected = computed(() => authStore.wsConnected);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
 const pageTitle = computed(() => uiStore.pageTitle);
 const pageTitleIcon = computed(() => uiStore.pageTitleIcon);
-const mainView = computed(() => uiStore.mainView);
 const unreadDmCount = computed(() => socialStore.totalUnreadDms);
 
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
@@ -110,7 +109,6 @@ const sttModelSearchTerm = ref('');
 const activePersonalityId = computed({ get: () => user.value?.active_personality_id, set: (id) => authStore.updateUserPreferences({ active_personality_id: id }) });
 const activeModelName = computed({ get: () => user.value?.lollms_model_name, set: (name) => authStore.updateUserPreferences({ lollms_model_name: name }) });
 const activeTtiModelName = computed({ get: () => user.value?.tti_binding_model_name, set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name }) });
-const activeItiModelName = computed({ get: () => user.value?.iti_binding_model_name, set: (name) => authStore.updateUserPreferences({ iti_binding_model_name: name }) });
 const activeTtsModelName = computed({ get: () => user.value?.tts_binding_model_name, set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name }) });
 const activeSttModelName = computed({ get: () => user.value?.stt_binding_model_name, set: (name) => authStore.updateUserPreferences({ stt_binding_model_name: name }) });
 
@@ -124,10 +122,6 @@ const formattedAvailableSttModels = computed(() => dataStore.availableSttModelsG
 // Selected Items
 const selectedModel = computed(() => formattedAvailableModels.value.flatMap(g => g.items).find(m => m.id === activeModelName.value));
 const selectedPersonality = computed(() => availablePersonalities.value.flatMap(g => g.items).find(p => p.id === activePersonalityId.value));
-const selectedTtiModel = computed(() => formattedAvailableTtiModels.value.flatMap(g => g.items).find(m => m.id === activeTtiModelName.value));
-const selectedItiModel = computed(() => formattedAvailableTtiModels.value.flatMap(g => g.items).find(m => m.id === activeItiModelName.value));
-const selectedTtsModel = computed(() => formattedAvailableTtsModels.value.flatMap(g => g.items).find(m => m.id === activeTtsModelName.value));
-const selectedSttModel = computed(() => formattedAvailableSttModels.value.flatMap(g => g.items).find(m => m.id === activeSttModelName.value));
 
 // Filtering Logic
 const filteredAvailableModels = computed(() => modelSearchTerm.value ? formattedAvailableModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(modelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableModels.value);
@@ -154,14 +148,14 @@ async function handleRefreshModels() {
 </script>
 
 <template>
-  <header class="shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 h-14 flex items-center justify-between px-3 sm:px-4 z-[50] relative shadow-sm">
+  <header class="shrink-0 bg-bg-card border-b border-border-main h-14 flex items-center justify-between px-3 sm:px-4 z-[50] relative shadow-sm transition-colors duration-500">
     
     <!-- Left: Logo & Sidebar Toggle & Model Selector -->
     <div class="flex items-center gap-2 sm:gap-4 min-w-0">
         <!-- Logo / Home Link -->
         <router-link to="/" class="flex items-center gap-2 shrink-0 group">
              <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
-             <span class="hidden md:inline font-black text-lg tracking-tighter text-blue-600 dark:text-blue-400">LoLLMs</span>
+             <span class="hidden md:inline font-black text-lg tracking-tighter text-primary">LoLLMs</span>
         </router-link>
 
         <!-- Sidebar Toggle -->
@@ -181,13 +175,11 @@ async function handleRefreshModels() {
                 <div class="w-8 h-8 rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700 shrink-0 border border-gray-300 dark:border-gray-600 shadow-sm relative">
                      <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="w-full h-full object-cover" />
                      <IconUserCircle v-else class="w-full h-full p-1 text-gray-500" />
-                     <!-- Tiny Model Icon Overlay -->
                      <div class="absolute bottom-0 right-0 bg-white dark:bg-gray-800 rounded-full p-0.5 border border-gray-300 dark:border-gray-600">
-                         <IconCpuChip class="w-2.5 h-2.5 text-blue-500" />
+                         <IconCpuChip class="w-2.5 h-2.5 text-primary" />
                      </div>
                 </div>
                 
-                <!-- Text Info -->
                 <div class="hidden lg:flex flex-col items-start text-xs leading-tight">
                     <span class="font-bold text-gray-800 dark:text-gray-100 max-w-[140px] truncate" :title="selectedModel?.name || 'No Model'">{{ selectedModel?.name || 'Select Model' }}</span>
                     <span class="text-gray-500 dark:text-gray-400 max-w-[140px] truncate text-[10px]" :title="selectedPersonality?.name">{{ selectedPersonality?.name || 'Default' }}</span>
@@ -213,11 +205,11 @@ async function handleRefreshModels() {
                         class="z-[60] w-72 origin-top-left rounded-lg bg-white dark:bg-gray-800 shadow-xl ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1 flex flex-col max-h-[85vh] border dark:border-gray-700"
                     >
                          <button @click="handleRefreshModels" class="menu-item flex items-center gap-3 border-b dark:border-gray-700 mb-1 py-3 px-4 hover:bg-gray-50 dark:hover:bg-gray-700" :disabled="isRefreshingModels">
-                            <IconRefresh class="h-4 w-4 text-blue-500" :class="{'animate-spin': isRefreshingModels}" />
+                            <IconRefresh class="h-4 w-4 text-primary" :class="{'animate-spin': isRefreshingModels}" />
                             <span class="font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300">Refresh Models</span>
                          </button>
 
-                         <DropdownSubmenu title="LLM Model" icon="cpu-chip" :icon-src="selectedModel?.alias?.icon">
+                         <DropdownSubmenu title="LLM Model" icon="cpu-chip">
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full"></div>
                             <div class="p-1 grow overflow-y-auto max-h-96">
                                 <button @click="selectModel(null)" class="menu-item-button" :class="{'selected': !activeModelName}"><span class="truncate">None</span></button>
@@ -228,13 +220,6 @@ async function handleRefreshModels() {
                                             <span class="truncate pr-2">{{ item.name }}</span>
                                             <div class="flex items-center gap-1.5 shrink-0">
                                                 <IconEye v-if="item.alias?.has_vision" class="w-3.5 h-3.5 text-green-500" title="Vision Support" />
-                                                <button 
-                                                    @click.stop="uiStore.openModal('modelCard', { model: item })" 
-                                                    class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-400 hover:text-blue-500 transition-colors"
-                                                    title="Model Information"
-                                                >
-                                                    <IconInfo class="w-3.5 h-3.5" />
-                                                </button>
                                             </div>
                                         </button>
                                     </div>
@@ -242,7 +227,7 @@ async function handleRefreshModels() {
                             </div>
                          </DropdownSubmenu>
                          
-                         <DropdownSubmenu title="Personality" icon="user-circle" :icon-src="selectedPersonality?.icon_base64">
+                         <DropdownSubmenu title="Personality" icon="user-circle">
                             <div class="flex flex-col sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <router-link to="/personality-studio" @click="closeMenu" class="flex items-center gap-3 py-2.5 px-4 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-orange-600 transition-colors border-b dark:border-gray-700">
                                     <IconPencil class="w-4 h-4" />
@@ -267,41 +252,23 @@ async function handleRefreshModels() {
                                 </div>
                             </div>
                          </DropdownSubmenu>
-
-                         <div class="border-t dark:border-gray-700 my-1"></div>
-                         <DropdownSubmenu v-if="!user.tti_model_forced" title="Image Generation" icon="photo" :icon-src="selectedTtiModel?.alias?.icon">
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
-                            <div class="p-1 grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtiModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtiModel(item.id)" class="menu-item-button" :class="{'selected': activeTtiModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
-                         </DropdownSubmenu>
-                         <DropdownSubmenu v-if="!user.tts_model_forced" title="Text-to-Speech" icon="microphone" :icon-src="selectedTtsModel?.alias?.icon">
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
-                            <div class="p-1 grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableTtsModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectTtsModel(item.id)" class="menu-item-button" :class="{'selected': activeTtsModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
-                         </DropdownSubmenu>
-                         <DropdownSubmenu v-if="!user.stt_model_forced" title="Speech-to-Text" icon="microphone" :icon-src="selectedSttModel?.alias?.icon">
-                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
-                            <div class="p-1 grow overflow-y-auto max-h-80"><div v-for="group in filteredAvailableSttModels" :key="group.label"><h4 class="px-2 py-1 text-xs font-bold text-gray-500">{{ group.label }}</h4><button v-for="item in group.items" :key="item.id" @click="selectSttModel(item.id)" class="menu-item-button" :class="{'selected': activeSttModelName === item.id}"><span class="truncate">{{ item.name }}</span></button></div></div>
-                         </DropdownSubmenu>
                      </div>
                 </Transition>
              </Teleport>
         </div>
     </div>
 
-    <!-- Center: Dynamic Title / Context Area (Portal) -->
+    <!-- Center: Dynamic Portal -->
     <div class="flex-1 flex justify-center min-w-0 px-2 lg:px-6 h-full relative">
-        <!-- 1. Try to render portal content (Views can push custom controls here) -->
         <div id="global-header-title-target" class="w-full flex justify-center items-center h-full pointer-events-auto z-20"></div>
-        
-        <!-- 2. Fallback: Standard Page Title -->
         <div v-if="pageTitle" class="absolute pointer-events-none flex items-center gap-2 text-gray-600 dark:text-gray-300 font-semibold truncate">
             <component v-if="pageTitleIcon" :is="pageTitleIcon" class="w-5 h-5 opacity-70" />
             <span>{{ pageTitle }}</span>
         </div>
     </div>
 
-    <!-- Right: Actions, System Tools & User Profile -->
+    <!-- Right: Vibe Selector & Tools -->
     <div class="flex items-center gap-1 sm:gap-2 shrink-0">
-        <!-- Portal Target for View-Specific Actions -->
         <div id="global-header-actions-target" class="flex items-center gap-1 mr-1 sm:mr-3"></div>
         
         <div class="h-6 w-px bg-gray-200 dark:border-gray-700 mx-1 hidden sm:block"></div>
@@ -310,26 +277,22 @@ async function handleRefreshModels() {
         
         <NotificationBell v-if="user && user.user_ui_level >= 2" />
         
-        <ThemeToggle />
+        <!-- NEW THEME AND VIBE SELECTOR -->
+        <ThemeSelector />
         
-        <!-- Data Zone Toggle (Only in Chat) -->
         <button v-if="showDataZoneButton" @click="uiStore.toggleDataZone()" 
             class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors relative" 
-            :class="{'text-blue-600 bg-blue-50 dark:bg-blue-900/20': isDataZoneVisible, 'text-gray-500': !isDataZoneVisible}"
+            :class="{'text-primary bg-blue-50 dark:bg-blue-900/20': isDataZoneVisible, 'text-gray-500': !isDataZoneVisible}"
             title="Context Explorer"
         >
             <IconDataZone class="w-5 h-5" />
         </button>
         
-        <!-- Chat Sidebar Toggle -->
         <button v-if="user && user.chat_active" @click="uiStore.toggleChatSidebar()" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 relative transition-colors">
             <IconMessage class="w-5 h-5" />
             <span v-if="unreadDmCount > 0" class="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white dark:ring-gray-800"></span>
         </button>
 
-        <div class="h-6 w-px bg-gray-200 dark:border-gray-700 mx-1 hidden sm:block"></div>
-
-        <!-- NEW: User Menu integrated into Header -->
         <UserInfo />
     </div>
   </header>
@@ -337,10 +300,8 @@ async function handleRefreshModels() {
 
 <style scoped>
 @reference "tailwindcss";
-
+@reference "../../assets/css/main.css";
 .menu-item { @apply w-full text-left px-4 py-2.5 text-sm transition-colors hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer flex items-center; }
 .menu-item-button { @apply w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between gap-2 text-sm text-gray-700 dark:text-gray-200; }
-.menu-item-button.selected { @apply bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 font-medium; }
-.no-scrollbar::-webkit-scrollbar { display: none; }
-.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.menu-item-button.selected { @apply bg-blue-50 dark:bg-blue-900/30 text-primary font-medium; }
 </style>

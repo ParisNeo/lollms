@@ -362,6 +362,27 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
+    async function fetchArtefactHistory(discussionId, artefactTitle) {
+        const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        const response = await apiClient.get(`/api/discussions/${discussionId}/artefacts/${encoded}/history`);
+        return response.data;
+    }
+
+    async function squashArtefactVersions({ discussionId, artefactTitle, params }) {
+        const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/${encoded}/squash`, params);
+        await fetchArtefacts(discussionId);
+        uiStore.addNotification(`History squashed. Reclaimed space.`, 'success');
+        return response.data;
+    }
+
+    async function deleteArtefactVersion({ discussionId, artefactTitle, version }) {
+        const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        await apiClient.delete(`/api/discussions/${discussionId}/artefacts/${encoded}/version/${version}`);
+        await fetchArtefacts(discussionId);
+        uiStore.addNotification(`Version ${version} deleted.`, 'success');
+    }
+
     // NEW: Functions to bridge global notes/skills to the versioned artefact system
     async function addNoteAsArtefact(note) {
         if (!currentDiscussionId.value) return;

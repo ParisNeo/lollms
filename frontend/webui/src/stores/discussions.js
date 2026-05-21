@@ -1,8 +1,11 @@
 import { defineStore, storeToRefs } from 'pinia';
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
-import apiClient from '../services/api'; // Import apiClient
+import apiClient from '../services/api'; 
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
+import { useDataStore } from './data';
+
+import { useTasksStore } from './tasks'; // [FIX] Added missing import
 import useEventBus from '../services/eventBus';
 
 // Import ALL composables
@@ -19,6 +22,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     // --- STORES ---
     const uiStore = useUiStore();
     const authStore = useAuthStore();
+    const dataStore = useDataStore();
+
+    // We resolve tasksStore here to ensure it's available for the watch and composables
+    const tasksStore = useTasksStore(); 
+
     const { user } = storeToRefs(authStore);
     const { tasks } = storeToRefs(tasksStore);
     const { on, off, emit } = useEventBus();

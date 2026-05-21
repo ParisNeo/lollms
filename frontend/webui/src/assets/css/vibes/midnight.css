@@ -1,0 +1,11 @@
+/* Midnight Vibe - High Contrast Dark Mode only */
+.vibe-midnight {
+  --brand-primary: #38bdf8;
+  --brand-primary-hover: #0ea5e9; 
+  --brand-accent: #818cf8;
+  --brand-bg-app: #020617;
+  --brand-bg-card: #0f172a;
+  --brand-border-main: #1e293b;
+  --brand-text-main: #f1f5f9;
+  --brand-text-dim: #94a3b8;
+}

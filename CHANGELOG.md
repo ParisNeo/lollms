@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-21 01:20]
+
+- feat(artefacts): add StackOverflow import support and optimize WebSocket payloads
+
 ## [2026-05-18 21:15]
 
 - build(deps): bump lollms-client from 1.13.18 to 1.13.19

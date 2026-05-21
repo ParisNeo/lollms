@@ -577,13 +577,11 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function updateUserPreferences(preferences, notify = true) {
-        // 0. Robust Equality Guard: Prevent infinite loops and TypeErrors
+        // 0. Robust Equality Guard
         if (user.value) {
             let isActualChange = false;
             for (const [key, value] of Object.entries(preferences)) {
                 const currentVal = user.value[key];
-
-                // Deep comparison for Objects/Arrays
                 if (value !== null && typeof value === 'object') {
                     try {
                         if (JSON.stringify(currentVal) !== JSON.stringify(value)) {
@@ -592,7 +590,6 @@ export const useAuthStore = defineStore('auth', () => {
                         }
                     } catch (e) { isActualChange = true; break; }
                 } 
-                // Simple comparison for primitives
                 else if (currentVal !== value) {
                     isActualChange = true;
                     break;
@@ -601,47 +598,46 @@ export const useAuthStore = defineStore('auth', () => {
             if (!isActualChange) return;
         }
 
-        // --- Handle Personality Requirements ---
-        // Use the existing stores if already available, otherwise dynamic import
+        // --- Handle Personality Requirements & Context Safety ---
         const dataStore = (await import('./data')).useDataStore();
         const uiStore = useUiStore();
 
-        // Determine the personality we are evaluating (either the one we are switching to, or the current one)
-        const isChangingPersonality = preferences.active_personality_id !== undefined;
-        let targetId = isChangingPersonality ? preferences.active_personality_id : user.value?.active_personality_id;
+        // 1. Determine Intent: Are we selecting a NEW personality?
+        // Check for undefined AND null (explicit clear) vs just presence
+        const isExplicitlySettingPersonality = preferences.active_personality_id !== undefined;
+        const targetPersonalityId = isExplicitlySettingPersonality ? preferences.active_personality_id : user.value?.active_personality_id;
 
-        if (targetId) {
-            const personality = dataStore.getPersonalityById(targetId);
-            if (personality && personality.required_context_options && personality.required_context_options.length > 0) {
-
-                // SCENARIO: User is trying to disable a feature that the personality needs
-                // OR we are switching TO a personality that has requirements.
+        if (targetPersonalityId) {
+            const personality = dataStore.getPersonalityById(targetPersonalityId);
+            if (personality?.required_context_options?.length > 0) {
 
                 let hasViolations = false;
+
                 personality.required_context_options.forEach(opt => {
                     const key = optionToPrefKey(opt);
-                    if (key) {
-                        // If the user is explicitly trying to turn this OFF (false)
-                        if (preferences[key] === false) {
-                            hasViolations = true;
-                        } 
-                        // If we are just saving or switching personality, ensure the required features are ON
-                        else if (preferences[key] === undefined && !user.value[key]) {
-                            preferences[key] = true;
-                        }
+                    if (!key) return;
+
+                    // A. VIOLATION CHECK: User is actively turning a required feature OFF
+                    if (preferences[key] === false) {
+                        hasViolations = true;
+                    } 
+
+                    // B. REQUIREMENT FULFILLMENT: Only force features ON if we are ACTIVELY switching 
+                    //    to this personality for the first time.
+                    if (isExplicitlySettingPersonality && preferences[key] === undefined && !user.value[key]) {
+                        preferences[key] = true;
                     }
                 });
 
                 if (hasViolations) {
-                    // USER INTENT OVERRIDE: Clear the personality so the user can control their settings
+                    // User priority: They want the feature OFF. Revert to default personality.
                     preferences.active_personality_id = null;
-                    if (notify) uiStore.addNotification('Features manually changed: Reverting to default personality.', 'info');
+                    if (notify) uiStore.addNotification('Setting manually disabled: Reverting to default personality.', 'info');
                 }
             }
         }
-        // --- END NEW LOGIC ---
 
-        // 1. Optimistic Update (Moved here to prevent "blinking" UI states)
+        // 1. Optimistic Update
         if (user.value) {
             user.value = { ...user.value, ...preferences };
         }

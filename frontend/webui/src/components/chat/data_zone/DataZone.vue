@@ -73,17 +73,17 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="relative h-full flex shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 z-10 shadow-2xl transition-[width] duration-300" 
+    <div class="relative h-full flex shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 z-10 shadow-2xl transition-[width] duration-300" 
          :class="[isDataZoneExpanded ? 'absolute inset-0 w-full' : '']" 
          :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }">
-        
+
         <!-- Resizer Handle -->
         <div @mousedown.prevent="startResize" 
              class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize z-20 hover:bg-blue-500/30 transition-colors" 
              v-if="!isDataZoneExpanded"></div>
 
         <!-- Vertical Navigation Rail -->
-        <div class="w-14 shrink-0 border-r dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900 flex flex-col items-center py-4 gap-4">
+        <div class="w-14 shrink-0 border-r dark:border-gray-800 bg-gray-50/50 dark:bg-black flex flex-col items-center py-4 gap-4">
             <button @click="activeTab = 'context'" 
                     class="p-2.5 rounded-xl transition-all relative group"
                     :class="activeTab === 'context' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'">

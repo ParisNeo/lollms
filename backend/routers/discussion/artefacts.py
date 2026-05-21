@@ -97,13 +97,18 @@ class StackOverflowImportRequest(BaseModel):
 
 class StackOverflowSearchRequest(BaseModel):
     query: str
-class StackOverflowImportRequest(BaseModel):
-    video_url: str
-    language: str = "en"
-    auto_load: bool = True
 
 class ArtefactRenameRequest(BaseModel):
     new_title: str
+
+class ArtefactSquashRequest(BaseModel):
+    keep_versions: Optional[List[int]] = None
+    keep_last_n: Optional[int] = None
+    target_version: Optional[int] = None
+
+class ArtefactCleanupRequest(BaseModel):
+    keep_count: int = 5
+    min_age_hours: Optional[float] = None
 
 class AudioExportRequest(BaseModel):
     title: str
@@ -1120,6 +1125,70 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Revert failed: {e}")
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/history")
+    async def get_artefact_history(
+        discussion_id: str,
+        artefact_title: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        history = discussion.artefacts.get_version_history(unquote(artefact_title))
+        return history
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/squash")
+    async def squash_artefact_versions(
+        discussion_id: str,
+        artefact_title: str,
+        payload: ArtefactSquashRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            result = discussion.artefacts.squash_versions(
+                unquote(artefact_title),
+                keep_versions=payload.keep_versions,
+                keep_last_n=payload.keep_last_n,
+                target_version=payload.target_version
+            )
+            discussion.commit()
+            return result
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/cleanup")
+    async def cleanup_artefact_versions(
+        discussion_id: str,
+        artefact_title: str,
+        payload: ArtefactCleanupRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        result = discussion.artefacts.cleanup_old_versions(
+            unquote(artefact_title),
+            keep_count=payload.keep_count,
+            min_age_hours=payload.min_age_hours
+        )
+        discussion.commit()
+        return result
+
+    @router.delete("/{discussion_id}/artefacts/{artefact_title:path}/version/{version}")
+    async def delete_artefact_version(
+        discussion_id: str,
+        artefact_title: str,
+        version: int,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        removed = discussion.artefacts.remove(unquote(artefact_title), version=version)
+        if removed == 0:
+            raise HTTPException(status_code=404, detail="Version not found.")
+        discussion.commit()
+        return {"message": f"Version {version} deleted."}
 
     @router.post("/{discussion_id}/artefacts/load-all-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
     async def load_all_artefacts_to_data_zone(

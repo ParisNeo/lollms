@@ -1,0 +1,19 @@
+/* Lollms Indigo Vibe (Default) */
+:root {
+  --brand-primary: #2563eb;
+  --brand-primary-hover: #1d4ed8;
+  --brand-accent: #6366f1;
+  --brand-bg-app: #f9fafb;
+  --brand-bg-card: #ffffff;
+  --brand-border-main: #e5e7eb;
+  --brand-text-main: #111827;
+  --brand-text-dim: #6b7280;
+}
+
+.dark {
+  --brand-bg-app: #000000;
+  --brand-bg-card: #0a0a0a;
+  --brand-border-main: #1f2937;
+  --brand-text-main: #f9fafb;
+  --brand-text-dim: #9ca3af;
+}

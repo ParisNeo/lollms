@@ -10,6 +10,7 @@ import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
+import IconClock from '../../assets/icons/IconClock.vue';
 import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconMinimize from '../../assets/icons/IconMinimize.vue';
@@ -480,8 +481,14 @@ function download() {
                 </select>
             </div>
 
+            <button @click="uiStore.openModal('artefactVersionManager', { artefactTitle: title })" 
+                    class="btn btn-secondary btn-xs h-8" title="Manage Version History (Delete/Squash)">
+                <IconClock class="w-3.5 h-3.5 mr-1" />
+                History
+            </button>
+
             <button @click="handleUndo" :disabled="artefactGroup?.versions.length < 2 || isSaving" 
-                    class="btn btn-secondary btn-xs h-8" title="Restore previous version">
+                    class="btn btn-secondary btn-xs h-8" title="Quick Undo">
                 <IconArrowPath class="w-3.5 h-3.5 mr-1" />
                 Undo
             </button>
@@ -550,7 +557,13 @@ function download() {
                     <IconSparkles class="w-4 h-4 mr-3 text-emerald-500" />
                     <span>Convert to AI Skill</span>
                 </button>
-            </DropdownMenu>
+
+                <div class="menu-divider"></div>
+                <button @click="uiStore.openModal('artefactVersionManager', { artefactTitle: title })" class="menu-item text-blue-500 font-bold">
+                    <IconScissors class="w-4 h-4 mr-3" />
+                    <span>Manage Versions...</span>
+                </button>
+                </DropdownMenu>
 
             <!-- Primary Action Button -->
             <div class="flex gap-1">
