@@ -1,3 +1,4 @@
+<!-- [UPDATE] frontend/webui/src/components/chat/MessageBubble.vue -->
 <script setup>
 import { computed, ref, onMounted, watch, markRaw, nextTick } from 'vue';
 import { marked } from 'marked';
@@ -582,25 +583,31 @@ const groupedEvents = computed(() => {
     return result;
 });
 
-function getEventIcon(type) {
-  const lowerType = type?.toLowerCase() || 'default';
-  if (eventIconMap[lowerType]) return eventIconMap[lowerType];
-  const key = Object.keys(eventIconMap).find(k => k !== 'default' && lowerType.includes(k));
-  return eventIconMap[key || 'default'];
-}
-
 const branchInfo = computed(() => {
     const hasMultipleBranches = props.message.branches && props.message.branches.length > 1;
-    if (!hasMultipleBranches || props.message.sender_type !== 'user') return null;
-    const currentMessages = discussionsStore.activeMessages;
-    const currentMessageIndex = currentMessages.findIndex(m => m.id === props.message.id);
-    const nextMessage = currentMessages[currentMessageIndex + 1];
+    if (!hasMultipleBranches) return null;
+    
     let activeBranchIndex = -1;
-    if (nextMessage && nextMessage.parent_message_id === props.message.id) {
-        activeBranchIndex = props.message.branches.findIndex(id => id === nextMessage.id);
+    if (props.message.sender_type === 'user') {
+        const currentMessages = discussionsStore.activeMessages;
+        const currentMessageIndex = currentMessages.findIndex(m => m.id === props.message.id);
+        const nextMessage = currentMessages[currentMessageIndex + 1];
+        if (nextMessage && nextMessage.parent_message_id === props.message.id) {
+            activeBranchIndex = props.message.branches.findIndex(id => id === nextMessage.id);
+        }
+    } else {
+        // For assistant messages, we find our own message id in the sibling list
+        activeBranchIndex = props.message.branches.findIndex(id => id === props.message.id);
     }
+    
     if (activeBranchIndex === -1) activeBranchIndex = 0;
-    return { isBranchPoint: true, current: activeBranchIndex + 1, total: props.message.branches.length, branchIds: props.message.branches, currentIndex: activeBranchIndex };
+    return { 
+        isBranchPoint: true, 
+        current: activeBranchIndex + 1, 
+        total: props.message.branches.length, 
+        branchIds: props.message.branches, 
+        currentIndex: activeBranchIndex 
+    };
 });
 
 function navigateBranch(direction) {
@@ -1160,4 +1167,3 @@ details[open] > .document-summary { @apply border-b border-gray-200 dark:border-
 .events-details-container summary::-webkit-details-marker { display: none; }
 .step-card { @apply shadow-sm transition-all hover:shadow-md; }
 </style>
-

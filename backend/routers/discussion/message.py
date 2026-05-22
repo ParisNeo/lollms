@@ -28,7 +28,7 @@ from lollms_client import (LollmsClient, LollmsDiscussion, LollmsMessage,
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from ascii_colors import ASCIIColors, trace_exception
+from ascii_colors import trace_exception
 import markdown2
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
@@ -352,14 +352,14 @@ def build_message_router(router: APIRouter):
                 meta = msg_obj.metadata or {}
                 
                 # Update Infos
-                infos = meta.get("generated_image_infos", [])
-                infos.append({
+                type = meta.get("generated_image_infos", [])
+                type.append({
                     'index': new_index, 
                     'prompt': prompt,
                     'width': width,
                     'height': height
                 })
-                msg_obj.set_metadata_item("generated_image_infos", infos, discussion)
+                msg_obj.set_metadata_item("generated_image_infos", type, discussion)
                 
                 discussion.commit()
                 
@@ -479,11 +479,11 @@ def build_message_router(router: APIRouter):
             
             parent_id = message_to_delete.parent_id
             
-            discussion_obj.delete_branch(message_id)
+            discussion_obj.prune_branch(message_id)
             
             # After deleting, set the active branch to the parent of the deleted branch
             if parent_id:
-                discussion_obj.switch_to_branch(parent_id)
+                discussion_obj.switch_branch(parent_id)
             else:
                 discussion_obj.active_branch_id = None
 

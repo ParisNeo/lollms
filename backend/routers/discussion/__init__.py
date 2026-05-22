@@ -15,7 +15,7 @@ import fitz  # PyMuPDF
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, HTTPException, Query)
 from sqlalchemy.orm import Session
-from ascii_colors import ASCIIColors, trace_exception
+from ascii_colors import trace_exception
 
 # Local Application Imports
 from backend.db import get_db
@@ -349,7 +349,7 @@ def build_discussions_router():
 
         # 5. Set the active branch to the end of the copied chain
         if last_new_message_id:
-            new_discussion.switch_to_branch(last_new_message_id)
+            new_discussion.switch_branch(last_new_message_id)
 
         # 6. Auto-title if needed
         db_user = db.query(DBUser).filter(DBUser.username == username).one_or_none()
@@ -489,7 +489,7 @@ def build_discussions_router():
                 try: msg_metadata = json.loads(msg_metadata_raw) if msg_metadata_raw else {}
                 except json.JSONDecodeError: msg_metadata = {}
             else:
-                msg_metadata = msg_metadata_raw or {}
+                msg_metadata = msg_obj.metadata or {}
 
 
             messages_output.append(
@@ -521,7 +521,7 @@ def build_discussions_router():
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
         try:
-            discussion_obj.switch_to_branch(branch_request.active_branch_id)
+            discussion_obj.switch_branch(branch_request.active_branch_id)
             discussion_obj.commit()
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))

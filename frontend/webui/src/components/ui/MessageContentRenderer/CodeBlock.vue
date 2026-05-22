@@ -280,8 +280,17 @@ async function executeCode() {
         } else if (lang === 'html') {
             // Give UI a tick to show the spinner on the button
             await new Promise(resolve => setTimeout(resolve, 50));
-            uiStore.openModal('interactiveOutput', { htmlContent: props.code, title: 'HTML Output' });
-            executionOutput.value = 'HTML content rendered in a modal canvas.';
+            try {
+                const blob = new Blob([props.code], { type: 'text/html' });
+                const url = URL.createObjectURL(blob);
+                window.open(url, '_blank');
+                // Clean up local reference in 60s
+                setTimeout(() => URL.revokeObjectURL(url), 60000);
+                executionOutput.value = 'HTML content rendered directly in a new tab.';
+            } catch (e) {
+                isError.value = true;
+                executionOutput.value = `Failed to launch HTML in new tab: ${e.message}`;
+            }
         } else if (lang === 'svg') {
             await new Promise(resolve => setTimeout(resolve, 50));
             const htmlContent = `
@@ -303,7 +312,7 @@ async function executeCode() {
 
                 const id = `mermaid-svg-${Date.now()}`;
                 
-                // [FIX] Rendering into a temporary DOM element helps browsers resolve 
+                // Rendering into a temporary DOM element helps browsers resolve 
                 // dynamic modules correctly in certain bundled environments.
                 const container = document.createElement('div');
                 container.style.position = 'absolute';
@@ -511,12 +520,12 @@ async function downloadCreatedFile(filename) {
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clip-rule="evenodd" /></svg>
                 <span>Upload</span>
             </button>
-          <button v-if="isGenerativeImage" @click="generateImage" class="code-action-btn" :disabled="isExecuting" title="Generate Image">
+          <button @click="generateImage" class="code-action-btn" :disabled="isExecuting" title="Generate Image" v-if="isGenerativeImage">
               <IconPhoto class="h-4 w-4" />
               <span>{{ isExecuting ? 'Generating...' : 'Generate' }}</span>
           </button>
           <!-- NOTE BUTTON -->
-          <button v-if="isNote" @click="saveNote" class="code-action-btn" title="Save as Note">
+          <button @click="saveNote" class="code-action-btn" title="Save as Note" v-if="isNote">
               <IconSave class="h-4 w-4" />
               <span>Save Note</span>
           </button>
