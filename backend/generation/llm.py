@@ -1722,7 +1722,8 @@ def build_llm_generation_router(router: APIRouter):
                             enable_skills=owner_db_user.skills_building_enabled,
                             enable_forms=owner_db_user.form_building_enabled,
                             enable_books=enable_books if enable_books is not None else owner_db_user.book_generation_enabled,
-                            enable_silent_artefact_explanation=True # Library handles explanation if only XML was emitted
+                            enable_silent_artefact_explanation=True, # Library handles explanation if only XML was emitted
+                            enable_artefacts=owner_db_user.artefacts_enabled
                             )
                     finally:
                         # Ensure discussion state is committed even on client disconnect/stop signal

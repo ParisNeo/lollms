@@ -250,7 +250,7 @@ def _bootstrap_lollms_user(connection):
                     default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status,
                     max_image_width, max_image_height,
                     slide_maker_enabled, activate_generated_images, compress_images, image_compression_quality,
-                    web_search_enabled, web_search_deep_analysis
+                    web_search_enabled, web_search_deep_analysis, artefacts_enabled
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
@@ -264,7 +264,7 @@ def _bootstrap_lollms_user(connection):
                     :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status,
                     -1, -1,
                     :slide_maker_enabled, :activate_generated_images, :compress_images, :image_compression_quality,
-                    :web_search_enabled, :web_search_deep_analysis
+                    :web_search_enabled, :web_search_deep_analysis, :artefacts_enabled
                 )
             """),
             {
@@ -304,7 +304,8 @@ def _bootstrap_lollms_user(connection):
                 "image_compression_quality": 85,
                 "web_search_enabled": False,
                 "web_search_providers": "JSON DEFAULT '[\"google\"]'", # NEW COLUMN
-                "web_search_deep_analysis": False
+                "web_search_deep_analysis": False,
+                "artefacts_enabled": True
             }
         )
         connection.commit()
@@ -618,6 +619,12 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.commit()
             except Exception: connection.rollback()
 
+        if 'artefacts_enabled' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN artefacts_enabled BOOLEAN DEFAULT 1 NOT NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
         if 'image_editing_enabled' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN image_editing_enabled BOOLEAN DEFAULT 0 NOT NULL"))
@@ -829,6 +836,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             "compress_images": "BOOLEAN DEFAULT 0 NOT NULL",
             "image_compression_quality": "INTEGER DEFAULT 85 NOT NULL",
             "rlm_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
+            "artefacts_enabled": "BOOLEAN DEFAULT 1 NOT NULL",
             "street_view_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "google_drive_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
             "google_calendar_enabled": "BOOLEAN DEFAULT 0 NOT NULL",
@@ -850,6 +858,10 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
              connection.execute(text("UPDATE users SET chat_active = 1 WHERE chat_active IS NULL"))
              connection.commit()
 
+        if 'artefacts_enabled' in added_cols:
+             connection.execute(text("UPDATE users SET artefacts_enabled = 1 WHERE artefacts_enabled IS NULL"))
+             connection.commit()
+             
         if 'discussion_sorting_mode' not in user_columns_db:
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN discussion_sorting_mode VARCHAR DEFAULT 'date' NOT NULL"))

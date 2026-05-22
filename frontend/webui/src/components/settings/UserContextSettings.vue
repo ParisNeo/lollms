@@ -55,6 +55,7 @@ const slideMakerEnabled = ref(false);
 const activateGeneratedImages = ref(false);
 const noteGenerationEnabled = ref(false);
 const bookGenerationEnabled = ref(false);
+const artefactsEnabled = ref(true);
 const memoryEnabled = ref(false);
 const autoMemoryEnabled = ref(false);
 const skillsLibraryEnabled = ref(false);
@@ -148,6 +149,7 @@ function populateForm() {
     activateGeneratedImages.value = !!(user.value.activate_generated_images ?? false);
     noteGenerationEnabled.value = !!(user.value.note_generation_enabled ?? false);
     bookGenerationEnabled.value = !!(user.value.book_generation_enabled ?? false);
+    artefactsEnabled.value = !!(user.value.artefacts_enabled ?? true);
     memoryEnabled.value = !!(user.value.memory_enabled ?? false);
     autoMemoryEnabled.value = !!(user.value.auto_memory_enabled ?? false);
     skillsLibraryEnabled.value = !!(user.value.skills_library_enabled ?? false);
@@ -208,6 +210,7 @@ watch([
     funMode, aiResponseLanguage, forceAiResponseLanguage, 
     imageGenerationEnabled, imageGenerationSystemPrompt, imageAnnotationEnabled, imageEditingEnabled, slideMakerEnabled, activateGeneratedImages, noteGenerationEnabled,
     bookGenerationEnabled,
+    artefactsEnabled,
     memoryEnabled, autoMemoryEnabled, skillsLibraryEnabled, skillsBuildingEnabled, formBuildingEnabled, 
     reasoningActivation, reasoningEffort, reasoningSummary, rlmEnabled, 
     maxImageWidth, maxImageHeight, compressImages, imageCompressionQuality,
@@ -262,6 +265,7 @@ async function handleSaveChanges() {
             activate_generated_images: activateGeneratedImages.value,
             note_generation_enabled: noteGenerationEnabled.value,
             book_generation_enabled: bookGenerationEnabled.value,
+            artefacts_enabled: artefactsEnabled.value,
             memory_enabled: memoryEnabled.value,
             auto_memory_enabled: autoMemoryEnabled.value,
             skills_library_enabled: skillsLibraryEnabled.value,
@@ -587,6 +591,7 @@ async function handleSaveChanges() {
                     <label class="feature-tag" :class="{'active': inlineWidgetsEnabled}" title="Build interactive widgets"><input type="checkbox" v-model="inlineWidgetsEnabled"><span>Widgets</span></label>
                     <label class="feature-tag" :class="{'active': noteGenerationEnabled}" title="Generate research notes"><input type="checkbox" v-model="noteGenerationEnabled"><span>Notes</span></label>
                     <label class="feature-tag" :class="{'active': bookGenerationEnabled}" title="Generate digital books"><input type="checkbox" v-model="bookGenerationEnabled"><span>Books</span></label>
+                    <label class="feature-tag" :class="{'active': artefactsEnabled}" title="Enable/Disable Artefact Generation"><input type="checkbox" v-model="artefactsEnabled"><span>Artefacts</span></label>
                     <label class="feature-tag" :class="{'active': skillsBuildingEnabled}" title="Save conversation as reusable skills"><input type="checkbox" v-model="skillsBuildingEnabled"><span>Skills</span></label>
                     <label class="feature-tag" :class="{'active': formBuildingEnabled}" title="Allow AI to create interactive forms"><input type="checkbox" v-model="formBuildingEnabled"><span>Forms</span></label>
                 </div>

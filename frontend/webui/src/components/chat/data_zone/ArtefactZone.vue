@@ -33,8 +33,9 @@ const isUploadingArtefact = ref(false);
 const uploadingMessage = ref('Processing files...');
 const isArtefactsCollapsed = ref(false);
 const artefactFileInput = ref(null);
+const bundleFileInput = ref(null);
 const isDraggingFile = ref(false);
-const currentUploadPdfMode = ref('text_and_embedded_images');
+const currentUploadPdfMode = ref('text_images');
 
 const idToUse = computed(() => props.notebookId || discussionsStore.activeDiscussion?.id);
 
@@ -82,6 +83,36 @@ function handleCreateArtefact() {
 function triggerArtefactFileUpload(mode = 'text_and_embedded_images') { 
     currentUploadPdfMode.value = mode;
     artefactFileInput.value?.click(); 
+}
+
+function triggerBundleImport() {
+    bundleFileInput.value?.click();
+}
+
+async function handleBundleImport(event) {
+    const file = event.target.files[0];
+    if (!file || !idToUse.value) return;
+    try {
+        const text = await file.text();
+        const bundle = JSON.parse(text);
+        if (!bundle.main_artefact) {
+            uiStore.addNotification('Invalid bundle file. Main artefact is missing.', 'error');
+            return;
+        }
+        isUploadingArtefact.value = true;
+        uploadingMessage.value = 'Importing complete artefact bundle...';
+        await discussionsStore.importArtefactBundle({
+            discussionId: idToUse.value,
+            bundle
+        });
+        uiStore.addNotification('Bundle imported successfully!', 'success');
+    } catch (e) {
+        console.error("Bundle import failed:", e);
+        uiStore.addNotification('Failed to parse or import the bundle.', 'error');
+    } finally {
+        isUploadingArtefact.value = false;
+        if (bundleFileInput.value) bundleFileInput.value.value = '';
+    }
 }
 
 function handleImportFromUrl() {
@@ -153,9 +184,10 @@ function handleCreateNew() {
 
 <template>
     <div @dragover.prevent="isDraggingFile = true" @dragleave.prevent="isDraggingFile = false" @drop.prevent="handleDrop" class="p-2 flex flex-col grow min-h-0 relative">
-        <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
-        
-        <!-- Drop Overlay -->
+    <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
+    <input type="file" ref="bundleFileInput" @change="handleBundleImport" accept=".json" class="hidden">
+
+    <!-- Drop Overlay -->
         <div v-if="isDraggingFile" class="absolute inset-0 bg-blue-500/10 border-2 border-dashed border-blue-500 rounded-lg z-50 flex items-center justify-center pointer-events-none">
             <p class="text-sm font-bold text-blue-600">Drop to Add</p>
         </div>
@@ -168,11 +200,11 @@ function handleCreateNew() {
             <div class="flex items-center gap-1">
                  <DropdownMenu icon="arrow-up-tray" title="Upload Files" buttonClass="p-1.5 hover:text-blue-500 transition-colors">
                      <div class="p-1 min-w-[220px]">
-                         <button @click="triggerArtefactFileUpload('text_and_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
-                         <button @click="triggerArtefactFileUpload('text_only')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
-                         <button @click="triggerArtefactFileUpload('embedded_images')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
-                         <button @click="triggerArtefactFileUpload('render_pages')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-pink-500" /> <span>Render Pages (For Scans)</span></button>
+                         <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
+                         <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
+                         <button @click="triggerArtefactFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
                          <button @click="triggerArtefactFileUpload('ocr')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
+                         <button @click="triggerBundleImport" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconRefresh class="w-4 h-4 mr-3 text-teal-500" /> <span>Import Bundle (.json)</span></button>
                      </div>
                  </DropdownMenu>
                  <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 transition-colors" title="Import from URL"><IconWeb class="w-4 h-4" /></button>

@@ -88,6 +88,9 @@ class User(Base):
     # Book Generation
     book_generation_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
 
+    # Artefacts Generation
+    artefacts_enabled = Column(Boolean, default=True, nullable=False, server_default='1')
+
     # Herd Mode Settings
     herd_mode_enabled = Column(Boolean, default=False, nullable=False, server_default='0')
     herd_participants = Column(JSON, nullable=True) # Legacy/Fallback list

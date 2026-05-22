@@ -18,15 +18,44 @@ const discussionId = computed(() => modalData.value?.discussionId || discussions
 const history = ref([]);
 const isLoading = ref(false);
 const isActionRunning = ref(false);
+const tagToRevert = ref('');
 
 async function loadHistory() {
     if (!artefactTitle.value) return;
     isLoading.value = true;
     try {
+        // Fetch rich commit log instead of basic history
+        history.value = await discussionsStore.fetchArtefactLog(discussionId.value, artefactTitle.value);
+    } catch (e) {
+        // Fallback to basic history if log method fails
         history.value = await discussionsStore.fetchArtefactHistory(discussionId.value, artefactTitle.value);
     } finally {
         isLoading.value = false;
     }
+}
+
+async function handleRevertToTag() {
+    if (!tagToRevert.value.trim() || !artefactTitle.value) return;
+    isActionRunning.value = true;
+    try {
+        await discussionsStore.revertArtefactToTag({
+            discussionId: discussionId.value,
+            artefactTitle: artefactTitle.value,
+            tag: tagToRevert.value.trim()
+        });
+        tagToRevert.value = '';
+        await loadHistory();
+    } finally {
+        isActionRunning.value = false;
+    }
+}
+
+async function handleExportBundle() {
+    if (!artefactTitle.value) return;
+    await discussionsStore.exportArtefactBundle({
+        discussionId: discussionId.value,
+        artefactTitle: artefactTitle.value
+    });
 }
 
 watch(artefactTitle, loadHistory, { immediate: true });
@@ -110,6 +139,35 @@ const formatDate = (iso) => new Date(iso).toLocaleString();
                     </button>
                 </div>
 
+
+                <!-- Tag & Bundle Operations Control Bar -->
+                <div class="flex flex-col sm:flex-row items-center gap-3 bg-gray-50/50 dark:bg-gray-900/30 p-4 rounded-2xl border border-gray-150 dark:border-gray-800 shadow-inner">
+                    <div class="grow relative w-full sm:w-auto">
+                        <input 
+                            v-model="tagToRevert" 
+                            placeholder="Type tag to revert (e.g. stable-v1)..." 
+                            class="w-full px-3 py-1.5 pl-8 text-xs bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:text-white transition-all h-9" 
+                        />
+                        <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
+                            <IconGitBranch class="w-4 h-4 text-gray-400" />
+                        </div>
+                    </div>
+                    <button 
+                        @click="handleRevertToTag" 
+                        :disabled="!tagToRevert.trim() || isActionRunning" 
+                        class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all border border-gray-200 dark:border-gray-700 h-9 w-full sm:w-auto flex items-center justify-center disabled:opacity-50"
+                    >
+                        Revert to Tag
+                    </button>
+                    <button 
+                        @click="handleExportBundle" 
+                        class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all border border-gray-200 dark:border-gray-700 h-9 w-full sm:w-auto flex items-center justify-center gap-1.5 disabled:opacity-50" 
+                        title="Export this complete multimodal bundle"
+                    >
+                        <IconArrowDownTray class="w-3.5 h-3.5" />
+                        Export Bundle
+                    </button>
+                </div>
                 <div v-if="isLoading" class="flex justify-center py-12">
                     <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
                 </div>
@@ -119,6 +177,7 @@ const formatDate = (iso) => new Date(iso).toLocaleString();
                         <thead class="bg-gray-50 dark:bg-gray-800 text-[10px] font-black uppercase tracking-widest text-gray-400">
                             <tr>
                                 <th class="px-4 py-3">Version</th>
+                                <th class="px-4 py-3">Commit & Tags</th>
                                 <th class="px-4 py-3">Created</th>
                                 <th class="px-4 py-3">Size</th>
                                 <th class="px-4 py-3 text-right">Actions</th>
@@ -132,9 +191,24 @@ const formatDate = (iso) => new Date(iso).toLocaleString();
                                         <span v-if="v.is_active" class="px-1.5 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-[9px] font-black uppercase">Active</span>
                                     </div>
                                 </td>
+                                <td class="px-4 py-3 text-xs">
+                                    <div class="flex flex-col gap-1 max-w-sm">
+                                        <span class="font-mono text-gray-400 dark:text-gray-500 text-[10px]" v-if="v.commit_hash">
+                                            Hash: {{ v.commit_hash.slice(0, 8) }}
+                                        </span>
+                                        <span class="font-medium text-gray-700 dark:text-gray-300 italic" v-if="v.commit_message">
+                                            "{{ v.commit_message }}"
+                                        </span>
+                                        <div class="flex flex-wrap gap-1 mt-1" v-if="v.tags && v.tags.length > 0">
+                                            <span v-for="tag in v.tags" :key="tag" class="px-1.5 py-0.5 bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 rounded text-[9px] font-mono">
+                                                {{ tag }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </td>
                                 <td class="px-4 py-3 text-xs text-gray-500">{{ formatDate(v.created_at) }}</td>
-                                <td class="px-4 py-3 text-xs font-mono text-gray-400">{{ v.size_chars }} chars</td>
-                                <td class="px-4 py-3 text-right space-x-2">
+                                <td class="px-4 py-3 text-xs font-mono text-gray-400">{{ v.size_chars || v.content_size || 0 }} chars</td>
+                                <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
                                     <button 
                                         @click="handleSquashToTarget(v.version)" 
                                         class="p-1.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800 transition-all" 

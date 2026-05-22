@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-22 01:50]
+
+- feat(user,artefacts): add user capability flags and update artefact workflows
+
 ## [2026-05-21 01:46]
 
 - build(frontend): regenerate dist assets after source changes

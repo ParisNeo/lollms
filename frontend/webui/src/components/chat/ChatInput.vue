@@ -92,7 +92,7 @@ const uploadingMessage = ref('Processing files...');
 const fileInput = ref(null);
 const imageInput = ref(null);
 const isRecording = ref(false);
-const currentUploadPdfMode = ref('text_and_embedded_images');
+const currentUploadPdfMode = ref('text_images');
 const userPromptSearchTerm = ref('');
 const inputTokenCount = ref(0);
 let tokenizeInputDebounceTimer = null;
@@ -554,6 +554,18 @@ const activeFeatures = computed(() => {
             systemPrompt: '## Books: Use <artifact type="book" title="Title">...</artifact> using semantic HTML5.'
         });
     }
+    if (user.value?.artefacts_enabled) {
+        features.push({ 
+            id: 'artefacts', 
+            icon: IconFileText, 
+            label: 'Artefacts', 
+            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800', 
+            title: 'Artefacts Generation Enabled.',
+            modalTitle: 'Artefacts',
+            modalDescription: 'Enables high-fidelity modular file, code, and document creation inside your workspace.',
+            systemPrompt: 'Allows generation of structured workspace artefacts.'
+        });
+    }
     if (user.value && user.value.inline_widgets_enabled === true) {
         features.push({ 
             id: 'widgets', 
@@ -1000,10 +1012,10 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                          <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
                         <DropdownSubmenu title="Add Document" icon="file-text" collection="ui">
                             <div class="p-1 min-w-[220px]">
-                                <button @click="triggerFileUpload('text_and_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
-                                <button @click="triggerFileUpload('text_only')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
-                                <button @click="triggerFileUpload('embedded_images')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
-                                <button @click="triggerFileUpload('render_pages')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-pink-500" /> <span>Render Pages (For Scans)</span></button>
+                                <button @click="triggerFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
+                                <button @click="triggerFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
+                                <button @click="triggerFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
+                                <button @click="triggerFileUpload('ocr')" class="menu-item"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
                             </div>
                         </DropdownSubmenu>
                         <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>
@@ -1185,6 +1197,16 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                                         <span>Book Building</span>
                                     </span>
                                     <IconCheckCircle v-if="user?.book_generation_enabled" class="w-4 h-4 text-green-500" />
+                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                </button>
+
+                                <!-- Artefacts Toggle -->
+                                <button @click.stop="toggleUserPref('artefacts_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
+                                    <span class="flex items-center gap-2">
+                                        <IconFileText class="w-4 h-4 text-blue-500" />
+                                        <span>Artefacts</span>
+                                    </span>
+                                    <IconCheckCircle v-if="user?.artefacts_enabled" class="w-4 h-4 text-green-500" />
                                     <IconCircle v-else class="w-4 h-4 text-gray-400" />
                                 </button>
 

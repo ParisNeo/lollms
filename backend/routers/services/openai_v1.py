@@ -813,7 +813,16 @@ async def chat_completions(
         generation_kwargs["reasoning_effort"] = request.reasoning_effort
 
     stream_style = '\nTools requested in stream mode.' if request.tools else ""
-    ASCIIColors.panel(f"[bold]Request:[/bold]Open AI V1\n[bold]User:[/bold] {user.username}\n[bold]Model:[/bold] {request.model}\n[bold]Bonding alias:[/bold] {binding_alias}\n[bold]Model name:[/bold] {model_name}\n[bold]Stream:[/bold] {request.stream}{stream_style}\n[bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}\n[bold]Received images:[/bold] {len(images)}\n[bold]Max Tokens:[/bold] {request.max_tokens}", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
+    ASCIIColors.panel(f"""[bold]Request:[/bold]Open AI V1
+[bold]User:[/bold] {user.username}
+[bold]Model:[/bold] {request.model}
+[bold]Bonding alias:[/bold] {binding_alias}
+[bold]Model name:[/bold] {model_name}
+[bold]Stream:[/bold] {request.stream}{stream_style}
+[bold]Temperature:[/bold] {request.temperature}
+[bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}
+[bold]Received images:[/bold] {len(images)}
+[bold]Max Tokens:[/bold] {request.max_tokens}""", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
     if request.stream:
             async def stream_generator():
                 main_loop = asyncio.get_running_loop()

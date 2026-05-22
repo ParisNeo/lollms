@@ -571,7 +571,8 @@ export const useAuthStore = defineStore('auth', () => {
             'web_search': 'web_search_enabled',
             'inline_widgets': 'inline_widgets_enabled',
             'form_building': 'form_building_enabled',
-            'book_generation': 'book_generation_enabled'
+            'book_generation': 'book_generation_enabled',
+            'artefacts': 'artefacts_enabled'
         };
         return map[opt];
     }

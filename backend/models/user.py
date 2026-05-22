@@ -72,6 +72,9 @@ class UserCreateAdmin(BaseModel):
     form_building_enabled: bool = True
     herd_mode_enabled: bool = False
     herd_rounds: int = 2
+
+    # Artefacts Generation
+    artefacts_enabled: bool = True
     
     # Reasoning
     reasoning_activation: bool = False
@@ -299,6 +302,9 @@ class UserAuthDetails(BaseModel):
     skills_library_enabled: bool = False
     skills_building_enabled: bool = False
     form_building_enabled: bool = True
+    
+    # Artefacts Generation
+    artefacts_enabled: bool = True
 
     # Herd Mode Settings
     herd_mode_enabled: bool = False

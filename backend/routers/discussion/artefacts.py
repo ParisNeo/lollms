@@ -214,17 +214,15 @@ def build_artefacts_router(router: APIRouter):
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
 
-        # Map frontend modes to library modes
-        # UI: text_and_embedded_images, text_only, embedded_images, render_pages, ocr
+        # Map frontend modes directly to lollms_client modes
         mode_map = {
-            "text_and_embedded_images": "text_images",
-            "render_pages": "text_images",
-            "text_only": "text",
-            "embedded_images": "images_only",
+            "text_images": "text_images",
+            "text": "text",
+            "images_only": "images_only",
             "ocr": "ocr"
         }
 
-        import_mode = mode_map.get(pdf_mode, pdf_mode) # Default to literal if not in map
+        import_mode = mode_map.get(pdf_mode, "text_images")
 
         # Save to temporary file so the library can read it via path
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename).suffix) as tmp:
@@ -1332,12 +1330,12 @@ def build_artefacts_router(router: APIRouter):
         from urllib.parse import unquote
         old_title = unquote(artefact_title)
         new_title = payload.new_title.strip()
-        
+
         if not new_title:
             raise HTTPException(status_code=400, detail="New title cannot be empty.")
-            
+
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        
+
         # Prevent collisions
         if discussion.get_artefact(title=new_title):
              raise HTTPException(status_code=400, detail=f"An artefact named '{new_title}' already exists.")
@@ -1350,10 +1348,10 @@ def build_artefacts_router(router: APIRouter):
                     if art['title'] == old_title:
                         art['title'] = new_title
                         found = True
-                
+
                 if not found:
                     raise HTTPException(status_code=404, detail="Artefact not found.")
-                
+
                 # 2. Update source field in global discussion images (for vision anchors)
                 if hasattr(discussion, 'images') and discussion.images:
                     for img in discussion.images:
@@ -1377,4 +1375,85 @@ def build_artefacts_router(router: APIRouter):
                 raise HTTPException(status_code=404, detail="No artefacts found.")
         except Exception as e:
             trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/log")
+    async def get_artefact_log(
+        discussion_id: str,
+        artefact_title: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        try:
+            log = discussion.artefacts.get_log(unquote(artefact_title))
+            return log
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/resolve-tag")
+    async def resolve_artefact_tag(
+        discussion_id: str,
+        artefact_title: str,
+        tag: str = Query(...),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        try:
+            version = discussion.artefacts.resolve_tag(unquote(artefact_title), tag)
+            return {"version": version}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    class RevertToTagRequest(BaseModel):
+        tag: str
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/revert-to-tag")
+    async def revert_artefact_to_tag(
+        discussion_id: str,
+        artefact_title: str,
+        payload: RevertToTagRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            reverted_art = discussion.artefacts.revert_to_tag(unquote(artefact_title), payload.tag)
+            discussion.commit()
+            return _map_artefact_for_ui(reverted_art, discussion_id)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/bundle")
+    async def export_artefact_bundle(
+        discussion_id: str,
+        artefact_title: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        try:
+            bundle = discussion.artefacts.export_artefact_bundle(unquote(artefact_title))
+            return bundle
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=str(e))
+
+    class ImportBundleRequest(BaseModel):
+        bundle: Dict[str, Any]
+        activate: bool = True
+
+    @router.post("/{discussion_id}/artefacts/bundle")
+    async def import_artefact_bundle(
+        discussion_id: str,
+        payload: ImportBundleRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            restored_art = discussion.artefacts.import_artefact_bundle(payload.bundle, activate=payload.activate)
+            discussion.commit()
+            return _map_artefact_for_ui(restored_art, discussion_id)
+        except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))

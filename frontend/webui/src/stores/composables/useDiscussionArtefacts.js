@@ -383,6 +383,42 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         uiStore.addNotification(`Version ${version} deleted.`, 'success');
     }
 
+    async function fetchArtefactLog(discussionId, artefactTitle) {
+        const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        const response = await apiClient.get(`/api/discussions/${discussionId}/artefacts/${encoded}/log`);
+        return response.data;
+    }
+
+    async function revertArtefactToTag({ discussionId, artefactTitle, tag }) {
+        const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/${encoded}/revert-to-tag`, { tag });
+        await fetchArtefacts(discussionId);
+        uiStore.addNotification(`Reverted to tag '${tag}'`, 'success');
+        return response.data;
+    }
+
+    async function exportArtefactBundle({ discussionId, artefactTitle }) {
+        const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        const response = await apiClient.get(`/api/discussions/${discussionId}/artefacts/${encoded}/bundle`);
+        const blob = new Blob([JSON.stringify(response.data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${artefactTitle.replace(/\s/g, '_')}_bundle.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        uiStore.addNotification('Bundle exported successfully.', 'success');
+    }
+
+    async function importArtefactBundle({ discussionId, bundle, activate = true }) {
+        const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/bundle`, { bundle, activate });
+        await fetchArtefacts(discussionId);
+        uiStore.addNotification('Bundle imported successfully.', 'success');
+        return response.data;
+    }
+
     // NEW: Functions to bridge global notes/skills to the versioned artefact system
     async function addNoteAsArtefact(note) {
         if (!currentDiscussionId.value) return;
@@ -499,6 +535,10 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         // --- Added Version Management Exports ---
         fetchArtefactHistory,
         squashArtefactVersions,
-        deleteArtefactVersion
+        deleteArtefactVersion,
+        fetchArtefactLog,
+        revertArtefactToTag,
+        exportArtefactBundle,
+        importArtefactBundle
     };
 }
