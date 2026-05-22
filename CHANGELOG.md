@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-22 02:12]
+
+- chore(deps): bump lollms-client from 1.13.21 to 1.13.22
+
 ## [2026-05-22 01:50]
 
 - feat(user,artefacts): add user capability flags and update artefact workflows
