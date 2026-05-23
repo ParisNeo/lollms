@@ -7,9 +7,7 @@
     "audit:fix": "npm audit fix",
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview",
-    "preinstall": "", 
-    "postinstall": "npm audit fix"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@codemirror/commands": "6.10.3",
