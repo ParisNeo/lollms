@@ -121,12 +121,16 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
         try:
             user_db = db.query(DBUser).filter(DBUser.username == username).first()
             if user_db:
-                # Memory
-                memory_parts = []
-                for mem in user_db.memories:
-                    date_str = f" (Created on: {mem.created_at.strftime('%Y-%d-%m')})" if user_db.include_memory_date_in_context else ""
-                    memory_parts.append(f"--- Memory: {mem.title}{date_str} ---\n{mem.content}\n--- End Memory: {mem.title} ---")
-                discussion.memory = "\n\n".join(memory_parts)
+                # Cognitive Three-Layer Memory Integration
+                from backend.routers.memories import get_user_memory_manager
+                mm = get_user_memory_manager(username)
+                
+                # Bind the instantiated memory manager directly to the discussion.
+                # LollmsDiscussion uses `discussion.memory_manager` internally to manage context layers.
+                discussion.memory_manager = mm
+                
+                # Build the active working memory prompt dynamically
+                discussion.memory = mm.build_working_zone()
 
                 # User Data Zone construction
                 preferences_lines = []

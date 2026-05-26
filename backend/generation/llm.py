@@ -25,7 +25,7 @@ from PIL import Image # Needed for image resizing
 from docx import Document as DocxDocument
 from fastapi import (
     APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query,
-    UploadFile, status)
+    UploadFile, status, Request)
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                PlainTextResponse, StreamingResponse)
@@ -1179,6 +1179,7 @@ def build_llm_generation_router(router: APIRouter):
     @router.post("/{discussion_id}/chat")
     async def chat_in_existing_discussion(
         discussion_id: str,
+        fastapi_request: Request,
         prompt: str = Form(""),
         image_server_paths_json: str = Form("[]"),
         parent_message_id: Optional[str] = Form(None), 
@@ -1267,29 +1268,47 @@ def build_llm_generation_router(router: APIRouter):
             }
 
         if owner_db_user.memory_enabled:
+            from backend.routers.memories import get_user_memory_manager
+
             def tool_memory_add(title: str, content: str):
-                db_mem = next(get_db())
                 try:
-                    new_memory = UserMemory(owner_user_id=owner_db_user.id, title=title, content=content)
-                    db_mem.add(new_memory)
-                    db_mem.commit()
-                    manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory"}}, current_user.id)
-                    return {"success": True, "message": "Memory added."}
-                finally:
-                    db_mem.close()
-            
+                    mm = get_user_memory_manager(owner_username)
+                    # We combine title and content or store content directly as specified by the advanced memory system
+                    combined_content = f"{title}: {content}" if title else content
+                    mm.add(content=combined_content, importance=0.95)
+                    manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory", "discussion_id": discussion_id}}, current_user.id)
+                    return {"success": True, "message": "Memory successfully recorded in multi-layer cognitive store."}
+                except Exception as e:
+                    return {"success": False, "error": f"Failed to record memory: {e}"}
+
             def tool_memory_delete(index: int):
-                db_mem = next(get_db())
                 try:
-                    memories = db_mem.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.created_at.asc()).all()
-                    if 1 <= index <= len(memories):
-                        db_mem.delete(memories[index-1])
-                        db_mem.commit()
-                        manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory"}}, current_user.id)
-                        return {"success": True, "message": "Memory deleted."}
+                    mm = get_user_memory_manager(owner_username)
+                    with mm._session() as s:
+                        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+                        memories = mm._q(s).order_by(_MemoryRecord.created_at.asc()).all()
+                        if 1 <= index <= len(memories):
+                            s.delete(memories[index-1])
+                            s.commit()
+                            manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory", "discussion_id": discussion_id}}, current_user.id)
+                            return {"success": True, "message": "Memory erased."}
                     return {"success": False, "error": "Invalid index."}
-                finally:
-                    db_mem.close()
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            def tool_memory_search(query: str):
+                try:
+                    mm = get_user_memory_manager(owner_username)
+                    with mm._session() as s:
+                        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+                        results = mm.search(query, session=s, limit=10)
+                        formatted_results = [
+                            {"title": r.content[:30], "content": r.content, "created_at": r.created_at.isoformat() if r.created_at else None}
+                            for r in results
+                        ]
+                        return {"success": True, "results": formatted_results, "count": len(formatted_results)}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
 
             agentic_tools["memory_add"] = {
                 "name": "memory_add",
@@ -1304,6 +1323,13 @@ def build_llm_generation_router(router: APIRouter):
                 "parameters":[{"name": "index", "type": "int", "optional": False}],
                 "output":[{"name": "success", "type": "bool"}, {"name": "message", "type": "str"}],
                 "callable": tool_memory_delete
+            }
+            agentic_tools["memory_search"] = {
+                "name": "memory_search",
+                "description": "Perform a high-speed deep memory search to retrieve past user details, solved problems, or project notes.",
+                "parameters": [{"name": "query", "type": "str", "optional": False, "description": "The search query or keywords to find in deep memory."}],
+                "output": [{"name": "success", "type": "bool"}, {"name": "results", "type": "list"}, {"name": "count", "type": "int"}],
+                "callable": tool_memory_search
             }
 
         if owner_db_user.slide_maker_enabled:
@@ -1390,7 +1416,22 @@ def build_llm_generation_router(router: APIRouter):
         memory_content = ""
         memory_instructions = ""
         if owner_db_user.memory_enabled:
-            memories = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.created_at.asc()).all()
+            # Count total memories first to decide between Full vs Deep search
+            total_mems = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).count()
+
+            if total_mems <= 12:
+                # Load everything if memory bank is light (Tier 1)
+                memories = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.created_at.asc()).all()
+            else:
+                # Deep Memory Search (Tier 2): Perform high-speed keyword routing based on current prompt
+                from backend.routers.memories import search_deep_memory_internal
+                memories = search_deep_memory_internal(db, owner_db_user.id, prompt, limit=6)
+
+                # If no direct hits, pull the 3 most recently updated memories as default ambient context
+                if not memories:
+                    memories = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.updated_at.desc()).limit(3).all()
+                    memories.reverse()
+
             if memories:
                 memory_text = "\n".join([f"[Memory #{idx+1}] {m.title}: {m.content}" for idx, m in enumerate(memories)])
                 memory_content = f"\n## Long-Term Memory Bank\nYou have access to the following memories:\n{memory_text}\n"
@@ -1563,7 +1604,33 @@ def build_llm_generation_router(router: APIRouter):
         async def stream_generator() -> AsyncGenerator[str, None]:
             all_events = []
             collected_sources = []
-            
+            watcher_task = None
+
+            async def watch_disconnect() -> None:
+                try:
+                    receive = (
+                        fastapi_request.scope.get("_receive")
+                        or getattr(fastapi_request, "_receive", None)
+                    )
+                    if receive:
+                        while True:
+                            msg = await receive()
+                            if msg.get("type") == "http.disconnect":
+                                break
+                    else:
+                        while not await fastapi_request.is_disconnected():
+                            await asyncio.sleep(0.25)
+                except asyncio.CancelledError:
+                    return
+                except Exception as e:
+                    ASCIIColors.warning(f"[watch_disconnect] {e}")
+                    return
+
+                ASCIIColors.warning(
+                    f"[chat] Client disconnected — cancelling active generation for discussion '{discussion_id}'."
+                )
+                stop_event.set()
+
             def blocking_call():
                 start_time = time.time()
                 first_chunk_time = None
@@ -1614,7 +1681,13 @@ def build_llm_generation_router(router: APIRouter):
                         44: {"type": "widget_chunk", "content": chunk, "meta": params},
                         45: {"type": "widget_done", "content": chunk, "meta": params},
                         46: {"type": "form_ready", "content": params},
-                        47: {"type": "form_submitted", "content": params}
+                        47: {"type": "form_submitted", "content": params},
+                        # Multi-Level Cognitive Memory Events
+                        MSG_TYPE.MSG_TYPE_INFO.value: {
+                            "type": "memory_update" if params and params.get("type") == "memory_update" else ("memory_dream" if params and params.get("type") == "memory_dream" else "info"),
+                            "content": chunk,
+                            "meta": params
+                        }
                     }
 
                     payload = payload_map.get(mtype_val)
@@ -1799,11 +1872,20 @@ def build_llm_generation_router(router: APIRouter):
                     user_sessions.get(current_user.username, {}).get("active_generation_control", {}).pop(discussion_id, None)
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
             
-            main_loop.run_in_executor(executor, blocking_call)
-            while True:
-                item = await stream_queue.get()
-                if item is None: break
-                yield item
+            try:
+                watcher_task = asyncio.ensure_future(watch_disconnect())
+                main_loop.run_in_executor(executor, blocking_call)
+                while True:
+                    item = await stream_queue.get()
+                    if item is None: break
+                    yield item
+            finally:
+                if watcher_task and not watcher_task.done():
+                    watcher_task.cancel()
+                    try:
+                        await watcher_task
+                    except asyncio.CancelledError:
+                        pass
 
         return StreamingResponse(stream_generator(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 

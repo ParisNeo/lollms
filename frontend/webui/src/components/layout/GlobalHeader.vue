@@ -20,6 +20,8 @@ import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
+import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
+import IconVideoCamera from '../../assets/icons/IconVideoCamera.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
@@ -58,7 +60,6 @@ const showDataZoneButton = computed(() => {
     return !!discussionsStore.currentDiscussionId;
 });
 
-const isMenuOpen = ref(false);
 const isRefreshingModels = ref(false);
 const menuTriggerRef = ref(null);
 const menuFloatingRef = ref(null);
@@ -99,11 +100,16 @@ const vOnClickOutside = {
 };
 
 // Model selection state
+// Model selection state
 const modelSearchTerm = ref('');
 const personalitySearchTerm = ref('');
 const ttiModelSearchTerm = ref('');
 const ttsModelSearchTerm = ref('');
 const sttModelSearchTerm = ref('');
+const ttvModelSearchTerm = ref('');
+const ttmModelSearchTerm = ref('');
+
+const isMenuOpen = ref(false);
 
 // Active Selections
 const activePersonalityId = computed({ get: () => user.value?.active_personality_id, set: (id) => authStore.updateUserPreferences({ active_personality_id: id }) });
@@ -111,6 +117,8 @@ const activeModelName = computed({ get: () => user.value?.lollms_model_name, set
 const activeTtiModelName = computed({ get: () => user.value?.tti_binding_model_name, set: (name) => authStore.updateUserPreferences({ tti_binding_model_name: name }) });
 const activeTtsModelName = computed({ get: () => user.value?.tts_binding_model_name, set: (name) => authStore.updateUserPreferences({ tts_binding_model_name: name }) });
 const activeSttModelName = computed({ get: () => user.value?.stt_binding_model_name, set: (name) => authStore.updateUserPreferences({ stt_binding_model_name: name }) });
+const activeTtvModelName = computed({ get: () => user.value?.ttv_binding_model_name, set: (name) => authStore.updateUserPreferences({ ttv_binding_model_name: name }) });
+const activeTtmModelName = computed({ get: () => user.value?.ttm_binding_model_name, set: (name) => authStore.updateUserPreferences({ ttm_binding_model_name: name }) });
 
 // Available Data
 const availablePersonalities = computed(() => [{ isGroup: true, label: 'Personal', items: dataStore.userPersonalities }, { isGroup: true, label: 'Public', items: dataStore.publicPersonalities }]);
@@ -118,6 +126,8 @@ const formattedAvailableModels = computed(() => dataStore.availableLLMModelsGrou
 const formattedAvailableTtiModels = computed(() => dataStore.availableTtiModelsGrouped);
 const formattedAvailableTtsModels = computed(() => dataStore.availableTtsModelsGrouped);
 const formattedAvailableSttModels = computed(() => dataStore.availableSttModelsGrouped);
+const formattedAvailableTtvModels = computed(() => dataStore.availableTtvModelsGrouped || []);
+const formattedAvailableTtmModels = computed(() => dataStore.availableTtmModelsGrouped || []);
 
 // Selected Items
 const selectedModel = computed(() => formattedAvailableModels.value.flatMap(g => g.items).find(m => m.id === activeModelName.value));
@@ -128,6 +138,8 @@ const filteredAvailableModels = computed(() => modelSearchTerm.value ? formatted
 const filteredAvailableTtiModels = computed(() => ttiModelSearchTerm.value ? formattedAvailableTtiModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(ttiModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableTtiModels.value);
 const filteredAvailableTtsModels = computed(() => ttsModelSearchTerm.value ? formattedAvailableTtsModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(ttsModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableTtsModels.value);
 const filteredAvailableSttModels = computed(() => sttModelSearchTerm.value ? formattedAvailableSttModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(sttModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableSttModels.value);
+const filteredAvailableTtvModels = computed(() => ttvModelSearchTerm.value ? formattedAvailableTtvModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(ttvModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableTtvModels.value);
+const filteredAvailableTtmModels = computed(() => ttmModelSearchTerm.value ? formattedAvailableTtmModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(ttmModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableTtmModels.value);
 const filteredAvailablePersonalities = computed(() => personalitySearchTerm.value ? availablePersonalities.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(personalitySearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : availablePersonalities.value);
 
 function selectModel(id) { activeModelName.value = id; }
@@ -135,6 +147,8 @@ function selectPersonality(id) { activePersonalityId.value = id; }
 function selectTtiModel(id) { activeTtiModelName.value = id; }
 function selectTtsModel(id) { activeTtsModelName.value = id; }
 function selectSttModel(id) { activeSttModelName.value = id; }
+function selectTtvModel(id) { activeTtvModelName.value = id; }
+function selectTtmModel(id) { activeTtmModelName.value = id; }
 
 async function handleRefreshModels() {
     isRefreshingModels.value = true;
@@ -226,7 +240,82 @@ async function handleRefreshModels() {
                                 </div>
                             </div>
                          </DropdownSubmenu>
-                         
+
+                         <DropdownSubmenu v-if="formattedAvailableTtiModels.length > 0" title="TTI Model" icon="photo">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI models..." class="input-field-sm w-full"></div>
+                            <div class="p-1 grow overflow-y-auto max-h-96">
+                                <button @click="selectTtiModel(null)" class="menu-item-button" :class="{'selected': !activeTtiModelName}"><span class="truncate">None</span></button>
+                                <div v-for="group in filteredAvailableTtiModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button @click="selectTtiModel(item.id)" class="menu-item-button grow !justify-between" :class="{'selected': activeTtiModelName === item.id}">
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                         </DropdownSubmenu>
+
+                         <DropdownSubmenu v-if="formattedAvailableTtsModels.length > 0" title="TTS Model" icon="speaker-wave">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full"></div>
+                            <div class="p-1 grow overflow-y-auto max-h-96">
+                                <button @click="selectTtsModel(null)" class="menu-item-button" :class="{'selected': !activeTtsModelName}"><span class="truncate">None</span></button>
+                                <div v-for="group in filteredAvailableTtsModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button @click="selectTtsModel(item.id)" class="menu-item-button grow !justify-between" :class="{'selected': activeTtsModelName === item.id}">
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                         </DropdownSubmenu>
+
+                         <DropdownSubmenu v-if="formattedAvailableSttModels.length > 0" title="STT Model" icon="microphone">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search STT models..." class="input-field-sm w-full"></div>
+                            <div class="p-1 grow overflow-y-auto max-h-96">
+                                <button @click="selectSttModel(null)" class="menu-item-button" :class="{'selected': !activeSttModelName}"><span class="truncate">None</span></button>
+                                <div v-for="group in filteredAvailableSttModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button @click="selectSttModel(item.id)" class="menu-item-button grow !justify-between" :class="{'selected': activeSttModelName === item.id}">
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                         </DropdownSubmenu>
+
+                         <DropdownSubmenu v-if="formattedAvailableTtmModels.length > 0" title="TTM Model" icon="speaker-wave">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttmModelSearchTerm" @click.stop placeholder="Search TTM models..." class="input-field-sm w-full"></div>
+                            <div class="p-1 grow overflow-y-auto max-h-96">
+                                <button @click="selectTtmModel(null)" class="menu-item-button" :class="{'selected': !activeTtmModelName}"><span class="truncate">None</span></button>
+                                <div v-for="group in filteredAvailableTtmModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button @click="selectTtmModel(item.id)" class="menu-item-button grow !justify-between" :class="{'selected': activeTtmModelName === item.id}">
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                         </DropdownSubmenu>
+
+                         <DropdownSubmenu v-if="formattedAvailableTtvModels.length > 0" title="TTV Model" icon="video-camera">
+                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700"><input type="text" v-model="ttvModelSearchTerm" @click.stop placeholder="Search TTV models..." class="input-field-sm w-full"></div>
+                            <div class="p-1 grow overflow-y-auto max-h-96">
+                                <button @click="selectTtvModel(null)" class="menu-item-button" :class="{'selected': !activeTtvModelName}"><span class="truncate">None</span></button>
+                                <div v-for="group in filteredAvailableTtvModels" :key="group.label">
+                                    <h4 class="px-2 py-1.5 text-xs font-bold text-gray-500">{{ group.label }}</h4>
+                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
+                                        <button @click="selectTtvModel(item.id)" class="menu-item-button grow !justify-between" :class="{'selected': activeTtvModelName === item.id}">
+                                            <span class="truncate pr-2">{{ item.name }}</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                         </DropdownSubmenu>
+
                          <DropdownSubmenu title="Personality" icon="user-circle">
                             <div class="flex flex-col sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <router-link to="/personality-studio" @click="closeMenu" class="flex items-center gap-3 py-2.5 px-4 hover:bg-orange-50 dark:hover:bg-orange-900/20 text-orange-600 transition-colors border-b dark:border-gray-700">

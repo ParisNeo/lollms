@@ -1,8 +1,12 @@
 # backend/tasks/artefact_tasks.py
 import traceback
+import re
 from datetime import datetime
 from pydantic import BaseModel
 from ascii_colors import trace_exception
+from pathlib import Path
+import tempfile
+import shutil
 
 from backend.discussion import get_user_discussion
 from backend.session import get_user_lollms_client
@@ -20,6 +24,105 @@ except ImportError:
         traceback.print_exc()
         print("Couldn't install ScrapeMaster. Please install it manually (`pip install ScrapeMaster`)")
         ScrapeMaster = None
+
+def _map_artefact_for_ui_local(art: dict, discussion_id: str = None) -> dict:
+    """
+    Standardizes Artefact metadata for the UI without relying on any external imports.
+    Maps internal library keys ('type', 'active') to public API keys ('artefact_type', 'is_loaded').
+    """
+    mapped = {k: v for k, v in art.items() if k not in ['content', 'images']}
+    
+    # Ensure discussion_id is preserved
+    if 'discussion_id' not in mapped and discussion_id:
+        mapped['discussion_id'] = discussion_id
+
+    # Map library internal 'type' to UI 'artefact_type'
+    mapped['artefact_type'] = art.get('type', 'document')
+    
+    # Map library 'active' (boolean) to UI 'is_loaded'
+    mapped['is_loaded'] = bool(art.get('active', False))
+    
+    # Handle serialization of dates
+    for date_key in ['created_at', 'updated_at']:
+        if isinstance(mapped.get(date_key), datetime):
+            mapped[date_key] = mapped[date_key].isoformat()
+            
+    return mapped
+
+def _import_artefact_task(task: Task, username: str, discussion_id: str, file_path_str: str, filename: str, pdf_mode: str, auto_load: bool):
+    task.log(f"Starting file import task for '{filename}'...")
+    task.set_progress(10)
+    
+    tmp_path = Path(file_path_str)
+    
+    try:
+        discussion = get_user_discussion(username, discussion_id)
+        if not discussion:
+            raise ValueError("Discussion not found.")
+
+        # Map frontend modes directly to lollms_client modes
+        mode_map = {
+            "text_images": "text_images",
+            "text_embedded_images": "text_embedded_images",
+            "text": "text",
+            "images_only": "images_only",
+            "ocr": "ocr",
+            "data": "data"
+        }
+        import_mode = mode_map.get(pdf_mode, "text_images")
+
+        def progress_callback(msg: str):
+            task.log(msg)
+            match = re.search(r'page\s+(\d+)\s+of\s+(\d+)', msg, re.I)
+            if match:
+                current_page, total_pages = map(int, match.groups())
+                progress_val = 10 + int(80 * (current_page / total_pages))
+                task.set_progress(progress_val)
+            else:
+                if "loading" in msg.lower(): task.set_progress(15)
+                elif "extracting" in msg.lower(): task.set_progress(45)
+                elif "images" in msg.lower(): task.set_progress(80)
+
+        # Delegate to library's integrated import_file
+        result = discussion.import_file(
+            path=tmp_path,
+            mode=import_mode,
+            title=filename,
+            activate=auto_load,
+            progress_cb=progress_callback
+        )
+        
+        discussion.commit()
+        task.set_progress(100)
+        task.log(f"File '{filename}' successfully imported into workspace.")
+        
+        text_art = result.get("text_artefact")
+        img_art = result.get("image_artefact")
+        primary_art = text_art or img_art
+
+        if not primary_art:
+            raise RuntimeError("Library failed to create any artefacts from the provided file.")
+
+        mapped_info = _map_artefact_for_ui_local(primary_art, discussion_id)
+
+        all_images_info = discussion.get_discussion_images()
+
+        return {
+            "new_artefact_info": mapped_info,
+            "discussion_images": [img['data'] for img in all_images_info],
+            "active_discussion_images": [img['active'] for img in all_images_info]
+        }
+        
+    except Exception as e:
+        task.log(f"Import failed: {e}", "ERROR")
+        trace_exception(e)
+        raise e
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except Exception:
+                pass
 
 def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str, url: str, depth: int = 0, process_with_ai: bool = False):
     if ScrapeMaster is None:

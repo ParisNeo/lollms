@@ -19,6 +19,8 @@ import IconGather from '../../../assets/icons/IconGather.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconFolder from '../../../assets/icons/IconFolder.vue';
 import IconPhoto from '../../../assets/icons/IconPhoto.vue';
+import IconEye from '../../../assets/icons/IconEye.vue';
+import IconDatabase from '../../../assets/icons/IconDatabase.vue';
 
 const props = defineProps({
     notebookId: { type: String, default: null }
@@ -199,11 +201,13 @@ function handleCreateNew() {
             </div>
             <div class="flex items-center gap-1">
                  <DropdownMenu icon="arrow-up-tray" title="Upload Files" buttonClass="p-1.5 hover:text-blue-500 transition-colors">
-                     <div class="p-1 min-w-[220px]">
-                         <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
+                     <div class="p-1 min-w-[250px]">
+                         <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
+                         <button @click="triggerArtefactFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
                          <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
                          <button @click="triggerArtefactFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
                          <button @click="triggerArtefactFileUpload('ocr')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
+                         <button @click="triggerArtefactFileUpload('data')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconDatabase class="w-4 h-4 mr-3 text-green-500" /> <span>Data / Spreadsheet</span></button>
                          <button @click="triggerBundleImport" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconRefresh class="w-4 h-4 mr-3 text-teal-500" /> <span>Import Bundle (.json)</span></button>
                      </div>
                  </DropdownMenu>

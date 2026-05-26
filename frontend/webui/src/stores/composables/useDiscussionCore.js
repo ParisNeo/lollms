@@ -54,6 +54,11 @@ export function useDiscussionCore(state, stores, getActions) {
         }
 
         // --- CONTEXT SWITCH CLEANUP ---
+        // If there is an active generation running, stop it first to free up the engine
+        if (state.generationInProgress.value) {
+            await getActions().stopGeneration();
+        }
+
         // Reset the active workspace file when switching discussions
         uiStore.activeSplitArtefactTitle = null;
 

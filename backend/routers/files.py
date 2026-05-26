@@ -995,6 +995,7 @@ async def extract_and_embed_files(
     discussion_id: str,
     files: List[UploadFile] = File(...),
     extract_images: bool = Form(True),
+    pdf_mode: str = Form("text_images"),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     discussion = get_user_discussion(current_user.username, discussion_id)
@@ -1002,37 +1003,55 @@ async def extract_and_embed_files(
         raise HTTPException(status_code=404, detail="Discussion not found.")
 
     all_extracted_text = ""
-    initial_image_count = len(discussion.images)
-    new_image_count = 0
 
-    temp_img_root = get_user_temp_uploads_path(current_user.username)
+    # Map frontend modes directly to lollms_client modes
+    mode_map = {
+        "text_images": "text_images",
+        "text_embedded_images": "text_embedded_images",
+        "text": "text",
+        "images_only": "images_only",
+        "ocr": "ocr",
+        "data": "data"
+    }
+    import_mode = mode_map.get(pdf_mode, "text_images" if extract_images else "text")
 
     for file in files:
-        filename = secure_filename(file.filename)
-        content = await file.read()
-        
-        file_text = f"\n\n--- Document: {filename} ---\n"
-        
-        try:
-            extracted_text, images = extract_text_from_file_bytes(content, filename, extract_images=extract_images)
-            
-            # --- Integrate the extracted data into the discussion ---
-            file_text += extracted_text
-            
-            if images:
-                for b64_image in images:
-                    discussion.add_discussion_image(b64_image)
-                    new_image_count += 1
-                    # Append a reference tag to the text if an image was extracted
-                    file_text += f"\n![Image from {filename} | Image {initial_image_count + new_image_count}]\n"
-            # --- End Integration ---
+        # Save to temporary file so the library can read it via path
+        suffix = Path(file.filename).suffix
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = Path(tmp.name)
 
-            file_text += f"\n--- End Document: {filename} ---\n"
+        try:
+            # Delegate to library's integrated import_file
+            result = discussion.import_file(
+                path=tmp_path,
+                mode=import_mode,
+                title=file.filename,
+                activate=True
+            )
+
+            text_art = result.get("text_artefact")
+            if text_art and "content" in text_art:
+                extracted_text = text_art["content"]
+            else:
+                extracted_text = ""
+
+            file_text = f"\n\n--- Document: {file.filename} ---\n"
+            file_text += extracted_text
+            file_text += f"\n--- End Document: {file.filename} ---\n"
             all_extracted_text += file_text
 
         except Exception as e:
             trace_exception(e)            
-            all_extracted_text += f"\n\n--- Error processing {filename}: {str(e)} ---\n\n"
+            all_extracted_text += f"\n\n--- Error processing {file.filename}: {str(e)} ---\n\n"
+        finally:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
 
     discussion.discussion_data_zone = all_extracted_text + (discussion.discussion_data_zone or "")
     discussion.commit()

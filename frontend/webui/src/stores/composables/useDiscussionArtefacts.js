@@ -61,12 +61,13 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function addArtefact({ discussionId, file, extractImages, pdfMode = 'text_and_embedded_images' }) {
+    async function addArtefact({ discussionId, file, extractImages, auto_load = true, pdfMode = 'text_images' }) {
         if (!discussionId) return;
         const formData = new FormData();
         formData.append('file', file);
         formData.append('extract_images', extractImages ? 'true' : 'false');
         formData.append('pdf_mode', pdfMode);
+        formData.append('auto_load', auto_load ? 'true' : 'false');
 
         try {
             // CRITICAL: Explicitly set artefact_type to 'file' for uploads
@@ -75,13 +76,13 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
                 params: { artefact_type: 'file' }
             });
             
-            // If the upload was for the currently active discussion/notebook, update the list
-            if (currentDiscussionId.value === discussionId || !currentDiscussionId.value) {
-                // If it's a notebook or the active chat, we refetch to ensure we have the full synced list
-                await fetchArtefacts(discussionId);
+            const task = response.data;
+            if (task && task.id) {
+                activeAiTasks.value[discussionId] = { taskId: task.id, type: 'import_file' };
+                tasksStore.addTask(task);
             }
             
-            return response.data;
+            return task;
         } catch (error) {
             console.error("Failed to add artefact:", error);
             uiStore.addNotification(`Failed to upload ${file.name}`, 'error');
@@ -472,10 +473,10 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
 
     async function importSourceToArtefacts(source) {
         if (!currentDiscussionId.value) return;
-        
+
         const title = source.title || "Imported Source";
         const pathOrUrl = source.source || "";
-        
+
         try {
             if (pathOrUrl.startsWith('http')) {
                 // External Web Source: Use the scraping background task
@@ -492,11 +493,11 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
                     { params: { artefact_type: 'document', auto_load: true } }
                 );
                 _handleArtefactAndDataZoneUpdate(response);
-                
+
                 uiStore.activeSplitArtefactTitle = title;
                 uiStore.addNotification(`Source '${title}' saved to workspace.`, 'success');
             }
-            
+
             // Ensure the side panel is open to show the new artefact
             if (!uiStore.isDataZoneVisible) {
                 uiStore.isDataZoneVisible = true;
@@ -504,6 +505,27 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         } catch (e) {
             console.error("Failed to import source:", e);
             uiStore.addNotification("Failed to import source to artefacts.", "error");
+        }
+    }
+
+    async function deleteArtefactImage({ discussionId, artefactTitle, imageIndex }) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.delete(`/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}/images/${imageIndex}`);
+
+            // Re-fetch the artefacts list
+            await fetchArtefacts(discussionId);
+
+            // Re-fetch the data zones (this updates the document view text)
+            await getActions().fetchDataZones(discussionId);
+
+            // Force re-fetch of the context status
+            getActions().fetchContextStatus(discussionId);
+
+            uiStore.addNotification('Image removed from workspace.', 'success');
+        } catch (error) {
+            console.error("Failed to delete artefact image:", error);
+            uiStore.addNotification('Failed to remove image.', 'error');
         }
     }
 
@@ -532,6 +554,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         importStackOverflowArtefact,
         importYoutubeTranscript,
         importSourceToArtefacts,
+        deleteArtefactImage,
         // --- Added Version Management Exports ---
         fetchArtefactHistory,
         squashArtefactVersions,

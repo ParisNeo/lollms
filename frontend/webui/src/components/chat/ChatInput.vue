@@ -285,7 +285,9 @@ const mcpToolSelection = computed({
 
 const currentActiveTask = computed(() => {
     if (!activeDiscussion.value) return null;
-    return activeAiTasks.value[activeDiscussion.value.id];
+    const tracked = activeAiTasks.value[activeDiscussion.value.id];
+    if (!tracked || !tracked.taskId) return null;
+    return tasksStore.tasks.find(t => t.id === tracked.taskId) || null;
 });
 
 function toggleRagStore(storeId) {
@@ -1011,11 +1013,13 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     <DropdownMenu icon="plus" collection="" title="Add" buttonClass="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative">
                          <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
                         <DropdownSubmenu title="Add Document" icon="file-text" collection="ui">
-                            <div class="p-1 min-w-[220px]">
-                                <button @click="triggerFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Standard (Text & Images)</span></button>
+                            <div class="p-1 min-w-[250px]">
+                                <button @click="triggerFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
+                                <button @click="triggerFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
                                 <button @click="triggerFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
                                 <button @click="triggerFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
                                 <button @click="triggerFileUpload('ocr')" class="menu-item"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
+                                <button @click="triggerFileUpload('data')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconDatabase class="w-4 h-4 mr-3 text-green-500" /> <span>Data / Spreadsheet</span></button>
                             </div>
                         </DropdownSubmenu>
                         <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>

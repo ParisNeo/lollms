@@ -185,23 +185,21 @@ If no important information is found based on these strict criteria, return {"me
 
             count = 0
             if extracted_memories:
+                from backend.routers.memories import get_user_memory_manager
+                mm = get_user_memory_manager(username)
+
                 for mem in extracted_memories:
                     title = mem.get("title")
                     content = mem.get("content")
                     if title and content:
-                        new_memory = UserMemory(
-                            title=title,
-                            content=content,
-                            owner_user_id=db_user.id
-                        )
-                        db.add(new_memory)
+                        combined_content = f"{title}: {content}"
+                        mm.add(content=combined_content, importance=0.85)
                         count += 1
                         task.log(f"Extracted: {title}")
-                
+
                 if count > 0:
-                    db.commit()
                     task.log(f"Successfully saved {count} new memories.")
-                    
+
                     # Push notification manually to ensure immediate UI update via WS
                     from backend.ws_manager import manager
                     manager.send_personal_message_sync({

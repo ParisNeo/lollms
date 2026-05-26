@@ -154,6 +154,26 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     messageToUpdate.thoughts += data.content;
                     break;
 
+                case 'memory_update':
+                    if (data.meta && data.meta.report) {
+                        const created = data.meta.report.created || [];
+                        const tagged = data.meta.report.tagged || [];
+                        if (created.length > 0) {
+                            uiStore.addNotification(`🧠 Learned: "${created[0].content.substring(0, 45)}..."`, 'success', 5000);
+                        }
+                        if (tagged.length > 0) {
+                            uiStore.addNotification(`🔗 Recalled Fact: "${tagged[0].content.substring(0, 45)}..."`, 'info', 4000);
+                        }
+                    }
+                    break;
+
+                case 'memory_dream':
+                    if (data.meta && data.meta.report) {
+                        const rep = data.meta.report;
+                        uiStore.addNotification(`💤 Dream: Reinforced ${rep.reinforced || 0} memories, Demoted ${rep.decayed || 0}`, 'info', 5000);
+                    }
+                    break;
+
                 case 'finalize':
                     const finalData = data.data;
                     const aiIdx = messages.value.findIndex(m => m.id === tempAiMessage.id || m.id === finalData.ai_message?.id);
@@ -189,11 +209,11 @@ export function useDiscussionGeneration(state, stores, getActions) {
             });
 
             if (!response.ok) throw new Error(`HTTP error ${response.status}`);
-            
+
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
-            
+
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
@@ -216,6 +236,16 @@ export function useDiscussionGeneration(state, stores, getActions) {
             generationInProgress.value = false;
             generationState.value = { status: 'idle', details: '' };
             activeGenerationAbortController = null;
+
+            // Auto-refresh the cognitive memories list at the end of the turn
+            // in case the AI generated or updated any facts
+            try {
+                const { useMemoriesStore } = await import('../memories');
+                await useMemoriesStore().fetchMemories();
+            } catch (memErr) {
+                console.warn("Failed to auto-refresh memories list:", memErr);
+            }
+
             getActions().refreshDataZones(currentDiscussionId.value);
         }
     }

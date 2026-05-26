@@ -20,185 +20,151 @@ const uiStore = useUiStore();
 
 const { memories, isLoading: isLoadingMemories } = storeToRefs(memoriesStore);
 const memorySearchTerm = ref('');
-const loadedMemoryTitles = ref(new Set());
-
-// Function to estimate token count (rough approximation: 1 token ~= 4 chars)
-function estimateTokens(text) {
-    if (!text) return 0;
-    return Math.ceil(text.length / 4);
-}
+const isDreaming = ref(false);
 
 const activeDiscussion = computed(() => discussionsStore.activeDiscussion);
-const isMemorizing = computed(() => activeDiscussion.value && discussionsStore.activeAiTasks[activeDiscussion.value.id]?.type === 'memorize');
+const activeTab = ref('working'); // 'working', 'deep', 'archived'
 
-// Sorted memories to maintain consistent indexing display (must match backend sort order)
-const sortedMemories = computed(() => {
-    return [...memories.value].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-});
-
-const memoryContext = computed(() => {
-    // Reconstruct context text similar to backend to show realistic preview
-    // Using simple indexing #1, #2 based on sorted list
-    const activeMems = sortedMemories.value.filter(m => loadedMemoryTitles.value.has(m.title));
-    if (activeMems.length === 0) return '';
+const activeMemories = computed(() => {
+    let level = 1;
+    if (activeTab.value === 'deep') level = 2;
+    if (activeTab.value === 'archived') level = 3;
     
-    return activeMems.map((m) => {
-        // Find the index in the FULL sorted list for consistent reference
-        const fullIndex = sortedMemories.value.findIndex(sm => sm.id === m.id) + 1;
-        return `[Memory #${fullIndex}] ${m.title}: ${m.content}`;
-    }).join('\n\n');
+    let list = memories.value.filter(m => m.level === level);
+    if (memorySearchTerm.value) {
+        const query = memorySearchTerm.value.toLowerCase();
+        list = list.filter(m => m.content.toLowerCase().includes(query));
+    }
+    return list;
 });
 
-const contextTokenCount = computed(() => estimateTokens(memoryContext.value));
-
-const filteredMemories = computed(() => {
-    if (!memorySearchTerm.value) return sortedMemories.value;
-    const term = memorySearchTerm.value.toLowerCase();
-    return sortedMemories.value.filter(m => 
-        m.title.toLowerCase().includes(term) || 
-        m.content.toLowerCase().includes(term)
-    );
-});
-
-function handleMemorize() {
-    if (!activeDiscussion.value) return;
-    discussionsStore.memorizeLTM(activeDiscussion.value.id);
+async function triggerDream() {
+    if (isDreaming.value) return;
+    isDreaming.value = true;
+    try {
+        const report = await memoriesStore.triggerDream();
+        if (report) {
+            uiStore.openModal('interactiveOutput', {
+                title: 'Consolidation Report (Subconscious Dream)',
+                content: `### Dream Summary\n* **Reinforced Memories**: ${report.reinforced || 0}\n* **Decayed Memories**: ${report.decayed || 0}\n* **Forgotten Memories**: ${report.forgotten || 0}\n* **Retained by Dreamer**: ${report.retained_by_dreamer || 0}\n* **Processing Duration**: ${report.duration_seconds || 0} seconds.`
+            });
+        }
+    } finally {
+        isDreaming.value = false;
+    }
 }
 
-function handleCreateMemory() { uiStore.openModal('memoryEditor'); }
-function handleEditMemory(memory) { uiStore.openModal('memoryEditor', { memory }); }
+async function updateMemoryLevel(memory, newLevel) {
+    await memoriesStore.updateMemory(memory.id, { level: newLevel });
+}
 
-async function handleDeleteMemory(memoryId) {
-    const memoryToDelete = memories.value.find(m => m.id === memoryId);
-    if (!memoryToDelete) return;
+async function updateMemoryWeight(memory, weight) {
+    await memoriesStore.updateMemory(memory.id, { importance: weight });
+}
 
+async function forgetMemory(memoryId) {
     const confirmed = await uiStore.showConfirmation({
-        title: `Delete Memory?`,
-        message: `Permanently delete "${memoryToDelete.title}"?`,
-        confirmText: 'Delete'
+        title: 'Forget Memory?',
+        message: 'This will permanently erase this fact from your persistent cognitive layers.',
+        confirmText: 'Erase'
     });
-    
-    if (confirmed && confirmed.confirmed) {
-        // Optimistically remove from UI (so animation can start) before the store refreshes
-        // This also removes the title from the loaded set if it was selected
-        loadedMemoryTitles.value.delete(memoryToDelete.title);
-        loadedMemoryTitles.value = new Set(loadedMemoryTitles.value); // trigger reactivity
-
+    if (confirmed.confirmed) {
         await memoriesStore.deleteMemory(memoryId);
     }
 }
 
-function handleLoadMemory(title) { 
-    loadedMemoryTitles.value.add(title);
-    // Force reactivity for the Set
-    loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
-}
-
-function handleUnloadMemory(title) { 
-    loadedMemoryTitles.value.delete(title);
-    // Force reactivity for the Set
-    loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
-}
-
-async function refreshMemories() {
-    await memoriesStore.fetchMemories();
-    // Auto-select all new memories if set is empty (first load)
-    if (loadedMemoryTitles.value.size === 0 && memories.value.length > 0) {
-        memories.value.forEach(m => loadedMemoryTitles.value.add(m.title));
-        loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
+async function addManualFact() {
+    const { confirmed, value } = await uiStore.showConfirmation({
+        title: 'New Memory Fact',
+        message: 'Enter a key personal fact, rule, or preference to persist in your cognitive layer:',
+        inputType: 'text',
+        confirmText: 'Save Fact'
+    });
+    if (confirmed && value) {
+        await memoriesStore.addMemory(value);
     }
 }
-
-// Watch for changes in memories list to prune titles that no longer exist (deleted via AI or manually)
-watch(memories, (newMemories) => {
-    const currentTitles = new Set(newMemories.map(m => m.title));
-    let changed = false;
-    for (const title of loadedMemoryTitles.value) {
-        if (!currentTitles.has(title)) {
-            loadedMemoryTitles.value.delete(title);
-            changed = true;
-        }
-    }
-    if (changed) {
-        loadedMemoryTitles.value = new Set(loadedMemoryTitles.value);
-    }
-}, { deep: true });
 
 onMounted(() => {
-    refreshMemories();
+    memoriesStore.fetchMemories();
 });
 </script>
 
 <template>
   <div class="flex flex-col h-full gap-3 overflow-hidden">
-    <!-- Header with Actions -->
+    <!-- Header with Search & Dreaming -->
     <div class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-2 rounded-lg shadow-sm shrink-0">
-        <input type="text" v-model="memorySearchTerm" placeholder="Filter bank..." 
+        <input v-model="memorySearchTerm" type="text" placeholder="Filter memories..." 
                class="w-32 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border-none focus:ring-1 focus:ring-blue-500 rounded" />
-        <button @click="handleMemorize" class="btn btn-primary btn-xs py-1 px-3 shadow-sm" :disabled="isMemorizing">
-            <IconAnimateSpin v-if="isMemorizing" class="w-3.5 h-3.5 mr-1 animate-spin"/>
-            <IconSparkles v-else class="w-3.5 h-3.5 mr-1"/>
-            Memorize Chat
+        <div class="flex gap-2">
+            <button @click="triggerDream" class="btn btn-secondary btn-xs py-1 px-3 shadow-sm flex items-center gap-1.5" :disabled="isDreaming">
+                <IconAnimateSpin v-if="isDreaming" class="w-3.5 h-3.5 animate-spin" />
+                <span v-else>💤 Dream</span>
+            </button>
+            <button @click="addManualFact" class="btn btn-primary btn-xs py-1 px-3 shadow-sm flex items-center gap-1.5">
+                <IconPlus class="w-3.5 h-3.5"/>
+                <span>Add Fact</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Tier Tabs -->
+    <div class="flex border-b dark:border-gray-800 p-1 bg-gray-50 dark:bg-gray-900/50 rounded-lg shrink-0">
+        <button @click="activeTab = 'working'" class="flex-1 py-1 px-2 text-[9px] font-black uppercase tracking-widest rounded-md transition-all"
+                :class="activeTab === 'working' ? 'bg-white dark:bg-gray-800 text-blue-600 shadow-sm' : 'text-gray-400'">
+            Working (L1)
+        </button>
+        <button @click="activeTab = 'deep'" class="flex-1 py-1 px-2 text-[9px] font-black uppercase tracking-widest rounded-md transition-all"
+                :class="activeTab === 'deep' ? 'bg-white dark:bg-gray-800 text-amber-500 shadow-sm' : 'text-gray-400'">
+            Deep (L2)
+        </button>
+        <button @click="activeTab = 'archived'" class="flex-1 py-1 px-2 text-[9px] font-black uppercase tracking-widest rounded-md transition-all"
+                :class="activeTab === 'archived' ? 'bg-white dark:bg-gray-800 text-red-500 shadow-sm' : 'text-gray-400'">
+            Archived (L3)
         </button>
     </div>
 
-    <!-- Main Vertical Stack -->
-    <div class="flex-1 flex flex-col gap-3 min-h-0">
-        
-        <!-- Rendered Context (What's being sent) -->
-        <div class="flex-1 flex flex-col min-h-[150px] border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900/50 shadow-inner overflow-hidden">
-            <div class="p-2 border-b dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-800/30">
-                <span class="text-[9px] font-black uppercase text-gray-400 tracking-tighter">Active Context Preview</span>
-                <div class="flex gap-2">
-                    <span class="text-[9px] font-mono text-gray-500" v-if="memoryContext">{{ memoryContext.length }} chars</span>
-                    <span class="text-[9px] font-mono text-blue-500" v-if="memoryContext">~{{ contextTokenCount }} tokens</span>
-                </div>
-            </div>
-            <div class="flex-1 overflow-y-auto custom-scrollbar p-3">
-                <div v-if="!memoryContext" class="h-full flex flex-col items-center justify-center text-gray-400 opacity-40">
-                    <IconThinking class="w-10 h-10 mb-2" />
-                    <p class="text-[10px] uppercase font-black tracking-widest">No Active Memories</p>
-                </div>
-                <MessageContentRenderer v-else :content="memoryContext" class="prose-xs" />
-            </div>
+    <!-- Active List -->
+    <div class="flex-1 overflow-y-auto custom-scrollbar bg-white dark:bg-gray-950 rounded-lg p-2 border dark:border-gray-800">
+        <div v-if="isLoadingMemories" class="flex justify-center items-center py-20">
+            <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
         </div>
-
-        <!-- Bank List -->
-        <div class="h-64 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 flex flex-col shadow-sm overflow-hidden shrink-0">
-            <div class="p-2 border-b dark:border-gray-700 flex justify-between items-center bg-gray-50/50 dark:bg-gray-800/30">
-                <span class="text-[10px] font-black uppercase text-gray-500">Memory Bank ({{ filteredMemories.length }})</span>
-                <button @click="handleCreateMemory" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-700 text-blue-500" title="Manual Memory Entry"><IconPlus class="w-4 h-4" /></button>
-            </div>
-            <div class="flex-1 overflow-y-auto custom-scrollbar p-1">
-                <div v-if="isLoadingMemories" class="text-center py-6"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
-                <div v-else-if="filteredMemories.length === 0" class="text-center py-6 text-xs text-gray-400">Empty</div>
-                <transition-group name="mem" tag="div" class="space-y-1" v-else>
-                    <div v-for="(mem, index) in filteredMemories" :key="mem.id"
-                         class="group p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800/50 flex items-center justify-between transition-all border border-transparent"
-                         :class="{'border-green-500/20 bg-green-50/10 dark:bg-green-900/5': loadedMemoryTitles.has(mem.title)}">
-                        
-                        <div class="flex items-center gap-3 min-w-0">
-                            <!-- Index Badge -->
-                            <span class="text-[10px] font-mono text-gray-400 font-bold w-5 text-center shrink-0">#{{ index + 1 }}</span>
-                            
-                            <button @click="loadedMemoryTitles.has(mem.title) ? handleUnloadMemory(mem.title) : handleLoadMemory(mem.title)" 
-                                    class="shrink-0 transition-colors" :class="loadedMemoryTitles.has(mem.title) ? 'text-green-500' : 'text-gray-300 hover:text-gray-400'">
-                                <IconCheckCircle v-if="loadedMemoryTitles.has(mem.title)" class="w-5 h-5" />
-                                <IconCircle v-else class="w-5 h-5" />
-                            </button>
-                            
-                            <div class="flex flex-col min-w-0">
-                                <span class="text-xs font-bold truncate text-gray-700 dark:text-gray-200" :title="mem.title">{{ mem.title }}</span>
-                                <span class="text-[10px] truncate text-gray-400">{{ estimateTokens(mem.content) }} tokens</span>
-                            </div>
-                        </div>
-
-                        <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button @click="handleEditMemory(mem)" class="p-1.5 rounded hover:bg-white dark:hover:bg-gray-700 shadow-sm text-blue-500" title="Edit"><IconPencil class="w-3.5 h-3.5" /></button>
-                            <button @click="handleDeleteMemory(mem.id)" class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 shadow-sm text-red-500" title="Delete"><IconTrash class="w-3.5 h-3.5" /></button>
-                        </div>
+        <div v-else-if="activeMemories.length === 0" class="flex flex-col items-center justify-center py-20 text-gray-400 italic">
+            <IconThinking class="w-10 h-10 opacity-20 mb-2" />
+            <span class="text-[9px] font-black uppercase tracking-widest">No matching memories</span>
+        </div>
+        <div v-else class="space-y-3">
+            <div v-for="mem in activeMemories" :key="mem.id" class="p-3 rounded-xl border border-gray-150 dark:border-gray-800 bg-gray-50/30 dark:bg-gray-900/20 group/item relative">
+                <!-- Header Stats/Actions -->
+                <div class="flex items-center justify-between mb-2">
+                    <span class="font-mono text-[9px] text-gray-400">Handle: [{{ mem.id.substring(0, 8) }}]</span>
+                    
+                    <!-- Manual level switches -->
+                    <div class="flex gap-1">
+                        <button v-if="mem.level !== 1" @click="updateMemoryLevel(mem, 1)" class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400">Promote to L1</button>
+                        <button v-if="mem.level !== 2" @click="updateMemoryLevel(mem, 2)" class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400">Demote to L2</button>
+                        <button v-if="mem.level !== 3" @click="updateMemoryLevel(mem, 3)" class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-400">Archive to L3</button>
                     </div>
-                </transition-group>
+                </div>
+
+                <p class="text-xs text-gray-800 dark:text-gray-200 leading-relaxed break-words pr-8 font-serif italic">
+                    "{{ mem.content }}"
+                </p>
+
+                <!-- Footer Weights & Actions -->
+                <div class="mt-3 flex items-center justify-between border-t dark:border-gray-800 pt-2">
+                    <div class="flex items-center gap-3">
+                        <span class="text-[9px] font-bold text-gray-400 uppercase">Importance: {{ Math.round(mem.importance * 100) }}%</span>
+                        <input type="range" :value="mem.importance" @change="updateMemoryWeight(mem, parseFloat($event.target.value))" min="0" max="1" step="0.05" class="w-20 accent-blue-500">
+                    </div>
+                    
+                    <div class="flex items-center gap-2">
+                        <span class="text-[9px] font-mono text-gray-400">Used {{ mem.use_count }}x</span>
+                        <button @click="forgetMemory(mem.id)" class="p-1 text-gray-400 hover:text-red-500 rounded" title="Forget completely">
+                            <IconTrash class="w-3.5 h-3.5" />
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -209,16 +175,4 @@ onMounted(() => {
 @reference "tailwindcss";
 .custom-scrollbar::-webkit-scrollbar { width: 3px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
-.prose-xs { @apply text-xs leading-relaxed text-gray-600 dark:text-gray-400; }
-
-/* Transition for memory list items */
-.mem-enter-active,
-.mem-leave-active {
-  transition: all 0.25s ease;
-}
-.mem-enter-from,
-.mem-leave-to {
-  opacity: 0;
-  transform: translateY(-8px);
-}
 </style>

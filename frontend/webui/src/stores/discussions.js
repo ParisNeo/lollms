@@ -122,7 +122,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                     const isFinished = ['completed', 'failed', 'cancelled'].includes(correspondingTaskInStore.status);
                     if (isFinished) {
                         if (correspondingTaskInStore.status === 'completed') {
-                            if (trackedTask.type === 'import_url') {
+                            if (trackedTask.type === 'import_url' || trackedTask.type === 'import_file') {
                                 getActions().fetchArtefacts(discussionId);
                             }
                             // --- FIX: Explicitly refresh memories when memorization completes ---

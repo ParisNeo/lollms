@@ -773,7 +773,18 @@ if __name__ == "__main__":
     db = db_session_module.SessionLocal()
     try:
         settings.load_from_db(db)
-        
+
+        # Start the Communication Hub server in a background thread of the master process
+        import threading
+        from backend.com_hub import start_hub_server
+        hub_port_val = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
+        threading.Thread(
+            target=start_hub_server, 
+            kwargs={"host": "127.0.0.1", "port": int(hub_port_val)}, 
+            daemon=True
+        ).start()
+        print(f"INFO: Master process started Communication Hub on port {hub_port_val}.")
+
         host_setting = settings.get("host", SERVER_CONFIG.get("host", "0.0.0.0"))
         port_setting = settings.get("port", SERVER_CONFIG.get("port", 9642))
         https_enabled = settings.get("https_enabled", False)

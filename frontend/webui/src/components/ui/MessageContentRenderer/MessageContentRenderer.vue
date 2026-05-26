@@ -18,7 +18,7 @@ import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import TaskProgressIndicator from '../TaskProgressIndicator.vue'; 
 import IconMap from '../../../assets/icons/IconMap.vue';
-import IconClock from '../../../assets/icons/IconClock.vue';
+import IconClock  from '../../../assets/icons/IconClock.vue';
 import IconSave from '../../../assets/icons/IconSave.vue';
 import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
 import IconCog from '../../../assets/icons/IconCog.vue';
@@ -41,7 +41,7 @@ const props = defineProps({
   events: { type: Array, default: () => [] },
   inlineWidgets: { type: Array, default: () => [] },
   isStreaming: { type: Boolean, default: false },
-  isUser: { type: Boolean, default: false },
+  isUser: { type: String, default: false },
   hasImages: { type: Boolean, default: false },
   lastUserImage: { type: String, default: null },
   messageId: { type: String, default: null },
@@ -384,7 +384,7 @@ const parsedStreamingContent = computed(() => {
         const raw = match[17];
         const fullId = match[18];
         const parts = fullId.split('::');
-        return { type: 'artefact_image', title: parts[0], index: parseInt(parts[1]), raw };
+        return { type: 'artefact_image', title: parts[0], index: parseInt(parts[parts.length - 1]), raw };
     }
     else if (match[19]) {
         // --- NEW: Unified Processing UI Logic ---
@@ -543,7 +543,8 @@ const messageParts = computed(() => {
         { type: 'lollms_form', regex: /<lollms_form\b([^>]*)>([\s\S]*?)<\/lollms_form>/g },
         { type: 'lollms_inline', regex: /<lollms_inline\b[^>]*\btitle=["']([^"']+)["'][^>]*>([\s\S]*?)<\/lollms_inline>/g },
         { type: 'processing', regex: /(<processing\s+type=["']([^"']*)["']\s+title=["']([^"']*)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))/gi },
-        { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g }
+        { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g },
+        { type: 'artefact_image', regex: /<artefact_image\s+id=["']([^"']+)["']\s*\/?>/g }
     ];
 
     const allElements = [];
@@ -680,6 +681,16 @@ const messageParts = computed(() => {
                 isClosed: el.raw.trim().endsWith('</processing>'), 
                 id: `proc-${el.start}` 
             });
+        } else if (el.type === 'artefact_image') {
+            const fullId = el.match[1];
+            const parts_arr = fullId.split('::');
+            parts.push({
+                type: 'artefact_image',
+                title: parts_arr[0],
+                index: parseInt(parts_arr[parts_arr.length - 1]),
+                raw: el.raw,
+                id: `artimg-${el.start}`
+            });
         }
         // Forms handled via parsing logic inside parseSpecialBlock if <lollms_form> is in content
         cursor =  Math.max(cursor,el.end);
@@ -693,34 +704,10 @@ const messageParts = computed(() => {
     return parts;
 });
 
-const resolvedArtefactImages = ref({}); // 'title::index' -> 'base64'
+// Module-level cache to prevent duplicate requests across unmounts/remounts or multiple instances
+const globalResolvedArtefactImages = {};
 
-watch(messageParts, (parts) => {
-    parts.forEach(part => {
-        if (part.type === 'artefact_image') {
-            const key = `${part.title}::${part.index}`;
-            if (!resolvedArtefactImages.value[key]) {
-                resolvedArtefactImages.value[key] = 'loading';
-                const discussionId = discussionsStore.currentDiscussionId;
-                if (discussionId) {
-                    apiClient.get(`/api/discussions/${discussionId}/artefact`, {
-                        params: { artefact_title: part.title }
-                    }).then(res => {
-                        const artefact = res.data;
-                        if (artefact && artefact.images && artefact.images[part.index]) {
-                            resolvedArtefactImages.value[key] = artefact.images[part.index];
-                        } else {
-                            resolvedArtefactImages.value[key] = 'error';
-                        }
-                    }).catch(err => {
-                        console.error("Failed to load artefact image:", err);
-                        resolvedArtefactImages.value[key] = 'error';
-                    });
-                }
-            }
-        }
-    });
-}, { immediate: true, deep: true });
+const resolvedArtefactImages = ref({}); // 'title::index' -> 'base64'
 
 const getTokens = (text) => {
     if (!text) return [];
@@ -896,6 +883,26 @@ async function downloadAnnotatedImage(annotations, event) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+async function deleteArtefactImage(title, index) {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Delete Image/Page',
+        message: `Are you sure you want to permanently delete this page/image from "${title}"? This cannot be undone.`,
+        confirmText: 'Delete',
+        danger: true
+    });
+    if (confirmed.confirmed) {
+        try {
+            await discussionsStore.deleteArtefactImage({
+                discussionId: discussionsStore.currentDiscussionId,
+                artefactTitle: title,
+                imageIndex: index
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    }
 }
 
 function saveNoteFromRenderer(title, content) {
@@ -1351,27 +1358,23 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- ── Artefact Image Resolution ───────────────────────────────── -->
           <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount">
-             <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
-                <template v-if="resolvedArtefactImages[`${part.title}::${part.index}`] && resolvedArtefactImages[`${part.title}::${part.index}`] !== 'loading' && resolvedArtefactImages[`${part.title}::${part.index}`] !== 'error'">
-                    <div class="relative">
-                        <AuthenticatedImage 
-                            :src="'data:image/png;base64,' + resolvedArtefactImages[`${part.title}::${part.index}`]" 
-                            class="w-full h-auto max-h-[600px] object-contain mx-auto"
-                        />
-                        <!-- Overlay Title -->
-                        <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
-                             <span class="text-[10px] font-black uppercase tracking-widest text-white">{{ part.title }} — Page {{ part.index + 1 }}</span>
-                        </div>
-                    </div>
-                </template>
-                <div v-else-if="resolvedArtefactImages[`${part.title}::${part.index}`] === 'error'" class="p-4 flex items-center gap-3 text-red-500">
-                    <IconError class="w-5 h-5" />
-                    <span class="text-xs font-bold">Image {{ part.index + 1 }} for document '{{ part.title }}' not found.</span>
-                </div>
-                <div v-else class="p-8 text-center text-xs text-gray-500 italic">
-                   <IconAnimateSpin class="w-6 h-6 animate-spin mx-auto mb-2 opacity-30" />
-                   Awaiting image resolution for {{ part.title }} [Page {{ part.index + 1 }}]
-                </div>
+             <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
+                  <div class="relative">
+                      <AuthenticatedImage 
+                          :src="`/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(part.title)}/images/${part.index}`" 
+                          class="w-full h-auto max-h-[600px] object-contain mx-auto"
+                      />
+                      <!-- Actions Overlay / Delete Button -->
+                      <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 z-10">
+                          <button @click="deleteArtefactImage(part.title, part.index)" class="p-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-lg transition-all active:scale-95 cursor-pointer" title="Delete this page/image">
+                              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                          </button>
+                      </div>
+                      <!-- Overlay Title -->
+                      <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
+                           <span class="text-[10px] font-black uppercase tracking-widest text-white">{{ part.title }} — Page {{ part.index + 1 }}</span>
+                      </div>
+                  </div>
              </div>
           </div>
 
