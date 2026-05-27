@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from 'vue';
 import { useSocialStore } from '../../stores/social';
 import { useNotesStore } from '../../stores/notes';
 import { useSkillsStore } from '../../stores/skills';
+import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from './GenericModal.vue';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
@@ -11,14 +12,16 @@ import { storeToRefs } from 'pinia';
 const socialStore = useSocialStore();
 const notesStore = useNotesStore();
 const skillsStore = useSkillsStore();
+const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
 const { friends } = storeToRefs(socialStore);
 
 const modalData = computed(() => uiStore.modalData('shareResource'));
 const resourceId = computed(() => modalData.value?.id);
-const resourceType = computed(() => modalData.value?.type); // 'note' or 'skill'
+const resourceType = computed(() => modalData.value?.type); // 'note', 'skill', or 'artefact'
 const resourceName = computed(() => modalData.value?.name);
+const discussionId = computed(() => modalData.value?.discussionId || discussionsStore.currentDiscussionId);
 
 const selectedUsername = ref('');
 const isSharing = ref(false);
@@ -29,13 +32,15 @@ onMounted(() => {
 
 async function handleShare() {
     if (!selectedUsername.value) return;
-    
+
     isSharing.value = true;
     try {
         if (resourceType.value === 'note') {
             await notesStore.shareNote(resourceId.value, selectedUsername.value);
         } else if (resourceType.value === 'skill') {
             await skillsStore.shareSkill(resourceId.value, selectedUsername.value);
+        } else if (resourceType.value === 'artefact') {
+            await discussionsStore.shareArtefact(discussionId.value, resourceName.value, selectedUsername.value);
         }
         uiStore.closeModal('shareResource');
     } finally {

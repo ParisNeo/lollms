@@ -24,6 +24,7 @@ from backend.db.models.dm import Conversation, ConversationMember, DirectMessage
 from backend.db.models.note import Note, NoteGroup
 from backend.db.models.notebook import Notebook
 from backend.db.models.flow import Flow, FlowNodeDefinition
+from backend.db.models.saved_artefact import SavedArtefact
 from backend.db.models.db_task import ScheduledTask # Assuming we will add this
 from ascii_colors import ASCIIColors, trace_exception
 
@@ -1319,6 +1320,11 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("skills"):
         from backend.db.models.skill import Skill
         Skill.__table__.create(connection)
+        connection.commit()
+
+    if not inspector.has_table("saved_artefacts"):
+        from backend.db.models.saved_artefact import SavedArtefact
+        SavedArtefact.__table__.create(connection)
         connection.commit()
 
     if not inspector.has_table("notebooks"):

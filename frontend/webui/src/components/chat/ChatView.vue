@@ -117,8 +117,7 @@ async function handlePaste(event) {
                             @click="emit('scroll-chat-to-bottom')" 
                             class="fab-editorial absolute bottom-28 left-1/2 -translate-x-1/2"
                         >
-                            <span class="fab-label">Go to bottom</span>
-                            <div class="fab-icon-container">
+=                            <div class="fab-icon-container">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
                                     <path fill-rule="evenodd" d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z" clip-rule="evenodd" />
                                 </svg>

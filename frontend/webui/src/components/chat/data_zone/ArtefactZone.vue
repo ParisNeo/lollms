@@ -31,6 +31,60 @@ const uiStore = useUiStore();
 
 const { activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
 
+const starredItems = ref([]);
+
+onMounted(() => {
+    try {
+        const stored = localStorage.getItem('starredArtefacts');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+                starredItems.value = parsed;
+            }
+        }
+    } catch (e) {
+        console.error("Failed to parse starredArtefacts:", e);
+    }
+});
+
+function handleStarToggle(title) {
+    const idx = starredItems.value.indexOf(title);
+    if (idx > -1) {
+        starredItems.value.splice(idx, 1);
+    } else {
+        starredItems.value.push(title);
+    }
+    localStorage.setItem('starredArtefacts', JSON.stringify(starredItems.value));
+}
+
+function handleShareArtefact(group) {
+    const latest = group.versions[0];
+    if (!latest) return;
+    uiStore.openModal('shareResource', {
+        id: latest.title,
+        name: latest.title,
+        type: 'artefact',
+        discussionId: latest.discussion_id || discussionsStore.currentDiscussionId
+    });
+}
+
+async function handleImportToCurrent(group) {
+    const latest = group.versions[0];
+    if (!latest || !discussionsStore.currentDiscussionId) {
+        uiStore.addNotification("Please select or start a discussion first.", "warning");
+        return;
+    }
+    if (latest.discussion_id === discussionsStore.currentDiscussionId) {
+        uiStore.addNotification("Artefact is already in the current discussion.", "info");
+        return;
+    }
+    await discussionsStore.importArtefactFromSource({
+        targetDiscussionId: discussionsStore.currentDiscussionId,
+        sourceDiscussionId: latest.discussion_id,
+        artefactTitle: latest.title
+    });
+}
+
 const isUploadingArtefact = ref(false);
 const uploadingMessage = ref('Processing files...');
 const isArtefactsCollapsed = ref(false);
@@ -118,8 +172,9 @@ async function handleBundleImport(event) {
 }
 
 function handleImportFromUrl() {
-    const url = prompt("Please enter the URL to import:");
-    if (url && idToUse.value) discussionsStore.importArtefactFromUrl(idToUse.value, url);
+    if (idToUse.value) {
+        uiStore.openModal('scrapeUrl', { discussionId: idToUse.value, mode: 'url' });
+    }
 }
 
 async function handleArtefactFileUpload(event) {
@@ -195,24 +250,27 @@ function handleCreateNew() {
         </div>
 
         <div class="flex justify-between items-center p-3 mb-2 shrink-0 bg-gray-50 dark:bg-gray-800/50 rounded-lg border dark:border-gray-700">
-            <div class="flex items-center gap-2">
-                <IconPlus class="w-4 h-4 text-emerald-500 cursor-pointer" @click="handleCreateArtefact" />
-                <span class="text-xs font-bold uppercase tracking-widest text-gray-500">Repository</span>
+            <div class="flex items-center gap-1.5">
+                <DropdownMenu icon="plus" title="Add Local Document" buttonClass="p-1 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-colors flex items-center justify-center">
+                    <template #icon>
+                        <IconPlus class="w-4.5 h-4.5 text-emerald-500" />
+                    </template>
+                    <div class="p-1 min-w-[250px]">
+                        <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
+                        <button @click="triggerArtefactFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
+                        <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
+                        <button @click="triggerArtefactFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
+                        <button @click="triggerArtefactFileUpload('ocr')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
+                        <button @click="triggerArtefactFileUpload('data')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconDatabase class="w-4 h-4 mr-3 text-green-500" /> <span>Data / Spreadsheet</span></button>
+                        <button @click="triggerBundleImport" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconRefresh class="w-4 h-4 mr-3 text-teal-500" /> <span>Import Bundle (.json)</span></button>
+                        <button @click="handleCreateArtefact" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconPencil class="w-4 h-4 mr-3 text-orange-500" /> <span>Create Document (Manual)</span></button>
+                    </div>
+                </DropdownMenu>
+                <span class="text-xs font-bold uppercase tracking-widest text-gray-500 select-none">Repository</span>
             </div>
-            <div class="flex items-center gap-1">
-                 <DropdownMenu icon="arrow-up-tray" title="Upload Files" buttonClass="p-1.5 hover:text-blue-500 transition-colors">
-                     <div class="p-1 min-w-[250px]">
-                         <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
-                         <button @click="triggerArtefactFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
-                         <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
-                         <button @click="triggerArtefactFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
-                         <button @click="triggerArtefactFileUpload('ocr')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
-                         <button @click="triggerArtefactFileUpload('data')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconDatabase class="w-4 h-4 mr-3 text-green-500" /> <span>Data / Spreadsheet</span></button>
-                         <button @click="triggerBundleImport" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconRefresh class="w-4 h-4 mr-3 text-teal-500" /> <span>Import Bundle (.json)</span></button>
-                     </div>
-                 </DropdownMenu>
-                 <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 transition-colors" title="Import from URL"><IconWeb class="w-4 h-4" /></button>
-                 <button @click="handleRefreshArtefacts" class="p-1.5 hover:text-blue-500 transition-colors" title="Refresh List"><IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" /></button>
+            <div class="flex items-center gap-1.5">
+                 <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all" title="Import from URL"><IconWeb class="w-4.5 h-4.5 text-blue-500" /></button>
+                 <button @click="handleRefreshArtefacts" class="p-1.5 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all" title="Refresh List"><IconRefresh class="w-4.5 h-4.5" :class="{'animate-spin': isLoadingArtefacts}" /></button>
             </div>
         </div>
         <div v-if="!isArtefactsCollapsed" class="grow overflow-y-auto custom-scrollbar">
@@ -240,7 +298,13 @@ function handleCreateNew() {
                     @click="openArtefactInWorkspace(group)"
                     class="cursor-pointer"
                 >
-                    <ArtefactCard :artefact-group="group" />
+                    <ArtefactCard 
+                        :artefact-group="group" 
+                        :is-starred="starredItems.includes(group.title)"
+                        @star="handleStarToggle(group.title)"
+                        @share="handleShareArtefact(group)"
+                        @import="handleImportToCurrent(group)"
+                    />
                 </div>
             </div>
         </div>

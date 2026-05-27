@@ -33,15 +33,19 @@ const svgContent = ref('');
 watchEffect(async () => {
   if (props.name) {
     const componentName = `Icon${toPascalCase(props.name)}.vue`;
-    const pathKeyWithCollection = `/src/assets/icons/${props.collection}/${componentName}`;
-    const pathKeyWithoutCollection = `/src/assets/icons/${componentName}`;
-    
-    let pathKeyToUse = null;
+    const targetWithCollection = `/${props.collection}/${componentName}`.toLowerCase();
+    const targetWithoutCollection = `/${componentName}`.toLowerCase();
 
-    if (iconModules[pathKeyWithCollection]) {
-      pathKeyToUse = pathKeyWithCollection;
-    } else if (iconModules[pathKeyWithoutCollection]) {
-      pathKeyToUse = pathKeyWithoutCollection;
+    let pathKeyToUse = Object.keys(iconModules).find(key => {
+        const lowerKey = key.toLowerCase();
+        return lowerKey.endsWith(targetWithCollection);
+    });
+
+    if (!pathKeyToUse) {
+        pathKeyToUse = Object.keys(iconModules).find(key => {
+            const lowerKey = key.toLowerCase();
+            return lowerKey.endsWith(targetWithoutCollection);
+        });
     }
 
     let rawVueFile = null;
@@ -49,9 +53,9 @@ watchEffect(async () => {
       rawVueFile = await iconModules[pathKeyToUse]();
     } else {
       console.warn(`Icon '${props.name}' (expected as ${componentName}) not found. Using fallback.`);
-      const fallbackPath = '/src/assets/icons/IconCode.vue';
-      if (iconModules[fallbackPath]) {
-        rawVueFile = await iconModules[fallbackPath]();
+      const fallbackKey = Object.keys(iconModules).find(key => key.toLowerCase().endsWith('/iconcode.vue'));
+      if (fallbackKey) {
+        rawVueFile = await iconModules[fallbackKey]();
       }
     }
 
@@ -72,3 +76,10 @@ watchEffect(async () => {
 <template>
   <span v-html="svgContent" class="inline-flex items-center justify-center"></span>
 </template>
+
+<style scoped>
+span :deep(svg) {
+  width: 100%;
+  height: 100%;
+}
+</style>

@@ -18,9 +18,11 @@ import IconError from '../../assets/icons/IconError.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
+import { usePyodideStore } from '../../stores/pyodide';
 
 const uiStore = useUiStore();
 const authStore = useAuthStore();
@@ -139,6 +141,96 @@ const isSaving = ref(false);
 const isFetching = ref(false);
 const isGeneratingAudio = ref(false);
 const loadError = ref(null);
+const isExecuting = ref(false);
+const pyodideStore = usePyodideStore();
+
+const isExecutable = computed(() => {
+    const type = detectedContentType.value;
+    return ['html', 'mermaid', 'svg', 'python', 'javascript'].includes(type);
+});
+
+const executeTitle = computed(() => {
+    const type = detectedContentType.value;
+    if (['html', 'mermaid', 'svg'].includes(type)) return 'Show Render / Preview';
+    return 'Execute Code';
+});
+
+async function executeArtefactContent(title, content, ext) {
+    const cleanContent = content.trim();
+
+    if (ext === 'html') {
+        const blob = new Blob([cleanContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        uiStore.addNotification("HTML opened in a new tab.", "success");
+    } else if (ext === 'svg') {
+        const htmlContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem;">${cleanContent}</div>`;
+        uiStore.openModal('interactiveOutput', { htmlContent, title: `SVG Preview: ${title}`, contentType: 'svg' });
+    } else if (ext === 'mermaid') {
+        uiStore.openModal('interactiveOutput', {
+            title: `Mermaid Diagram: ${title}`,
+            contentType: 'mermaid',
+            sourceCode: cleanContent
+        });
+    } else if (ext === 'js' || ext === 'javascript') {
+        const createDynamicFn = window.Function;
+        try {
+            let capturedOutput = '';
+            const originalLog = console.log;
+            console.log = (...args) => { capturedOutput += args.map(String).join(' ') + '\n'; };
+
+            const result = (new createDynamicFn(cleanContent))();
+            if (result !== undefined && result !== null) {
+                capturedOutput += String(result);
+            }
+            console.log = originalLog;
+
+            const outputText = capturedOutput.trim() || 'Execution finished with no output.';
+            uiStore.openModal('interactiveOutput', { content: `### Execution Output\n\`\`\`\n${outputText}\n\`\`\``, title: `JS Output: ${title}` });
+        } catch (e) {
+            uiStore.openModal('interactiveOutput', { content: `### Execution Error\n\`\`\`\n${e.toString()}\n\`\`\``, title: `JS Error: ${title}` });
+        }
+    } else if (ext === 'py' || ext === 'python') {
+        uiStore.addNotification("Loading Python environment...", "info");
+        if (!pyodideStore.isReady) {
+            await pyodideStore.initialize();
+        }
+
+        const canvasId = `code-canvas-${Date.now()}`;
+        const result = await pyodideStore.runCode(cleanContent, {
+            canvasSelector: `#${canvasId}`
+        });
+
+        const outputText = result.error || result.output || (result.image || result.usesCanvas ? '' : 'Execution finished with no output.');
+
+        if (result.usesCanvas) {
+            uiStore.openModal('interactiveOutput', { canvasId: canvasId, title: `Python Canvas: ${title}` });
+        } else if (result.image) {
+            const htmlContent = `<div style="text-align: center;"><img src="data:image/png;base64,${result.image}" class="max-w-full h-auto mx-auto" /></div>`;
+            uiStore.openModal('interactiveOutput', { htmlContent, title: `Python Output: ${title}` });
+        } else {
+            uiStore.openModal('interactiveOutput', { content: `### Python Output\n\`\`\`\n${outputText}\n\`\`\``, title: `Python Output: ${title}` });
+        }
+    } else {
+        uiStore.openModal('interactiveOutput', { content: cleanContent, title: `Viewer: ${title}` });
+    }
+}
+
+async function handleExecute() {
+    if (isExecuting.value) return;
+    isExecuting.value = true;
+    try {
+        const type = detectedContentType.value;
+        const ext = type === 'python' ? 'py' : (type === 'javascript' ? 'js' : type);
+        await executeArtefactContent(title.value, dbContent.value, ext);
+    } catch (e) {
+        console.error("Execution failed:", e);
+        uiStore.addNotification("Execution failed: " + e.message, "error");
+    } finally {
+        isExecuting.value = false;
+    }
+}
 
 
     // Detect content type for syntax highlighting based on artefact type and title
@@ -265,46 +357,38 @@ const loadError = ref(null);
         }
     }
 
-    // [FIX] Robust observer: Automatically loads the latest version whenever a file is selected
-    // or when a new version is created by the AI.
-    watch(() => artefactGroup.value, async (newGroup, oldGroup) => {
-        // If no group is found, we might still be loading or nothing is selected
-        if (!newGroup) {
-            if (!title.value) {
-                dbContent.value = '';
-                selectedVersion.value = null;
-            }
+    // Performance Optimisation: Avoid deep watching large nested arrays.
+    // Instead, watch a string key combining the file title and versions count.
+    const watcherKey = computed(() => {
+        if (!artefactGroup.value) return null;
+        return `${artefactGroup.value.title}-${artefactGroup.value.versions.length}`;
+    });
+
+    watch(watcherKey, async (newVal, oldVal) => {
+        if (!newVal) {
+            dbContent.value = '';
+            selectedVersion.value = null;
             return;
         }
 
-        const isNewFileSelection = !oldGroup || newGroup.title !== oldGroup.title;
-        const hasNewVersion = oldGroup && newGroup.versions.length > oldGroup.versions.length;
+        const group = artefactGroup.value;
+        if (!group) return;
 
-        // Trigger load if:
-        // 1. We just switched to a different file
-        // 2. The AI just added a new version to the current file
-        // 3. The workspace is open but no version is selected yet (initial load)
-        if (isNewFileSelection || hasNewVersion || selectedVersion.value === null) {
-            
-            if (isNewFileSelection) {
-                dbContent.value = ''; // Clear previous text immediately to prevent flickering
-            }
-
-            // Default to the latest version (at index 0 due to our DESC sorting)
-            const latestVersion = newGroup.versions[0]?.version;
-            
-            // If no versions exist yet (new file), just clear and ready for editing
-            if (!latestVersion) {
-                dbContent.value = '';
-                selectedVersion.value = 1;
-                return;
-            }
-            
-            // Sync the dropdown state and fetch the actual text content
-            selectedVersion.value = latestVersion;
-            await loadVersion(latestVersion);
+        const isNewFileSelection = !oldVal || newVal.split('-')[0] !== oldVal.split('-')[0];
+        if (isNewFileSelection) {
+            dbContent.value = ''; // Clear previous text immediately to prevent flickering
         }
-    }, { immediate: true, deep: true });
+
+        const latestVersion = group.versions[0]?.version;
+        if (!latestVersion) {
+            dbContent.value = '';
+            selectedVersion.value = 1;
+            return;
+        }
+
+        selectedVersion.value = latestVersion;
+        await loadVersion(latestVersion);
+    }, { immediate: true });
 
 async function handleSave(forceType = null) {
     if (isLiveUpdating.value) return;
@@ -367,9 +451,15 @@ async function handlePushToLibrary(type) {
         uiStore.addNotification("Document is empty.", "warning");
         return;
     }
-    
+
     try {
-        if (type === 'note') {
+        if (type === 'saved') {
+            await discussionsStore.saveArtefactToLibrary({
+                discussionId: discussionsStore.currentDiscussionId,
+                artefactTitle: title.value,
+                version: selectedVersion.value
+            });
+        } else if (type === 'note') {
             await notesStore.createNote({
                 title: title.value,
                 content: dbContent.value
@@ -516,6 +606,12 @@ function download() {
                 </button>
             </DropdownMenu>
 
+            <!-- Execute/Preview Button -->
+            <button v-if="isExecutable" @click="handleExecute" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" :title="executeTitle" :disabled="isExecuting">
+                <IconAnimateSpin v-if="isExecuting" class="w-4 h-4 animate-spin" />
+                <IconPlayCircle v-else class="w-4 h-4" />
+            </button>
+
             <button @click="download" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" title="Download Source">
                 <IconArrowDownTray class="w-4 h-4" />
             </button>
@@ -525,6 +621,13 @@ function download() {
             <!-- Global Library Export -->
             <DropdownMenu title="Library & Types" icon="folder" button-class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-blue-500 transition-colors" collection="ui">
                 <!-- EXPORTS: Save copy to global library -->
+                <button v-if="!isLiveUpdating" @click="handlePushToLibrary('saved')" class="menu-item">
+                    <IconFileText class="w-4 h-4 mr-3 text-blue-500" />
+                    <div class="flex flex-col">
+                        <span class="font-bold">Save to Featured Library</span>
+                        <span class="text-[10px] opacity-60 text-gray-500">Copy to global featured artefacts list</span>
+                    </div>
+                </button>
                 <button @click="handlePushToLibrary('note')" class="menu-item">
                     <IconPencil class="w-4 h-4 mr-3 text-amber-500" />
                     <div class="flex flex-col">

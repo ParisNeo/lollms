@@ -28,7 +28,7 @@ from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as D
 from backend.db.models.config import GlobalConfig
 from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
-from backend.session import user_sessions, build_lollms_client_from_params, get_user_data_root
+from backend.session import user_sessions, build_lollms_client_from_params, get_user_data_root, find_model_by_alias, resolve_model_name, invalidate_model_cache
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
@@ -231,39 +231,10 @@ def _cancel_generation(lc) -> None:
     if hasattr(lc, 'llm') and lc.llm is not None and hasattr(lc.llm, 'cancel'):
         lc.llm.cancel()
 
-# --- NEW HELPER FUNCTIONS for model resolution ---
-def find_model_by_alias(db: Session, alias_title: str) -> Optional[Tuple[str, str]]:
-    all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-    for binding in all_bindings:
-        model_aliases = binding.model_aliases or {}
-        if isinstance(model_aliases, str):
-            try: model_aliases = json.loads(model_aliases)
-            except Exception: continue
-        
-        for original_name, alias_data in model_aliases.items():
-            if original_name=="smart-routing":
-                continue 
-            if alias_data and alias_data.get('title') == alias_title:
-                return binding.alias, original_name
-    return None, None
-
-def resolve_model_name(db: Session, requested_model: str) -> Tuple[str, str]:
-    if '/' in requested_model:
-        parts = requested_model.split('/', 1)
-        binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
-        if binding:
-            return parts[0], parts[1]
-    
-    binding_alias, model_name = find_model_by_alias(db, requested_model)
-    if binding_alias:
-        return binding_alias, model_name
-
-    # If we fail to resolve, force invalidate cache so next list attempt is fresh
-    invalidate_model_cache(db)
-    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid alias.")
-
 def generate_mistral_compatible_id() -> str:
     """Generates a 9-character alphanumeric ID required by Mistral/LiteLLM."""
+    import random
+    import string
     return ''.join(random.choices(string.ascii_letters + string.digits, k=9))
 
 _global_model_cache = None
@@ -296,12 +267,6 @@ def set_cached_models(db: Session, models_list: list):
         config = GlobalConfig(key="cache_available_models", value=val, category="System Cache")
         db.add(config)
     db.commit()
-
-def invalidate_model_cache(db: Session):
-    db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").delete()
-    db.commit()
-
-# --- END HELPER FUNCTIONS ---
 
 
 # --- Dependencies ---

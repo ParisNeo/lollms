@@ -75,6 +75,17 @@ const layoutState = computed(() => {
     return isAuthenticated.value ? 'authenticated' : 'guest';
 });
 
+const funnyStatusHint = computed(() => {
+    const prog = authStore.loadingProgress;
+    if (prog <= 15) return "Feeding the server hamsters...";
+    if (prog <= 30) return "Reticulating splines...";
+    if (prog <= 45) return "Convincing the AI not to escape the sandbox...";
+    if (prog <= 60) return "Downloading extra sarcasm protocols...";
+    if (prog <= 75) return "Brewing espresso for the GPU...";
+    if (prog <= 90) return "Calibrating flux-capacitor coordinates...";
+    return "Finalizing world-domination formulas...";
+});
+
 const showMainSidebar = computed(() => {
     if (!isAuthenticated.value) return false;
     const noSidebarPaths = ['/settings', '/admin', '/friends', '/help', '/profile', '/messages', '/voices-studio', '/image-studio'];
@@ -169,7 +180,7 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
     </Transition>
 
     <!-- Splash Screen -->
-    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col bg-bg-app transition-all duration-1000 overflow-hidden">
+    <div v-if="layoutState === 'loading'" class="fixed inset-0 z-[100] flex flex-col bg-bg-app transition-all duration-1000 overflow-hidden splash-grid-bg">
         
         <!-- Background Decor (Reduced blur to prevent STATUS_BREAKPOINT crash) -->
         <div class="absolute inset-0 z-0 overflow-hidden pointer-events-none transition-all duration-1000" :class="{'blur-xl opacity-20 scale-110': isFunFactHanging}">
@@ -188,12 +199,13 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 
         <div class="grow flex flex-col relative z-10 transition-all duration-700" :class="{'blur-2xl opacity-0 scale-90 pointer-events-none': isFunFactHanging}">
 
-            <div class="grow flex flex-col items-center justify-center p-4 space-y-6">
+            <div class="grow flex flex-col items-center justify-center p-6 space-y-6 max-w-lg mx-auto w-full">
                 <!-- Compact Logo & Branding -->
                 <div class="text-center splash-branding animate-in fade-in zoom-in-95 duration-1000">
-                    <div class="flex justify-center mb-4 logo-wrap">
+                    <div class="flex justify-center mb-6 logo-wrap animate-float">
                         <div class="relative group">
-                            <div class="absolute inset-0 bg-primary/20 blur-2xl rounded-full group-hover:bg-primary/40 transition-all duration-700"></div>
+                            <!-- Rotating glowing backplate -->
+                            <div class="absolute -inset-4 bg-gradient-to-tr from-primary/30 to-accent/30 blur-2xl rounded-full opacity-70 group-hover:opacity-100 animate-rotate-glow transition-all duration-1000"></div>
                             <img :src="logoSrc" alt="Logo" class="relative h-24 sm:h-28 w-auto object-contain drop-shadow-[0_15px_30px_rgba(0,0,0,0.15)] dark:drop-shadow-[0_15px_30px_rgba(255,255,255,0.1)] transition-transform duration-700 hover:scale-105" />
                         </div>
                     </div>
@@ -205,32 +217,71 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
                     </p>
                 </div>
 
-                <!-- Compact Editorial Fact Card -->
-                <div v-if="authStore.funFact" 
-                    class="w-full max-w-lg cursor-pointer group transition-all duration-500"
-                    @click="toggleFactHang()">
-                    <div class="p-6 sm:p-8 border-l-[8px] rounded-[1.5rem] text-left shadow-xl bg-bg-card border-border-main overflow-hidden transform group-hover:-translate-y-1 group-hover:shadow-primary/5 transition-all" 
-                         :style="{ borderLeftColor: funFactColor }">
-                        <div class="flex items-center gap-4 mb-6">
-                            <div class="w-10 h-10 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-800 shadow-inner">
-                                <span class="text-xl">💡</span>
+                <!-- Unified Sleek Loader & Knowledge Card -->
+                <div class="w-full text-left shadow-2xl bg-white/40 dark:bg-black/30 backdrop-blur-xl border border-white/10 dark:border-white/5 overflow-hidden rounded-[1.5rem] transition-all duration-500 p-6 sm:p-8 border-l-[8px]" 
+                     :style="{ borderLeftColor: authStore.funFact ? funFactColor : 'var(--color-primary)' }">
+
+                    <!-- Header Row -->
+                    <div class="flex items-center justify-between gap-4 mb-5">
+                        <div class="flex items-center gap-4 min-w-0">
+                            <div class="w-10 h-10 rounded-full flex items-center justify-center bg-gray-100 dark:bg-gray-800 shadow-inner shrink-0">
+                                <span v-if="authStore.funFact" class="text-xl">💡</span>
+                                <IconAnimateSpin v-else class="w-5 h-5 text-primary animate-spin" />
                             </div>
-                            <div class="flex flex-col">
-                                <span class="text-[10px] font-black uppercase tracking-[0.4em] opacity-40 leading-none mb-1">Knowledge Discovery</span>
-                                <span class="text-xs font-bold" :style="{ color: funFactColor }">{{ funFactCategory || 'Archive' }}</span>
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-[9px] font-black uppercase tracking-[0.3em] opacity-40 leading-none mb-1">
+                                    {{ authStore.funFact ? 'Knowledge Discovery' : 'System Boot' }}
+                                </span>
+                                <span class="text-xs font-bold truncate" :style="{ color: authStore.funFact ? funFactColor : 'var(--color-primary)' }">
+                                    {{ authStore.funFact ? (funFactCategory || 'Fact Discovery') : 'Preparing Workspace' }}
+                                </span>
                             </div>
                         </div>
-                        <div class="max-h-[12vh] overflow-y-auto custom-scrollbar pr-4 italic font-serif text-lg text-text-main/80 leading-relaxed">
-                            <MessageContentRenderer :content="authStore.funFact" class="line-clamp-3" />
-                        </div>
-                        <div class="mt-8 flex items-center justify-between">
-                            <div class="flex gap-1">
-                                <div class="w-1 h-1 rounded-full bg-primary/20"></div>
-                                <div class="w-1 h-1 rounded-full bg-primary/40"></div>
-                                <div class="w-3 h-1 rounded-full bg-primary"></div>
+
+                        <!-- Pin / Expand Button -->
+                        <button 
+                            v-if="authStore.funFact"
+                            @click.stop="toggleFactHang()" 
+                            class="p-2.5 bg-gray-100/50 hover:bg-gray-200/50 dark:bg-gray-800/50 dark:hover:bg-gray-700/50 text-gray-500 hover:text-blue-500 rounded-xl transition-all duration-300 active:scale-95 flex items-center justify-center pointer-events-auto"
+                            title="Pin & Expand Fact"
+                        >
+                            <!-- Sleek Pushpin Icon -->
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a3 3 0 016 0v2M7 7h10" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Fun Fact Body (Only visible if loaded) -->
+                    <div v-if="authStore.funFact" class="mb-6 pr-2 max-h-[14vh] overflow-y-auto custom-scrollbar italic font-serif text-lg text-text-main/85 leading-relaxed border-l-2 pl-4 border-gray-200 dark:border-gray-800">
+                        <MessageContentRenderer :content="authStore.funFact" class="line-clamp-3" />
+                    </div>
+
+                    <!-- Integrated Progress Bar Section -->
+                    <div class="pt-4 border-t border-gray-150 dark:border-gray-850/50">
+                        <div class="flex justify-between items-end mb-2.5">
+                            <div class="flex flex-col min-w-0">
+                                <span class="splash-loading-label">System Initialization</span>
+                                <span class="text-[11px] font-bold text-primary dark:text-blue-400 animate-pulse tracking-wide truncate pr-4">
+                                    {{ authStore.loadingMessage }}
+                                </span>
                             </div>
-                            <span class="text-[9px] font-black uppercase tracking-[0.2em] text-primary animate-pulse">Expand for Details</span>
+                            <div class="text-right shrink-0">
+                                <span class="text-base font-black text-gray-900 dark:text-gray-100 font-mono tracking-tighter">{{ authStore.loadingProgress }}%</span>
+                            </div>
                         </div>
+
+                        <!-- Progress Track -->
+                        <div class="splash-progress-track !bg-gray-200/10 dark:!bg-gray-800/10 border border-white/5 h-2">
+                            <div class="splash-progress-fill" :style="{ width: `${authStore.loadingProgress}%` }">
+                                <div class="absolute inset-0 w-full h-full progress-bar-animated opacity-40"></div>
+                            </div>
+                        </div>
+
+                        <!-- Funny / System Status Hint -->
+                        <p class="mt-3.5 text-center text-[8px] font-black uppercase tracking-[0.3em] text-gray-400 dark:text-gray-600 opacity-65">
+                            {{ authStore.funFact ? funnyStatusHint : 'Connecting to local worker cluster...' }}
+                        </p>
                     </div>
                 </div>
             </div>
@@ -264,37 +315,6 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
                 </div>
             </div>
         </Teleport>
-
-        <!-- Progress Area: Pinned to bottom, z-30 -->
-        <div class="w-full bg-white/5 dark:bg-black/10 backdrop-blur-3xl p-4 sm:p-6 border-t border-gray-200/10 dark:border-gray-800/10 absolute bottom-0 left-0 z-30 transition-all duration-700 delay-100" 
-             :class="isFunFactHanging ? 'translate-y-full opacity-0' : 'translate-y-0 opacity-100'">
-
-            <div class="max-w-md mx-auto">
-                <!-- Top Labels -->
-                <div class="flex justify-between items-end mb-3">
-                    <div class="flex flex-col">
-                        <span class="splash-loading-label">System Initialization</span>
-                        <span class="text-[11px] font-bold text-blue-500 dark:text-blue-400 animate-pulse tracking-wide">{{ authStore.loadingMessage }}</span>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-lg font-black text-gray-900 dark:text-gray-100 font-mono tracking-tighter">{{ authStore.loadingProgress }}%</span>
-                    </div>
-                </div>
-
-                <!-- Progress Track -->
-                <div class="splash-progress-track">
-                    <div class="splash-progress-fill" :style="{ width: `${authStore.loadingProgress}%` }">
-                         <!-- Animated Shine Overlay -->
-                         <div class="absolute inset-0 w-full h-full progress-bar-animated opacity-40"></div>
-                    </div>
-                </div>
-
-                <!-- Status Hint -->
-                <p class="mt-4 text-center text-[8px] font-black uppercase tracking-[0.3em] text-gray-400 dark:text-gray-600 opacity-50">
-                    Connecting to local worker cluster...
-                </p>
-            </div>
-        </div>
 
         <footer class="absolute bottom-2 w-full text-center text-[9px] font-black uppercase tracking-[0.4em] text-gray-400 dark:text-gray-600 pointer-events-none" :class="{'opacity-0': isFunFactHanging}">ParisNeo &middot; 2025</footer>    
     </div>
@@ -370,6 +390,33 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
   to { opacity: 1; transform: translateY(0); }
 }
 .animate-fade-in-up { animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+
+@keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-8px); }
+}
+.animate-float {
+    animation: float 4s ease-in-out infinite;
+}
+
+@keyframes rotate-glow {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+.animate-rotate-glow {
+    animation: rotate-glow 20s linear infinite;
+}
+
+.splash-grid-bg {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+    background-position: center;
+}
+.dark .splash-grid-bg {
+    background-image: linear-gradient(rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+                      linear-gradient(90deg, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+}
 
 /* Landscape optimization */
 @media (max-height: 600px) {

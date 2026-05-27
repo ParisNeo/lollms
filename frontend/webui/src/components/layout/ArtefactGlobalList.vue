@@ -20,11 +20,67 @@ const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const { allUserArtefacts, isLoadingArtefacts, discussions } = storeToRefs(discussionsStore);
 
-const viewMode = ref('flat'); // 'flat' or 'discussion'
+const viewMode = ref('flat'); // 'flat', 'discussion' or 'starred'
 const expandedDiscussions = ref(new Set());
+const starredItems = ref([]);
 
 onMounted(() => {
     discussionsStore.fetchAllUserArtefacts();
+    try {
+        const stored = localStorage.getItem('starredArtefacts');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+                starredItems.value = parsed;
+            }
+        }
+    } catch (e) {
+        console.error("Failed to parse starredArtefacts:", e);
+    }
+});
+
+function handleStarToggle(title) {
+    const idx = starredItems.value.indexOf(title);
+    if (idx > -1) {
+        starredItems.value.splice(idx, 1);
+    } else {
+        starredItems.value.push(title);
+    }
+    localStorage.setItem('starredArtefacts', JSON.stringify(starredItems.value));
+}
+
+function handleShareArtefact(group) {
+    const latest = group.versions[0];
+    if (!latest) return;
+    uiStore.openModal('shareResource', {
+        id: latest.title,
+        name: latest.title,
+        type: 'artefact',
+        discussionId: latest.discussion_id || discussionsStore.currentDiscussionId
+    });
+}
+
+async function handleImportToCurrent(group) {
+    const latest = group.versions[0];
+    if (!latest || !discussionsStore.currentDiscussionId) {
+        uiStore.addNotification("Please select or start a discussion first.", "warning");
+        return;
+    }
+    if (latest.discussion_id === discussionsStore.currentDiscussionId) {
+        uiStore.addNotification("Artefact is already in the current discussion.", "info");
+        return;
+    }
+    await discussionsStore.importArtefactFromSource({
+        targetDiscussionId: discussionsStore.currentDiscussionId,
+        sourceDiscussionId: latest.discussion_id,
+        artefactTitle: latest.title
+    });
+}
+
+const filteredStarredArtefacts = computed(() => {
+    const list = groupedArtefacts.value;
+    if (!Array.isArray(list)) return [];
+    return list.filter(g => Array.isArray(starredItems.value) && starredItems.value.includes(g.title));
 });
 
 const filteredArtefacts = computed(() => {
@@ -117,6 +173,11 @@ async function handleViewArtefact(artefact) {
                         :class="viewMode === 'discussion' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-400'">
                     BY CHAT
                 </button>
+                <button @click="viewMode = 'starred'" 
+                        class="px-3 py-1 text-[10px] font-bold rounded-md transition-all"
+                        :class="viewMode === 'starred' ? 'bg-white dark:bg-gray-700 text-yellow-600 dark:text-yellow-400 shadow-sm' : 'text-gray-400'">
+                    STARRED
+                </button>
             </div>
             <button @click="discussionsStore.fetchAllUserArtefacts()" class="p-1.5 text-gray-400 hover:text-blue-500 transition-colors">
                 <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" />
@@ -130,13 +191,19 @@ async function handleViewArtefact(artefact) {
 
             <!-- FLAT VIEW -->
             <div v-else-if="viewMode === 'flat'" class="space-y-2">
-                <div v-for="group in groupedArtefacts" :key="group.title" @click="handleViewArtefact(group.versions[0])">
-                    <ArtefactCard :artefact-group="group" />
+                <div v-for="group in groupedArtefacts" :key="group.title">
+                    <ArtefactCard 
+                        :artefact-group="group" 
+                        :is-starred="starredItems && starredItems.includes(group.title)"
+                        @star="handleStarToggle(group.title)"
+                        @share="handleShareArtefact(group)"
+                        @import="handleImportToCurrent(group)"
+                    />
                 </div>
             </div>
 
             <!-- GROUPED VIEW -->
-            <div v-else class="space-y-4">
+            <div v-else-if="viewMode === 'discussion'" class="space-y-4">
                 <div v-for="group in groupedByDiscussion" :key="group.id" class="border-b dark:border-gray-800 pb-2 last:border-0">
                     <button @click="toggleDiscussion(group.id)" class="w-full flex items-center justify-between p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg group transition-colors">
                         <div class="flex items-center gap-2 min-w-0">
@@ -144,19 +211,39 @@ async function handleViewArtefact(artefact) {
                             <IconFileText class="w-4 h-4 text-blue-500 shrink-0" />
                             <span class="text-xs font-bold truncate text-gray-700 dark:text-gray-200">{{ group.title }}</span>
                         </div>
-                        <span class="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 rounded-full text-gray-500">{{ group.artefacts.length }}</span>
+                        <span class="text-[10px] bg-gray-100 dark:bg-gray-700 px-2 rounded-full text-gray-500">{{ group.artefacts ? group.artefacts.length : 0 }}</span>
                     </button>
-                    
+
                     <div v-if="expandedDiscussions.has(group.id)" class="mt-2 ml-4 space-y-2 animate-in fade-in slide-in-from-top-1">
-                        <div v-for="art in group.artefacts" :key="art.title + art.version" @click="handleViewArtefact(art)">
+                        <div v-for="art in group.artefacts" :key="art.title + art.version">
                             <!-- Wrap single artefact in fake group for card compatibility -->
-                            <ArtefactCard :artefact-group="{ title: art.title, versions: [art] }" />
+                            <ArtefactCard 
+                                :artefact-group="{ title: art.title, versions: [art] }" 
+                                :is-starred="starredItems && starredItems.includes(art.title)"
+                                @star="handleStarToggle(art.title)"
+                                @share="handleShareArtefact({ versions: [art] })"
+                                @import="handleImportToCurrent({ versions: [art] })"
+                            />
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div v-if="!isLoadingArtefacts && filteredArtefacts.length === 0" class="empty-state-flat">
+            <!-- STARRED VIEW -->
+            <div v-else-if="viewMode === 'starred'" class="space-y-2">
+                <div v-if="!filteredStarredArtefacts || filteredStarredArtefacts.length === 0" class="text-center py-10 text-gray-400 text-xs">No starred artefacts.</div>
+                <div v-for="group in filteredStarredArtefacts" :key="group.title">
+                    <ArtefactCard 
+                        :artefact-group="group" 
+                        :is-starred="true"
+                        @star="handleStarToggle(group.title)"
+                        @share="handleShareArtefact(group)"
+                        @import="handleImportToCurrent(group)"
+                    />
+                </div>
+            </div>
+
+            <div v-if="!isLoadingArtefacts && (!filteredArtefacts || filteredArtefacts.length === 0)" class="empty-state-flat">
                 <p class="text-sm text-gray-500">No artefacts found.</p>
             </div>
         </div>

@@ -17,7 +17,7 @@ ArtefactType.register_custom_type("file", label="External Document")
 ArtefactType.register_custom_type("book", label="Digital Book")
 
 
-def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None) -> Optional[LollmsDiscussion]:
+def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None, load_memory: bool = True) -> Optional[LollmsDiscussion]:
     """
     Retrieves or creates a LollmsDiscussion object for a user.
     This function now relies on the lollms-client's native LollmsDiscussion class.
@@ -117,23 +117,24 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
         discussion.max_context_size = max_context_size
         
         # --- NEW MEMORY & USER DATA ZONE LOGIC ---
-        db = next(get_db())
-        try:
-            user_db = db.query(DBUser).filter(DBUser.username == username).first()
-            if user_db:
-                # Cognitive Three-Layer Memory Integration
-                from backend.routers.memories import get_user_memory_manager
-                mm = get_user_memory_manager(username)
-                
-                # Bind the instantiated memory manager directly to the discussion.
-                # LollmsDiscussion uses `discussion.memory_manager` internally to manage context layers.
-                discussion.memory_manager = mm
-                
-                # Build the active working memory prompt dynamically
-                discussion.memory = mm.build_working_zone()
+        if load_memory:
+            db = next(get_db())
+            try:
+                user_db = db.query(DBUser).filter(DBUser.username == username).first()
+                if user_db:
+                    # Cognitive Three-Layer Memory Integration
+                    from backend.routers.memories import get_user_memory_manager
+                    mm = get_user_memory_manager(username)
 
-                # User Data Zone construction
-                preferences_lines = []
+                    # Bind the instantiated memory manager directly to the discussion.
+                    # LollmsDiscussion uses `discussion.memory_manager` internally to manage context layers.
+                    discussion.memory_manager = mm
+
+                    # Build the active working memory prompt dynamically
+                    discussion.memory = mm.build_working_zone()
+
+                    # User Data Zone construction
+                    preferences_lines = []
 
                 if user_db.share_dynamic_info_with_llm:
                     preferences_lines.extend([
@@ -164,9 +165,9 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
                     user_data_zone_parts.append("\n--- User General Information ---")
                     user_data_zone_parts.append(user_db.data_zone)
 
-                discussion.user_data_zone = "\n".join(user_data_zone_parts)
-        finally:
-            db.close()
+                    discussion.user_data_zone = "\n".join(user_data_zone_parts)
+            finally:
+                db.close()
         # --- END NEW LOGIC ---
 
         try:
@@ -184,5 +185,17 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
             autosave=True,
             discussion_metadata={"title": f"New Discussion {discussion_id[:8]}"},
         )
+        # --- CONDITIONAL MEMORY LOADING FOR CREATION ---
+        if load_memory:
+            db = next(get_db())
+            try:
+                user_db = db.query(DBUser).filter(DBUser.username == username).first()
+                if user_db:
+                    from backend.routers.memories import get_user_memory_manager
+                    mm = get_user_memory_manager(username)
+                    new_discussion.memory_manager = mm
+                    new_discussion.memory = mm.build_working_zone()
+            finally:
+                db.close()
         return new_discussion
     return None

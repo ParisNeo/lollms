@@ -1,7 +1,8 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useDiscussionsStore } from '../../../stores/discussions';
 import { useUiStore } from '../../../stores/ui';
+import { usePyodideStore } from '../../../stores/pyodide';
 
 // Icons
 import IconFileText from '../../../assets/icons/IconFileText.vue';
@@ -10,16 +11,48 @@ import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconMenu from '../../../assets/icons/IconMenu.vue';
+import IconPlayCircle from '../../../assets/icons/IconPlayCircle.vue';
+import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
+import IconStar from '../../../assets/icons/IconStar.vue';
+import IconStarFilled from '../../../assets/icons/IconStarFilled.vue';
+import IconShare from '../../../assets/icons/IconShare.vue';
+import IconArrowUpTray from '../../../assets/icons/IconArrowUpTray.vue';
 import DropdownMenu from '../DropdownMenu/DropdownMenu.vue';
 
 const props = defineProps({
   artefactGroup: { type: Object, required: true },
+  isStarred: { type: Boolean, default: false }
 });
+
+defineEmits(['star', 'share', 'import']);
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
+const pyodideStore = usePyodideStore();
 
 const selectedVersion = ref(props.artefactGroup.versions[0]?.version || 1);
+const isExecuting = ref(false);
+
+const isSavedLibraryItem = computed(() => {
+    const latest = props.artefactGroup.versions[0];
+    return latest && latest.discussion_id === 'saved';
+});
+
+async function handleSaveToLibrary() {
+    await discussionsStore.saveArtefactToLibrary({
+        discussionId: discussionsStore.currentDiscussionId,
+        artefactTitle: props.artefactGroup.title,
+        version: selectedVersion.value
+    });
+}
+
+async function handleStarClick() {
+    if (!isSavedLibraryItem.value && !props.isStarred) {
+        // Auto-promote to global library if starred from a local discussion
+        await handleSaveToLibrary();
+    }
+    emit('star');
+}
 
 const fileExtension = computed(() => {
     const title = props.artefactGroup.title;
@@ -31,6 +64,119 @@ const isLoadedToDataZone = computed(() => {
     const versionData = props.artefactGroup.versions.find(v => v.version === selectedVersion.value);
     return versionData ? versionData.is_loaded : false;
 });
+
+const showImportOption = computed(() => {
+    const latest = props.artefactGroup.versions[0];
+    return latest && latest.discussion_id && latest.discussion_id !== discussionsStore.currentDiscussionId;
+});
+
+const fileExtensionLower = computed(() => {
+    const title = props.artefactGroup.title;
+    const parts = title.split('.');
+    return parts.length > 1 ? parts.pop().toLowerCase() : '';
+});
+
+const isExecutable = computed(() => {
+    const ext = fileExtensionLower.value;
+    return ['html', 'mermaid', 'svg', 'py', 'js', 'json', 'python', 'javascript'].includes(ext);
+});
+
+const executeTitle = computed(() => {
+    const ext = fileExtensionLower.value;
+    if (['html', 'mermaid', 'svg'].includes(ext)) return 'Show Render / Preview';
+    return 'Execute Code';
+});
+
+async function executeArtefactContent(title, content, ext) {
+    const cleanContent = content.trim();
+
+    if (ext === 'html') {
+        const blob = new Blob([cleanContent], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        window.open(url, '_blank');
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        uiStore.addNotification("HTML opened in a new tab.", "success");
+    } else if (ext === 'svg') {
+        const htmlContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem;">${cleanContent}</div>`;
+        uiStore.openModal('interactiveOutput', { htmlContent, title: `SVG Preview: ${title}`, contentType: 'svg' });
+    } else if (ext === 'mermaid') {
+        uiStore.openModal('interactiveOutput', {
+            title: `Mermaid Diagram: ${title}`,
+            contentType: 'mermaid',
+            sourceCode: cleanContent
+        });
+    } else if (ext === 'js' || ext === 'javascript') {
+        const createDynamicFn = window.Function;
+        try {
+            let capturedOutput = '';
+            const originalLog = console.log;
+            console.log = (...args) => { capturedOutput += args.map(String).join(' ') + '\n'; };
+
+            const result = (new createDynamicFn(cleanContent))();
+            if (result !== undefined && result !== null) {
+                capturedOutput += String(result);
+            }
+            console.log = originalLog;
+
+            const outputText = capturedOutput.trim() || 'Execution finished with no output.';
+            uiStore.openModal('interactiveOutput', { content: `### Execution Output\n\`\`\`\n${outputText}\n\`\`\``, title: `JS Output: ${title}` });
+        } catch (e) {
+            uiStore.openModal('interactiveOutput', { content: `### Execution Error\n\`\`\`\n${e.toString()}\n\`\`\``, title: `JS Error: ${title}` });
+        }
+    } else if (ext === 'py' || ext === 'python') {
+        uiStore.addNotification("Loading Python environment...", "info");
+        if (!pyodideStore.isReady) {
+            await pyodideStore.initialize();
+        }
+
+        const canvasId = `code-canvas-${Date.now()}`;
+        const result = await pyodideStore.runCode(cleanContent, {
+            canvasSelector: `#${canvasId}`
+        });
+
+        const outputText = result.error || result.output || (result.image || result.usesCanvas ? '' : 'Execution finished with no output.');
+
+        if (result.usesCanvas) {
+            uiStore.openModal('interactiveOutput', { canvasId: canvasId, title: `Python Canvas: ${title}` });
+        } else if (result.image) {
+            const htmlContent = `<div style="text-align: center;"><img src="data:image/png;base64,${result.image}" class="max-w-full h-auto mx-auto" /></div>`;
+            uiStore.openModal('interactiveOutput', { htmlContent, title: `Python Output: ${title}` });
+        } else {
+            uiStore.openModal('interactiveOutput', { content: `### Python Output\n\`\`\`\n${outputText}\n\`\`\``, title: `Python Output: ${title}` });
+        }
+    } else {
+        uiStore.openModal('interactiveOutput', { content: cleanContent, title: `Viewer: ${title}` });
+    }
+}
+
+async function handleExecute() {
+    if (isExecuting.value) return;
+    isExecuting.value = true;
+    try {
+        const data = await discussionsStore.fetchArtefactContent({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: props.artefactGroup.title,
+            version: selectedVersion.value
+        });
+
+        let content = '';
+        if (typeof data === 'string') {
+            content = data;
+        } else if (data && typeof data === 'object') {
+            content = data.content ?? '';
+        }
+
+        const ext = fileExtensionLower.value;
+        const title = props.artefactGroup.title;
+
+        await executeArtefactContent(title, content, ext);
+    } catch (e) {
+        console.error("Execution failed:", e);
+        uiStore.addNotification("Execution failed: " + e.message, "error");
+    } finally {
+        isExecuting.value = false;
+    }
+}
 
 const currentType = computed(() => {
     // Get type from the first (latest) version
@@ -111,9 +257,16 @@ async function toggleLoad() {
 
     <!-- Info Column -->
     <div class="grow min-w-0 flex flex-col justify-center cursor-pointer" @click="handleView">
-        <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate" :title="artefactGroup.title">
-            {{ artefactGroup.title }}
-        </h4>
+        <div class="flex items-center gap-2">
+            <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate" :title="artefactGroup.title">
+                {{ artefactGroup.title }}
+            </h4>
+            <!-- Star Toggle Button -->
+            <button @click.stop="handleStarClick" class="p-1 rounded-full transition-colors shrink-0" :class="isStarred ? 'text-yellow-500' : 'text-gray-300 dark:text-gray-600 hover:text-yellow-500'">
+                <IconStarFilled v-if="isStarred" class="w-3.5 h-3.5" />
+                <IconStar v-else class="w-3.5 h-3.5" />
+            </button>
+        </div>
         <div class="flex items-center gap-2 mt-0.5">
             <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ fileExtension }}</span>
             <span class="text-[10px] text-gray-400">•</span>
@@ -123,6 +276,11 @@ async function toggleLoad() {
 
     <!-- Actions -->
     <div class="flex items-center gap-1 pr-1">
+        <button v-if="isExecutable" @click.stop="handleExecute" class="p-2 text-gray-400 hover:text-green-600 transition-colors" :title="executeTitle">
+            <IconAnimateSpin v-if="isExecuting" class="w-5 h-5 animate-spin" />
+            <IconPlayCircle v-else class="w-5 h-5" />
+        </button>
+
         <button @click.stop="handleDownload" class="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download">
             <IconArrowDownTray class="w-5 h-5" />
         </button>
@@ -130,11 +288,30 @@ async function toggleLoad() {
 
         <!-- Advanced Actions Dropdown -->
         <DropdownMenu icon="menu" buttonClass="p-2 text-gray-400 hover:text-gray-900 dark:hover:white transition-colors" title="Actions">
-            <button @click="toggleLoad" class="menu-item">
+            <button v-if="!isSavedLibraryItem" @click="toggleLoad" class="menu-item">
                 <IconRefresh class="w-4 h-4 mr-3" :class="{'text-green-500': isLoadedToDataZone}"/> 
                 <span>{{ isLoadedToDataZone ? 'Unload from Context' : 'Load to Context' }}</span>
             </button>
-            <button @click="handleRename" class="menu-item">
+            <button v-if="!isSavedLibraryItem" @click="handleSaveToLibrary" class="menu-item text-blue-500">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+                <span>Save to Library</span>
+            </button>
+            <button v-if="showImportOption" @click="$emit('import')" class="menu-item">
+                <IconArrowUpTray class="w-4 h-4 mr-3" />
+                <span>Import to Current Chat</span>
+            </button>
+            <button @click="$emit('share')" class="menu-item">
+                <IconShare class="w-4 h-4 mr-3" />
+                <span>Share with Friend</span>
+            </button>
+            <button @click="handleStarClick" class="menu-item">
+                <IconStarFilled v-if="isStarred" class="w-4 h-4 mr-3 text-yellow-500" />
+                <IconStar v-else class="w-4 h-4 mr-3" />
+                <span>{{ isStarred ? 'Unstar' : 'Star' }}</span>
+            </button>
+            <button v-if="!isSavedLibraryItem" @click="handleRename" class="menu-item">
                 <IconPencil class="w-4 h-4 mr-3" />
                 <span>Rename</span>
             </button>

@@ -470,12 +470,21 @@ function _parse_form_xml(attrs_str, body) {
         attrs[match[1]] = match[2];
     }
 
-    // Extract fields
-    const fields = [...body.matchAll(/<field\s+([^>]+?)\s*\/?>/g)].map(m => {
+    // Extract fields supporting self-closing and block tags (with children like <option>)
+    const fieldRegex = /<field\s+([^>]*?)(?:\/>|>([\s\S]*?)<\/field>)/gi;
+    const fields = [...body.matchAll(fieldRegex)].map(m => {
+        const fieldAttrsStr = m[1];
+        const innerContent = m[2];
         const fAttrs = {};
-        const fAttrMatch = m[1].matchAll(/(\w+)=["']([^"']+)["']/g);
+        const fAttrMatch = fieldAttrsStr.matchAll(/(\w+)=["']([^"']*)["']/g);
         for (const ma of fAttrMatch) {
             fAttrs[ma[1]] = ma[2];
+        }
+        if (innerContent) {
+            const options = [...innerContent.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)].map(om => om[1].trim());
+            if (options.length > 0) {
+                fAttrs.options = options;
+            }
         }
         return fAttrs;
     });

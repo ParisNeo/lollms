@@ -145,6 +145,24 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         uiStore.addNotification(`Renamed to '${newTitle}'`, 'success');
     }
     
+    async function saveArtefactToLibrary({ discussionId, artefactTitle, version }) {
+        try {
+            // Double-encode to ensure title characters like dots don't trigger static file handlers
+            const encodedTitle = encodeURIComponent(artefactTitle)
+                .replace(/\./g, '%2E')
+                .replace(/%/g, '%25');
+
+            await apiClient.post(`/api/discussions/${discussionId}/artefacts/${encodedTitle}/save`, null, {
+                params: { version }
+            });
+            uiStore.addNotification(`'${artefactTitle}' saved to your featured library!`, 'success');
+            await fetchAllUserArtefacts();
+        } catch (e) {
+            console.error("Failed to save artefact to library:", e);
+            uiStore.addNotification(`Failed to save '${artefactTitle}' to library.`, 'error');
+        }
+    }
+
     async function deleteArtefact({ discussionId, artefactTitle }) {
         // 1. Capture original state for potential rollback
         const originalArtefacts = [...activeDiscussionArtefacts.value];
@@ -168,6 +186,16 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
 
         try {
+            if (discussionId === 'saved') {
+                const encodedTitle = encodeURIComponent(artefactTitle)
+                    .replace(/\./g, '%2E')
+                    .replace(/%/g, '%25');
+                await apiClient.delete(`/api/discussions/artefacts/save/${encodedTitle}`);
+                await fetchAllUserArtefacts();
+                uiStore.addNotification(`'${artefactTitle}' removed from saved library.`, 'success', 2000);
+                return;
+            }
+
             // 4. Perform actual deletion in the background
             await apiClient.delete(`/api/discussions/${discussionId}/artefact`, {
                 params: { artefact_title: artefactTitle }
@@ -529,7 +557,37 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
+    async function shareArtefact(discussionId, artefactTitle, targetUsername) {
+        try {
+            await apiClient.post(`/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}/share`, {
+                target_username: targetUsername
+            });
+            uiStore.addNotification(`Artefact shared with ${targetUsername}`, 'success');
+        } catch (error) {
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to share artefact', 'error');
+        }
+    }
+
+    async function importArtefactFromSource({ targetDiscussionId, sourceDiscussionId, artefactTitle }) {
+        try {
+            const response = await apiClient.post(`/api/discussions/${targetDiscussionId}/artefacts/import-from-source`, null, {
+                params: {
+                    source_discussion_id: sourceDiscussionId,
+                    artefact_title: artefactTitle
+                }
+            });
+            _handleArtefactAndDataZoneUpdate(response);
+            uiStore.addNotification(`Artefact '${artefactTitle}' imported to current discussion.`, 'success');
+        } catch (error) {
+            console.error("Import from source failed:", error);
+            uiStore.addNotification("Failed to import artefact.", "error");
+        }
+    }
+
     return {
+        saveArtefactToLibrary,
+        shareArtefact,
+        importArtefactFromSource,
         createDiscussionWithArtefactVersion,
         revertArtefact,
         renameArtefact,

@@ -58,6 +58,7 @@ import IconGoogleDrive from '../../assets/icons/IconGoogleDrive.vue';
 import IconCalendar from '../../assets/icons/IconCalendar.vue';
 import IconGoogle from '../../assets/icons/IconGoogle.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -676,6 +677,111 @@ function viewAttachedFile(file) {
         uiStore.addNotification(`Opening workspace: ${file.title}`, 'info', 1500);
     }, 100);
 }
+function getGroupExtension(group) {
+    const title = group?.title || '';
+    const parts = title.split('.');
+    return parts.length > 1 ? parts.pop().toLowerCase() : '';
+}
+
+function isGroupExecutable(group) {
+    const ext = getGroupExtension(group);
+    return ['html', 'mermaid', 'svg', 'py', 'js', 'json', 'python', 'javascript'].includes(ext);
+}
+
+function getGroupExecuteTitle(group) {
+    const ext = getGroupExtension(group);
+    if (['html', 'mermaid', 'svg'].includes(ext)) return 'Show Render / Preview';
+    return 'Execute Code';
+}
+
+async function handleExecuteGroup(group) {
+    const targetFile = group.selectedFile || group.latest;
+    if (!targetFile) return;
+
+    uiStore.addNotification("Fetching content for execution...", "info");
+    try {
+        const data = await discussionsStore.fetchArtefactContent({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: targetFile.title,
+            version: targetFile.version,
+            strategy: 'raw'
+        });
+
+        let content = '';
+        if (typeof data === 'string') {
+            content = data;
+        } else if (data && typeof data === 'object') {
+            content = data.content ?? '';
+        }
+
+        const ext = getGroupExtension(group);
+        const title = targetFile.title;
+        const cleanContent = content.trim();
+
+        if (ext === 'html') {
+            const blob = new Blob([cleanContent], { type: 'text/html' });
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank');
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+            uiStore.addNotification("HTML opened in a new tab.", "success");
+        } else if (ext === 'svg') {
+            const htmlContent = `<div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 1rem;">${cleanContent}</div>`;
+            uiStore.openModal('interactiveOutput', { htmlContent, title: `SVG Preview: ${title}`, contentType: 'svg' });
+        } else if (ext === 'mermaid') {
+            uiStore.openModal('interactiveOutput', {
+                title: `Mermaid Diagram: ${title}`,
+                contentType: 'mermaid',
+                sourceCode: cleanContent
+            });
+        } else if (ext === 'js' || ext === 'javascript') {
+            const createDynamicFn = window.Function;
+            try {
+                let capturedOutput = '';
+                const originalLog = console.log;
+                console.log = (...args) => { capturedOutput += args.map(String).join(' ') + '\n'; };
+
+                const result = (new createDynamicFn(cleanContent))();
+                if (result !== undefined && result !== null) {
+                    capturedOutput += String(result);
+                }
+                console.log = originalLog;
+
+                const outputText = capturedOutput.trim() || 'Execution finished with no output.';
+                uiStore.openModal('interactiveOutput', { content: `### Execution Output\n\`\`\`\n${outputText}\n\`\`\``, title: `JS Output: ${title}` });
+            } catch (e) {
+                uiStore.openModal('interactiveOutput', { content: `### Execution Error\n\`\`\`\n${e.toString()}\n\`\`\``, title: `JS Error: ${title}` });
+            }
+        } else if (ext === 'py' || ext === 'python') {
+            const pyodideStore = (await import('../../stores/pyodide')).usePyodideStore();
+            uiStore.addNotification("Loading Python environment...", "info");
+            if (!pyodideStore.isReady) {
+                await pyodideStore.initialize();
+            }
+
+            const canvasId = `code-canvas-${Date.now()}`;
+            const result = await pyodideStore.runCode(cleanContent, {
+                canvasSelector: `#${canvasId}`
+            });
+
+            const outputText = result.error || result.output || (result.image || result.usesCanvas ? '' : 'Execution finished with no output.');
+
+            if (result.usesCanvas) {
+                uiStore.openModal('interactiveOutput', { canvasId: canvasId, title: `Python Canvas: ${title}` });
+            } else if (result.image) {
+                const htmlContent = `<div style="text-align: center;"><img src="data:image/png;base64,${result.image}" class="max-w-full h-auto mx-auto" /></div>`;
+                uiStore.openModal('interactiveOutput', { htmlContent, title: `Python Output: ${title}` });
+            } else {
+                uiStore.openModal('interactiveOutput', { content: `### Python Output\n\`\`\`\n${outputText}\n\`\`\``, title: `Python Output: ${title}` });
+            }
+        } else {
+            uiStore.openModal('interactiveOutput', { content: cleanContent, title: `Viewer: ${title}` });
+        }
+    } catch (e) {
+        console.error("Execution failed:", e);
+        uiStore.addNotification("Execution failed: " + e.message, "error");
+    }
+}
+
 async function toggleArtefactLoad(file) { 
     if (!activeDiscussion.value) return; 
     if (file.is_loaded) 
@@ -982,14 +1088,19 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 
                     <div class="h-3 w-px bg-gray-300 dark:bg-gray-600 mx-1"></div>
 
+                    <!-- Execute Button (Visual Cue in attached chips list) -->
+                    <button v-if="isGroupExecutable(group)" @click.stop="handleExecuteGroup(group)" class="cursor-pointer hover:scale-110 transition-transform text-blue-500 hover:text-green-500 mr-1" :title="getGroupExecuteTitle(group)">
+                        <IconPlayCircle class="w-4 h-4" />
+                    </button>
+
                     <!-- Load/Unload Toggle (applies to selected version) -->
-                    <button @click.stop="toggleArtefactLoad(group.selectedFile || group.latest)" :title="(group.selectedFile || group.latest).is_loaded ? 'Exclude from context' : 'Include in context'" class="hover:scale-110 transition-transform">
+                    <button v-if="!isSavedLibraryItem" @click.stop="toggleLoad" :title="(group.selectedFile || group.latest).is_loaded ? 'Exclude from context' : 'Include in context'" class="cursor-pointer hover:scale-110 transition-transform">
                         <IconCheckCircle v-if="(group.selectedFile || group.latest).is_loaded" class="w-4 h-4 text-green-500"/>
                         <IconCircle v-else class="w-4 h-4" />
                     </button>
 
                     <!-- Remove Button -->
-                    <button @click.stop="removeArtefact(group.latest)" class="text-gray-400 hover:text-red-500 transition-colors ml-1" title="Permanently delete">
+                    <button @click.stop="removeArtefact(group.latest)" class="cursor-pointer text-gray-400 hover:text-red-500 transition-colors ml-1" title="Permanently delete">
                         <IconXMark class="w-3.5 h-3.5" />
                     </button>
                 </div>

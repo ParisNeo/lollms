@@ -111,6 +111,20 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
 
+        // 3. Handle Pruning Discussions Task Completion (Auto-refresh List)
+        const pruneTask = newTasks.find(t => t.name.startsWith('Prune empty discussions') && t.status === 'completed');
+        if (pruneTask && !pruneTask._processed_for_ui) {
+            pruneTask._processed_for_ui = true;
+            await getActions().loadDiscussions();
+
+            // Defensive Check: If currently active discussion was deleted, switch back to Feed
+            if (currentDiscussionId.value && !discussions.value[currentDiscussionId.value]) {
+                await getActions().selectDiscussion(null);
+                uiStore.setMainView('feed');
+            }
+            uiStore.addNotification('Empty discussions pruned successfully.', 'success');
+        }
+
         const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
         if (activeTrackedTaskIds.length === 0) return;
 
@@ -563,7 +577,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         discussions, currentDiscussionId, currentGroupId, messages, generationInProgress, discussionGroups,
         isLoadingDiscussions, isLoadingMessages, 
         titleGenerationInProgressId, activeDiscussionContextStatus,
-        activeAiTasks, activeDiscussionArtefacts, isLoadingArtefacts, liveDataZoneTokens,
+        activeAiTasks, activeDiscussionArtefacts, allUserArtefacts, isLoadingArtefacts, liveDataZoneTokens,
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
         attachedSkills, ttsState, generationState, currentPlayingAudio, imageGenerationSystemPrompt,
         activeUpdatingArtefacts, liveArtefactBuffers,

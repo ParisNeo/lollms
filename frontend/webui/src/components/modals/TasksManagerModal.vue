@@ -74,13 +74,13 @@ function copyLogs() {
 <template>
     <GenericModal modal-name="tasksManager" title="Command Center" max-width-class="max-w-[95vw]">
         <template #body>
-            <!-- ── Centered Main Container (Crucial Fix: Removed negative margins) ── -->
-            <div class="max-w-[1500px] mx-auto min-h-[700px] h-[80vh] flex overflow-hidden bg-white dark:bg-gray-950 rounded-2xl border border-gray-100 dark:border-gray-800 shadow-2xl">
-                
+            <!-- ── Centered Main Container (Removed redundant border/shadow card nesting) ── -->
+            <div class="max-w-[1500px] mx-auto min-h-[500px] h-[72vh] flex overflow-hidden bg-transparent">
+
                 <!-- ── LEFT: Process Navigation Rail ── -->
-                <aside class="w-72 shrink-0 border-r border-gray-100 dark:border-gray-800 flex flex-col bg-gray-50/40 dark:bg-gray-900/40">
+                <aside class="w-64 shrink-0 border-r border-gray-100 dark:border-gray-800 flex flex-col bg-gray-50/20 dark:bg-gray-900/10">
                     <!-- Sidebar Search & Filter -->
-                    <div class="p-5 space-y-4 border-b dark:border-gray-800">
+                    <div class="p-3.5 space-y-3 border-b dark:border-gray-800">
                         <div class="relative">
                             <IconMagnifyingGlass class="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
                             <input 
@@ -100,13 +100,13 @@ function copyLogs() {
                     </div>
 
                     <!-- Task List -->
-                    <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+                    <div class="flex-1 overflow-y-auto custom-scrollbar">
                         <button 
                             v-for="task in filteredTasks" 
                             :key="task.id" 
                             @click="selectedTask = task"
-                            class="task-sidebar-item"
-                            :class="{ 'is-selected': selectedTask?.id === task.id }"
+                            class="task-item-card"
+                            :class="{ 'selected': selectedTask?.id === task.id }"
                         >
                             <div class="flex justify-between items-start mb-2">
                                 <span class="text-[11px] font-bold text-gray-700 dark:text-gray-300 truncate pr-3">{{ task.name }}</span>
@@ -125,66 +125,67 @@ function copyLogs() {
                 </aside>
 
                 <!-- ── RIGHT: Task Insight Dashboard ── -->
-                <main class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-950">
+                <!-- ── RIGHT: Task Insight Dashboard ── -->
+                <main class="flex-1 flex flex-col min-w-0 bg-transparent">
                     <Transition mode="out-in" name="fade-slide">
                         <div v-if="selectedTask" :key="selectedTask.id" class="flex flex-col h-full overflow-hidden">
                             
                             <!-- 1. HUD Layer (Fixed Top) -->
-                            <section class="p-8 pb-6 border-b border-gray-50 dark:border-gray-800 shrink-0">
-                                <div class="flex items-start justify-between mb-6">
+                            <section class="p-5 pb-4 border-b border-gray-100 dark:border-gray-800 shrink-0 bg-gray-50/10 dark:bg-gray-900/10">
+                                <div class="flex items-start justify-between mb-4">
                                     <div class="flex-1 min-w-0">
-                                        <div class="flex items-center gap-2 mb-2">
+                                        <div class="flex items-center gap-2 mb-1.5">
                                             <span class="modal-tag !mb-0">Process Insight</span>
                                             <div v-if="selectedTask.status === 'completed'" class="flex items-center gap-1 text-[9px] font-black uppercase text-green-500 bg-green-50 dark:bg-green-900/20 px-2 py-0.5 rounded-full border border-green-100 dark:border-green-800">
                                                 <IconCheckCircle class="w-3 h-3" /> Success
                                             </div>
                                         </div>
-                                        <h2 class="text-3xl font-bold font-serif text-gray-900 dark:text-white leading-tight truncate pr-10">
+                                        <h2 class="text-lg font-bold font-serif text-gray-900 dark:text-white leading-tight truncate pr-10">
                                             {{ selectedTask.name }}
                                         </h2>
-                                        <div class="flex items-center gap-2 mt-2">
+                                        <div class="flex items-center gap-2 mt-1.5">
                                             <code class="text-[9px] bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded text-gray-400 font-mono">ID: {{ selectedTask.id }}</code>
                                             <button @click="uiStore.copyToClipboard(selectedTask.id)" class="text-gray-400 hover:text-blue-500 transition-colors"><IconCopy class="w-3 h-3" /></button>
                                         </div>
                                     </div>
                                     <div class="flex items-center gap-2">
-                                        <button @click="tasksStore.fetchTasks(ownerFilter)" class="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-400 transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-700">
-                                            <IconRefresh class="w-5 h-5" :class="{'animate-spin': isLoadingTasks}" />
+                                        <button @click="tasksStore.fetchTasks(ownerFilter)" class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-750">
+                                            <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingTasks}" />
                                         </button>
                                     </div>
                                 </div>
 
-                                <div class="grid grid-cols-4 gap-8">
+                                <div class="grid grid-cols-4 gap-4">
                                     <div v-for="(val, label) in { 
                                         'State': selectedTask.status, 
                                         'Submitted': formatDateTime(selectedTask.created_at), 
                                         'Exec. Time': formatDateTime(selectedTask.started_at), 
                                         'User': selectedTask.owner_username || 'Admin' 
                                     }" :key="label">
-                                        <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 block mb-1">{{ label }}</span>
-                                        <p class="text-xs font-bold text-gray-800 dark:text-gray-100 capitalize">{{ val }}</p>
+                                        <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 block mb-0.5">{{ label }}</span>
+                                        <p class="text-xs font-semibold text-gray-800 dark:text-gray-100 capitalize">{{ val }}</p>
                                     </div>
                                 </div>
                             </section>
 
                             <!-- 2. Scrollable Analysis Pane -->
-                            <section class="flex-1 overflow-y-auto p-8 pt-6 space-y-6 custom-scrollbar">
-                                
+                            <section class="flex-1 overflow-y-auto p-5 pt-4 space-y-4 custom-scrollbar">
+
                                 <!-- Detailed Scope Callout -->
-                                <div v-if="selectedTask.description" class="p-5 bg-blue-50/50 dark:bg-blue-900/10 rounded-2xl border border-blue-100/50 dark:border-blue-800/30">
-                                    <p class="text-[13px] italic font-serif text-blue-800/70 dark:text-blue-300/70 leading-relaxed">
+                                <div v-if="selectedTask.description" class="p-3.5 bg-blue-50/50 dark:bg-blue-900/10 rounded-xl border border-blue-100/50 dark:border-blue-800/30">
+                                    <p class="text-xs italic font-serif text-blue-800/70 dark:text-blue-300/70 leading-relaxed">
                                         "{{ selectedTask.description }}"
                                     </p>
                                 </div>
 
                                 <!-- Massive Log Viewport -->
-                                <div class="terminal-log-window flex flex-col min-h-[500px] h-full bg-gray-950 rounded-2xl shadow-2xl border border-gray-800 overflow-hidden">
-                                    <div class="px-5 py-3 bg-gray-900/50 border-b border-gray-800/50 flex items-center justify-between shrink-0">
+                                <div class="terminal-log-window flex flex-col flex-1 bg-gray-950 rounded-xl border border-gray-800 overflow-hidden">
+                                    <div class="px-4 py-2.5 bg-gray-900/50 border-b border-gray-800/50 flex items-center justify-between shrink-0">
                                         <div class="flex items-center gap-3">
                                             <div class="flex gap-1.5">
-                                                <div class="w-2.5 h-2.5 rounded-full bg-red-500/40"></div>
-                                                <div class="w-2.5 h-2.5 rounded-full bg-amber-500/40"></div>
-                                                <div class="w-2.5 h-2.5 rounded-full bg-green-500/40"></div>
+                                                <div class="w-2 h-2 rounded-full bg-red-500/40"></div>
+                                                <div class="w-2 h-2 rounded-full bg-amber-500/40"></div>
+                                                <div class="w-2 h-2 rounded-full bg-green-500/40"></div>
                                             </div>
                                             <div class="h-4 w-px bg-gray-800 mx-1"></div>
                                             <div class="flex items-center gap-2">
@@ -196,9 +197,9 @@ function copyLogs() {
                                             Copy Trace
                                         </button>
                                     </div>
-                                    <div ref="logsContainer" class="flex-1 overflow-y-auto p-6 font-mono text-[11px] leading-relaxed text-gray-400 custom-scrollbar">
-                                        <div v-for="(log, i) in selectedTask.logs" :key="i" class="flex gap-6 mb-2 group">
-                                            <span class="text-gray-700 shrink-0 select-none w-20">{{ new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
+                                    <div ref="logsContainer" class="flex-1 overflow-y-auto p-4 font-mono text-[11px] leading-relaxed text-gray-400 custom-scrollbar">
+                                        <div v-for="(log, i) in selectedTask.logs" :key="i" class="flex gap-4 mb-1.5 group">
+                                            <span class="text-gray-700 shrink-0 select-none w-16">{{ new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) }}</span>
                                             <span :class="{ 'text-red-400 font-bold': log.level === 'error', 'text-amber-400': log.level === 'warning' }">
                                                 {{ log.message }}
                                             </span>
@@ -212,13 +213,13 @@ function copyLogs() {
                         </div>
 
                         <!-- ── Empty State ── -->
-                        <div v-else class="flex-1 flex flex-col items-center justify-center p-20 text-center bg-white dark:bg-gray-950">
-                            <div class="relative mb-8">
-                                <IconCpuChip class="w-24 h-24 text-gray-100 dark:text-gray-800" />
+                        <div v-else class="flex-1 flex flex-col items-center justify-center p-12 text-center bg-transparent">
+                            <div class="relative mb-6">
+                                <IconCpuChip class="w-16 h-16 text-gray-200 dark:text-gray-800" />
                                 <div class="absolute inset-0 blur-3xl bg-blue-500/5"></div>
                             </div>
                             <span class="modal-tag">Dashboard Idle</span>
-                            <p class="text-xl font-serif text-gray-400 dark:text-gray-600 italic mt-2">Select a process from the navigation rail to inspect live data</p>
+                            <p class="text-sm font-serif text-gray-400 dark:text-gray-600 italic mt-2">Select a process from the navigation rail to inspect live data</p>
                         </div>
                     </Transition>
                 </main>
@@ -243,18 +244,6 @@ function copyLogs() {
 </template>
 
 <style scoped>
-@reference "tailwindcss";
-
-.task-sidebar-item {
-    @apply w-full text-left p-3 rounded-xl transition-all duration-300 border border-transparent mb-0.5;
-}
-.task-sidebar-item:hover {
-    @apply bg-white dark:bg-gray-800 shadow-sm border-gray-100 dark:border-gray-800;
-}
-.task-sidebar-item.is-selected {
-    @apply bg-white dark:bg-gray-800 shadow-lg border-blue-500/30 ring-1 ring-blue-500/10;
-}
-
 /* Transitions */
 .fade-slide-enter-active, .fade-slide-leave-active { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
 .fade-slide-enter-from { opacity: 0; transform: translateY(10px); }

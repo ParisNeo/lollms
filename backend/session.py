@@ -4,7 +4,7 @@ import traceback
 import datetime
 import threading
 from pathlib import Path
-from typing import Dict, Optional, Any, cast, Callable
+from typing import Dict, Optional, Any, cast, Callable, Tuple
 from urllib.parse import urlparse
 
 from fastapi import HTTPException, Depends, status
@@ -17,7 +17,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
+from backend.db.models.config import GlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
 from lollms_client import LollmsClient
 from backend.models.user import UserAuthDetails
 from backend.models.auth import TokenData
@@ -548,6 +548,15 @@ def build_lollms_client_from_params(
         user_model_full = session.get("lollms_model_name") or user_db.lollms_model_name
 
         if load_llm:
+            # If a model_name is provided, attempt to resolve it through the central aliasing engine
+            if model_name:
+                try:
+                    resolved_alias, resolved_model = resolve_model_name(db, model_name, fallback_to_default=False)
+                    binding_alias = resolved_alias
+                    model_name = resolved_model
+                except Exception:
+                    pass
+
             if user_model_full:
                 target_binding_alias = binding_alias
                 if not target_binding_alias and '/' in user_model_full:
@@ -988,3 +997,56 @@ def get_user_notebook_assets_path(username: str, notebook_id: str) -> Path:
     path = get_user_data_root(username) / NOTEBOOK_ASSETS_DIR_NAME / secure_filename(notebook_id)
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], Optional[str]]:
+    all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+    for binding in all_bindings:
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception:
+                continue
+
+        for original_name, alias_data in model_aliases.items():
+            if original_name == "smart-routing":
+                continue 
+            if alias_data and alias_data.get('title') == alias_title:
+                return binding.alias, original_name
+    return None, None
+
+
+def invalidate_model_cache(db: Session):
+    db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").delete()
+    db.commit()
+
+
+def resolve_model_name(db: Session, requested_model: str, fallback_to_default: bool = True) -> Tuple[str, str]:
+    if not requested_model:
+        if fallback_to_default:
+            default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+            if default_binding:
+                return default_binding.alias, default_binding.default_model_name
+        raise HTTPException(status_code=400, detail="Model name is empty.")
+
+    if '/' in requested_model:
+        parts = requested_model.split('/', 1)
+        binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
+        if binding:
+            return parts[0], parts[1]
+
+    binding_alias, model_name = find_model_by_alias(db, requested_model)
+    if binding_alias:
+        return binding_alias, model_name
+
+    # If we fail to resolve, let's see if we can fall back to the system default model
+    if fallback_to_default:
+        default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+        if default_binding:
+            ASCIIColors.warning(f"Model '{requested_model}' not found. Falling back to default: {default_binding.alias}/{default_binding.default_model_name}")
+            return default_binding.alias, default_binding.default_model_name
+
+    # If we fail to resolve and no fallback, force invalidate cache so next list attempt is fresh
+    invalidate_model_cache(db)
+    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid alias.")
