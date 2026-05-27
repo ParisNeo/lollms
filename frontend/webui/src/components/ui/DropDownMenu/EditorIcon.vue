@@ -59,8 +59,10 @@ watchEffect(async () => {
       }
     }
 
-    if (rawVueFile) {
-        const templateMatch = rawVueFile.match(/<template>([\s\S]*)<\/template>/);
+    const rawContent = rawVueFile ? (typeof rawVueFile === 'string' ? rawVueFile : (rawVueFile.default || '')) : '';
+
+    if (rawContent) {
+        const templateMatch = rawContent.match(/<template>([\s\S]*)<\/template>/);
         if (templateMatch && templateMatch[1]) {
             svgContent.value = templateMatch[1];
         } else {

@@ -561,7 +561,7 @@ function download() {
                 </button>
             </div>
         </div>
-        <div class="p-2 border-b border-gray-200 dark:border-gray-700 flex gap-2 items-center bg-white dark:bg-gray-850 shadow-sm relative z-10">
+        <div class="p-2 border-b border-border-main flex gap-2 items-center bg-bg-card shadow-sm relative z-10">
             <div v-if="artefactGroup" class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg px-2 py-1 gap-2">
                 <span class="text-[10px] font-black text-gray-400 uppercase tracking-tighter">Version</span>
                 <select v-model="selectedVersion" @change="loadVersion(selectedVersion)" class="bg-transparent border-none text-xs font-bold text-blue-600 dark:text-blue-400 focus:ring-0 p-0 pr-6">
@@ -572,21 +572,21 @@ function download() {
             </div>
 
             <button @click="uiStore.openModal('artefactVersionManager', { artefactTitle: title })" 
-                    class="btn btn-secondary btn-xs h-8" title="Manage Version History (Delete/Squash)">
-                <IconClock class="w-3.5 h-3.5 mr-1" />
-                History
+                    class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-gray-500 dark:text-gray-400 transition-colors h-8 w-8 flex items-center justify-center shrink-0" 
+                    title="Manage Version History (Delete/Squash)">
+                <IconClock class="w-4 h-4" />
             </button>
 
             <button @click="handleUndo" :disabled="artefactGroup?.versions.length < 2 || isSaving" 
-                    class="btn btn-secondary btn-xs h-8" title="Quick Undo">
-                <IconArrowPath class="w-3.5 h-3.5 mr-1" />
-                Undo
+                    class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-gray-500 dark:text-gray-400 transition-colors h-8 w-8 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed" 
+                    title="Quick Undo">
+                <IconArrowPath class="w-4 h-4" />
             </button>
 
             <button @click="handleCreateDiscussionFromVersion" :disabled="!selectedVersion || isSaving" 
-                    class="btn btn-secondary btn-xs h-8" title="Start new chat with this version">
-                <IconGitBranch class="w-3.5 h-3.5 mr-1" />
-                New Chat
+                    class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg text-gray-500 dark:text-gray-400 transition-colors h-8 w-8 flex items-center justify-center shrink-0 disabled:opacity-50 disabled:cursor-not-allowed" 
+                    title="Start new chat with this version">
+                <IconGitBranch class="w-4 h-4" />
             </button>
 
             <div class="grow"></div>

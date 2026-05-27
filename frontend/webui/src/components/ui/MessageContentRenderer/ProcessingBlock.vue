@@ -62,10 +62,10 @@ const steps = computed(() => {
         >
             <IconAnimateSpin 
                 v-if="!isClosed" 
-                class="text-blue-500/70 shrink-0" 
+                class="text-blue-500/70 shrink-0 animate-spin" 
                 style="width: 12px; height: 12px; min-width: 12px;" 
             />
-            
+
             <div class="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300">
                 <span class="uppercase font-bold tracking-wider opacity-80">{{ typeLabel }}:</span>
                 <span class="truncate max-w-[180px] sm:max-w-md font-medium">{{ title }}</span>

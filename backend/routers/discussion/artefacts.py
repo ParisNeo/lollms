@@ -1086,12 +1086,18 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
             # Check if it exists first
-            if not discussion.get_artefact(title=title):
-                raise HTTPException(status_code=404, detail="Artefact not found.")
-                
-            discussion.remove_artefact(title=title)
-            discussion.commit()
-            return {"message": f"Artefact '{title}' deleted."}
+            if discussion.get_artefact(title=title):
+                discussion.remove_artefact(title=title)
+                discussion.commit()
+                return {"message": f"Artefact '{title}' deleted."}
+            else:
+                # Already removed or not found, but we want to make sure any loose local state is cleared
+                try:
+                    discussion.remove_artefact(title=title)
+                    discussion.commit()
+                except Exception:
+                    pass
+                return {"message": f"Artefact '{title}' was already removed."}
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=str(e))

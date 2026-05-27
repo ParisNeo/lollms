@@ -33,14 +33,27 @@ const pyodideStore = usePyodideStore();
 const selectedVersion = ref(props.artefactGroup.versions[0]?.version || 1);
 const isExecuting = ref(false);
 
+const cardDiscussionId = computed(() => {
+    return props.artefactGroup.versions[0]?.discussion_id || discussionsStore.currentDiscussionId;
+});
+
 const isSavedLibraryItem = computed(() => {
-    const latest = props.artefactGroup.versions[0];
-    return latest && latest.discussion_id === 'saved';
+    return cardDiscussionId.value === 'saved';
+});
+
+const isAlsoInLibrary = computed(() => {
+    return discussionsStore.allUserArtefacts.some(a => a.title === props.artefactGroup.title);
+});
+
+const deleteButtonText = computed(() => {
+    if (isSavedLibraryItem.value) return "Delete from Library";
+    if (isAlsoInLibrary.value) return "Detach from Chat";
+    return "Delete Permanently";
 });
 
 async function handleSaveToLibrary() {
     await discussionsStore.saveArtefactToLibrary({
-        discussionId: discussionsStore.currentDiscussionId,
+        discussionId: cardDiscussionId.value,
         artefactTitle: props.artefactGroup.title,
         version: selectedVersion.value
     });
@@ -154,7 +167,7 @@ async function handleExecute() {
     isExecuting.value = true;
     try {
         const data = await discussionsStore.fetchArtefactContent({
-            discussionId: discussionsStore.currentDiscussionId,
+            discussionId: cardDiscussionId.value,
             artefactTitle: props.artefactGroup.title,
             version: selectedVersion.value
         });
@@ -191,19 +204,72 @@ function handleView() {
 function handleRename() {
     uiStore.openModal('renameArtefact', {
         artefactTitle: props.artefactGroup.title,
-        discussionId: discussionsStore.currentDiscussionId
+        discussionId: cardDiscussionId.value
     });
 }
 
-async function handleDelete() {
+async function handleDetach() {
     const confirmed = await uiStore.showConfirmation({
-        title: `Delete Artefact?`,
-        message: `This will delete "${props.artefactGroup.title}" and all its versions.`,
-        confirmText: 'Delete'
+        title: 'Detach from Chat',
+        message: `Are you sure you want to remove "${props.artefactGroup.title}" from this conversation's workspace? It will remain safely saved in your global library.`,
+        confirmText: 'Detach',
+        danger: false
     });
+
     if (confirmed.confirmed) {
         await discussionsStore.deleteArtefact({
-            discussionId: discussionsStore.currentDiscussionId,
+            discussionId: cardDiscussionId.value,
+            artefactTitle: props.artefactGroup.title,
+        });
+    }
+}
+
+async function handleDeletePermanently() {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Delete Permanently',
+        message: `Are you sure you want to permanently delete "${props.artefactGroup.title}"? This will delete it from both this conversation's workspace and your global library. This action cannot be undone.`,
+        confirmText: 'Delete Everywhere',
+        danger: true
+    });
+
+    if (confirmed.confirmed) {
+        // Delete from current discussion
+        await discussionsStore.deleteArtefact({
+            discussionId: cardDiscussionId.value,
+            artefactTitle: props.artefactGroup.title,
+        });
+        // Delete from global saved library
+        await discussionsStore.deleteArtefact({
+            discussionId: 'saved',
+            artefactTitle: props.artefactGroup.title,
+        });
+    }
+}
+
+async function handleDelete() {
+    let titleText = 'Delete';
+    let msgText = '';
+    if (isSavedLibraryItem.value) {
+        titleText = 'Delete from Library';
+        msgText = `Are you sure you want to permanently delete "${props.artefactGroup.title}" from your saved library? This will not affect active conversations containing this file.`;
+    } else if (isAlsoInLibrary.value) {
+        titleText = 'Detach from Chat';
+        msgText = `Are you sure you want to remove "${props.artefactGroup.title}" from this conversation's workspace? It will remain safely saved in your global library.`;
+    } else {
+        titleText = 'Delete Permanently';
+        msgText = `Are you sure you want to permanently delete "${props.artefactGroup.title}" and all its versions from this conversation? It is not saved in your library and will be lost.`;
+    }
+
+    const confirmed = await uiStore.showConfirmation({
+        title: titleText,
+        message: msgText,
+        confirmText: titleText.includes('Detach') ? 'Detach' : 'Delete',
+        danger: !titleText.includes('Detach')
+    });
+
+    if (confirmed.confirmed) {
+        await discussionsStore.deleteArtefact({
+            discussionId: cardDiscussionId.value,
             artefactTitle: props.artefactGroup.title,
         });
     }
@@ -211,7 +277,7 @@ async function handleDelete() {
 
 async function handleDownload() {
     const data = await discussionsStore.fetchArtefactContent({
-        discussionId: discussionsStore.currentDiscussionId,
+        discussionId: cardDiscussionId.value,
         artefactTitle: props.artefactGroup.title,
         version: selectedVersion.value
     });
@@ -227,14 +293,14 @@ async function handleDownload() {
 async function toggleLoad() {
     if (isLoadedToDataZone.value) {
         await discussionsStore.unloadArtefactFromContext({
-            discussionId: discussionsStore.currentDiscussionId,
+            discussionId: cardDiscussionId.value,
             artefactTitle: props.artefactGroup.title,
             version: selectedVersion.value,
             artefactType: currentType.value // Ensure correct category for text removal
         });
     } else {
         await discussionsStore.loadArtefactToContext({
-            discussionId: discussionsStore.currentDiscussionId,
+            discussionId: cardDiscussionId.value,
             artefactTitle: props.artefactGroup.title,
             version: selectedVersion.value
         });
@@ -270,7 +336,21 @@ async function toggleLoad() {
         <div class="flex items-center gap-2 mt-0.5">
             <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ fileExtension }}</span>
             <span class="text-[10px] text-gray-400">•</span>
-            <span class="text-[10px] font-bold text-gray-400">v{{ selectedVersion }}</span>
+
+            <!-- Version Selector (if multiple versions) -->
+            <div v-if="artefactGroup.versions.length > 1" class="relative flex items-center">
+                <select 
+                    v-model="selectedVersion"
+                    @click.stop
+                    class="bg-transparent border-none text-[10px] font-bold text-gray-400 focus:ring-0 p-0 pr-5 cursor-pointer hover:text-blue-500 transition-colors appearance-none"
+                >
+                    <option v-for="v in artefactGroup.versions" :key="v.version" :value="v.version" class="text-gray-800 dark:text-gray-200">
+                        v{{ v.version }} {{ v.version === artefactGroup.versions[0].version ? '(Latest)' : '' }}
+                    </option>
+                </select>
+                <span class="text-[7px] pointer-events-none opacity-60 ml-0.5 -mr-0.5 text-gray-400">▼</span>
+            </div>
+            <span v-else class="text-[10px] font-bold text-gray-400">v{{ selectedVersion }}</span>
         </div>
     </div>
 
@@ -316,9 +396,28 @@ async function toggleLoad() {
                 <span>Rename</span>
             </button>
             <div class="menu-divider"></div>
-            <button @click="handleDelete" class="menu-item text-red-500">
+            <!-- Case 1: Saved Library Item (Viewing global library) -->
+            <button v-if="isSavedLibraryItem" @click="handleDelete" class="menu-item text-red-500 font-semibold">
                 <IconTrash class="w-4 h-4 mr-3" />
-                <span>Delete</span>
+                <span>Delete from Library</span>
+            </button>
+
+            <!-- Case 2: Local Discussion Item also saved in Library (Viewing discussion with library backup) -->
+            <template v-else-if="isAlsoInLibrary">
+                <button @click="handleDetach" class="menu-item text-gray-600 dark:text-gray-300 font-semibold">
+                    <IconTrash class="w-4 h-4 mr-3 opacity-50" />
+                    <span>Detach from Chat</span>
+                </button>
+                <button @click="handleDeletePermanently" class="menu-item text-red-500 font-semibold">
+                    <IconTrash class="w-4 h-4 mr-3" />
+                    <span>Delete Permanently</span>
+                </button>
+            </template>
+
+            <!-- Case 3: Local Discussion Item only (Viewing transient discussion item) -->
+            <button v-else @click="handleDelete" class="menu-item text-red-500 font-semibold">
+                <IconTrash class="w-4 h-4 mr-3" />
+                <span>Delete Permanently</span>
             </button>
         </DropdownMenu>
     </div>
