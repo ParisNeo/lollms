@@ -18,35 +18,17 @@ const props = defineProps({
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
-const { allUserArtefacts, isLoadingArtefacts, discussions } = storeToRefs(discussionsStore);
+const { allUserArtefacts, isLoadingArtefacts, discussions, starredArtefacts } = storeToRefs(discussionsStore);
 
 const viewMode = ref('flat'); // 'flat', 'discussion' or 'starred'
 const expandedDiscussions = ref(new Set());
-const starredItems = ref([]);
 
 onMounted(() => {
     discussionsStore.fetchAllUserArtefacts();
-    try {
-        const stored = localStorage.getItem('starredArtefacts');
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed)) {
-                starredItems.value = parsed;
-            }
-        }
-    } catch (e) {
-        console.error("Failed to parse starredArtefacts:", e);
-    }
 });
 
 function handleStarToggle(title) {
-    const idx = starredItems.value.indexOf(title);
-    if (idx > -1) {
-        starredItems.value.splice(idx, 1);
-    } else {
-        starredItems.value.push(title);
-    }
-    localStorage.setItem('starredArtefacts', JSON.stringify(starredItems.value));
+    discussionsStore.toggleStarArtefact(title);
 }
 
 function handleShareArtefact(group) {
@@ -80,7 +62,7 @@ async function handleImportToCurrent(group) {
 const filteredStarredArtefacts = computed(() => {
     const list = groupedArtefacts.value;
     if (!Array.isArray(list)) return [];
-    return list.filter(g => Array.isArray(starredItems.value) && starredItems.value.includes(g.title));
+    return list.filter(g => Array.isArray(starredArtefacts.value) && starredArtefacts.value.includes(g.title));
 });
 
 const filteredArtefacts = computed(() => {
@@ -194,7 +176,7 @@ async function handleViewArtefact(artefact) {
                 <div v-for="group in groupedArtefacts" :key="group.title">
                     <ArtefactCard 
                         :artefact-group="group" 
-                        :is-starred="starredItems && starredItems.includes(group.title)"
+                        :is-starred="starredArtefacts && starredArtefacts.includes(group.title)"
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"
@@ -219,7 +201,7 @@ async function handleViewArtefact(artefact) {
                             <!-- Wrap single artefact in fake group for card compatibility -->
                             <ArtefactCard 
                                 :artefact-group="{ title: art.title, versions: [art] }" 
-                                :is-starred="starredItems && starredItems.includes(art.title)"
+                                :is-starred="starredArtefacts && starredArtefacts.includes(art.title)"
                                 @star="handleStarToggle(art.title)"
                                 @share="handleShareArtefact({ versions: [art] })"
                                 @import="handleImportToCurrent({ versions: [art] })"

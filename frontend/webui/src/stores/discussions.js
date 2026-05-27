@@ -34,6 +34,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     // --- STATE ---
     const discussions = ref({});
     const discussionGroups = ref([]);
+    const starredArtefacts = ref([]);
+
+    try {
+        const stored = localStorage.getItem('starredArtefacts');
+        if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+                starredArtefacts.value = parsed;
+            }
+        }
+    } catch (e) {
+        console.error("Failed to parse starredArtefacts:", e);
+    }
+
+    function toggleStarArtefact(title) {
+        const current = [...starredArtefacts.value];
+        const idx = current.indexOf(title);
+        if (idx > -1) {
+            current.splice(idx, 1);
+        } else {
+            current.push(title);
+        }
+        starredArtefacts.value = current;
+        localStorage.setItem('starredArtefacts', JSON.stringify(starredArtefacts.value));
+    }
     const sharedWithMe = ref([]);
     const isLoadingDiscussions = ref(false);
     const currentDiscussionId = ref(null);
@@ -581,6 +606,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         promptInsertionText, promptLoadedArtefacts, sharedWithMe, activeDiscussionParticipants,
         attachedSkills, ttsState, generationState, currentPlayingAudio, imageGenerationSystemPrompt,
         activeUpdatingArtefacts, liveArtefactBuffers,
+        
+        starredArtefacts,
+        toggleStarArtefact,
 
         // Computeds
         activeDiscussion, activeMessages, activeDiscussionContainsCode, sortedDiscussions,

@@ -29,32 +29,10 @@ const props = defineProps({
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
-const { activeDiscussionArtefacts, isLoadingArtefacts } = storeToRefs(discussionsStore);
-
-const starredItems = ref([]);
-
-onMounted(() => {
-    try {
-        const stored = localStorage.getItem('starredArtefacts');
-        if (stored) {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed)) {
-                starredItems.value = parsed;
-            }
-        }
-    } catch (e) {
-        console.error("Failed to parse starredArtefacts:", e);
-    }
-});
+const { activeDiscussionArtefacts, isLoadingArtefacts, starredArtefacts } = storeToRefs(discussionsStore);
 
 function handleStarToggle(title) {
-    const idx = starredItems.value.indexOf(title);
-    if (idx > -1) {
-        starredItems.value.splice(idx, 1);
-    } else {
-        starredItems.value.push(title);
-    }
-    localStorage.setItem('starredArtefacts', JSON.stringify(starredItems.value));
+    discussionsStore.toggleStarArtefact(title);
 }
 
 function handleShareArtefact(group) {
@@ -300,7 +278,7 @@ function handleCreateNew() {
                 >
                     <ArtefactCard 
                         :artefact-group="group" 
-                        :is-starred="starredItems.includes(group.title)"
+                        :is-starred="starredArtefacts.includes(group.title)"
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"
