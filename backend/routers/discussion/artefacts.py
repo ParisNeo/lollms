@@ -1413,6 +1413,15 @@ def build_artefacts_router(router: APIRouter):
             "data": {"message": f"🎁 {current_user.username} shared an artefact: {decoded_title}", "type": "success", "duration": 5000}
         }, target_user.id)
 
+        # Send a discussion update event to let the receiver's UI auto-refresh their discussions list
+        manager.send_personal_message_sync({
+            "type": "discussion_updated",
+            "data": {
+                "discussion_id": target_discussion_id,
+                "sender_username": current_user.username
+            }
+        }, target_user.id)
+
         return {"message": f"Artefact successfully shared with {payload.target_username}."}
 
     @router.post("/{discussion_id}/artefacts/export_audio", response_model=TaskInfo, status_code=202)

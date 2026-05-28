@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-28 06:55]
+
+- feat(artefacts): update global list and card components
+
 ## [2026-05-27 19:31]
 
 - chore(deps): bump lollms-client from 1.14.2 to 1.14.4

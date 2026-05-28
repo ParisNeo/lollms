@@ -327,6 +327,11 @@ async function toggleLoad() {
             <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate" :title="artefactGroup.title">
                 {{ artefactGroup.title }}
             </h4>
+            <!-- Shared By Tag -->
+            <span v-if="artefactGroup.versions[0]?.author && artefactGroup.versions[0].author.startsWith('Shared by')" 
+                  class="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 shrink-0 select-none">
+                {{ artefactGroup.versions[0].author }}
+            </span>
             <!-- Star Toggle Button -->
             <button @click.stop="handleStarClick" class="p-1 rounded-full transition-colors shrink-0" :class="isStarred ? 'text-yellow-500' : 'text-gray-300 dark:text-gray-600 hover:text-yellow-500'">
                 <IconStarFilled v-if="isStarred" class="w-3.5 h-3.5" />

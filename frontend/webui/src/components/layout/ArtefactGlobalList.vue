@@ -61,8 +61,14 @@ async function handleImportToCurrent(group) {
 
 const filteredStarredArtefacts = computed(() => {
     const list = groupedArtefacts.value;
-    if (!Array.isArray(list)) return [];
+    if (!allUserArtefacts.value) return [];
     return list.filter(g => Array.isArray(starredArtefacts.value) && starredArtefacts.value.includes(g.title));
+});
+
+const filteredSharedArtefacts = computed(() => {
+    const list = groupedArtefacts.value;
+    if (!Array.isArray(list)) return [];
+    return list.filter(g => g.versions[0]?.author && g.versions[0].author.startsWith('Shared by'));
 });
 
 const filteredArtefacts = computed(() => {
@@ -160,6 +166,11 @@ async function handleViewArtefact(artefact) {
                         :class="viewMode === 'starred' ? 'bg-white dark:bg-gray-700 text-yellow-600 dark:text-yellow-400 shadow-sm' : 'text-gray-400'">
                     STARRED
                 </button>
+                <button @click="viewMode = 'shared'" 
+                        class="px-3 py-1 text-[10px] font-bold rounded-md transition-all"
+                        :class="viewMode === 'shared' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-400'">
+                    SHARED
+                </button>
             </div>
             <button @click="discussionsStore.fetchAllUserArtefacts()" class="p-1.5 text-gray-400 hover:text-blue-500 transition-colors">
                 <IconRefresh class="w-4 h-4" :class="{'animate-spin': isLoadingArtefacts}" />
@@ -218,6 +229,20 @@ async function handleViewArtefact(artefact) {
                     <ArtefactCard 
                         :artefact-group="group" 
                         :is-starred="true"
+                        @star="handleStarToggle(group.title)"
+                        @share="handleShareArtefact(group)"
+                        @import="handleImportToCurrent(group)"
+                    />
+                </div>
+            </div>
+
+            <!-- SHARED VIEW -->
+            <div v-else-if="viewMode === 'shared'" class="space-y-2">
+                <div v-if="!filteredSharedArtefacts || filteredSharedArtefacts.length === 0" class="text-center py-10 text-gray-400 text-xs">No shared artefacts.</div>
+                <div v-for="group in filteredSharedArtefacts" :key="group.title">
+                    <ArtefactCard 
+                        :artefact-group="group" 
+                        :is-starred="starredArtefacts && starredArtefacts.includes(group.title)"
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"
