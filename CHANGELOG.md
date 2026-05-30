@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-30 11:22]
+
+- feat: improve discussion artefact handling and refresh UI build
+
 ## [2026-05-28 06:55]
 
 - feat(artefacts): update global list and card components

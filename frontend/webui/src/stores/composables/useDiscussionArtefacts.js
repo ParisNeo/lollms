@@ -563,6 +563,10 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
                 target_username: targetUsername
             });
             uiStore.addNotification(`Artefact shared with ${targetUsername}`, 'success');
+            if (discussionId && discussionId !== 'saved') {
+                await fetchArtefacts(discussionId);
+            }
+            await fetchAllUserArtefacts();
         } catch (error) {
             uiStore.addNotification(error.response?.data?.detail || 'Failed to share artefact', 'error');
         }

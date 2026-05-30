@@ -84,6 +84,101 @@ const isRootDragOver = ref(false);
 
 const isFlowWizardOpen = ref(false);
 
+const isUploadingArtefact = ref(false);
+const uploadingMessage = ref('Processing files...');
+const artefactFileInput = ref(null);
+const bundleFileInput = ref(null);
+const currentUploadPdfMode = ref('text_images');
+
+function triggerArtefactFileUpload(mode = 'text_images') { 
+    currentUploadPdfMode.value = mode;
+    artefactFileInput.value?.click(); 
+}
+
+function triggerBundleImport() {
+    bundleFileInput.value?.click();
+}
+
+async function handleBundleImport(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (!store.currentDiscussionId) {
+        try {
+            await store.createNewDiscussion();
+        } catch (e) {
+            uiStore.addNotification('Could not start a conversation to host the imported bundle.', 'error');
+            return;
+        }
+    }
+
+    const idToUse = store.currentDiscussionId;
+    try {
+        const text = await file.text();
+        const bundle = JSON.parse(text);
+        if (!bundle.main_artefact) {
+            uiStore.addNotification('Invalid bundle file. Main artefact is missing.', 'error');
+            return;
+        }
+        isUploadingArtefact.value = true;
+        uploadingMessage.value = 'Importing complete artefact bundle...';
+        await store.importArtefactBundle({
+            discussionId: idToUse,
+            bundle
+        });
+        uiStore.addNotification('Bundle imported successfully!', 'success');
+    } catch (e) {
+        console.error("Bundle import failed:", e);
+        uiStore.addNotification('Failed to parse or import the bundle.', 'error');
+    } finally {
+        isUploadingArtefact.value = false;
+        if (bundleFileInput.value) bundleFileInput.value.value = '';
+    }
+}
+
+async function handleCreateArtefact() {
+    if (!store.currentDiscussionId) {
+        try {
+            await store.createNewDiscussion();
+        } catch (e) {
+            uiStore.addNotification('Could not start a conversation to host the new document.', 'error');
+            return;
+        }
+    }
+    const idToUse = store.currentDiscussionId;
+    if (idToUse) uiStore.openModal('createArtefact', { discussionId: idToUse });
+}
+
+async function handleArtefactFileUpload(event) {
+    const files = Array.from(event.target.files || []);
+    if (!files.length) return;
+
+    if (!store.currentDiscussionId) {
+        try {
+            await store.createNewDiscussion();
+        } catch (e) {
+            uiStore.addNotification('Could not start a conversation to host the imported document.', 'error');
+            return;
+        }
+    }
+
+    const idToUse = store.currentDiscussionId;
+    isUploadingArtefact.value = true;
+    uploadingMessage.value = 'Uploading and analyzing files...';
+
+    const installHintTimer = setTimeout(() => {
+        uploadingMessage.value = 'Preparing environment (this might involve installing required libraries)...';
+    }, 5000);
+
+    try {
+        await Promise.all(files.map(file => store.addArtefact({ discussionId: idToUse, file, extractImages: true, pdfMode: currentUploadPdfMode.value })));
+    } finally {
+        clearTimeout(installHintTimer);
+        isUploadingArtefact.value = false;
+        if (artefactFileInput.value) artefactFileInput.value.value = '';
+    }
+}
+
 onMounted(() => {
     if (notesStore.notes.length === 0) notesStore.fetchNotes();
     if (notebookStore.notebooks.length === 0) notebookStore.fetchNotebooks();
@@ -206,7 +301,7 @@ async function handleNewItem() {
     if (activeTab.value === 'chat') {
         store.createNewDiscussion(store.currentGroupId); 
         if (window.innerWidth < 768) uiStore.closeSidebar();
-    } else if (activeTab.value === 'files') {
+    } else if (activeTab.value === 'artefacts') {
         // [FIX] Open Create Artefact modal when on the Files/Artefacts tab
         uiStore.openModal('createArtefact');
         if (window.innerWidth < 768) uiStore.closeSidebar();
@@ -324,7 +419,9 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
       @drop.prevent="handleRootDrop"
       :class="{'bg-blue-50 dark:bg-blue-900/20': isRootDragOver}"
     >
-        
+        <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
+        <input type="file" ref="bundleFileInput" @change="handleBundleImport" accept=".json" class="hidden">
+
         <div class="p-4 border-b border-slate-200 dark:border-gray-700 shrink-0 space-y-3">
             <div class="flex items-center justify-between">
                 <div class="flex items-center space-x-3 min-w-0 grow">
@@ -483,7 +580,30 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         </DropdownMenu>
                     </div>
                 </div>
-                <button @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'skills' ? 'New Skill' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook')))))">
+
+                <!-- Dropdown + Button for Artefacts/ART tab to show all options -->
+                <DropdownMenu 
+                    v-if="activeTab === 'artefacts'"
+                    icon="plus" 
+                    title="Add Document" 
+                    buttonClass="btn-primary-flat !px-2.5"
+                >
+                    <template #icon>
+                        <IconPlus class="h-4 w-4" stroke-width="2.5" />
+                    </template>
+                    <div class="p-1 min-w-[250px]">
+                        <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
+                        <button @click="triggerArtefactFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
+                        <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
+                        <button @click="triggerArtefactFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
+                        <button @click="triggerArtefactFileUpload('ocr')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
+                        <button @click="triggerArtefactFileUpload('data')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconDatabase class="w-4 h-4 mr-3 text-green-500" /> <span>Data / Spreadsheet</span></button>
+                        <button @click="triggerBundleImport" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconRefresh class="w-4 h-4 mr-3 text-teal-500" /> <span>Import Bundle (.json)</span></button>
+                        <button @click="handleCreateArtefact" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconPencil class="w-4 h-4 mr-3 text-orange-500" /> <span>Create Document (Manual)</span></button>
+                    </div>
+                </DropdownMenu>
+
+                <button v-else @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'skills' ? 'New Skill' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook')))))">
                     <IconPlus class="h-4 w-4" stroke-width="2.5" />
                 </button>
             </div>
@@ -512,6 +632,19 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
         </div>
         
         <div ref="scrollComponent" class="grow overflow-y-auto p-2 space-y-1 custom-scrollbar">
+            <!-- Active Processing Item -->
+            <div v-if="isUploadingArtefact" class="mb-4 p-2 animate-in fade-in slide-in-from-top-2">
+                 <div class="flex items-center gap-4 p-3 bg-blue-50/50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-800 shadow-sm">
+                    <IconAnimateSpin class="w-5 h-5 text-blue-500 animate-spin shrink-0" />
+                    <div class="flex flex-col min-w-0">
+                        <span class="text-[9px] font-black uppercase tracking-widest text-blue-500 mb-0.5">Workspace Ingestion</span>
+                        <p class="text-[11px] font-bold text-gray-700 dark:text-gray-300 leading-tight">
+                            {{ uploadingMessage }}
+                        </p>
+                    </div>
+                 </div>
+            </div>
+
             <!-- CHATS TAB -->
             <template v-if="activeTab === 'chat'">
                 <div v-if="isLoadingDiscussions" class="space-y-2 animate-pulse">

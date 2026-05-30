@@ -6,20 +6,23 @@ import IconUserGroup from '../assets/icons/IconUserGroup.vue';
 import IconTicket from '../assets/icons/IconTicket.vue';
 import IconPlus from '../assets/icons/IconPlus.vue';
 import IconNoSymbol from '../assets/icons/IconNoSymbol.vue';
+import IconFolder from '../assets/icons/IconFolder.vue';
 
 // Async components
 const AddFriend = defineAsyncComponent(() => import('../components/social/AddFriend.vue'));
 const FriendRequestList = defineAsyncComponent(() => import('../components/social/FriendRequestList.vue'));
 const FriendList = defineAsyncComponent(() => import('../components/social/FriendList.vue'));
 const BlockedList = defineAsyncComponent(() => import('../components/social/BlockedList.vue'));
+const GroupList = defineAsyncComponent(() => import('../components/social/GroupList.vue'));
 
 const socialStore = useSocialStore();
 
-const activeTab = ref('all'); // 'all', 'requests', 'add', 'blocked'
+const activeTab = ref('all'); // 'all', 'groups', 'requests', 'add', 'blocked'
 const requestCount = computed(() => socialStore.friendRequestCount);
 
 const tabs = computed(() => [
     { id: 'all', label: 'All Friends', icon: IconUserGroup },
+    { id: 'groups', label: 'Groups', icon: IconFolder },
     { id: 'requests', label: 'Requests', icon: IconTicket, count: requestCount.value },
     { id: 'add', label: 'Add Friend', icon: IconPlus },
     { id: 'blocked', label: 'Blocked', icon: IconNoSymbol },
@@ -29,6 +32,7 @@ onMounted(() => {
     socialStore.fetchFriends();
     socialStore.fetchPendingRequests();
     socialStore.fetchBlockedUsers();
+    socialStore.fetchSocialGroups();
 })
 
 </script>
@@ -62,6 +66,14 @@ onMounted(() => {
                 <FriendList />
                 <template #fallback>
                     <div class="text-center text-gray-500">Loading friends...</div>
+                </template>
+            </Suspense>
+        </div>
+        <div v-if="activeTab === 'groups'">
+            <Suspense>
+                <GroupList />
+                <template #fallback>
+                    <div class="text-center text-gray-500">Loading groups...</div>
                 </template>
             </Suspense>
         </div>

@@ -11,9 +11,9 @@
 }
 
 .dark {
-  --brand-bg-app: #000000;
-  --brand-bg-card: #0a0a0a;
-  --brand-border-main: #1f2937;
-  --brand-text-main: #f9fafb;
+  --brand-bg-app: #0b0d19;      /* Slate blue-black */
+  --brand-bg-card: #111526;     /* Deep slate card */
+  --brand-border-main: #1e243a;  /* Subtle blue-gray border */
+  --brand-text-main: #f3f4f6;
   --brand-text-dim: #9ca3af;
 }

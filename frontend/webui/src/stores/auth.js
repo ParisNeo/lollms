@@ -260,6 +260,7 @@ export const useAuthStore = defineStore('auth', () => {
                             s.refreshActiveDiscussionMessages();
                         }
                         s.loadDiscussions();
+                        s.fetchAllUserArtefacts(); // Instantly sync the global artefacts list as well!
                     });
                     break;
                 case 'data_zone_processed': 

@@ -1,11 +1,14 @@
 <script setup>
 import { computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import { useDiscussionsStore } from '../../stores/discussions';
 import GenericModal from './GenericModal.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 
 const uiStore = useUiStore();
+const discussionsStore = useDiscussionsStore();
 const props = computed(() => uiStore.modalData('artefactViewer'));
 
 const artefact = computed(() => props.value?.artefact || props.value || {});
@@ -22,6 +25,29 @@ const images = computed(() => artefact.value?.images || []);
 const hasContent = computed(() => content.value && content.value.trim() !== '');
 const hasImages = computed(() => images.value && images.value.length > 0);
 
+async function handleImportToCurrentChat() {
+    if (!discussionsStore.currentDiscussionId || discussionsStore.currentDiscussionId === 'saved') {
+        uiStore.addNotification("Please select or start a chat first.", "warning");
+        return;
+    }
+    try {
+        uiStore.closeModal('artefactViewer');
+        uiStore.addNotification("Importing document to chat workspace...", "info");
+
+        await discussionsStore.importArtefactFromSource({
+            targetDiscussionId: discussionsStore.currentDiscussionId,
+            sourceDiscussionId: 'saved',
+            artefactTitle: title.value
+        });
+
+        // Open the workspace panel automatically for high-fidelity experience
+        uiStore.activeSplitArtefactTitle = title.value;
+        uiStore.dataZoneTab = 'workspace';
+        uiStore.isDataZoneVisible = true;
+    } catch (e) {
+        console.error("Import failed:", e);
+    }
+}
 </script>
 
 <template>
@@ -36,7 +62,7 @@ const hasImages = computed(() => images.value && images.value.length > 0);
                     <svg class="w-12 h-12 mx-auto mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
                     <p>This artefact has no displayable content or images.</p>
                 </div>
-                
+
                 <div v-if="hasImages" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                     <div v-for="(img_b64, index) in images" :key="`${index}-${img_b64.slice(0, 30)}`" class="relative group rounded-lg overflow-hidden">
                         <img :src="'data:image/png;base64,' + img_b64" class="w-full h-48 object-cover cursor-pointer" @click="uiStore.openImageViewer('data:image/png;base64,' + img_b64)" alt="Artefact image"/>
@@ -66,7 +92,20 @@ const hasImages = computed(() => images.value && images.value.length > 0);
             </div>
         </template>
          <template #footer>
-            <button @click="uiStore.closeModal('artefactViewer')" class="btn btn-primary">Close</button>
+            <div class="flex justify-between items-center w-full">
+                <!-- Inline Import Option inside Modal footer -->
+                <button 
+                    v-if="discussionsStore.currentDiscussionId && discussionsStore.currentDiscussionId !== 'saved'"
+                    @click="handleImportToCurrentChat" 
+                    class="btn btn-secondary btn-sm flex items-center gap-1.5"
+                    title="Copy this global library document directly into your active chat workspace"
+                >
+                    <IconArrowUpTray class="w-3.5 h-3.5 text-blue-500" />
+                    <span>Import to Current Chat</span>
+                </button>
+                <div v-else></div>
+                <button @click="uiStore.closeModal('artefactViewer')" class="btn btn-primary px-8">Close</button>
+            </div>
         </template>
     </GenericModal>
 </template>

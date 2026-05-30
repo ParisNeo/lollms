@@ -187,7 +187,7 @@ async function handleViewArtefact(artefact) {
                 <div v-for="group in groupedArtefacts" :key="group.title">
                     <ArtefactCard 
                         :artefact-group="group" 
-                        :is-starred="starredArtefacts && starredArtefacts.includes(group.title)"
+                        :is-starred="starredArtefacts.includes(group.title)"
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"
@@ -212,7 +212,7 @@ async function handleViewArtefact(artefact) {
                             <!-- Wrap single artefact in fake group for card compatibility -->
                             <ArtefactCard 
                                 :artefact-group="{ title: art.title, versions: [art] }" 
-                                :is-starred="starredArtefacts && starredArtefacts.includes(art.title)"
+                                :is-starred="starredArtefacts.includes(art.title)"
                                 @star="handleStarToggle(art.title)"
                                 @share="handleShareArtefact({ versions: [art] })"
                                 @import="handleImportToCurrent({ versions: [art] })"
@@ -242,7 +242,7 @@ async function handleViewArtefact(artefact) {
                 <div v-for="group in filteredSharedArtefacts" :key="group.title">
                     <ArtefactCard 
                         :artefact-group="group" 
-                        :is-starred="starredArtefacts && starredArtefacts.includes(group.title)"
+                        :is-starred="starredArtefacts.includes(group.title)"
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"

@@ -88,14 +88,14 @@ const defaultIcon = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53M
 <style scoped>
 @reference "tailwindcss";
 
-.card { @apply bg-white dark:bg-gray-800 rounded-lg shadow-md flex flex-col overflow-hidden transition-shadow hover:shadow-lg h-full; }
-.card-header { @apply flex items-start p-4 gap-4; }
+.card { @apply relative bg-white dark:bg-gray-800/90 rounded-xl shadow-md flex flex-col overflow-hidden transition-all hover:shadow-lg h-full; border: 1px solid var(--brand-border-main); }
+.card-header { @apply flex items-start p-3 gap-3; }
 .card-icon { @apply w-12 h-12 object-cover rounded-md shrink-0 bg-gray-200 dark:bg-gray-700 p-1; }
-.card-body { @apply px-4 pb-4 grow; }
-.card-title { @apply font-bold text-base leading-tight; }
-.card-tags { @apply flex flex-wrap gap-x-2 gap-y-1 mt-1; }
-.tag { @apply text-xs bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300 capitalize; }
+.card-body { @apply px-3 pb-3 grow; }
+.card-title { @apply font-bold text-sm leading-tight; }
+.card-tags { @apply flex flex-wrap gap-x-1.5 gap-y-1 mt-1; }
+.tag { @apply text-[10px] font-medium bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded-full text-gray-600 dark:text-gray-300 capitalize; }
 .installed-tag { @apply bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300; }
-.card-description { @apply text-sm text-gray-600 dark:text-gray-400 mt-2 line-clamp-4; }
-.card-footer { @apply p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between gap-2 mt-auto; }
+.card-description { @apply text-xs text-gray-600 dark:text-gray-400 mt-1.5 line-clamp-4; }
+.card-footer { @apply p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-between gap-2 mt-auto; }
 </style>

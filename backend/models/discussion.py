@@ -33,6 +33,7 @@ class ArtefactInfo(BaseModel):
     artefact_type: str = "document" # note, skill, code, document
     created_at: str
     updated_at: str
+    discussion_id: Optional[str] = None
     # Heavily modified: ensuring these are never required for list validation
     content: Optional[str] = Field(default=None, description="Only populated on direct fetch")
     images: Optional[List[str]] = Field(default=None, description="Only populated on direct fetch")

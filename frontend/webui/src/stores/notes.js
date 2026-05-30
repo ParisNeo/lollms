@@ -97,6 +97,7 @@ export const useNotesStore = defineStore('notes', () => {
         try {
             await apiClient.post(`/api/notes/${noteId}/share`, { target_username: targetUsername });
             uiStore.addNotification(`Note shared with ${targetUsername}`, 'success');
+            await fetchNotes();
         } catch (error) {
             uiStore.addNotification(error.response?.data?.detail || 'Failed to share note', 'error');
         }

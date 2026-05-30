@@ -25,6 +25,40 @@ const discussionId = computed(() => modalData.value?.discussionId || discussions
 
 const selectedUsername = ref('');
 const isSharing = ref(false);
+const sharedUsernames = ref([]);
+const isLoadingSharedUsers = ref(false);
+
+const isAlreadyShared = (username) => {
+    return sharedUsernames.value.includes(username);
+};
+
+async function fetchSharedUsers() {
+    if (!resourceName.value || !resourceType.value) return;
+    isLoadingSharedUsers.value = true;
+    try {
+        const response = await (await import('../../services/api')).default.get(
+            `/api/discussions/shared-with-users`,
+            {
+                params: {
+                    resource_type: resourceType.value,
+                    resource_name: resourceName.value
+                }
+            }
+        );
+        sharedUsernames.value = response.data;
+    } catch (error) {
+        console.error('Failed to fetch shared users:', error);
+        sharedUsernames.value = [];
+    } finally {
+        isLoadingSharedUsers.value = false;
+    }
+}
+
+watch(() => [resourceName.value, resourceType.value], () => {
+    if (resourceName.value && resourceType.value) {
+        fetchSharedUsers();
+    }
+}, { immediate: true });
 
 onMounted(() => {
     if (socialStore.friends.length === 0) socialStore.fetchFriends();
@@ -61,19 +95,31 @@ async function handleShare() {
         <label class="block text-sm font-medium">Select a friend to receive a copy:</label>
         
         <div class="max-h-60 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-            <div v-for="friend in friends" :key="friend.id" 
-                 @click="selectedUsername = friend.username"
-                 class="flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors"
-                 :class="selectedUsername === friend.username ? 'bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-500' : 'hover:bg-gray-100 dark:hover:bg-gray-700'">
-                <UserAvatar :icon="friend.icon" :username="friend.username" size-class="h-8 w-8" />
-                <span class="text-sm font-medium">{{ friend.username }}</span>
-                <div v-if="selectedUsername === friend.username" class="ml-auto">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+            <div v-if="isLoadingSharedUsers" class="flex justify-center items-center py-8">
+                <IconAnimateSpin class="w-6 h-6 text-blue-500 animate-spin" />
+            </div>
+            <template v-else>
+                <div v-for="friend in friends" :key="friend.id" 
+                     @click="!isAlreadyShared(friend.username) && (selectedUsername = friend.username)"
+                     class="flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-all"
+                     :class="[
+                        selectedUsername === friend.username ? 'bg-blue-100 dark:bg-blue-900/50 ring-1 ring-blue-500' : 'hover:bg-gray-100 dark:hover:bg-gray-700',
+                        isAlreadyShared(friend.username) ? 'opacity-50 cursor-not-allowed bg-gray-50/50 dark:bg-gray-900/10' : ''
+                     ]">
+                    <UserAvatar :icon="friend.icon" :username="friend.username" size-class="h-8 w-8" />
+                    <span class="text-sm font-medium">{{ friend.username }}</span>
+                    <div v-if="isAlreadyShared(friend.username)" class="ml-auto flex items-center gap-1 text-green-600 dark:text-green-400 select-none">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7" /></svg>
+                        <span class="text-[9px] font-black uppercase tracking-widest">Shared</span>
+                    </div>
+                    <div v-else-if="selectedUsername === friend.username" class="ml-auto">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>
+                    </div>
                 </div>
-            </div>
-            <div v-if="friends.length === 0" class="text-center py-4 text-gray-500 italic text-sm">
-                No friends found to share with.
-            </div>
+                <div v-if="friends.length === 0" class="text-center py-4 text-gray-500 italic text-sm">
+                    No friends found to share with.
+                </div>
+            </template>
         </div>
       </div>
     </template>

@@ -3,17 +3,17 @@
   --brand-primary: #10b981;
   --brand-primary-hover: #059669;
   --brand-accent: #84cc16;
-  --brand-bg-app: #f0fdf4;
+  --brand-bg-app: #f4fbf7;      /* Clean sage tint */
   --brand-bg-card: #ffffff;
-  --brand-border-main: #dcfce7;
+  --brand-border-main: #e1f5eb;
   --brand-text-main: #064e3b;
   --brand-text-dim: #059669;
 }
 
 .dark.vibe-forest {
-  --brand-bg-app: #022c22;
-  --brand-bg-card: #064e3b;
-  --brand-border-main: #065f46;
+  --brand-bg-app: #020f0c;      /* Deep forest black */
+  --brand-bg-card: #051b15;     /* Dark moss card */
+  --brand-border-main: #0d2b22;  /* Green slate border */
   --brand-text-main: #ecfdf5;
   --brand-text-dim: #34d399;
 }

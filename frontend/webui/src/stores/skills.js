@@ -56,6 +56,7 @@ export const useSkillsStore = defineStore('skills', () => {
         try {
             await apiClient.post(`/api/skills/${skillId}/share`, { target_username: targetUsername });
             uiStore.addNotification(`Skill shared with ${targetUsername}`, 'success');
+            await fetchSkills();
         } catch (error) {
             uiStore.addNotification(error.response?.data?.detail || 'Failed to share skill', 'error');
         }

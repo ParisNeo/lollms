@@ -196,9 +196,41 @@ const currentType = computed(() => {
     return props.artefactGroup.versions[0]?.artefact_type || 'file';
 });
 
-function handleView() {
-    uiStore.activeSplitArtefactTitle = props.artefactGroup.title;
-    if (!uiStore.isDataZoneVisible) uiStore.isDataZoneVisible = true;
+async function handleView() {
+    if (isSavedLibraryItem.value) {
+        // If it's a global saved library item, fetch and display in the rich viewer modal
+        try {
+            uiStore.addNotification("Loading document...", "info");
+            const data = await discussionsStore.fetchArtefactContent({
+                discussionId: 'saved',
+                artefactTitle: props.artefactGroup.title,
+                version: selectedVersion.value,
+                strategy: 'raw'
+            });
+
+            // Normalize content structure
+            let rawContent = '';
+            if (typeof data === 'string') {
+                rawContent = data;
+            } else if (data && typeof data === 'object') {
+                rawContent = data.content ?? '';
+            }
+
+            uiStore.openModal('artefactViewer', {
+                title: props.artefactGroup.title,
+                content: rawContent,
+                images: data.images || []
+            });
+        } catch (e) {
+            console.error("Failed to load global library artefact:", e);
+            uiStore.addNotification("Failed to load document.", "error");
+        }
+    } else {
+        // Normal local discussion artefact: open in split view workspace
+        uiStore.activeSplitArtefactTitle = props.artefactGroup.title;
+        uiStore.dataZoneTab = 'workspace'; // Shift focus immediately
+        if (!uiStore.isDataZoneVisible) uiStore.isDataZoneVisible = true;
+    }
 }
 
 function handleRename() {
@@ -312,13 +344,13 @@ async function toggleLoad() {
   <div class="artefact-list-item group" :class="{'is-active': isLoadedToDataZone}">
     <!-- File Icon Box -->
     <div class="file-icon-box" @click="handleView" :class="{
-        'bg-blue-50 text-blue-500 border-blue-200': currentType === 'file' || currentType === 'document' || currentType === 'code',
-        'bg-amber-50 text-amber-500 border-amber-200': currentType === 'note',
-        'bg-green-50 text-green-500 border-green-200': currentType === 'skill'
+        'bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/30': currentType === 'file' || currentType === 'document' || currentType === 'code',
+        'bg-amber-50 text-amber-600 border-amber-100 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/30': currentType === 'note',
+        'bg-green-50 text-green-600 border-green-100 dark:bg-green-950/40 dark:text-green-400 dark:border-green-900/30': currentType === 'skill'
     }">
-        <IconFileText v-if="currentType === 'file' || currentType === 'document' || currentType === 'code'" class="w-6 h-6" />
-        <IconPencil v-else-if="currentType === 'note'" class="w-6 h-6" />
-        <IconSparkles v-else-if="currentType === 'skill'" class="w-6 h-6" />
+        <IconFileText v-if="currentType === 'file' || currentType === 'document' || currentType === 'code'" class="w-4 h-4" />
+        <IconPencil v-else-if="currentType === 'note'" class="w-4.5 h-4.5" />
+        <IconSparkles v-else-if="currentType === 'skill'" class="w-4 h-4" />
     </div>
 
     <!-- Info Column -->
@@ -327,16 +359,17 @@ async function toggleLoad() {
             <h4 class="text-sm font-bold text-gray-800 dark:text-gray-200 truncate" :title="artefactGroup.title">
                 {{ artefactGroup.title }}
             </h4>
-            <!-- Shared By Tag -->
+            <!-- Shared With You Tag (Receiver) -->
             <span v-if="artefactGroup.versions[0]?.author && artefactGroup.versions[0].author.startsWith('Shared by')" 
-                  class="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 shrink-0 select-none">
-                {{ artefactGroup.versions[0].author }}
+                  class="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border border-blue-200 dark:border-blue-800/50 shrink-0 select-none"
+                  :title="artefactGroup.versions[0].author">
+                shared with you
             </span>
-            <!-- Star Toggle Button -->
-            <button @click.stop="handleStarClick" class="p-1 rounded-full transition-colors shrink-0" :class="isStarred ? 'text-yellow-500' : 'text-gray-300 dark:text-gray-600 hover:text-yellow-500'">
-                <IconStarFilled v-if="isStarred" class="w-3.5 h-3.5" />
-                <IconStar v-else class="w-3.5 h-3.5" />
-            </button>
+            <!-- Shared Tag (Sender) -->
+            <span v-else-if="artefactGroup.versions[0]?.author === 'Shared'" 
+                  class="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 select-none">
+                shared
+            </span>
         </div>
         <div class="flex items-center gap-2 mt-0.5">
             <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ fileExtension }}</span>
@@ -360,24 +393,29 @@ async function toggleLoad() {
     </div>
 
     <!-- Actions -->
-    <div class="flex items-center gap-1 pr-1">
-        <button v-if="isExecutable" @click.stop="handleExecute" class="p-2 text-gray-400 hover:text-green-600 transition-colors" :title="executeTitle">
-            <IconAnimateSpin v-if="isExecuting" class="w-5 h-5 animate-spin" />
-            <IconPlayCircle v-else class="w-5 h-5" />
+    <div class="flex items-center gap-0.5 pr-0.5">
+        <!-- Star Toggle Button -->
+        <button @click.stop="handleStarClick" class="p-1.5 rounded-full transition-colors shrink-0 hover:bg-gray-100 dark:hover:bg-gray-700" :class="isStarred ? 'text-yellow-500' : 'text-gray-400 hover:text-gray-500'" title="Toggle favorite">
+            <IconStarFilled v-if="isStarred" class="w-4 h-4" />
+            <IconStar v-else class="w-4 h-4" />
         </button>
 
-        <button @click.stop="handleDownload" class="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download">
-            <IconArrowDownTray class="w-5 h-5" />
+        <button v-if="isExecutable" @click.stop="handleExecute" class="p-1.5 text-gray-400 hover:text-green-600 transition-colors" :title="executeTitle">
+            <IconAnimateSpin v-if="isExecuting" class="w-4 h-4 animate-spin" />
+            <IconPlayCircle v-else class="w-4 h-4" />
         </button>
 
+        <button @click.stop="handleDownload" class="p-1.5 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download">
+            <IconArrowDownTray class="w-4 h-4" />
+        </button>
 
         <!-- Advanced Actions Dropdown -->
-        <DropdownMenu icon="menu" buttonClass="p-2 text-gray-400 hover:text-gray-900 dark:hover:white transition-colors" title="Actions">
+        <DropdownMenu icon="menu" buttonClass="p-1.5 text-gray-400 hover:text-gray-900 dark:hover:white transition-colors" title="Actions">
             <button v-if="!isSavedLibraryItem" @click="toggleLoad" class="menu-item">
                 <IconRefresh class="w-4 h-4 mr-3" :class="{'text-green-500': isLoadedToDataZone}"/> 
                 <span>{{ isLoadedToDataZone ? 'Unload from Context' : 'Load to Context' }}</span>
             </button>
-            <button v-if="!isSavedLibraryItem" @click="handleSaveToLibrary" class="menu-item text-blue-500">
+            <button v-if="!isSavedLibraryItem && !isAlsoInLibrary" @click="handleSaveToLibrary" class="menu-item text-blue-500">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
                 </svg>
@@ -433,14 +471,19 @@ async function toggleLoad() {
 @reference "tailwindcss";
 
 .artefact-list-item {
-    @apply flex items-center gap-4 p-2 bg-white dark:bg-gray-800/40 rounded-xl border border-gray-100 dark:border-gray-700/50 hover:border-gray-300 dark:hover:border-gray-600 transition-all shadow-sm;
+    @apply flex items-center transition-all shadow-sm;
+    background-color: var(--brand-bg-card);
+    border: 1px solid var(--brand-border-main);
+    border-radius: 0.5rem;
+    padding: 0.375rem 0.5rem;
+    gap: 0.5rem;
 }
 .artefact-list-item.is-active {
-    @apply ring-1 ring-blue-500/50 bg-blue-50/10 dark:bg-blue-900/5;
+    @apply ring-1 ring-blue-500/30;
+    background-color: rgba(59, 130, 246, 0.04);
 }
 .file-icon-box {
-    @apply w-12 h-12 shrink-0 flex items-center justify-center bg-gray-50 dark:bg-gray-900 rounded-lg border dark:border-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors;
+    @apply w-8 h-8 shrink-0 flex items-center justify-center rounded-md border cursor-pointer transition-colors;
+    border-color: var(--brand-border-main);
 }
-.menu-item { @apply flex items-center w-full px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors; }
-.menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
 </style>

@@ -19,7 +19,15 @@ export const useSocialStore = defineStore('social', () => {
     const isLoadingBlocked = ref(false);
     const comments = ref({});
     const isLoadingComments = ref({});
-    
+
+    // Social Groups State
+    const socialGroups = ref([]);
+    const isLoadingGroups = ref(false);
+    const activeGroupDetails = ref(null);
+    const isLoadingGroupDetails = ref(false);
+    const groupFeedPosts = ref([]);
+    const isLoadingGroupFeed = ref(false);
+
     // Chat State
     const conversations = ref([]); // List of summary objects (groups + DMs)
     const activeConversations = ref({}); // Cache of detailed conversation objects { [id]: { ...details, messages: [] } }
@@ -69,6 +77,124 @@ export const useSocialStore = defineStore('social', () => {
             friends.value = [];
         } finally {
             isLoadingFriends.value = false;
+        }
+    }
+
+    // -- Social Groups Actions --
+    async function fetchSocialGroups() {
+        isLoadingGroups.value = true;
+        try {
+            const response = await apiClient.get('/api/groups');
+            socialGroups.value = response.data || [];
+        } catch (error) {
+            console.error("Failed to fetch social groups:", error);
+            socialGroups.value = [];
+        } finally {
+            isLoadingGroups.value = false;
+        }
+    }
+
+    async function createSocialGroup(groupData) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post('/api/groups', groupData);
+            socialGroups.value.push(response.data);
+            uiStore.addNotification(`Group "${response.data.displayName || response.data.display_name}" created successfully.`, 'success');
+            return response.data;
+        } catch (error) {
+            console.error("Failed to create social group:", error);
+            uiStore.addNotification("Failed to create group.", "error");
+            throw error;
+        }
+    }
+
+    async function fetchSocialGroupDetails(groupId) {
+        isLoadingGroupDetails.value = true;
+        try {
+            const response = await apiClient.get(`/api/groups/${groupId}`);
+            activeGroupDetails.value = response.data;
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to fetch details for group ${groupId}:`, error);
+            activeGroupDetails.value = null;
+            throw error;
+        } finally {
+            isLoadingGroupDetails.value = false;
+        }
+    }
+
+    async function updateSocialGroup(groupId, groupData) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.put(`/api/groups/${groupId}`, groupData);
+            activeGroupDetails.value = response.data;
+            const idx = socialGroups.value.findIndex(g => g.id === groupId);
+            if (idx !== -1) {
+                socialGroups.value[idx] = response.data;
+            }
+            uiStore.addNotification("Group settings updated.", "success");
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to update group ${groupId}:`, error);
+            uiStore.addNotification("Failed to update group.", "error");
+            throw error;
+        }
+    }
+
+    async function deleteSocialGroup(groupId) {
+        const uiStore = useUiStore();
+        try {
+            await apiClient.delete(`/api/groups/${groupId}`);
+            socialGroups.value = socialGroups.value.filter(g => g.id !== groupId);
+            if (activeGroupDetails.value?.id === groupId) {
+                activeGroupDetails.value = null;
+            }
+            uiStore.addNotification("Group deleted successfully.", "success");
+        } catch (error) {
+            console.error(`Failed to delete group ${groupId}:`, error);
+            uiStore.addNotification("Failed to delete group.", "error");
+            throw error;
+        }
+    }
+
+    async function addMemberToSocialGroup(groupId, userId) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.post(`/api/groups/${groupId}/members`, { user_id: userId });
+            activeGroupDetails.value = response.data;
+            uiStore.addNotification("Member added to group.", "success");
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to add member to group ${groupId}:`, error);
+            uiStore.addNotification("Failed to add member.", "error");
+            throw error;
+        }
+    }
+
+    async function removeMemberFromSocialGroup(groupId, userId) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.delete(`/api/groups/${groupId}/members/${userId}`);
+            activeGroupDetails.value = response.data;
+            uiStore.addNotification("Member removed from group.", "success");
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to remove member from group ${groupId}:`, error);
+            uiStore.addNotification("Failed to remove member.", "error");
+            throw error;
+        }
+    }
+
+    async function fetchSocialGroupFeed(groupId) {
+        isLoadingGroupFeed.value = true;
+        try {
+            const response = await apiClient.get(`/api/groups/${groupId}/feed`);
+            groupFeedPosts.value = response.data || [];
+        } catch (error) {
+            console.error(`Failed to fetch feed for group ${groupId}:`, error);
+            groupFeedPosts.value = [];
+        } finally {
+            isLoadingGroupFeed.value = false;
         }
     }
 
@@ -630,6 +756,13 @@ export const useSocialStore = defineStore('social', () => {
         activeConversationId.value = null;
         isLoadingConversations.value = false;
         isLoadingMessages.value = false;
+
+        socialGroups.value = [];
+        isLoadingGroups.value = false;
+        activeGroupDetails.value = null;
+        isLoadingGroupDetails.value = false;
+        groupFeedPosts.value = [];
+        isLoadingGroupFeed.value = false;
     }
 
     return {
@@ -644,7 +777,10 @@ export const useSocialStore = defineStore('social', () => {
         conversations, 
         activeConversations, 
         activeConversationId,
-        
+        socialGroups,
+        activeGroupDetails,
+        groupFeedPosts,
+
         // LOADING STATES
         isLoadingFriends, 
         isLoadingFeed, // EXPORTED
@@ -654,6 +790,9 @@ export const useSocialStore = defineStore('social', () => {
         isLoadingComments, // EXPORTED
         isLoadingConversations, 
         isLoadingMessages, // EXPORTED
+        isLoadingGroups,
+        isLoadingGroupDetails,
+        isLoadingGroupFeed,
 
         // COMPUTED / GETTERS
         totalUnreadDms, 
@@ -669,6 +808,7 @@ export const useSocialStore = defineStore('social', () => {
         handleNewDm, handleNewComment, handleIncomingFriendRequest, markConversationAsRead,
         fetchFeed, fetchUserPosts, createPost, deletePost, fetchComments, createComment, deleteComment,
         followUser, unfollowUser, toggleLike, searchForMentions,
+        fetchSocialGroups, createSocialGroup, fetchSocialGroupDetails, updateSocialGroup, deleteSocialGroup, addMemberToSocialGroup, removeMemberFromSocialGroup, fetchSocialGroupFeed,
         $reset
     };
 });

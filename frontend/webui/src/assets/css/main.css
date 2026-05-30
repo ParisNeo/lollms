@@ -29,29 +29,36 @@
 
 @layer base {
   html {
-    font-size: 19px; 
+    font-size: 15px; 
     background-color: var(--bg-app);
     color: var(--text-main);
   }
   @media (max-width: 768px) {
     html {
-      font-size: 17px;
+      font-size: 14px;
     }
   }
   @media (max-width: 480px) {
     html {
-      font-size: 16px;
+      font-size: 13px;
     }
   }
 
   body {
-    font-family: Georgia, Cambria, "Times New Roman", Times, serif;
-    line-height: 1.6;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.5;
     overscroll-behavior-y: none;
-    /* True Dark Mode: Use black for base background */
-    @apply bg-white text-gray-900 dark:bg-black dark:text-gray-100;
+    background-color: var(--brand-bg-app);
+    color: var(--brand-text-main);
     margin: 0;
     transition: background-color 0.4s cubic-bezier(0.4, 0, 0.2, 1), color 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  .dark body {
+    background-image: 
+      radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.04), transparent 40%),
+      radial-gradient(circle at 90% 80%, rgba(34, 211, 238, 0.03), transparent 40%);
+    background-attachment: fixed;
   }
 
   /* Custom scrollbar for webkit browsers */
@@ -68,7 +75,7 @@
 @layer components {
     /* --- Input Fields --- */
     .input-field {
-        @apply block w-full px-3 py-2 border rounded-xl shadow-sm sm:text-sm;
+        @apply block w-full px-3 py-1.5 border rounded-lg shadow-sm sm:text-sm;
         @apply bg-gray-50 border-gray-200 placeholder-gray-400;
         @apply dark:bg-gray-800 dark:border-gray-700 dark:placeholder-gray-500 dark:text-white;
         @apply transition-all duration-200 ease-in-out;
@@ -76,16 +83,13 @@
     .input-field:focus {
         @apply ring-4 ring-blue-500/10 border-blue-500 dark:border-blue-500/50;
     }
-    .input-field:focus {
-        @apply ring-2 ring-blue-500/50 border-blue-500;
-    }
     .input-field-sm {
         @apply block w-full px-2 py-1.5 bg-white dark:bg-gray-700/50 border border-gray-300 dark:border-gray-600 rounded-md text-xs placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 disabled:opacity-50;
     }
 
     /* --- Buttons --- */
     .btn {
-        @apply inline-flex items-center justify-center px-4 py-2 text-sm font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800;
+        @apply inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 dark:focus:ring-offset-gray-800;
         @apply transition-all duration-150 ease-in-out;
     }
     .btn:not(:disabled):hover { @apply brightness-110; }
@@ -134,7 +138,7 @@
    ========================================================================== */
 .message-row { @apply w-full; }
 /* Increased max-width to utilize more screen real estate on large monitors */
-.message-content-container { @apply max-w-7xl xl:max-w-[90%] mx-auto px-4 sm:px-6 lg:px-8 py-6 flex items-start space-x-4; }
+.message-content-container { @apply max-w-7xl xl:max-w-[90%] mx-auto px-3 sm:px-4 lg:px-6 py-4 flex items-start space-x-3; }
 
 .user-bubble { @apply self-end rounded-br-md bg-blue-50 text-blue-900 dark:bg-blue-800 dark:text-blue-100; width: 100%; }
 .ai-bubble { 
@@ -470,7 +474,6 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .menu-item-button.selected { @apply bg-blue-100 dark:bg-blue-900/50 font-semibold; }
 
 /* Code mirror */
-.message-prose { @apply prose prose-base dark:prose-invert max-w-none break-words; font-family: Georgia, serif; }
 .think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
 details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
 .think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
@@ -525,10 +528,10 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
     all: unset;
 }
 .message-prose {
-    @apply prose prose-lg dark:prose-invert max-w-none break-words;
-    font-family: Georgia, Cambria, "Times New Roman", Times, serif;
-    font-size: var(--message-font-size, 1.2rem);
-    line-height: 1.7;
+    @apply prose prose-base dark:prose-invert max-w-none break-words;
+    font-family: system-ui, -apple-system, sans-serif;
+    font-size: var(--message-font-size, 1.025rem);
+    line-height: 1.6;
 }
 .btn-icon-sm { @apply p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center; }
 .think-block { @apply bg-blue-50/50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800/30 rounded-xl overflow-hidden transition-all duration-300 shadow-sm; }
@@ -544,6 +547,15 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .document-summary::-webkit-details-marker { display: none; }
 details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
 .document-content { @apply p-3; }
+
+/* Glass Card Utility */
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px) saturate(140%);
+  -webkit-backdrop-filter: blur(16px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
 
 /* Shared structure for status/action blocks */
 .skill-block, .note-block-collapsible, .document-block { @apply rounded-xl overflow-hidden shadow-sm transition-all duration-300 border mb-4; }

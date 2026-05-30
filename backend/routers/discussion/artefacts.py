@@ -141,11 +141,15 @@ def _map_artefact_for_ui(art: dict, discussion_id: str = None) -> dict:
     return mapped
 
 def _map_saved_artefact_for_ui(saved: SavedArtefact) -> dict:
+    author_val = "Me"
+    if saved.description:
+        if saved.description.startswith("Shared by ") or saved.description == "Shared":
+            author_val = saved.description
     return {
         "title": saved.title,
         "version": 1,
         "is_loaded": False,
-        "author": "Me",
+        "author": author_val,
         "artefact_type": saved.artefact_type or "document",
         "created_at": saved.created_at.isoformat() if saved.created_at else datetime.now().isoformat(),
         "updated_at": saved.updated_at.isoformat() if saved.updated_at else datetime.now().isoformat(),
@@ -918,11 +922,31 @@ def build_artefacts_router(router: APIRouter):
         Path-style route to avoid conflicts with SPA catch-all.
         """
         from urllib.parse import unquote
-        
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-        
-        # URL decode the title (handles spaces and special chars)
         decoded_title = unquote(artefact_title)
+
+        # Decode twice in case of double encoding of path segments
+        try:
+            if "%" in decoded_title:
+                decoded_title = unquote(decoded_title)
+        except Exception:
+            pass
+
+        if discussion_id == "saved":
+            saved_art = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first()
+            if not saved_art:
+                raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
+
+            from fastapi.responses import PlainTextResponse
+            return PlainTextResponse(
+                content=saved_art.content,
+                media_type="text/plain; charset=utf-8",
+                headers={"X-Artefact-Title": decoded_title, "X-Artefact-Version": "1"}
+            )
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
         # Performance Optimisation: Attempt to locate version directly in memory-cached list
         artefact = None
@@ -947,7 +971,7 @@ def build_artefacts_router(router: APIRouter):
 
         # Return raw content as plain text for the workspace editor
         content = artefact.get('content', '')
-        
+
         from fastapi.responses import PlainTextResponse
         return PlainTextResponse(
             content=content,
@@ -967,10 +991,19 @@ def build_artefacts_router(router: APIRouter):
         """
         Get artefact metadata (JSON). Use /content endpoint for raw content.
         """
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-
         from urllib.parse import unquote
         decoded_title = unquote(artefact_title)
+
+        if discussion_id == "saved":
+            saved_art = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first()
+            if not saved_art:
+                raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
+            return _map_saved_artefact_for_ui(saved_art)
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
         # Performance Optimisation: Attempt to locate version directly in memory-cached list
         artefact = None
@@ -1369,42 +1402,128 @@ def build_artefacts_router(router: APIRouter):
         from urllib.parse import unquote
         from backend.db.models.user import User as DBUser
         from backend.discussion import get_user_discussion
+        from backend.db.models.saved_artefact import SavedArtefact
 
-        # 1. Get the source discussion and the target user
-        source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         decoded_title = unquote(artefact_title)
-        source_art = source_discussion.get_artefact(title=decoded_title)
 
-        if not source_art:
-            raise HTTPException(status_code=404, detail="Source artefact not found.")
+        # Decode twice in case of double encoding of path segments
+        try:
+            if "%" in decoded_title:
+                decoded_title = unquote(decoded_title)
+        except Exception:
+            pass
 
         target_user = db.query(DBUser).filter(DBUser.username == payload.target_username).first()
         if not target_user:
-            raise HTTPException(status_code=404, detail="Target user not found.")
+            raise HTTPException(status_code=404, detail=f"Target user '{payload.target_username}' not found.")
 
         if target_user.id == current_user.id:
             raise HTTPException(status_code=400, detail="Cannot share with yourself.")
 
-        # 2. Create a new discussion for the target user to receive the shared artefact
+        # Create a new discussion for the target user to receive the shared artefact
         import uuid
         target_discussion_id = str(uuid.uuid4())
-        target_discussion = get_user_discussion(target_user.username, target_discussion_id, create_if_missing=True)
+        lc_sender = get_user_lollms_client(current_user.username)
+        target_discussion = get_user_discussion(target_user.username, target_discussion_id, create_if_missing=True, lollms_client=lc_sender)
 
         if not target_discussion:
             raise HTTPException(status_code=500, detail="Failed to create target discussion for sharing.")
 
-        # 3. Copy the artefact into the target user's new discussion
-        target_discussion.add_artefact(
-            title=decoded_title,
-            content=source_art.get('content', ''),
-            images=source_art.get('images', []),
-            author=f"Shared by {current_user.username}",
-            active=True,
-            artefact_type=source_art.get('artefact_type', 'document')
-        )
+        # If it's a global saved library item, query DB directly
+        if discussion_id == "saved":
+            source_art = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first()
+            if not source_art:
+                raise HTTPException(status_code=404, detail=f"Source saved artefact '{decoded_title}' not found.")
 
-        target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
-        target_discussion.commit()
+            # Copy the artefact into the target user's new discussion
+            target_discussion.add_artefact(
+                title=decoded_title,
+                content=source_art.content,
+                images=[],
+                author=f"Shared by {current_user.username}",
+                active=True,
+                artefact_type=source_art.artefact_type or 'document'
+            )
+            target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
+
+            # Add an introductory message so the discussion is not empty and appears in the sidebar clearly
+            target_discussion.add_message(
+                sender="System",
+                content=f"👋 **{current_user.username}** has shared the document **{decoded_title}** with you.\n\nThe file is already loaded into this conversation's context and can be viewed or edited in the Workspace panel on the right.",
+                sender_type="system"
+            )
+            target_discussion.commit()
+
+            # Save to receiver's SavedArtefact table directly
+            new_saved_art = SavedArtefact(
+                title=decoded_title,
+                content=source_art.content,
+                description=f"Shared by {current_user.username}",
+                artefact_type=source_art.artefact_type or 'document',
+                owner_user_id=target_user.id
+            )
+            db.add(new_saved_art)
+
+            # Update sender's copy description to "Shared"
+            source_art.description = "Shared"
+            db.commit()
+        else:
+            # Normal local discussion artefact: get the source discussion and the target user
+            source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+            source_art = source_discussion.get_artefact(title=decoded_title)
+
+            if not source_art:
+                raise HTTPException(status_code=404, detail="Source artefact not found.")
+
+            # Copy the artefact into the target user's new discussion
+            target_discussion.add_artefact(
+                title=decoded_title,
+                content=source_art.get('content', ''),
+                images=source_art.get('images', []),
+                author=f"Shared by {current_user.username}",
+                active=True,
+                artefact_type=source_art.get('artefact_type', 'document')
+            )
+
+            target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
+
+            # Add an introductory message so the discussion is not empty and appears in the sidebar clearly
+            target_discussion.add_message(
+                sender="System",
+                content=f"👋 **{current_user.username}** has shared the document **{decoded_title}** with you.\n\nThe file is already loaded into this conversation's context and can be viewed or edited in the Workspace panel on the right.",
+                sender_type="system"
+            )
+            target_discussion.commit()
+
+            # Save to receiver's SavedArtefact table directly to ensure visibility in global library
+            new_saved_art = SavedArtefact(
+                title=decoded_title,
+                content=source_art.get('content', ''),
+                description=f"Shared by {current_user.username}",
+                artefact_type=source_art.get('artefact_type', 'document'),
+                owner_user_id=target_user.id
+            )
+            db.add(new_saved_art)
+
+            # Mark sender's original artefact as "Shared"
+            source_discussion.artefacts.update(
+                title=decoded_title,
+                new_content=source_art.get('content', ''),
+                new_type=source_art.get('artefact_type', 'document'),
+                new_images=source_art.get('images', []),
+                bump_version=False,
+                active=source_art.get('active', True),
+                author="Shared"
+            )
+
+            # Automatically detach the local copy from the discussion database once saved to global library
+            source_discussion.remove_artefact(title=decoded_title)
+
+            source_discussion.commit()
+            db.commit()
 
         # 4. Send real-time notifications to the receiver
         from backend.ws_manager import manager
@@ -1578,3 +1697,36 @@ def build_artefacts_router(router: APIRouter):
             return _map_artefact_for_ui(restored_art, discussion_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get("/shared-with-users", response_model=List[str])
+    async def get_resource_shared_with(
+        resource_type: str,
+        resource_name: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        from urllib.parse import unquote
+        decoded_name = unquote(resource_name)
+        usernames = []
+
+        if resource_type == "artefact":
+            records = db.query(SavedArtefact).options(joinedload(SavedArtefact.owner)).filter(
+                SavedArtefact.title == decoded_name,
+                SavedArtefact.description == f"Shared by {current_user.username}"
+            ).all()
+            usernames = [r.owner.username for r in records if r.owner]
+        elif resource_type == "skill":
+            from backend.db.models.skill import Skill
+            records = db.query(Skill).options(joinedload(Skill.owner)).filter(
+                Skill.name == decoded_name,
+                Skill.author == f"Shared by {current_user.username}"
+            ).all()
+            usernames = [r.owner.username for r in records if r.owner]
+        elif resource_type == "note":
+            from backend.db.models.note import Note
+            sender_note = db.query(Note).filter(Note.owner_id == current_user.id, Note.title == decoded_name).first()
+            if sender_note and sender_note.description:
+                found = re.findall(r'\[Shared with (\w+) on', sender_note.description)
+                usernames = found
+
+        return list(set(usernames))
