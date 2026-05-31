@@ -341,13 +341,13 @@ const parsedStreamingContent = computed(() => {
     else if (match[13] || match[16]) {
         // --- Building / Working Indicator (Merged Logic) ---
         const raw = match[13] || match[16];
-        const msgMatch = raw.match(/message=["']([^"']+)["']/);
-        const lblMatch = raw.match(/label=["']([^"']+)["']/);
+        const msgMatch = typeof raw === 'string' ? raw.match(/message=["']([^"']+)["']/) : null;
+        const lblMatch = typeof raw === 'string' ? raw.match(/label=["']([^"']+)["']/) : null;
         const label = (msgMatch && msgMatch[1]) || (lblMatch && lblMatch[1]) || 'Processing';
         
-        const title = raw.match(/title=["']([^"']+)["']/)?.[1] || '';
-        const sub_content = raw.match(/sub_content=["']([^"']+)["']/)?.[1] || '';
-        const id = raw.match(/id=["']([^"']+)["']/)?.[1];
+        const title = typeof raw === 'string' ? raw.match(/title=["']([^"']+)["']/)?.[1] || '' : '';
+        const sub_content = typeof raw === 'string' ? raw.match(/sub_content=["']([^"']+)["']/)?.[1] || '' : '';
+        const id = typeof raw === 'string' ? raw.match(/id=["']([^"']+)["']/)?.[1] : undefined;
         
         // Determine if still active (isDone check)
         const isDone = (props.forms?.some(f => f.id === id || f.form_id === id)) || 
@@ -428,24 +428,17 @@ const parsedStreamingContent = computed(() => {
     else if (match[12] || match[27]) { // <lollms_inline>
         const fullTag = match[12] || match[27];
         // Regex to extract inner content without any markdown escaping
-        const innerContentMatch = fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/i);
+        const innerContentMatch = typeof fullTag === 'string' ? fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/i) : null;
         const innerContent = innerContentMatch ? innerContentMatch[1] : '';
         
-        const titleMatch = fullTag.match(/title=["']([^"']+)["']/i);
+        const titleMatch = typeof fullTag === 'string' ? fullTag.match(/title=["']([^"']+)["']/i) : null;
         const title = titleMatch ? titleMatch[1] : 'Interactive Widget';
         
-        const isLoading = !fullTag.includes('</lollms_inline>');
+        // If it doesn't have a closing tag, it's still streaming
+        const isLoading = typeof fullTag === 'string' ? !fullTag.includes('</lollms_inline>') : false;
         
-        return { 
-            type: 'interactive_widget', 
-            widget: { 
-                id: title, 
-                title: title, 
-                source: innerContent, 
-                is_loading: isLoading 
-            }, 
-            raw: fullTag 
-        };
+        const widgetData = { id: title, title: title, source: innerContent, is_loading: isLoading };
+        return { type: 'interactive_widget', widget: widgetData, raw: fullTag };
     }
 
     return { type: 'content', content: rawBlock };

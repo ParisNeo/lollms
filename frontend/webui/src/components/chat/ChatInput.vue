@@ -1466,7 +1466,6 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 <style scoped>
 @reference "tailwindcss";
 .tool-badge { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black border shadow-sm transition-all; }
-.menu-item { @apply flex items-center w-full px-4 py-2.5 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors text-left; }
 .menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }

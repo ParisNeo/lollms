@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue';
+import { ref, computed, onMounted, watch } from 'vue';
 import { useSocialStore } from '../../stores/social';
 import { useNotesStore } from '../../stores/notes';
 import { useSkillsStore } from '../../stores/skills';
@@ -7,6 +7,7 @@ import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from './GenericModal.vue';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import { storeToRefs } from 'pinia';
 
 const socialStore = useSocialStore();

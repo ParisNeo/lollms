@@ -342,6 +342,10 @@ def build_artefacts_router(router: APIRouter):
             db.refresh(new_save)
             saved = new_save
 
+        # Automatically detach/remove the local copy from the discussion's local database once saved globally
+        discussion.remove_artefact(title=decoded_title)
+        discussion.commit()
+
         return _map_saved_artefact_for_ui(saved)
 
     @router.delete("/artefacts/save/{artefact_title:path}", status_code=status.HTTP_200_OK)
@@ -1706,6 +1710,7 @@ def build_artefacts_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         from urllib.parse import unquote
+        from sqlalchemy.orm import joinedload
         decoded_name = unquote(resource_name)
         usernames = []
 

@@ -24,7 +24,7 @@ const props = defineProps({
   isStarred: { type: Boolean, default: false }
 });
 
-defineEmits(['star', 'share', 'import']);
+const emit = defineEmits(['star', 'share', 'import']);
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -32,6 +32,32 @@ const pyodideStore = usePyodideStore();
 
 const selectedVersion = ref(props.artefactGroup.versions[0]?.version || 1);
 const isExecuting = ref(false);
+
+const sharedUsers = ref([]);
+const isLoadingShared = ref(false);
+const hasFetchedShared = ref(false);
+
+async function fetchSharedUsers() {
+    if (hasFetchedShared.value || isLoadingShared.value) return;
+    isLoadingShared.value = true;
+    try {
+        const response = await (await import('../../../services/api')).default.get(
+            '/api/discussions/shared-with-users',
+            {
+                params: {
+                    resource_type: 'artefact',
+                    resource_name: props.artefactGroup.title
+                }
+            }
+        );
+        sharedUsers.value = response.data || [];
+        hasFetchedShared.value = true;
+    } catch (e) {
+        console.error("Failed to fetch shared users for card:", e);
+    } finally {
+        isLoadingShared.value = false;
+    }
+}
 
 const cardDiscussionId = computed(() => {
     return props.artefactGroup.versions[0]?.discussion_id || discussionsStore.currentDiscussionId;
@@ -367,7 +393,10 @@ async function toggleLoad() {
             </span>
             <!-- Shared Tag (Sender) -->
             <span v-else-if="artefactGroup.versions[0]?.author === 'Shared'" 
-                  class="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 select-none">
+                    @mouseenter="fetchSharedUsers"
+                    :title="isLoadingShared ? 'Loading recipients...' : (sharedUsers.length > 0 ? 'Shared with: ' + sharedUsers.join(', ') : 'Shared with friends')"
+                    class="px-1.5 py-0.5 text-[9px] font-bold rounded-full bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 select-none cursor-help"
+            >
                 shared
             </span>
         </div>

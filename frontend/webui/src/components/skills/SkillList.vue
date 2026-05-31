@@ -162,3 +162,9 @@ async function handleFileImport(event) {
         </div>
     </div>
 </template>
+<style scoped>
+@reference "tailwindcss";
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
+.menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
+</style>

@@ -878,8 +878,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
 
 <style scoped>
 @reference "tailwindcss";
-
-.custom-scrollbar::-webkit-scrollbar { height: 4px; width: 4px; }
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
-.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
 </style>

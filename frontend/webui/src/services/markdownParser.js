@@ -30,7 +30,10 @@ function unprotectHtml(html) {
 const citationExtension = {
   name: 'citation',
   level: 'inline',
-  start(src) { return src.match(/\[\d+\]/)?.index; },
+  start(src) { 
+    if (typeof src !== 'string') return -1;
+    return src.match(/\[\d+\]/)?.index; 
+  },
   tokenizer(src, tokens) {
     const rule = /^\[(\d+)\]/;
     const match = rule.exec(src);
