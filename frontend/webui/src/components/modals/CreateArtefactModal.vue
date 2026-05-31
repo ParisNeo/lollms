@@ -15,6 +15,7 @@ const discussionsStore = useDiscussionsStore();
 
 const modalData = computed(() => uiStore.modalData('createArtefact'));
 const discussionId = computed(() => modalData.value?.discussionId || discussionsStore.currentDiscussionId);
+const isLibraryOnly = computed(() => !!modalData.value?.isLibraryOnly || !discussionId.value);
 
 const title = ref('');
 const content = ref('');
@@ -93,7 +94,7 @@ function insertSnippet(snippetCode) {
 }
 
 async function handleSubmit() {
-    if (!discussionId.value) {
+    if (!isLibraryOnly.value && !discussionId.value) {
         uiStore.addNotification('No discussion selected.', 'error');
         return;
     }
@@ -101,16 +102,26 @@ async function handleSubmit() {
         uiStore.addNotification('Title is required.', 'warning');
         return;
     }
-    
+
     isLoading.value = true;
     try {
-        await discussionsStore.createManualArtefact({
-            discussionId: discussionId.value,
-            title: title.value.trim(),
-            content: content.value,
-            imagesB64: []
-        });
+        if (isLibraryOnly.value) {
+            await discussionsStore.saveRawArtefactToLibrary({
+                title: title.value.trim(),
+                content: content.value,
+                artefactType: selectedLanguage.value === 'markdown' ? 'document' : 'code'
+            });
+        } else {
+            await discussionsStore.createManualArtefact({
+                discussionId: discussionId.value,
+                title: title.value.trim(),
+                content: content.value,
+                imagesB64: []
+            });
+        }
         uiStore.closeModal('createArtefact');
+    } catch (e) {
+        console.error("Failed to save artefact:", e);
     } finally {
         isLoading.value = false;
     }
@@ -181,9 +192,9 @@ async function handleSubmit() {
         <template #footer>
             <div class="flex justify-end gap-3">
                 <button @click="uiStore.closeModal('createArtefact')" type="button" class="btn btn-secondary">Cancel</button>
-                <button @click="handleSubmit" type="button" class="btn btn-primary" :disabled="isLoading || !title.trim()">
+                <button @click="handleSubmit" type="button" class="btn btn-primary px-10" :disabled="isLoading || !title.trim()">
                     <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
-                    Create & Load
+                    {{ isLibraryOnly ? 'Create & Save' : 'Create & Load' }}
                 </button>
             </div>
         </template>

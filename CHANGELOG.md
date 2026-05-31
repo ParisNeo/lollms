@@ -42,6 +42,18 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-31 22:53]
+
+- feat(artefacts): add category field to saved artefacts
+
+## [2026-05-31 22:53]
+
+- feat(artefacts): add category support to saved artefacts and rebuild frontend
+
+## [2026-05-31 22:53]
+
+- feat(artefacts): add category support to saved artefacts and update discussion UI
+
 ## [2026-05-31 13:52]
 
 - fix(backend): add missing imports and update global settings bootstrap

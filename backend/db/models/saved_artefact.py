@@ -16,6 +16,7 @@ class SavedArtefact(Base):
     category = Column(String, nullable=True)
     artefact_type = Column(String, nullable=True, default="document") # 'document', 'code', 'note', 'skill', etc.
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    version = Column(Integer, default=1, nullable=False)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

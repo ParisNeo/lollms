@@ -886,7 +886,15 @@ async def export_content(
         raise HTTPException(status_code=403, detail=f"Export to '{export_format}' is disabled by the administrator.")
 
     content = payload.content
-    filename = f"export.{export_format}"
+
+    # Resolve and sanitize the filename using the payload filename stem and target extension
+    base_filename = "export"
+    if getattr(payload, 'filename', None):
+        base_filename = Path(payload.filename).stem
+
+    safe_base = secure_filename(base_filename) or "export"
+    filename = f"{safe_base}.{export_format}"
+
     media_type = "application/octet-stream"
     file_content = b''
 

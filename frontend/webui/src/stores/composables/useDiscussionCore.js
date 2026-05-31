@@ -84,7 +84,15 @@ export function useDiscussionCore(state, stores, getActions) {
         if (discussionId) {
             isLoadingMessages.value = true;
             messages.value = [];
-            
+
+            if (discussionId === 'saved') {
+                activeDiscussionParticipants.value = {};
+                isLoadingMessages.value = false;
+                await getActions().fetchAllUserArtefacts();
+                state.emit('discussion:refreshed');
+                return;
+            }
+
             await fetchParticipants(discussionId);
 
             try {
@@ -95,7 +103,7 @@ export function useDiscussionCore(state, stores, getActions) {
                     getActions().fetchContextStatus(discussionId),
                     getActions().fetchArtefacts(discussionId)
                 ]);
-                
+
                 messages.value = processMessages(msgResponse.data);
             } catch (error) {
                 uiStore.addNotification('Could not load the selected discussion.', 'error');

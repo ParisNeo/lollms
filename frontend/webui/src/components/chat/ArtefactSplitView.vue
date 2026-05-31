@@ -88,8 +88,9 @@ const isLiveUpdating = computed(() => {
 
 const artefactGroup = computed(() => {
     if (!title.value) return null;
-    const all = discussionsStore.activeDiscussionArtefacts || [];
-    console.log('[ArtefactSplitView] Checking artefacts for title:', title.value, 'available:', all.map(a => `${a.title}(v${a.version})`));
+    const isSaved = discussionsStore.currentDiscussionId === 'saved';
+    const all = isSaved ? (discussionsStore.allUserArtefacts || []) : (discussionsStore.activeDiscussionArtefacts || []);
+    console.log('[ArtefactSplitView] Checking artefacts for title:', title.value, 'isSaved:', isSaved, 'available:', all.map(a => `${a.title}(v${a.version})`));
     // Sort versions DESC (newest first)
     const versions = all.filter(a => a.title === title.value).sort((a,b) => b.version - a.version);
     console.log('[ArtefactSplitView] Found versions:', versions.length, versions.map(v => ({v: v.version, is_loaded: v.is_loaded, size: v.content_size})));
@@ -402,11 +403,13 @@ async function handleSave(forceType = null) {
             artefactType: forceType || undefined,
             updateInPlace: false
         });
-        
+
         // After updating/converting, refresh the context status 
         // to update token counts in the status bar
-        await discussionsStore.fetchContextStatus(discussionsStore.currentDiscussionId);
-        
+        if (discussionsStore.currentDiscussionId !== 'saved') {
+            await discussionsStore.fetchContextStatus(discussionsStore.currentDiscussionId);
+        }
+
         uiStore.addNotification(forceType ? `Converted to ${forceType}.` : "New version saved.", "success");
     } finally {
         isSaving.value = false;

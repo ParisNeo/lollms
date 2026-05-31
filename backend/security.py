@@ -173,6 +173,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     Creates a JWT access token for the main application using the global SECRET_KEY.
     """
     to_encode = data.copy()
+    from backend.settings import settings
 
     if expires_delta:
         expire = datetime.now(timezone.utc) + expires_delta

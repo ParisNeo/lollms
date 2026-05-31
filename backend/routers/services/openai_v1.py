@@ -778,8 +778,54 @@ async def chat_completions(
         generation_kwargs["reasoning_effort"] = request.reasoning_effort
 
     stream_style = '\nTools requested in stream mode.' if request.tools else ""
+
+    # Extract client network information safely
+    client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
+    client_port = fastapi_request.client.port if fastapi_request.client else "unknown"
+    
+    # Safely extract first 10 words of the final user prompt
+    last_prompt = ""
+    if request.messages:
+        last_msg = request.messages[-1]
+        if isinstance(last_msg.content, str):
+            last_prompt = last_msg.content
+        elif isinstance(last_msg.content, list):
+            for item in last_msg.content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    last_prompt = item.get("text", "")
+                    break
+                elif isinstance(item, dict) and "text" in item:
+                    last_prompt = item["text"]
+                    break
+
+    prompt_words = (last_prompt or "").split()
+    first_10_words = " ".join(prompt_words[:10]) + ("..." if len(prompt_words) > 10 else "")
+
+    # Extract first 10 words of the system prompt if present
+    system_prompt = ""
+    for msg in messages:
+        if msg.role == "system" and msg.content:
+            if isinstance(msg.content, str):
+                system_prompt = msg.content
+                break
+            elif isinstance(msg.content, list):
+                for item in msg.content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        system_prompt = item.get("text", "")
+                        break
+                    elif isinstance(item, dict) and "text" in item:
+                        system_prompt = item["text"]
+                        break
+                if system_prompt:
+                    break
+
+    sys_words = (system_prompt or "").split()
+    sys_prompt_snippet = " ".join(sys_words[:10]) + ("..." if len(sys_words) > 10 else "") if sys_words else "None"
+
     ASCIIColors.panel(f"""[bold]Request:[/bold]Open AI V1
 [bold]User:[/bold] {user.username}
+[bold]Client IP:[/bold] {client_ip}
+[bold]Client Port:[/bold] {client_port}
 [bold]Model:[/bold] {request.model}
 [bold]Bonding alias:[/bold] {binding_alias}
 [bold]Model name:[/bold] {model_name}
@@ -787,7 +833,10 @@ async def chat_completions(
 [bold]Temperature:[/bold] {request.temperature}
 [bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}
 [bold]Received images:[/bold] {len(images)}
-[bold]Max Tokens:[/bold] {request.max_tokens}""", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
+[bold]Max Tokens:[/bold] {request.max_tokens}
+[bold]Number of Messages:[/bold] {len(request.messages)}
+[bold]System Prompt Snippet:[/bold] "{sys_prompt_snippet}"
+[bold]Prompt Snippet:[/bold] "{first_10_words}""", title="Chat Completion Request", border_style="cyan")    # for message in request.messages:
     if request.stream:
             async def stream_generator():
                 main_loop = asyncio.get_running_loop()

@@ -147,7 +147,7 @@ def _map_saved_artefact_for_ui(saved: SavedArtefact) -> dict:
             author_val = saved.description
     return {
         "title": saved.title,
-        "version": 1,
+        "version": saved.version,
         "is_loaded": False,
         "author": author_val,
         "artefact_type": saved.artefact_type or "document",
@@ -275,30 +275,29 @@ def build_artefacts_router(router: APIRouter):
         """
         Saves raw content or custom document as a featured artefact in the global library.
         """
-        existing = db.query(SavedArtefact).filter(
+        existing_versions = db.query(SavedArtefact).filter(
             SavedArtefact.owner_user_id == current_user.id,
             SavedArtefact.title == payload.title
-        ).first()
+        ).all()
 
-        if existing:
-            existing.content = payload.content
-            existing.artefact_type = payload.artefact_type
-            db.commit()
-            db.refresh(existing)
-            saved = existing
+        if existing_versions:
+            max_version = max(v.version for v in existing_versions)
+            new_version = max_version + 1
         else:
-            new_save = SavedArtefact(
-                title=payload.title,
-                content=payload.content,
-                artefact_type=payload.artefact_type,
-                owner_user_id=current_user.id
-            )
-            db.add(new_save)
-            db.commit()
-            db.refresh(new_save)
-            saved = new_save
+            new_version = 1
 
-        return _map_saved_artefact_for_ui(saved)
+        new_save = SavedArtefact(
+            title=payload.title,
+            content=payload.content,
+            artefact_type=payload.artefact_type,
+            owner_user_id=current_user.id,
+            version=new_version
+        )
+        db.add(new_save)
+        db.commit()
+        db.refresh(new_save)
+
+        return _map_saved_artefact_for_ui(new_save)
 
     @router.post("/{discussion_id}/artefacts/{artefact_title:path}/save", response_model=ArtefactInfo)
     async def save_discussion_artefact_to_library(
@@ -319,34 +318,30 @@ def build_artefacts_router(router: APIRouter):
         if not art:
             raise HTTPException(status_code=404, detail="Artefact not found in discussion.")
 
-        existing = db.query(SavedArtefact).filter(
+        # Find existing versions in the library
+        existing_versions = db.query(SavedArtefact).filter(
             SavedArtefact.owner_user_id == current_user.id,
             SavedArtefact.title == decoded_title
-        ).first()
+        ).all()
 
-        if existing:
-            existing.content = art.get('content', '')
-            existing.artefact_type = art.get('artefact_type', 'document')
-            db.commit()
-            db.refresh(existing)
-            saved = existing
+        if existing_versions:
+            max_version = max(v.version for v in existing_versions)
+            new_version = max_version + 1
         else:
-            new_save = SavedArtefact(
-                title=decoded_title,
-                content=art.get('content', ''),
-                artefact_type=art.get('artefact_type', 'document'),
-                owner_user_id=current_user.id
-            )
-            db.add(new_save)
-            db.commit()
-            db.refresh(new_save)
-            saved = new_save
+            new_version = 1
 
-        # Automatically detach/remove the local copy from the discussion's local database once saved globally
-        discussion.remove_artefact(title=decoded_title)
-        discussion.commit()
+        new_save = SavedArtefact(
+            title=decoded_title,
+            content=art.get('content', ''),
+            artefact_type=art.get('artefact_type', 'document'),
+            owner_user_id=current_user.id,
+            version=new_version
+        )
+        db.add(new_save)
+        db.commit()
+        db.refresh(new_save)
 
-        return _map_saved_artefact_for_ui(saved)
+        return _map_saved_artefact_for_ui(new_save)
 
     @router.delete("/artefacts/save/{artefact_title:path}", status_code=status.HTTP_200_OK)
     async def delete_saved_artefact(
@@ -859,13 +854,57 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
+        from urllib.parse import unquote
+        decoded_title = unquote(artefact_title)
+
+        if discussion_id == "saved":
+            existing_versions = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).all()
+
+            if not existing_versions:
+                raise HTTPException(status_code=404, detail="Saved artefact not found in library.")
+
+            if payload.update_in_place:
+                version_to_update = payload.version if payload.version is not None else max(v.version for v in existing_versions)
+                saved_art = db.query(SavedArtefact).filter(
+                    SavedArtefact.owner_user_id == current_user.id,
+                    SavedArtefact.title == decoded_title,
+                    SavedArtefact.version == version_to_update
+                ).first()
+                if not saved_art:
+                    raise HTTPException(status_code=404, detail=f"Version {version_to_update} not found.")
+
+                saved_art.content = payload.new_content
+                if payload.artefact_type:
+                    saved_art.artefact_type = payload.artefact_type
+                db.commit()
+                db.refresh(saved_art)
+                return _map_saved_artefact_for_ui(saved_art)
+            else:
+                max_version = max(v.version for v in existing_versions)
+                new_version = max_version + 1
+
+                new_save = SavedArtefact(
+                    title=decoded_title,
+                    content=payload.new_content,
+                    artefact_type=payload.artefact_type or existing_versions[0].artefact_type,
+                    owner_user_id=current_user.id,
+                    version=new_version
+                )
+                db.add(new_save)
+                db.commit()
+                db.refresh(new_save)
+                return _map_saved_artefact_for_ui(new_save)
+
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
         try:
             # Use the library's internal manager for correct version bumping and state management.
             # We map UI parameters to the library's ArtefactManager.update signature.
             artefact_info = discussion.artefacts.update(
-                title=artefact_title, 
+                title=decoded_title, 
                 new_content=payload.new_content, 
                 new_type=payload.artefact_type,
                 new_images=payload.kept_images_b64 + payload.new_images_b64,
@@ -936,10 +975,15 @@ def build_artefacts_router(router: APIRouter):
             pass
 
         if discussion_id == "saved":
-            saved_art = db.query(SavedArtefact).filter(
+            query = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
                 SavedArtefact.title == decoded_title
-            ).first()
+            )
+            if version is not None:
+                saved_art = query.filter(SavedArtefact.version == version).first()
+            else:
+                saved_art = query.order_by(SavedArtefact.version.desc()).first()
+
             if not saved_art:
                 raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
 
@@ -947,7 +991,7 @@ def build_artefacts_router(router: APIRouter):
             return PlainTextResponse(
                 content=saved_art.content,
                 media_type="text/plain; charset=utf-8",
-                headers={"X-Artefact-Title": decoded_title, "X-Artefact-Version": "1"}
+                headers={"X-Artefact-Title": decoded_title, "X-Artefact-Version": str(saved_art.version)}
             )
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
@@ -999,10 +1043,15 @@ def build_artefacts_router(router: APIRouter):
         decoded_title = unquote(artefact_title)
 
         if discussion_id == "saved":
-            saved_art = db.query(SavedArtefact).filter(
+            query = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
                 SavedArtefact.title == decoded_title
-            ).first()
+            )
+            if version is not None:
+                saved_art = query.filter(SavedArtefact.version == version).first()
+            else:
+                saved_art = query.order_by(SavedArtefact.version.desc()).first()
+
             if not saved_art:
                 raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
             return _map_saved_artefact_for_ui(saved_art)
@@ -1163,6 +1212,26 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
+        from urllib.parse import unquote
+        decoded_title = unquote(artefact_title)
+
+        if discussion_id == "saved":
+            records = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).order_by(SavedArtefact.version.desc()).all()
+
+            return [
+                {
+                    "version": r.version,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                    "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                    "content_size": len(r.content),
+                    "is_active": False
+                }
+                for r in records
+            ]
+
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         history = discussion.artefacts.get_version_history(unquote(artefact_title))
         return history
@@ -1586,7 +1655,7 @@ def build_artefacts_router(router: APIRouter):
 
         # Prevent collisions
         if old_title != new_title and discussion.get_artefact(title=new_title):
-             raise HTTPException(status_code=400, detail=f"An artefact named '{new_title}' already exists.")
+            raise HTTPException(status_code=400, detail=f"An artefact named '{new_title}' already exists.")
 
         try:
             # 1. Auto-detect type based on extension
@@ -1598,23 +1667,23 @@ def build_artefacts_router(router: APIRouter):
             elif ext in {".md", ".txt", ".pdf", ".docx", ".xlsx", ".pptx"}:
                 auto_type = "document"
 
-            # 2. Rename via the LollmsDiscussion sub-manager
+            # 2. Rename via the LollmsDiscussion sub-manager (updates all versions and internal image anchors)
             discussion.artefacts.rename(
                 old_title=old_title, 
                 new_title=new_title, 
                 new_type=auto_type
             )
 
-            # 3. Update visual references in message content strings
-            all_msgs = discussion.db_manager.get_all_messages(discussion_id)
+            # 3. Update visual references in message content strings across the whole discussion tree
+            all_msgs = discussion.get_all_messages_flat()
             old_anchor = f'id="{old_title}::'
             new_anchor = f'id="{new_title}::'
             for m in all_msgs:
-                if old_anchor in m.content:
+                if m.content and old_anchor in m.content:
+                    # Modifying m.content automatically modifies the underlying SQLAlchemy ORM object and flags it as dirty
                     m.content = m.content.replace(old_anchor, new_anchor)
-                    discussion.db_manager.update_message(m)
 
-            # Persist changes
+            # Persist all dirty states (both renamed artifact versions and updated conversation messages)
             discussion.commit()
             return {"message": "Artefact renamed successfully.", "new_title": new_title}
         except Exception as e:

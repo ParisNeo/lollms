@@ -1,6 +1,7 @@
 # backend/routers/discussion/utils.py
 import base64
 import io
+import os
 import re
 import shutil
 import subprocess
@@ -72,11 +73,27 @@ def build_utils_router(router: APIRouter):
             tex_file_path = temp_dir / "document.tex"
             with open(tex_file_path, "w", encoding="utf-8") as f:
                 f.write(request.code)
-            
+
             try:
+                # Configure the environment variables to restrict file access
+                env = dict(os.environ)
+                env["openin_any"] = "p"
+                env["openout_any"] = "p"
+                env["shell_escape"] = "f"
+
                 process = subprocess.run(
-                    [latex_executable, "-interaction=nonstopmode", "-output-directory", str(temp_dir), str(tex_file_path)],
-                    capture_output=True, text=True, timeout=30 # 30 second timeout
+                    [
+                        latex_executable, 
+                        "-interaction=nonstopmode", 
+                        "-no-shell-escape", 
+                        "-output-directory", 
+                        str(temp_dir), 
+                        str(tex_file_path)
+                    ],
+                    capture_output=True, 
+                    text=True, 
+                    timeout=30, # 30 second timeout
+                    env=env
                 )
                 
                 pdf_path = temp_dir / "document.pdf"

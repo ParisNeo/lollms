@@ -121,7 +121,11 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
             artefact_type: artefactType
         };
         await apiClient.put(`/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}`, payload);
-        await fetchArtefacts(discussionId);
+        if (discussionId === 'saved') {
+            await fetchAllUserArtefacts();
+        } else {
+            await fetchArtefacts(discussionId);
+        }
     }
 
     async function renameArtefact({ discussionId, artefactTitle, newTitle }) {
@@ -160,6 +164,23 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         } catch (e) {
             console.error("Failed to save artefact to library:", e);
             uiStore.addNotification(`Failed to save '${artefactTitle}' to library.`, 'error');
+        }
+    }
+
+    async function saveRawArtefactToLibrary({ title, content, artefactType }) {
+        try {
+            const response = await apiClient.post('/api/discussions/artefacts/save', {
+                title,
+                content,
+                artefact_type: artefactType || 'document'
+            });
+            uiStore.addNotification(`'${title}' saved to your featured library!`, 'success');
+            await fetchAllUserArtefacts();
+            return response.data;
+        } catch (e) {
+            console.error("Failed to save raw artefact to library:", e);
+            uiStore.addNotification(`Failed to save '${title}' to library.`, 'error');
+            throw e;
         }
     }
 
@@ -589,6 +610,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
 
     return {
+        saveRawArtefactToLibrary,
         saveArtefactToLibrary,
         shareArtefact,
         importArtefactFromSource,

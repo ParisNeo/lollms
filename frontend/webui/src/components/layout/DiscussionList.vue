@@ -137,6 +137,10 @@ async function handleBundleImport(event) {
 }
 
 async function handleCreateArtefact() {
+    if (activeTab.value === 'artefacts') {
+        uiStore.openModal('createArtefact', { isLibraryOnly: true });
+        return;
+    }
     if (!store.currentDiscussionId) {
         try {
             await store.createNewDiscussion();
@@ -303,7 +307,7 @@ async function handleNewItem() {
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'artefacts') {
         // [FIX] Open Create Artefact modal when on the Files/Artefacts tab
-        uiStore.openModal('createArtefact');
+        uiStore.openModal('createArtefact', { isLibraryOnly: true });
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notes') {
         uiStore.openModal('noteEditor');

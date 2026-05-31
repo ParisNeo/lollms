@@ -1327,6 +1327,14 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         from backend.db.models.saved_artefact import SavedArtefact
         SavedArtefact.__table__.create(connection)
         connection.commit()
+    else:
+        saved_artefact_columns_db = [col['name'] for col in inspector.get_columns('saved_artefacts')]
+        if 'version' not in saved_artefact_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE saved_artefacts ADD COLUMN version INTEGER DEFAULT 1 NOT NULL"))
+                connection.commit()
+            except Exception:
+                connection.rollback()
 
     if not inspector.has_table("notebooks"):
         try:
