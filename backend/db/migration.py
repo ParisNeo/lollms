@@ -55,8 +55,9 @@ def _bootstrap_global_settings(connection):
     Ensures all necessary global settings exist in the database.
     """
     print("INFO: Checking and bootstrapping global settings in the database.")
-    
+
     all_possible_settings = {
+        "allow_dangerous_flow_execution": { "value": False, "type": "boolean", "description": "Enable Flow Studio Python code execution. Enabling this allows arbitrary code execution on the server host.", "category": "Security" },
         "host": { "value": SERVER_CONFIG.get("host", "0.0.0.0"), "type": "string", "description": "Server host address. Requires a restart to take effect.", "category": "Server" },
         "port": { "value": SERVER_CONFIG.get("port", 9642), "type": "integer", "description": "Server port. Requires a restart to take effect.", "category": "Server" },
         "https_enabled": { "value": SERVER_CONFIG.get("https_enabled", False), "type": "boolean", "description": "Enable HTTPS for the server. Requires a restart to take effect.", "category": "Server" },

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-31 13:52]
+
+- fix(backend): add missing imports and update global settings bootstrap
+
 ## [2026-05-31 00:34]
 
 - chore(deps): bump lollms-client from 1.14.6 to 1.14.7

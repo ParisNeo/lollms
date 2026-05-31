@@ -11,6 +11,7 @@ from backend.db import session as db_session_module
 from backend.db.models.flow import FlowNodeDefinition
 from backend.db.models.user import User as DBUser
 from backend.session import build_lollms_client_from_params
+from backend.settings import settings
 
 class FlowEngine:
     """
@@ -72,6 +73,12 @@ class FlowEngine:
             node_def = db.query(FlowNodeDefinition).filter(FlowNodeDefinition.name == node_in_graph['type']).first()
             if not node_def:
                 raise ValueError(f"Definition for node type '{node_in_graph['type']}' not found.")
+
+            # --- RUNTIME SECURITY CHECK (High-Speed AST-Only Analysis) ---
+            from backend.security import verify_custom_node_code
+            is_safe, error_msg = verify_custom_node_code(node_def.code, lollms_client=None)
+            if not is_safe:
+                raise RuntimeError(f"Security Rejection: {error_msg}")
 
             # 3. Handle Dependencies
             self._ensure_requirements(node_def)

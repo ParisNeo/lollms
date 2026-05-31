@@ -10,11 +10,14 @@ from sqlalchemy.orm import Session
 
 from backend.db import get_db
 from backend.db.models.flow import Flow as DBFlow, FlowNodeDefinition as DBFlowNodeDefinition
+from backend.db.models.user import User as DBUser
 from backend.models.flow import FlowCreate, FlowUpdate, FlowPublic, FlowExecuteRequest, FlowNodeDefCreate, FlowNodeDefPublic
+from backend.security import send_generic_email, _convert_html_to_text
 from backend.session import get_current_active_user, get_current_admin_user, build_lollms_client_from_params
 from backend.models import UserAuthDetails, TaskInfo
 from backend.task_manager import task_manager, Task
 from backend.flow_engine import FlowEngine
+from backend.settings import settings
 
 router = APIRouter(prefix="/api/flows", tags=["Flow Studio"])
 
@@ -46,7 +49,14 @@ def create_node_definition(
 ):
     if db.query(DBFlowNodeDefinition).filter(DBFlowNodeDefinition.name == def_data.name).first():
         raise HTTPException(status_code=400, detail="Node type name already exists")
-        
+
+    # Dual-Layer Security Audit (AST + Cognitive AI Review)
+    from backend.security import verify_custom_node_code
+    lc = build_lollms_client_from_params(current_user.username)
+    is_safe, error_msg = verify_custom_node_code(def_data.code, lc)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"Security Rejection: {error_msg}")
+
     new_def = DBFlowNodeDefinition(**def_data.model_dump())
     db.add(new_def)
     db.commit()
@@ -63,10 +73,17 @@ def update_node_definition(
     node = db.query(DBFlowNodeDefinition).filter(DBFlowNodeDefinition.id == node_id).first()
     if not node:
         raise HTTPException(status_code=404, detail="Node definition not found")
-        
+
+    # Dual-Layer Security Audit (AST + Cognitive AI Review)
+    from backend.security import verify_custom_node_code
+    lc = build_lollms_client_from_params(current_user.username)
+    is_safe, error_msg = verify_custom_node_code(def_data.code, lc)
+    if not is_safe:
+        raise HTTPException(status_code=400, detail=f"Security Rejection: {error_msg}")
+
     for field, value in def_data.model_dump().items():
         setattr(node, field, value)
-    
+
     db.commit()
     db.refresh(node)
     return node
@@ -83,6 +100,56 @@ def delete_node_definition(
     db.delete(node)
     db.commit()
     return {"message": "Node definition deleted"}
+
+@router.post("/nodes/{node_id}/flag")
+def flag_node_as_unsafe(
+    node_id: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    node = db.query(DBFlowNodeDefinition).filter(DBFlowNodeDefinition.id == node_id).first()
+    if not node:
+        raise HTTPException(status_code=404, detail="Node definition not found")
+
+    # Retrieve all system administrators
+    admins = db.query(DBUser).filter(DBUser.is_admin == True).all()
+    if not admins:
+        raise HTTPException(status_code=500, detail="No system administrators configured to receive the security alert.")
+
+    # Construct the security alert email
+    subject = f"⚠️ SECURITY ALERT: Custom Node '{node.label}' Flagged as UNSAFE"
+    body = f"""
+    <p>Hello Administrator,</p>
+    <p>An active user (<b>{current_user.username}</b>) has flagged the following custom node definition in the system as <b>UNSAFE / MALICIOUS</b>:</p>
+    <ul>
+        <li><b>Node ID:</b> {node.id}</li>
+        <li><b>Node Name/Type:</b> {node.name}</li>
+        <li><b>Node Label:</b> {node.label}</li>
+        <li><b>Category:</b> {node.category}</li>
+        <li><b>Description:</b> {node.description}</li>
+    </ul>
+    <p><b>CRITICAL SECURITY WARNING:</b> Since only administrators are authorized to publish custom node definitions, a user-flagged malicious node indicates a high probability of **compromise on one of your administrative accounts** or un-vetted third-party import.</p>
+    <p>Please review the node's source code immediately in the Flow Studio admin panel or directly in the database. If necessary, delete the node or deactivate compromised accounts.</p>
+    <p>This is an automated security broadcast from your LoLLMs instance.</p>
+    """
+
+    email_sent_count = 0
+    text_content = _convert_html_to_text(body)
+    for admin in admins:
+        if admin.email:
+            try:
+                send_generic_email(
+                    admin.email, 
+                    subject, 
+                    body, 
+                    background_color="#fff1f0", # Light red alert tint
+                    send_as_text=False
+                )
+                email_sent_count += 1
+            except Exception as e:
+                print(f"Failed to send security alert to admin {admin.username}: {e}")
+
+    return {"message": "Node successfully flagged. Security alerts have been dispatched to system administrators.", "admins_notified": email_sent_count}
 
 # --- Code Generation & Debugging ---
 
@@ -141,11 +208,19 @@ IMPORTANT: Respond ONLY with JSON.
         raise HTTPException(status_code=500, detail="AI failed to generate valid JSON.")
     return data
 
+
 @router.post("/test_code")
 def test_node_code(
     req: TestCodeRequest,
     current_user: UserAuthDetails = Depends(get_current_admin_user)
 ):
+    # Dual-Layer Security Audit (AST + Cognitive AI Review)
+    from backend.security import verify_custom_node_code
+    lc = build_lollms_client_from_params(current_user.username)
+    is_safe, error_msg = verify_custom_node_code(req.code, lc)
+    if not is_safe:
+        return {"status": "error", "error": f"Security Rejection: {error_msg}"}
+
     try:
         # Handle Requirements
         import pipmaster

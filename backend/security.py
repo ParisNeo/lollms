@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Any
 import secrets
 import smtplib
 import subprocess
@@ -21,7 +21,6 @@ from jose import jwt, JWTError
 from passlib.context import CryptContext
 
 from backend.config import SECRET_KEY, ALGORITHM
-from backend.settings import settings
 import json
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -55,6 +54,86 @@ def sanitize_content(content: str) -> str:
     # bleach.clean will strip or escape tags not in ALLOWED_TAGS
     # and strip attributes not in ALLOWED_ATTRS.
     return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
+
+import ast
+import json
+
+def verify_custom_node_code(code: str, lollms_client: Optional[Any] = None) -> Tuple[bool, str]:
+    """
+    Performs dual-layer security validation on custom node Python code:
+    1. Static AST Analysis: Reject blocked modules, functions, and double-underscore attributes.
+    2. LLM-Based Cognitive Analysis: Auditor agent inspects the code for backdoors or obfuscation.
+    """
+    if not code:
+        return True, ""
+
+    # --- LAYER 1: STATIC AST ANALYSIS ---
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return False, f"Syntax Error: {e}"
+
+    blocked_modules = {
+        'os', 'subprocess', 'sys', 'shutil', 'ctypes', 'socket', 'importlib', 
+        'pickle', 'marshal', 'pty', 'platform', 'requests', 'urllib', 'http'
+    }
+    blocked_builtins = {'eval', 'exec', 'compile', 'open', '__import__', 'getattr', 'setattr', 'delattr'}
+
+    for node in ast.walk(tree):
+        # Check Imports
+        if isinstance(node, ast.Import):
+            for name in node.names:
+                base_mod = name.name.split('.')[0]
+                if base_mod in blocked_modules:
+                    return False, f"Security Violation: Import of blocked module '{base_mod}' is forbidden."
+
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                base_mod = node.module.split('.')[0]
+                if base_mod in blocked_modules:
+                    return False, f"Security Violation: Import from blocked module '{base_mod}' is forbidden."
+
+        # Check Attribute Access (prevent dunder escapes like __globals__, __subclasses__)
+        elif isinstance(node, ast.Attribute):
+            if node.attr.startswith('__') and node.attr.endswith('__'):
+                dangerous_dunders = {'__subclasses__', '__globals__', '__code__', '__builtins__', '__dict__', '__class__', '__bases__', '__mro__'}
+                if node.attr in dangerous_dunders:
+                    return False, f"Security Violation: Access to dangerous attribute '{node.attr}' is forbidden."
+
+        # Check Function Calls (blocked builtins)
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name):
+                if node.func.id in blocked_builtins:
+                    return False, f"Security Violation: Call to blocked function '{node.func.id}' is forbidden."
+            elif isinstance(node.func, ast.Attribute):
+                if node.func.attr.startswith('__') and node.func.attr.endswith('__'):
+                    return False, f"Security Violation: Call to dangerous attribute method '{node.func.attr}' is forbidden."
+
+    # --- LAYER 2: LLM COGNITIVE AUDIT ---
+    if lollms_client:
+        try:
+            system_prompt = """You are an elite secure code auditor. Your job is to analyze the provided custom node Python code.
+Look for security threats, backdoors, obfuscation, or sneaky workarounds to escape sandboxing.
+You must return a JSON object with exactly two keys:
+1. "safe": boolean (true if the code is entirely safe and contains no malicious operations, false otherwise)
+2. "reason": string (if unsafe, explain why; if safe, keep it brief)
+
+IMPORTANT: Output ONLY the valid JSON block. No markdown wrappers or additional text."""
+
+            prompt = f"Analyze this Python code for any security exploits, obfuscation, or backdoors:\n\n```python\n{code}\n```"
+
+            audit_res = lollms_client.generate_text(prompt, system_prompt=system_prompt, temp=0.1)
+
+            json_start = audit_res.find('{')
+            json_end = audit_res.rfind('}') + 1
+            if json_start != -1 and json_end != -1:
+                data = json.loads(audit_res[json_start:json_end])
+                if data.get("safe") is False:
+                    return False, f"AI Auditor Rejection: {data.get('reason', 'Malicious patterns detected.')}"
+        except Exception as e:
+            print(f"Warning: AI Auditor failed ({e}), relying on AST analysis.")
+
+    return True, ""
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verifies a plain password against a hashed one."""
@@ -178,6 +257,7 @@ def _get_full_html_email(body: str, background_color: Optional[str]) -> str:
 
 def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], text_content: str):
     """Sends an email using a configured SMTP server. It can be text-only or multipart."""
+    from backend.settings import settings
     smtp_host = settings.get("smtp_host")
     smtp_port = settings.get("smtp_port", 587)
     smtp_user = settings.get("smtp_user")
@@ -214,6 +294,7 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
 
 def _send_email_gmail(to_email: str, subject: str, html_content: Optional[str], text_content: str):
     """Sends an email using Gmail's SMTP servers with pre-configured host/port."""
+    from backend.settings import settings
     smtp_host = "smtp.gmail.com"
     smtp_port = 587
     smtp_user = settings.get("smtp_user")
@@ -413,6 +494,7 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
     """
     Prepares and sends a generic email, handling both HTML and plain text modes correctly.
     """
+    from backend.settings import settings
     recovery_mode = settings.get("password_recovery_mode", "manual")
     
     # Prepare HTML wrapper if needed
