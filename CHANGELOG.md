@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-05-31 23:24]
+
+- test(backend): add LaTeX compilation security tests
+
 ## [2026-05-31 22:53]
 
 - feat(artefacts): add category field to saved artefacts
