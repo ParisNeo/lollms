@@ -155,8 +155,12 @@ def add_ui_routes(app):
     # 3. SPA Catch-All
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_vue_app(full_path: str):
-        # Resolve path against dist
-        path = STATIC_DIR / full_path
+        # Resolve path against dist and prevent path traversal
+        resolved_static = STATIC_DIR.resolve()
+        path = (STATIC_DIR / full_path).resolve()
+
+        if not path.is_relative_to(resolved_static):
+            raise HTTPException(status_code=404, detail="Asset not found")
 
         # If it's a physical file in dist root (e.g. favicon.ico, robots.txt), serve it
         if path.exists() and path.is_file():

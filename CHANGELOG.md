@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-06-01 23:37]
+
+- fix(ui): prevent path traversal in SPA catch-all route
+
 ## [2026-06-01 23:21]
 
 - chore(deps): bump lollms-client from 1.14.8 to 1.14.9
