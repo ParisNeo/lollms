@@ -23,5 +23,5 @@ from .email_marketing import EmailProposal, EmailTopic
 
 from .prompt import SavedPrompt
 # Flow Studio Integration
-from .flow import Flow
-from .saved_artefact import SavedArtefact
+from .saved_artefact import SavedArtefact, SharedArtefactLink
+from .flow import Flow, FlowNodeDefinition

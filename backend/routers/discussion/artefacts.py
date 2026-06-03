@@ -43,10 +43,14 @@ except ImportError:
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
-from backend.db.models.saved_artefact import SavedArtefact
+from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
 from pydantic import BaseModel
 
 # --- New Models for Search/Select ---
+class IndividualShareRequest(BaseModel):
+    target_username: str
+    permission_level: str = "interact" # "view" or "interact"
+
 class WikipediaSearchRequest(BaseModel):
     query: str
 
@@ -140,9 +144,11 @@ def _map_artefact_for_ui(art: dict, discussion_id: str = None) -> dict:
 
     return mapped
 
-def _map_saved_artefact_for_ui(saved: SavedArtefact) -> dict:
+def _map_saved_artefact_for_ui(saved: SavedArtefact, current_user_id: Optional[int] = None) -> dict:
     author_val = "Me"
-    if saved.description:
+    if current_user_id is not None and saved.owner_user_id != current_user_id and saved.owner:
+        author_val = f"Shared by {saved.owner.username}"
+    elif saved.description:
         if saved.description.startswith("Shared by ") or saved.description == "Shared":
             author_val = saved.description
     return {
@@ -341,7 +347,7 @@ def build_artefacts_router(router: APIRouter):
         db.commit()
         db.refresh(new_save)
 
-        return _map_saved_artefact_for_ui(new_save)
+        return _map_saved_artefact_for_ui(new_save, current_user.id)
 
     @router.delete("/artefacts/save/{artefact_title:path}", status_code=status.HTTP_200_OK)
     async def delete_saved_artefact(
@@ -350,14 +356,31 @@ def build_artefacts_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         """
-        Removes an artefact from the global saved library.
+        Removes an artefact from the global saved library (or revokes/unsubscribes if shared).
         """
         from urllib.parse import unquote
         decoded_title = unquote(artefact_title)
-        db.query(SavedArtefact).filter(
+
+        owned_art = db.query(SavedArtefact).filter(
             SavedArtefact.owner_user_id == current_user.id,
             SavedArtefact.title == decoded_title
-        ).delete()
+        ).first()
+
+        if owned_art:
+            db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).delete()
+            db.query(SharedArtefactLink).filter(
+                SharedArtefactLink.owner_user_id == current_user.id,
+                SharedArtefactLink.artefact_title == decoded_title
+            ).delete()
+        else:
+            db.query(SharedArtefactLink).filter(
+                SharedArtefactLink.shared_with_user_id == current_user.id,
+                SharedArtefactLink.artefact_title == decoded_title
+            ).delete()
+
         db.commit()
         return {"message": "Artefact removed from saved library."}
 
@@ -398,69 +421,7 @@ def build_artefacts_router(router: APIRouter):
             db.refresh(new_save)
             saved = new_save
 
-        return _map_saved_artefact_for_ui(saved)
-
-    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/save", response_model=ArtefactInfo)
-    async def save_discussion_artefact_to_library(
-        discussion_id: str,
-        artefact_title: str,
-        version: Optional[int] = Query(None),
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Saves an existing discussion artefact to the user's global library.
-        """
-        from urllib.parse import unquote
-        decoded_title = unquote(artefact_title)
-
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-        art = discussion.get_artefact(title=decoded_title, version=version)
-        if not art:
-            raise HTTPException(status_code=404, detail="Artefact not found in discussion.")
-
-        existing = db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id,
-            SavedArtefact.title == decoded_title
-        ).first()
-
-        if existing:
-            existing.content = art.get('content', '')
-            existing.artefact_type = art.get('artefact_type', 'document')
-            db.commit()
-            db.refresh(existing)
-            saved = existing
-        else:
-            new_save = SavedArtefact(
-                title=decoded_title,
-                content=art.get('content', ''),
-                artefact_type=art.get('artefact_type', 'document'),
-                owner_user_id=current_user.id
-            )
-            db.add(new_save)
-            db.commit()
-            db.refresh(new_save)
-            saved = new_save
-
-        return _map_saved_artefact_for_ui(saved)
-
-    @router.delete("/artefacts/save/{artefact_title:path}", status_code=status.HTTP_200_OK)
-    async def delete_saved_artefact(
-        artefact_title: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Removes an artefact from the global saved library.
-        """
-        from urllib.parse import unquote
-        decoded_title = unquote(artefact_title)
-        db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id,
-            SavedArtefact.title == decoded_title
-        ).delete()
-        db.commit()
-        return {"message": "Artefact removed from saved library."}
+        return _map_saved_artefact_for_ui(saved, current_user.id)
 
     @router.get("/artefacts/all", response_model=List[ArtefactInfo])
     async def list_all_user_artefacts(
@@ -468,13 +429,36 @@ def build_artefacts_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         """
-        Retrieves all saved (featured) artefacts for the current user.
+        Retrieves all saved (featured) artefacts for the current user (owned + shared with me).
         """
-        saved_list = db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id
-        ).order_by(SavedArtefact.updated_at.desc()).all()
-        
-        return [_map_saved_artefact_for_ui(s) for s in saved_list]
+        from sqlalchemy import or_, and_
+
+        shared_links = db.query(SharedArtefactLink).filter(
+            SharedArtefactLink.shared_with_user_id == current_user.id
+        ).all()
+
+        shared_conditions = []
+        for link in shared_links:
+            shared_conditions.append(
+                and_(
+                    SavedArtefact.owner_user_id == link.owner_user_id,
+                    SavedArtefact.title == link.artefact_title
+                )
+            )
+
+        if shared_conditions:
+            query = db.query(SavedArtefact).filter(
+                or_(
+                    SavedArtefact.owner_user_id == current_user.id,
+                    *shared_conditions
+                )
+            )
+        else:
+            query = db.query(SavedArtefact).filter(SavedArtefact.owner_user_id == current_user.id)
+
+        saved_list = query.order_by(SavedArtefact.updated_at.desc()).all()
+
+        return [_map_saved_artefact_for_ui(s, current_user.id) for s in saved_list]
 
     @router.get("/{discussion_id}/artefacts", response_model=List[ArtefactInfo])
     async def list_discussion_artefacts(
@@ -858,8 +842,26 @@ def build_artefacts_router(router: APIRouter):
         decoded_title = unquote(artefact_title)
 
         if discussion_id == "saved":
-            existing_versions = db.query(SavedArtefact).filter(
+            owner_id = current_user.id
+            owner_exists = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first() is not None
+            
+            if not owner_exists:
+                shared_link = db.query(SharedArtefactLink).filter(
+                    SharedArtefactLink.shared_with_user_id == current_user.id,
+                    SharedArtefactLink.artefact_title == decoded_title
+                ).first()
+                if shared_link:
+                    if shared_link.permission_level != "interact":
+                        raise HTTPException(status_code=403, detail="You only have view permission for this shared artefact.")
+                    owner_id = shared_link.owner_user_id
+                else:
+                    raise HTTPException(status_code=404, detail="Saved artefact not found in library.")
+
+            existing_versions = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == owner_id,
                 SavedArtefact.title == decoded_title
             ).all()
 
@@ -869,7 +871,7 @@ def build_artefacts_router(router: APIRouter):
             if payload.update_in_place:
                 version_to_update = payload.version if payload.version is not None else max(v.version for v in existing_versions)
                 saved_art = db.query(SavedArtefact).filter(
-                    SavedArtefact.owner_user_id == current_user.id,
+                    SavedArtefact.owner_user_id == owner_id,
                     SavedArtefact.title == decoded_title,
                     SavedArtefact.version == version_to_update
                 ).first()
@@ -881,7 +883,7 @@ def build_artefacts_router(router: APIRouter):
                     saved_art.artefact_type = payload.artefact_type
                 db.commit()
                 db.refresh(saved_art)
-                return _map_saved_artefact_for_ui(saved_art)
+                return _map_saved_artefact_for_ui(saved_art, current_user.id)
             else:
                 max_version = max(v.version for v in existing_versions)
                 new_version = max_version + 1
@@ -890,13 +892,13 @@ def build_artefacts_router(router: APIRouter):
                     title=decoded_title,
                     content=payload.new_content,
                     artefact_type=payload.artefact_type or existing_versions[0].artefact_type,
-                    owner_user_id=current_user.id,
+                    owner_user_id=owner_id,
                     version=new_version
                 )
                 db.add(new_save)
                 db.commit()
                 db.refresh(new_save)
-                return _map_saved_artefact_for_ui(new_save)
+                return _map_saved_artefact_for_ui(new_save, current_user.id)
 
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
@@ -975,8 +977,24 @@ def build_artefacts_router(router: APIRouter):
             pass
 
         if discussion_id == "saved":
-            query = db.query(SavedArtefact).filter(
+            owner_id = current_user.id
+            owner_exists = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first() is not None
+
+            if not owner_exists:
+                shared_link = db.query(SharedArtefactLink).filter(
+                    SharedArtefactLink.shared_with_user_id == current_user.id,
+                    SharedArtefactLink.artefact_title == decoded_title
+                ).first()
+                if shared_link:
+                    owner_id = shared_link.owner_user_id
+                else:
+                    raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
+
+            query = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == owner_id,
                 SavedArtefact.title == decoded_title
             )
             if version is not None:
@@ -1043,8 +1061,24 @@ def build_artefacts_router(router: APIRouter):
         decoded_title = unquote(artefact_title)
 
         if discussion_id == "saved":
-            query = db.query(SavedArtefact).filter(
+            owner_id = current_user.id
+            owner_exists = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first() is not None
+
+            if not owner_exists:
+                shared_link = db.query(SharedArtefactLink).filter(
+                    SharedArtefactLink.shared_with_user_id == current_user.id,
+                    SharedArtefactLink.artefact_title == decoded_title
+                ).first()
+                if shared_link:
+                    owner_id = shared_link.owner_user_id
+                else:
+                    raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
+
+            query = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == owner_id,
                 SavedArtefact.title == decoded_title
             )
             if version is not None:
@@ -1054,7 +1088,7 @@ def build_artefacts_router(router: APIRouter):
 
             if not saved_art:
                 raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
-            return _map_saved_artefact_for_ui(saved_art)
+            return _map_saved_artefact_for_ui(saved_art, current_user.id)
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
@@ -1216,8 +1250,24 @@ def build_artefacts_router(router: APIRouter):
         decoded_title = unquote(artefact_title)
 
         if discussion_id == "saved":
-            records = db.query(SavedArtefact).filter(
+            owner_id = current_user.id
+            owner_exists = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first() is not None
+
+            if not owner_exists:
+                shared_link = db.query(SharedArtefactLink).filter(
+                    SharedArtefactLink.shared_with_user_id == current_user.id,
+                    SharedArtefactLink.artefact_title == decoded_title
+                ).first()
+                if shared_link:
+                    owner_id = shared_link.owner_user_id
+                else:
+                    raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
+
+            records = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == owner_id,
                 SavedArtefact.title == decoded_title
             ).order_by(SavedArtefact.version.desc()).all()
 
@@ -1413,6 +1463,7 @@ def build_artefacts_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         from urllib.parse import unquote
+        from sqlalchemy import or_, and_
 
         # 1. Get target and source discussions
         target_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
@@ -1421,10 +1472,27 @@ def build_artefacts_router(router: APIRouter):
 
         if source_discussion_id == 'saved':
             # Load from SavedArtefact table
-            saved_art = db.query(SavedArtefact).filter(
+            owner_id = current_user.id
+            owner_exists = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
                 SavedArtefact.title == decoded_title
-            ).first()
+            ).first() is not None
+
+            if not owner_exists:
+                shared_link = db.query(SharedArtefactLink).filter(
+                    SharedArtefactLink.shared_with_user_id == current_user.id,
+                    SharedArtefactLink.artefact_title == decoded_title
+                ).first()
+                if shared_link:
+                    owner_id = shared_link.owner_user_id
+                else:
+                    raise HTTPException(status_code=404, detail="Saved artefact not found")
+
+            saved_art = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == owner_id,
+                SavedArtefact.title == decoded_title
+            ).order_by(SavedArtefact.version.desc()).first()
+
             if not saved_art:
                 raise HTTPException(status_code=404, detail="Saved artefact not found")
 
@@ -1468,14 +1536,14 @@ def build_artefacts_router(router: APIRouter):
     async def share_discussion_artefact(
         discussion_id: str,
         artefact_title: str,
-        payload: PersonalitySendRequest,
+        payload: IndividualShareRequest,
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
         from urllib.parse import unquote
         from backend.db.models.user import User as DBUser
         from backend.discussion import get_user_discussion
-        from backend.db.models.saved_artefact import SavedArtefact
+        from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
 
         decoded_title = unquote(artefact_title)
 
@@ -1493,7 +1561,59 @@ def build_artefacts_router(router: APIRouter):
         if target_user.id == current_user.id:
             raise HTTPException(status_code=400, detail="Cannot share with yourself.")
 
-        # Create a new discussion for the target user to receive the shared artefact
+        # Ensure the source artefact exists
+        if discussion_id == "saved":
+            source_art = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first()
+            if not source_art:
+                raise HTTPException(status_code=404, detail=f"Source saved artefact '{decoded_title}' not found.")
+        else:
+            source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+            source_art = source_discussion.get_artefact(title=decoded_title)
+            if not source_art:
+                raise HTTPException(status_code=404, detail="Source artefact not found.")
+
+            # If it's a local discussion artefact, we should first save it to the owner's global library!
+            # Let's save it to the owner's global library (SavedArtefact) if it doesn't exist
+            existing = db.query(SavedArtefact).filter(
+                SavedArtefact.owner_user_id == current_user.id,
+                SavedArtefact.title == decoded_title
+            ).first()
+            if not existing:
+                new_save = SavedArtefact(
+                    title=decoded_title,
+                    content=source_art.get('content', ''),
+                    artefact_type=source_art.get('artefact_type', 'document'),
+                    owner_user_id=current_user.id
+                )
+                db.add(new_save)
+                db.commit()
+
+        # Check if sharing link already exists
+        existing_link = db.query(SharedArtefactLink).filter_by(
+            artefact_title=decoded_title,
+            owner_user_id=current_user.id,
+            shared_with_user_id=target_user.id
+        ).first()
+
+        if not existing_link:
+            # Create a SharedArtefactLink with permission_level from payload
+            new_link = SharedArtefactLink(
+                artefact_title=decoded_title,
+                owner_user_id=current_user.id,
+                shared_with_user_id=target_user.id,
+                permission_level=payload.permission_level
+            )
+            db.add(new_link)
+            db.commit()
+        else:
+            # Update existing link's permission level
+            existing_link.permission_level = payload.permission_level
+            db.commit()
+
+        # Create a new discussion for the target user to receive the shared artefact link
         import uuid
         target_discussion_id = str(uuid.uuid4())
         lc_sender = get_user_lollms_client(current_user.username)
@@ -1502,101 +1622,24 @@ def build_artefacts_router(router: APIRouter):
         if not target_discussion:
             raise HTTPException(status_code=500, detail="Failed to create target discussion for sharing.")
 
-        # If it's a global saved library item, query DB directly
-        if discussion_id == "saved":
-            source_art = db.query(SavedArtefact).filter(
-                SavedArtefact.owner_user_id == current_user.id,
-                SavedArtefact.title == decoded_title
-            ).first()
-            if not source_art:
-                raise HTTPException(status_code=404, detail=f"Source saved artefact '{decoded_title}' not found.")
+        # Copy/mount the artefact into the target user's new discussion
+        target_discussion.add_artefact(
+            title=decoded_title,
+            content=source_art.content if discussion_id == "saved" else source_art.get('content', ''),
+            images=source_art.get('images', []) if hasattr(source_art, 'get') else [],
+            author=f"Shared by {current_user.username}",
+            active=True,
+            artefact_type=source_art.artefact_type if discussion_id == "saved" else source_art.get('artefact_type', 'document')
+        )
+        target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
 
-            # Copy the artefact into the target user's new discussion
-            target_discussion.add_artefact(
-                title=decoded_title,
-                content=source_art.content,
-                images=[],
-                author=f"Shared by {current_user.username}",
-                active=True,
-                artefact_type=source_art.artefact_type or 'document'
-            )
-            target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
-
-            # Add an introductory message so the discussion is not empty and appears in the sidebar clearly
-            target_discussion.add_message(
-                sender="System",
-                content=f"👋 **{current_user.username}** has shared the document **{decoded_title}** with you.\n\nThe file is already loaded into this conversation's context and can be viewed or edited in the Workspace panel on the right.",
-                sender_type="system"
-            )
-            target_discussion.commit()
-
-            # Save to receiver's SavedArtefact table directly
-            new_saved_art = SavedArtefact(
-                title=decoded_title,
-                content=source_art.content,
-                description=f"Shared by {current_user.username}",
-                artefact_type=source_art.artefact_type or 'document',
-                owner_user_id=target_user.id
-            )
-            db.add(new_saved_art)
-
-            # Update sender's copy description to "Shared"
-            source_art.description = "Shared"
-            db.commit()
-        else:
-            # Normal local discussion artefact: get the source discussion and the target user
-            source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-            source_art = source_discussion.get_artefact(title=decoded_title)
-
-            if not source_art:
-                raise HTTPException(status_code=404, detail="Source artefact not found.")
-
-            # Copy the artefact into the target user's new discussion
-            target_discussion.add_artefact(
-                title=decoded_title,
-                content=source_art.get('content', ''),
-                images=source_art.get('images', []),
-                author=f"Shared by {current_user.username}",
-                active=True,
-                artefact_type=source_art.get('artefact_type', 'document')
-            )
-
-            target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
-
-            # Add an introductory message so the discussion is not empty and appears in the sidebar clearly
-            target_discussion.add_message(
-                sender="System",
-                content=f"👋 **{current_user.username}** has shared the document **{decoded_title}** with you.\n\nThe file is already loaded into this conversation's context and can be viewed or edited in the Workspace panel on the right.",
-                sender_type="system"
-            )
-            target_discussion.commit()
-
-            # Save to receiver's SavedArtefact table directly to ensure visibility in global library
-            new_saved_art = SavedArtefact(
-                title=decoded_title,
-                content=source_art.get('content', ''),
-                description=f"Shared by {current_user.username}",
-                artefact_type=source_art.get('artefact_type', 'document'),
-                owner_user_id=target_user.id
-            )
-            db.add(new_saved_art)
-
-            # Mark sender's original artefact as "Shared"
-            source_discussion.artefacts.update(
-                title=decoded_title,
-                new_content=source_art.get('content', ''),
-                new_type=source_art.get('artefact_type', 'document'),
-                new_images=source_art.get('images', []),
-                bump_version=False,
-                active=source_art.get('active', True),
-                author="Shared"
-            )
-
-            # Automatically detach the local copy from the discussion database once saved to global library
-            source_discussion.remove_artefact(title=decoded_title)
-
-            source_discussion.commit()
-            db.commit()
+        # Add an introductory message so the discussion is not empty and appears in the sidebar clearly
+        target_discussion.add_message(
+            sender="System",
+            content=f"👋 **{current_user.username}** has shared the document **{decoded_title}** with you.\n\nThe file is already loaded into this conversation's context and can be viewed or edited in the Workspace panel on the right.",
+            sender_type="system"
+        )
+        target_discussion.commit()
 
         # 4. Send real-time notifications to the receiver
         from backend.ws_manager import manager
@@ -1615,6 +1658,213 @@ def build_artefacts_router(router: APIRouter):
         }, target_user.id)
 
         return {"message": f"Artefact successfully shared with {payload.target_username}."}
+
+    @router.delete("/{discussion_id}/artefacts/{artefact_title:path}/share/{target_user_id}", status_code=status.HTTP_200_OK)
+    async def unshare_discussion_artefact_from_user(
+        discussion_id: str,
+        artefact_title: str,
+        target_user_id: int,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Unshares a global saved library artefact from a specific user.
+        """
+        from urllib.parse import unquote
+        from backend.db.models.saved_artefact import SharedArtefactLink
+
+        decoded_title = unquote(artefact_title)
+
+        # Find and delete the matching link
+        link = db.query(SharedArtefactLink).filter_by(
+            artefact_title=decoded_title,
+            owner_user_id=current_user.id,
+            shared_with_user_id=target_user_id
+        ).first()
+
+        if not link:
+            raise HTTPException(status_code=404, detail="Sharing link not found.")
+
+        db.delete(link)
+        db.commit()
+
+        # Notify the unsubscribed participant to refresh their list
+        from backend.ws_manager import manager
+        manager.send_personal_message_sync({
+            "type": "notification",
+            "data": {"message": f"ℹ️ {current_user.username} has revoked your access to '{decoded_title}'", "type": "info"}
+        }, target_user_id)
+
+        return {"message": "Access revoked successfully."}
+
+    class GroupShareRequest(BaseModel):
+        group_id: int
+        permission_level: str = "interact"
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/share-group", status_code=status.HTTP_200_OK)
+    async def share_discussion_artefact_with_group(
+        discussion_id: str,
+        artefact_title: str,
+        payload: GroupShareRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Shares a global saved library artefact with all members of a user group.
+        """
+        from urllib.parse import unquote
+        from backend.db.models.group import Group as DBGroup
+        from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
+        from backend.discussion import get_user_discussion
+
+        decoded_title = unquote(artefact_title)
+
+        # Resolve target group
+        group = db.query(DBGroup).options(joinedload(DBGroup.members)).filter(
+            DBGroup.id == payload.group_id
+        ).first()
+
+        if not group:
+            raise HTTPException(status_code=404, detail="Target group not found.")
+
+        # Ensure the source artefact exists and is in global library
+        source_art = db.query(SavedArtefact).filter(
+            SavedArtefact.owner_user_id == current_user.id,
+            SavedArtefact.title == decoded_title
+        ).first()
+
+        if not source_art:
+            if discussion_id == "saved":
+                raise HTTPException(status_code=404, detail="Source saved library artefact not found.")
+
+            # Local discussion import to global library prior to sharing
+            source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+            local_art = source_discussion.get_artefact(title=decoded_title)
+            if not local_art:
+                raise HTTPException(status_code=404, detail="Source local artefact not found.")
+
+            source_art = SavedArtefact(
+                title=decoded_title,
+                content=local_art.get('content', ''),
+                artefact_type=local_art.get('artefact_type', 'document'),
+                owner_user_id=current_user.id
+            )
+            db.add(source_art)
+            db.commit()
+
+        # Iterate and create shared links for members
+        added_count = 0
+        from backend.ws_manager import manager
+        import uuid
+
+        for member in group.members:
+            if member.id == current_user.id:
+                continue
+
+            existing_link = db.query(SharedArtefactLink).filter_by(
+                artefact_title=decoded_title,
+                owner_user_id=current_user.id,
+                shared_with_user_id=member.id
+            ).first()
+
+            if not existing_link:
+                new_link = SharedArtefactLink(
+                    artefact_title=decoded_title,
+                    owner_user_id=current_user.id,
+                    shared_with_user_id=member.id,
+                    permission_level=payload.permission_level
+                )
+                db.add(new_link)
+                added_count += 1
+
+                # Spawn active discussion for the new workspace share
+                try:
+                    target_discussion_id = str(uuid.uuid4())
+                    lc_sender = get_user_lollms_client(current_user.username)
+                    target_discussion = get_user_discussion(member.username, target_discussion_id, create_if_missing=True, lollms_client=lc_sender)
+
+                    target_discussion.add_artefact(
+                        title=decoded_title,
+                        content=source_art.content,
+                        author=f"Shared by {current_user.username}",
+                        active=True,
+                        artefact_type=source_art.artefact_type or 'document'
+                    )
+                    target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
+                    target_discussion.add_message(
+                        sender="System",
+                        content=f"👋 **{current_user.username}** has shared the group document **{decoded_title}** with you.\n\nThe file is already loaded into your workspace.",
+                        sender_type="system"
+                    )
+                    target_discussion.commit()
+
+                    # Notify
+                    manager.send_personal_message_sync({
+                        "type": "notification",
+                        "data": {"message": f"🎁 Shared with Group: New artefact '{decoded_title}' added.", "type": "success"}
+                    }, member.id)
+
+                    manager.send_personal_message_sync({
+                        "type": "discussion_updated",
+                        "data": {
+                            "discussion_id": target_discussion_id,
+                            "sender_username": current_user.username
+                        }
+                    }, member.id)
+                except Exception as e:
+                    print(f"Warning: Failed to create target workspace mount for {member.username}: {e}")
+
+        db.commit()
+        return {"message": f"Artefact successfully shared with {added_count} group member(s)."}
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/unshare-group", status_code=status.HTTP_200_OK)
+    async def unshare_discussion_artefact_from_group(
+        discussion_id: str,
+        artefact_title: str,
+        payload: GroupShareRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Unshares a global saved library artefact from all members of a user group.
+        """
+        from urllib.parse import unquote
+        from backend.db.models.group import Group as DBGroup
+        from backend.db.models.saved_artefact import SharedArtefactLink
+
+        decoded_title = unquote(artefact_title)
+
+        group = db.query(DBGroup).options(joinedload(DBGroup.members)).filter(
+            DBGroup.id == payload.group_id
+        ).first()
+
+        if not group:
+            raise HTTPException(status_code=404, detail="Target group not found.")
+
+        revoked_count = 0
+        from backend.ws_manager import manager
+
+        for member in group.members:
+            if member.id == current_user.id:
+                continue
+
+            link = db.query(SharedArtefactLink).filter_by(
+                artefact_title=decoded_title,
+                owner_user_id=current_user.id,
+                shared_with_user_id=member.id
+            ).first()
+
+            if link:
+                db.delete(link)
+                revoked_count += 1
+
+                manager.send_personal_message_sync({
+                    "type": "notification",
+                    "data": {"message": f"ℹ️ {current_user.username} revoked access to '{decoded_title}'", "type": "info"}
+                }, member.id)
+
+        db.commit()
+        return {"message": f"Revoked access for {revoked_count} group member(s)."}
 
     @router.post("/{discussion_id}/artefacts/export_audio", response_model=TaskInfo, status_code=202)
     async def export_artefact_as_audio(
@@ -1771,7 +2021,7 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.get("/shared-with-users", response_model=List[str])
+    @router.get("/shared-with-users", response_model=List[Dict[str, Any]])
     async def get_resource_shared_with(
         resource_type: str,
         resource_name: str,
@@ -1781,26 +2031,36 @@ def build_artefacts_router(router: APIRouter):
         from urllib.parse import unquote
         from sqlalchemy.orm import joinedload
         decoded_name = unquote(resource_name)
-        usernames = []
+        shared_users = []
 
         if resource_type == "artefact":
-            records = db.query(SavedArtefact).options(joinedload(SavedArtefact.owner)).filter(
-                SavedArtefact.title == decoded_name,
-                SavedArtefact.description == f"Shared by {current_user.username}"
+            records = db.query(SharedArtefactLink).options(joinedload(SharedArtefactLink.shared_with_user)).filter(
+                SharedArtefactLink.artefact_title == decoded_name,
+                SharedArtefactLink.owner_user_id == current_user.id
             ).all()
-            usernames = [r.owner.username for r in records if r.owner]
+            shared_users = [{"id": r.shared_with_user.id, "username": r.shared_with_user.username, "icon": r.shared_with_user.icon} for r in records if r.shared_with_user]
         elif resource_type == "skill":
             from backend.db.models.skill import Skill
             records = db.query(Skill).options(joinedload(Skill.owner)).filter(
                 Skill.name == decoded_name,
                 Skill.author == f"Shared by {current_user.username}"
             ).all()
-            usernames = [r.owner.username for r in records if r.owner]
+            shared_users = [{"id": r.owner.id, "username": r.owner.username, "icon": r.owner.icon} for r in records if r.owner]
         elif resource_type == "note":
             from backend.db.models.note import Note
             sender_note = db.query(Note).filter(Note.owner_id == current_user.id, Note.title == decoded_name).first()
             if sender_note and sender_note.description:
-                found = re.findall(r'\[Shared with (\w+) on', sender_note.description)
-                usernames = found
+                found_usernames = re.findall(r'\[Shared with (\w+) on', sender_note.description)
+                for uname in found_usernames:
+                    user_obj = db.query(DBUser).filter(DBUser.username == uname).first()
+                    if user_obj:
+                        shared_users.append({"id": user_obj.id, "username": user_obj.username, "icon": user_obj.icon})
 
-        return list(set(usernames))
+        # Deduplicate list of dicts
+        seen = set()
+        deduped = []
+        for u in shared_users:
+            if u["id"] not in seen:
+                seen.add(u["id"])
+                deduped.append(u)
+        return deduped

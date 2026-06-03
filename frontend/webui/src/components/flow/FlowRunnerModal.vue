@@ -248,19 +248,28 @@ const requiredInputs = computed(() => {
     const inputs = [];
     nodes.forEach(node => {
         const nodeInputs = node.inputs || [];
+        if (!inputValues.value[node.id]) inputValues.value[node.id] = {};
         nodeInputs.forEach(inputName => {
             const isConnected = edges.some(e => e.target === node.id && e.targetHandle === inputName);
-            if (!isConnected) {
-                const def = flowStore.nodeDefinitions.find(d => d.name === node.type);
-                const inputDef = def?.inputs.find(i => i.name === inputName);
-                const type = inputDef?.type || 'string';
-                if (!inputValues.value[node.id]) inputValues.value[node.id] = {};
-                if (inputValues.value[node.id][inputName] === undefined) {
-                    const existingVal = node.data?.[inputName];
-                    inputValues.value[node.id][inputName] = existingVal !== undefined ? existingVal : (type === 'int' || type === 'float' ? 0 : type === 'boolean' ? false : '');
-                }
-                inputs.push({ key: `${node.id}-${inputName}`, nodeId: node.id, nodeLabel: node.label || node.id, inputName: inputName, type: type });
+            if (isConnected) return;
+
+            const def = flowStore.nodeDefinitions.find(d => d.name === node.type);
+            const inputDef = def?.inputs.find(i => i.name === inputName);
+            const type = inputDef?.type || 'string';
+
+            if (inputValues.value[node.id][inputName] === undefined) {
+                const existingVal = node.data?.[inputName];
+                inputValues.value[node.id][inputName] = existingVal !== undefined ? existingVal : (type === 'int' || type === 'float' ? 0 : type === 'boolean' ? false : '');
             }
+
+            const existingVal = node.data?.[inputName];
+            const isSetInBuilder = existingVal !== undefined && existingVal !== '';
+            const isTextInputNode = node.type?.toLowerCase().includes('text_input');
+
+            // Hide inputs already configured in the builder, unless it's a text input node
+            if (isSetInBuilder && !isTextInputNode) return;
+
+            inputs.push({ key: `${node.id}-${inputName}`, nodeId: node.id, nodeLabel: node.label || node.id, inputName: inputName, type: type });
         });
     });
     return inputs;
@@ -355,9 +364,6 @@ onMounted(() => {
 <style scoped>
 @reference "tailwindcss";
 
-.input-field {
-    @apply bg-gray-50 dark:bg-gray-900/50 border-gray-200 dark:border-gray-700 rounded-xl focus:ring-blue-500 focus:border-blue-500;
-}
 .custom-scrollbar::-webkit-scrollbar { width: 6px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-700 rounded-full; }
 </style>

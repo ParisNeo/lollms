@@ -157,9 +157,10 @@ function deleteConnection(i) { connections.value.splice(i, 1); }
 function getPortPos(nodeId, handleId, type) {
     const node = nodes.value.find(n => n.id === nodeId);
     if (!node) return { x: 0, y: 0 };
-    const index = (type === 'input' ? node.inputs : node.outputs).indexOf(handleId);
-    const nodeWidth = 192, headerHeight = 29, bodyPadding = 8, rowHeight = 24, rowGap = 8; 
-    const yOffset = headerHeight + bodyPadding + (index * (rowHeight + rowGap)) + (rowHeight / 2);
+    const indexInGroup = (type === 'input' ? node.inputs : node.outputs).indexOf(handleId);
+    const overallIndex = type === 'input' ? indexInGroup : node.inputs.length + indexInGroup;
+    const nodeWidth = 192, borderWidth = 2, headerHeight = 30, bodyPadding = 8, rowHeight = 24, rowGap = 8; 
+    const yOffset = borderWidth + headerHeight + bodyPadding + (overallIndex * (rowHeight + rowGap)) + (rowHeight / 2);
     return { x: type === 'input' ? node.x : node.x + nodeWidth, y: node.y + yOffset };
 }
 
@@ -228,10 +229,10 @@ defineExpose({ openRunner: () => showRunnerModal.value = true });
                 <svg class="absolute top-0 left-0 overflow-visible pointer-events-none w-full h-full" style="width:1px;height:1px"><g><path v-for="(c,i) in connections" :key="c.id" :d="getPathD(c)" class="stroke-gray-400 dark:stroke-gray-500 stroke-[3px] fill-none pointer-events-auto hover:stroke-blue-500" @click.stop="deleteConnection(i)" /><path v-if="isLinking" :d="activeLinkPath" class="stroke-blue-400 stroke-[3px] fill-none" stroke-dasharray="5,5" /></g></svg>
                 
                 <div v-for="n in nodes" :key="n.id" class="absolute w-48 rounded-lg shadow-lg border-2 bg-white dark:bg-gray-800 flex flex-col" :class="n.color" :style="{ transform: `translate(${n.x}px, ${n.y}px)` }" @mousedown.stop="startDragNode($event, n.id)">
-                    <div class="px-2 py-1 border-b dark:border-gray-700/50 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/20 cursor-grab"><span class="text-xs font-bold truncate select-none">{{ n.label }}</span><button @click.stop="deleteNode(n.id)" class="text-gray-400 hover:text-red-500"><IconXMark class="w-3 h-3" /></button></div>
+                    <div class="px-2 py-1 border-b dark:border-gray-700/50 flex justify-between items-center bg-gray-50/50 dark:bg-gray-900/20 cursor-grab h-[30px]"><span class="text-xs font-bold truncate select-none">{{ n.label }}</span><button @click.stop="deleteNode(n.id)" class="text-gray-400 hover:text-red-500"><IconXMark class="w-3 h-3" /></button></div>
                     <div class="p-2 space-y-2 relative">
                         <div v-for="i in n.inputs" :key="i" class="flex items-center relative h-6">
-                            <div class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -left-[1.1rem] cursor-crosshair hover:scale-125 shadow-sm" :class="getTypeColor(getNodeInputType(n.type, i))" @mousedown.stop="startLink($event, n.id, i, 'input')" @mouseup.stop="endLink($event, n.id, i, 'input')"></div>
+                            <div class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -left-[17px] top-1/2 -translate-y-1/2 cursor-crosshair hover:scale-125 shadow-sm" :class="getTypeColor(getNodeInputType(n.type, i))" @mousedown.stop="startLink($event, n.id, i, 'input')" @mouseup.stop="endLink($event, n.id, i, 'input')"></div>
                             <span class="text-[10px] text-gray-500 ml-1 truncate flex-1 select-none">{{ i }}</span>
                             <template v-if="!isInputConnected(n.id, i)">
                                 <select v-if="getNodeInputType(n.type, i) === 'model_selection'" v-model="n.data[i]" class="ml-auto w-24 h-5 text-[9px] border rounded bg-gray-50 dark:bg-gray-900" @mousedown.stop><optgroup v-for="group in dataStore.availableLLMModelsGrouped" :key="group.label" :label="group.label"><option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.name }}</option></optgroup></select>
@@ -242,7 +243,7 @@ defineExpose({ openRunner: () => showRunnerModal.value = true });
                         </div>
                         <div v-for="o in n.outputs" :key="o" class="flex items-center justify-end relative h-6">
                             <span class="text-[10px] text-gray-500 mr-1 truncate select-none">{{ o }}</span>
-                            <div class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -right-[1.1rem] cursor-crosshair hover:scale-125 shadow-sm" :class="getTypeColor(getNodeOutputType(n.type, o))" @mousedown.stop="startLink($event, n.id, o, 'output')" @mouseup.stop="endLink($event, n.id, o, 'output')"></div>
+                            <div class="w-3.5 h-3.5 rounded-full border-2 border-white dark:border-gray-800 absolute -right-[17px] top-1/2 -translate-y-1/2 cursor-crosshair hover:scale-125 shadow-sm" :class="getTypeColor(getNodeOutputType(n.type, o))" @mousedown.stop="startLink($event, n.id, o, 'output')" @mouseup.stop="endLink($event, n.id, o, 'output')"></div>
                         </div>
                     </div>
                 </div>

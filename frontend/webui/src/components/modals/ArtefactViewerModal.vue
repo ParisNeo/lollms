@@ -25,6 +25,35 @@ const images = computed(() => artefact.value?.images || []);
 const hasContent = computed(() => content.value && content.value.trim() !== '');
 const hasImages = computed(() => images.value && images.value.length > 0);
 
+const formattedMarkdownContent = computed(() => {
+    if (!content.value) return '';
+
+    const titleStr = title.value.toLowerCase();
+    const ext = titleStr.split('.').pop();
+    const type = artefact.value?.artefact_type || 'document';
+
+    if (type === 'code' || ['py', 'js', 'ts', 'html', 'css', 'sql', 'cpp', 'c', 'sh', 'svg', 'mermaid'].includes(ext)) {
+        if (content.value.trim().startsWith('```')) {
+            return content.value;
+        }
+        const langCode = ext === 'py' ? 'python' : (ext === 'js' ? 'javascript' : (ext === 'ts' ? 'typescript' : ext));
+        return `\`\`\`${langCode || 'plaintext'}\n${content.value}\n\`\`\``;
+    }
+
+    if (type === 'note' || type === 'skill' || ext === 'md' || ext === 'markdown') {
+        return content.value;
+    }
+
+    const trimmed = content.value.trim();
+    if (trimmed.startsWith('<!DOCTYPE html>') || trimmed.startsWith('<html') || trimmed.startsWith('<svg') || trimmed.startsWith('<?xml')) {
+        if (!trimmed.startsWith('```')) {
+            return `\`\`\`html\n${content.value}\n\`\`\``;
+        }
+    }
+
+    return content.value;
+});
+
 async function handleImportToCurrentChat() {
     if (!discussionsStore.currentDiscussionId || discussionsStore.currentDiscussionId === 'saved') {
         uiStore.addNotification("Please select or start a chat first.", "warning");
@@ -71,7 +100,7 @@ async function handleImportToCurrentChat() {
 
                 <div v-if="hasContent">
                     <div class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-lg max-h-[60vh] overflow-y-auto">
-                        <MessageContentRenderer :content="content" />
+                        <MessageContentRenderer :content="formattedMarkdownContent" />
                     </div>
                 </div>
 

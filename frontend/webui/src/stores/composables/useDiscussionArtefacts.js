@@ -609,10 +609,67 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
+    async function shareArtefact(discussionId, artefactTitle, targetUsername, permissionLevel = 'interact') {
+        try {
+            await apiClient.post(`/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}/share`, {
+                target_username: targetUsername,
+                permission_level: permissionLevel
+            });
+            uiStore.addNotification(`Artefact shared with ${targetUsername} (${permissionLevel === 'interact' ? 'Can Edit' : 'View Only'})`, 'success');
+            if (discussionId && discussionId !== 'saved') {
+                await fetchArtefacts(discussionId);
+            }
+            await fetchAllUserArtefacts();
+        } catch (error) {
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to share artefact', 'error');
+        }
+    }
+
+    async function unshareArtefact(discussionId, artefactTitle, targetUserId) {
+        try {
+            const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+            await apiClient.delete(`/api/discussions/${discussionId}/artefacts/${encoded}/share/${targetUserId}`);
+            uiStore.addNotification('Sharing revoked.', 'success');
+            await fetchAllUserArtefacts();
+        } catch (error) {
+            uiStore.addNotification('Failed to revoke sharing.', 'error');
+        }
+    }
+
+    async function shareArtefactWithGroup(discussionId, artefactTitle, groupId, permissionLevel = 'interact') {
+        try {
+            const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+            await apiClient.post(`/api/discussions/${discussionId}/artefacts/${encoded}/share-group`, {
+                group_id: groupId,
+                permission_level: permissionLevel
+            });
+            uiStore.addNotification('Shared with group successfully.', 'success');
+            await fetchAllUserArtefacts();
+        } catch (error) {
+            uiStore.addNotification('Failed to share with group.', 'error');
+        }
+    }
+
+    async function unshareArtefactFromGroup(discussionId, artefactTitle, groupId) {
+        try {
+            const encoded = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+            await apiClient.post(`/api/discussions/${discussionId}/artefacts/${encoded}/unshare-group`, {
+                group_id: groupId
+            });
+            uiStore.addNotification('Access revoked for group.', 'success');
+            await fetchAllUserArtefacts();
+        } catch (error) {
+            uiStore.addNotification('Failed to revoke group access.', 'error');
+        }
+    }
+
     return {
         saveRawArtefactToLibrary,
         saveArtefactToLibrary,
         shareArtefact,
+        unshareArtefact,
+        shareArtefactWithGroup,
+        unshareArtefactFromGroup,
         importArtefactFromSource,
         createDiscussionWithArtefactVersion,
         revertArtefact,

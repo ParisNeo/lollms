@@ -1057,7 +1057,14 @@ function onMermaidReady({ svg }, partIndex) {
 
 <template>
   <div ref="messageContentRef">
-    <div v-if="content || (isUser && !hasImages)" class="message-prose">
+    <div v-if="content || isUser || isStreaming || activeTask || (events && events.length > 0)" class="message-prose">
+
+      <!-- Live Typing Indicator during active connection before first token -->
+      <div v-if="isStreaming && !content" class="typing-indicator my-2 text-blue-500/60 flex items-center gap-1">
+          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+          <span class="text-[10px] font-black uppercase tracking-widest ml-2">Awaiting first token...</span>
+      </div>
+
       <template v-if="messageParts.length > 0">
         <template v-for="part in messageParts" :key="part.id">
           <!-- ── Mermaid diagram ─────────────────────────────────────────── -->

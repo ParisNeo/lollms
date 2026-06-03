@@ -1336,6 +1336,11 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             except Exception:
                 connection.rollback()
 
+    if not inspector.has_table("shared_artefact_links"):
+        from backend.db.models.saved_artefact import SharedArtefactLink
+        SharedArtefactLink.__table__.create(connection)
+        connection.commit()
+
     if not inspector.has_table("notebooks"):
         try:
             Notebook.__table__.create(connection)

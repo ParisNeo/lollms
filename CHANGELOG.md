@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-06-02 07:11]
+
+- build(frontend): regenerate distribution assets after flow updates
+
 ## [2026-06-01 23:37]
 
 - fix(ui): prevent path traversal in SPA catch-all route
