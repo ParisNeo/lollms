@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-06-03 15:24]
+
+- feat(feature): Implement core artefact management, discussion, and personalized settings
+
+## [2026-06-03 15:24]
+
+- feat(feature): Implement core artefact management, discussion, and personalized settings
+
 ## [2026-06-02 07:11]
 
 - build(frontend): regenerate distribution assets after flow updates
