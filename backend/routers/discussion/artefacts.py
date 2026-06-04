@@ -1481,7 +1481,7 @@ def build_artefacts_router(router: APIRouter):
         """Loads a specific versioned data artifact spreadsheet or SQLite DB."""
         from urllib.parse import unquote
         import pandas as pd
-        
+
         decoded_title = unquote(artefact_title)
         try:
             if "%" in decoded_title:
@@ -1491,30 +1491,32 @@ def build_artefacts_router(router: APIRouter):
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         active = discussion.get_artefact(title=decoded_title, version=version)
-        
-        ext = Path(decoded_title).suffix.lower()
+
+        path_obj = Path(decoded_title)
+        stem = path_obj.stem
+        ext = path_obj.suffix.lower()
         is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
-        
+
         if not active:
             raise HTTPException(status_code=404, detail="Artifact not found.")
-            
+
         # Check both potential type keys, with a safe fallback to file extension check
         art_type = active.get("artefact_type") or active.get("type")
         if art_type != "data" and not is_data_extension:
             raise HTTPException(status_code=404, detail="Data artifact not found.")
 
         current_version = active.get("version", 1)
-        
+
         # Use original discussion ID where the file is physically stored on disk
         source_discussion_id = active.get("discussion_id") or discussion_id
 
         from backend.session import get_user_discussion_assets_path
         assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
-        
+
         possible_paths = [
-            assets_dir / f"{decoded_title}_consolidated.db",
-            assets_dir / f"{decoded_title}_v{current_version}{ext}",
-            assets_dir / f"{decoded_title}{ext}",
+            assets_dir / f"{stem}_consolidated.db",
+            assets_dir / f"{stem}_v{current_version}{ext}",
+            assets_dir / f"{decoded_title}",
         ]
 
         file_path = None
@@ -1585,13 +1587,15 @@ def build_artefacts_router(router: APIRouter):
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         active = discussion.get_artefact(title=decoded_title)
-        
-        ext = Path(decoded_title).suffix.lower()
+
+        path_obj = Path(decoded_title)
+        stem = path_obj.stem
+        ext = path_obj.suffix.lower()
         is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
-        
+
         if not active:
             raise HTTPException(status_code=404, detail="Artifact not found.")
-            
+
         art_type = active.get("artefact_type") or active.get("type")
         if art_type != "data" and not is_data_extension:
             raise HTTPException(status_code=404, detail="Data artifact not found.")
@@ -1601,9 +1605,9 @@ def build_artefacts_router(router: APIRouter):
 
         from backend.session import get_user_discussion_assets_path
         assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
-        file_path = assets_dir / f"{decoded_title}_v{current_version}{ext}"
+        file_path = assets_dir / f"{stem}_v{current_version}{ext}"
         if not file_path.exists():
-            file_path = assets_dir / f"{decoded_title}{ext}"
+            file_path = assets_dir / f"{decoded_title}"
 
         if not file_path.exists():
             raise FileNotFoundError("Raw data file is missing.")
@@ -1660,7 +1664,9 @@ def build_artefacts_router(router: APIRouter):
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         active = discussion.get_artefact(title=decoded_title)
 
-        ext = Path(decoded_title).suffix.lower()
+        path_obj = Path(decoded_title)
+        stem = path_obj.stem
+        ext = path_obj.suffix.lower()
         is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
 
         if not active:

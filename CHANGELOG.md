@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-06-04 00:39]
+
+- Refactor file path construction in artifacts router
+
 ## [2026-06-04 00:33]
 
 - feat(system): Integrate LLM service routing and refactor frontend UI components
