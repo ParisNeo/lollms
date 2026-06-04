@@ -23,6 +23,7 @@ import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { usePyodideStore } from '../../stores/pyodide';
+import InteractiveDataGrid from '../ui/DataGrid/InteractiveDataGrid.vue';
 
 const uiStore = useUiStore();
 const authStore = useAuthStore();
@@ -357,6 +358,10 @@ async function handleExecute() {
             isFetching.value = false;
         }
     }
+
+    const isDataArtifact = computed(() => {
+        return artefactGroup.value?.versions[0]?.artefact_type === 'data';
+    });
 
     // Performance Optimisation: Avoid deep watching large nested arrays.
     // Instead, watch a string key combining the file title and versions count.
@@ -697,16 +702,27 @@ function download() {
                 <p class="text-sm font-medium">{{ loadError }}</p>
                 <button @click="loadVersion(selectedVersion)" class="mt-4 btn btn-secondary btn-sm">Retry</button>
             </div>
-            <CodeMirrorEditor 
-                v-else
-                v-model="dbContent" 
-                class="absolute inset-0 h-full" 
-                :initialMode="dbContent ? 'view' : 'edit'"
-                :renderable="true"
-                :contentType="detectedContentType"
-                :language="detectedLanguage"
-                placeholder="Start typing to add content or update the document..."
-            />
+
+            <!-- Conditional Rendering: Interactive Data Grid or CodeMirror Editor -->
+            <template v-else>
+                <InteractiveDataGrid 
+                    v-if="isDataArtifact"
+                    :discussionId="discussionsStore.currentDiscussionId"
+                    :title="title"
+                    :version="selectedVersion"
+                    class="absolute inset-0 h-full"
+                />
+                <CodeMirrorEditor 
+                    v-else
+                    v-model="dbContent" 
+                    class="absolute inset-0 h-full" 
+                    :initialMode="dbContent ? 'view' : 'edit'"
+                    :renderable="true"
+                    :contentType="detectedContentType"
+                    :language="detectedLanguage"
+                    placeholder="Start typing to add content or update the document..."
+                />
+            </template>
         </div>
         </div>
     </div>

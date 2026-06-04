@@ -611,14 +611,16 @@ async def list_models(
     db: Session = Depends(get_db)
 ):
     ASCIIColors.panel(f"{user.username} is listing the models", f"Open AI V1")
-    
+
     # 1. Try DB Cache first (unless forced)
     if not force_refresh:
-        cached = get_cached_models(db)
+        # Wrap DB query or cache lookup to keep event loop free
+        loop = asyncio.get_running_loop()
+        cached = await loop.run_in_executor(executor, lambda: get_cached_models(db))
         if cached:
             ASCIIColors.success("Returning cached model list.")
             return {"object": "list", "data": cached}
-    
+
     loop = asyncio.get_running_loop()
 
     def _fetch_models():
@@ -632,7 +634,7 @@ async def list_models(
                 # Blocking IO: building client, listing models
                 lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
                 models = lc.list_models()
-                
+
                 model_aliases = binding.model_aliases or {}
                 if isinstance(model_aliases, str):
                     try:
@@ -650,7 +652,7 @@ async def list_models(
                         internal_id = f"{binding.alias}/{model_id}"
                         id_to_send = internal_id
                         name_to_send = internal_id
-                        
+
                         if model_display_mode == 'aliased':
                             if not alias_data: continue
                             if alias_data.get('title'):
@@ -660,7 +662,7 @@ async def list_models(
                             if alias_data and alias_data.get('title'):
                                 id_to_send = alias_data.get('title')
                                 name_to_send = alias_data.get('title')
-                        
+
                         all_models.append({
                             "id": id_to_send,
                             "name": name_to_send,
@@ -733,15 +735,19 @@ async def chat_completions(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
+    loop = asyncio.get_running_loop()
     try:
-        binding_alias, model_name = resolve_model_name(db, request.model)
+        # Offload potentially blocking database model resolution
+        binding_alias, model_name = await loop.run_in_executor(
+            executor,
+            lambda: resolve_model_name(db, request.model)
+        )
     except HTTPException as e:
         if e.status_code == 400:
-            invalidate_model_cache(db)
+            await loop.run_in_executor(executor, lambda: invalidate_model_cache(db))
         raise e
 
     # Client building can be slow, might involve model loading.
-    loop = asyncio.get_running_loop()
     try:
         lc = await loop.run_in_executor(
             executor,
@@ -759,17 +765,22 @@ async def chat_completions(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to build LLM client: {str(e)}")
 
+    # Offload personality database lookup to the thread pool
     messages = list(request.messages)
     if request.personality:
-        personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
-        if not personality:
-            raise HTTPException(status_code=404, detail="Personality not found.")
-        if not personality.is_public and personality.owner_user_id != user.id:
-            raise HTTPException(status_code=403, detail="You cannot use this personality.")
+        def _fetch_personality():
+            personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
+            if not personality:
+                raise HTTPException(status_code=404, detail="Personality not found.")
+            if not personality.is_public and personality.owner_user_id != user.id:
+                raise HTTPException(status_code=403, detail="You cannot use this personality.")
+            return personality
+
+        personality = await loop.run_in_executor(executor, _fetch_personality)
         messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
     openai_messages, images = preprocess_openai_messages(messages)
-    
+
     if request.tools:
         openai_messages = handle_tools_injection(openai_messages, request.tools, request.tool_choice)
 
@@ -782,7 +793,7 @@ async def chat_completions(
     # Extract client network information safely
     client_ip = fastapi_request.client.host if fastapi_request.client else "unknown"
     client_port = fastapi_request.client.port if fastapi_request.client else "unknown"
-    
+
     # Safely extract first 10 words of the final user prompt
     last_prompt = ""
     if request.messages:

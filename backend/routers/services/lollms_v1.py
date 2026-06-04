@@ -48,27 +48,32 @@ async def get_user_for_lollms_service(
         raise HTTPException(status_code=403, detail="LoLLMs exclusive services are disabled.")
 
     require_key = settings.get("lollms_services_require_key", True)
-    
-    # DB operations can be blocking, but usually fast for single record lookups. 
-    # For high throughput auth, we keep it simple here, but could wrap if needed.
-    if not require_key:
-        user = db.query(DBUser).filter(DBUser.is_admin == True).first()
-    else:
-        if not authorization: raise HTTPException(status_code=401, detail="API Key required.")
-        api_key = authorization.credentials
-        parts = api_key.split('_')
-        if len(parts) < 2: raise HTTPException(status_code=401)
-        key_prefix = parts[0] + "_" + parts[1]
-        db_key = db.query(DBAPIKey).filter(DBAPIKey.key_prefix == key_prefix).first()
-        if not db_key or not verify_api_key(api_key, db_key.key_hash): raise HTTPException(status_code=401)
-        user = db.query(DBUser).filter(DBUser.id == db_key.user_id).first()
+    loop = asyncio.get_running_loop()
 
-    if not user or not user.is_active: raise HTTPException(status_code=401)
-    
+    # Offload potentially blocking database operations entirely
+    def _authenticate():
+        if not require_key:
+            user = db.query(DBUser).filter(DBUser.is_admin == True).first()
+        else:
+            if not authorization: raise HTTPException(status_code=401, detail="API Key required.")
+            api_key = authorization.credentials
+            parts = api_key.split('_')
+            if len(parts) < 2: raise HTTPException(status_code=401)
+            key_prefix = parts[0] + "_" + parts[1]
+            db_key = db.query(DBAPIKey).filter(DBAPIKey.key_prefix == key_prefix).first()
+            if not db_key or not verify_api_key(api_key, db_key.key_hash): raise HTTPException(status_code=401)
+            user = db.query(DBUser).filter(DBUser.id == db_key.user_id).first()
+
+        if not user or not user.is_active: raise HTTPException(status_code=401)
+        return user
+
+    user = await loop.run_in_executor(executor, _authenticate)
+
     identifier = authorization.credentials if authorization else "anonymous"
     if not check_rate_limit(identifier, "lollms"): raise HTTPException(status_code=429)
 
-    track_service_usage("lollms", user.id)
+    # Wrap usage tracking
+    await loop.run_in_executor(executor, lambda: track_service_usage("lollms", user.id))
     return user
 
 # --- Lollms Specific Feature Models ---

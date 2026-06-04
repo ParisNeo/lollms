@@ -19,6 +19,7 @@ import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import TaskProgressIndicator from '../TaskProgressIndicator.vue'; 
 import IconMap from '../../../assets/icons/IconMap.vue';
 import IconClock  from '../../../assets/icons/IconClock.vue';
+import InteractiveDataGrid from '../DataGrid/InteractiveDataGrid.vue';
 import IconSave from '../../../assets/icons/IconSave.vue';
 import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
 import IconCog from '../../../assets/icons/IconCog.vue';
@@ -603,6 +604,21 @@ const messageParts = computed(() => {
         }
     });
 
+    // Ensure any embedded data views in the message metadata are added to the layout
+    const embeddedViews = props.inlineWidgets?.filter(w => w.type === 'data_grid_view') || [];
+    if (props.messageId && discussionsStore.messages) {
+        const msgObj = discussionsStore.messages.find(m => m.id === props.messageId);
+        if (msgObj?.metadata?.ui_data_views) {
+            msgObj.metadata.ui_data_views.forEach(title => {
+                embeddedViews.push({
+                    type: 'data_grid_view',
+                    title: title,
+                    version: msgObj.metadata.version || null
+                });
+            });
+        }
+    }
+
     activeElements.forEach((el, index) => {
         // Add preceding text
         if (el.start > cursor) {
@@ -702,6 +718,16 @@ const messageParts = computed(() => {
     if (cursor < content.length) {
         parts.push({ type: 'content', content: content.substring(cursor), id: `text-${cursor}` });
     }
+
+    // Append embedded spreadsheets to the end of the message parts
+    embeddedViews.forEach((view, idx) => {
+        parts.push({
+            type: 'data_grid_view',
+            title: view.title,
+            version: view.version,
+            id: `datagrid-${idx}-${cursor}`
+        });
+    });
 
     return parts;
 });
@@ -1349,13 +1375,25 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- ── Interactive Form ────────────────────────────────────────── -->
           <template v-else-if="part.type === 'form_ready'">
-             <div class="my-4 p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
-                <InteractiveForm 
-                    :form="part.form" 
-                    :discussion-id="discussionsStore.currentDiscussionId"
-                />
-             </div>
-          </template>
+               <div class="my-4 p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
+                  <InteractiveForm 
+                      :form="part.form" 
+                      :discussion-id="discussionsStore.currentDiscussionId"
+                  />
+               </div>
+            </template>
+
+            <!-- ── Dynamic Multi-Sheet Spreadsheet Data Views ──────────────── -->
+            <template v-else-if="part.type === 'data_grid_view'">
+               <div class="my-6 border dark:border-gray-700 rounded-2xl overflow-hidden shadow-xl bg-white dark:bg-gray-950 h-96">
+                  <InteractiveDataGrid 
+                      :discussionId="discussionsStore.currentDiscussionId"
+                      :title="part.title"
+                      :version="part.version"
+                      class="w-full h-full"
+                  />
+               </div>
+            </template>
 
           <!-- ── Interactive Widget ──────────────────────────────────────── -->
           <template v-else-if="part.type === 'interactive_widget'">

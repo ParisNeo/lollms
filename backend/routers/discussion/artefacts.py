@@ -1382,9 +1382,17 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
+            from urllib.parse import unquote
+            decoded_title = unquote(request.title)
+            try:
+                if "%" in decoded_title:
+                    decoded_title = unquote(decoded_title)
+            except Exception:
+                pass
+
             # We only update the library metadata. The library handles 
             # context injection natively during chat() without modifying the data_zone string.
-            discussion.artefacts.activate(request.title, version=request.version)
+            discussion.artefacts.activate(decoded_title, version=request.version)
             discussion.commit()
             
             raw_artefacts = discussion.list_artefacts()
@@ -1415,8 +1423,16 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
+            from urllib.parse import unquote
+            decoded_title = unquote(request.title)
+            try:
+                if "%" in decoded_title:
+                    decoded_title = unquote(decoded_title)
+            except Exception:
+                pass
+
             # Deactivate in the library metadata only.
-            discussion.artefacts.deactivate(request.title, version=request.version)
+            discussion.artefacts.deactivate(decoded_title, version=request.version)
             discussion.commit()
             
             raw_artefacts = discussion.list_artefacts()
@@ -1453,6 +1469,295 @@ def build_artefacts_router(router: APIRouter):
             owner_username=current_user.username
         )
         return task
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/grid-data")
+    async def get_data_grid_data(
+        discussion_id: str,
+        artefact_title: str,
+        version: Optional[int] = Query(None),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Loads a specific versioned data artifact spreadsheet or SQLite DB."""
+        from urllib.parse import unquote
+        import pandas as pd
+        
+        decoded_title = unquote(artefact_title)
+        try:
+            if "%" in decoded_title:
+                decoded_title = unquote(decoded_title)
+        except Exception:
+            pass
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        active = discussion.get_artefact(title=decoded_title, version=version)
+        
+        ext = Path(decoded_title).suffix.lower()
+        is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
+        
+        if not active:
+            raise HTTPException(status_code=404, detail="Artifact not found.")
+            
+        # Check both potential type keys, with a safe fallback to file extension check
+        art_type = active.get("artefact_type") or active.get("type")
+        if art_type != "data" and not is_data_extension:
+            raise HTTPException(status_code=404, detail="Data artifact not found.")
+
+        current_version = active.get("version", 1)
+        
+        # Use original discussion ID where the file is physically stored on disk
+        source_discussion_id = active.get("discussion_id") or discussion_id
+
+        from backend.session import get_user_discussion_assets_path
+        assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
+        
+        possible_paths = [
+            assets_dir / f"{decoded_title}_consolidated.db",
+            assets_dir / f"{decoded_title}_v{current_version}{ext}",
+            assets_dir / f"{decoded_title}{ext}",
+        ]
+
+        file_path = None
+        for path in possible_paths:
+            if path.exists():
+                file_path = path
+                break
+
+        if not file_path or not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Raw data file missing from workspace. Checked: {possible_paths}")
+
+        try:
+            if ext in (".xlsx", ".xls"):
+                xl = pd.ExcelFile(str(file_path))
+                result = {"type": "excel", "sheets": {}}
+                for sheet in xl.sheet_names:
+                    df = pd.read_excel(str(file_path), sheet_name=sheet).head(100)
+                    df = df.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
+                    result["sheets"][sheet] = {
+                        "columns": list(df.columns),
+                        "rows": df.to_dict(orient="records")
+                    }
+            elif ext in (".db", ".sqlite", ".sqlite3"):
+                import sqlite3
+                conn = sqlite3.connect(str(file_path))
+                cursor = conn.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+                tables = [row[0] for row in cursor.fetchall()]
+                result = {"type": "sqlite", "sheets": {}}
+                for table in tables:
+                    df = pd.read_sql_query(f"SELECT * FROM {table} LIMIT 100;", conn)
+                    df = df.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
+                    result["sheets"][table] = {
+                        "columns": list(df.columns),
+                        "rows": df.to_dict(orient="records")
+                    }
+                conn.close()
+            else:
+                sep = ";" if ext == ".csv" and ";" in file_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0] else ","
+                df = pd.read_csv(str(file_path), sep=sep).head(100)
+                df = df.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
+                result = {
+                    "type": "csv",
+                    "columns": list(df.columns),
+                    "rows": df.to_dict(orient="records")
+                }
+            return result
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to parse dataset: {e}")
+
+    class RawSQLQueryPayload(BaseModel):
+        sql_query: str
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/raw-query")
+    async def execute_raw_sql_query(
+        discussion_id: str,
+        artefact_title: str,
+        payload: RawSQLQueryPayload,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Executes a raw, user-written SQLite SQL query on the active dataset tables."""
+        from urllib.parse import unquote
+        import sqlite3
+        import pandas as pd
+        decoded_title = unquote(artefact_title)
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        active = discussion.get_artefact(title=decoded_title)
+        
+        ext = Path(decoded_title).suffix.lower()
+        is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
+        
+        if not active:
+            raise HTTPException(status_code=404, detail="Artifact not found.")
+            
+        art_type = active.get("artefact_type") or active.get("type")
+        if art_type != "data" and not is_data_extension:
+            raise HTTPException(status_code=404, detail="Data artifact not found.")
+
+        current_version = active.get("version", 1)
+        source_discussion_id = active.get("discussion_id") or discussion_id
+
+        from backend.session import get_user_discussion_assets_path
+        assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
+        file_path = assets_dir / f"{decoded_title}_v{current_version}{ext}"
+        if not file_path.exists():
+            file_path = assets_dir / f"{decoded_title}{ext}"
+
+        if not file_path.exists():
+            raise FileNotFoundError("Raw data file is missing.")
+
+        try:
+            conn = sqlite3.connect(":memory:")
+            if ext in (".db", ".sqlite", ".sqlite3"):
+                disk_conn = sqlite3.connect(str(file_path))
+                disk_conn.backup(conn)
+                disk_conn.close()
+            elif ext in (".xlsx", ".xls"):
+                xl = pd.ExcelFile(str(file_path))
+                for sheet_name in xl.sheet_names:
+                    t_name = sheet_name.replace(" ", "_")
+                    df = pd.read_excel(str(file_path), sheet_name=sheet_name)
+                    df.to_sql(t_name, conn, index=False, if_exists="replace")
+            else:
+                sep = ";" if ext == ".csv" and ";" in file_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0] else ","
+                df = pd.read_csv(str(file_path), sep=sep)
+                df.to_sql(decoded_title.replace(" ", "_"), conn, index=False, if_exists="replace")
+
+            # Execute
+            df_res = pd.read_sql_query(payload.sql_query, conn)
+            conn.close()
+
+            df_res = df_res.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
+
+            return {
+                "success": True,
+                "columns": list(df_res.columns),
+                "rows": df_res.to_dict(orient="records")
+            }
+        except Exception as e:
+            trace_exception(e)
+            return {"success": False, "error": str(e)}
+
+    class AIDataQueryPayload(BaseModel):
+        question: str
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/ai-query")
+    async def execute_ai_data_query(
+        discussion_id: str,
+        artefact_title: str,
+        payload: AIDataQueryPayload,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Translates a natural language question into an SQL query, executes it, and returns the result."""
+        from urllib.parse import unquote
+        import sqlite3
+        import pandas as pd
+        decoded_title = unquote(artefact_title)
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        active = discussion.get_artefact(title=decoded_title)
+
+        ext = Path(decoded_title).suffix.lower()
+        is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
+
+        if not active:
+            raise HTTPException(status_code=404, detail="Artifact not found.")
+
+        art_type = active.get("artefact_type") or active.get("type")
+        if art_type != "data" and not is_data_extension:
+            raise HTTPException(status_code=404, detail="Data artifact not found.")
+
+        current_version = active.get("version", 1)
+        source_discussion_id = active.get("discussion_id") or discussion_id
+
+        from backend.session import get_user_discussion_assets_path
+        assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
+
+        schema_text = active.get("content", "")
+
+        # Ask LLM for the SQL query
+        prompt = (
+            "You are a Senior SQL Developer and Database Specialist.\n"
+            f"Given the database schema for '{decoded_title}' below, translate the user's natural language question into a single, valid, optimized SQLite SQL query.\n\n"
+            "=== DATABASE SCHEMA ===\n"
+            f"{schema_text}\n"
+            "=======================\n\n"
+            f"User Question: \"{payload.question}\"\n\n"
+            "Requirements:\n"
+            "1. Output ONLY the raw SQLite SQL query inside a JSON object.\n"
+            "2. Ensure table names match the Sheet/Table names listed in the schema (spaces replaced by underscores, e.g., 'Order_Details').\n"
+            "3. Do NOT include markdown formatting, explanations, or code blocks outside the JSON."
+        )
+
+        try:
+            lc = get_user_lollms_client(current_user.username)
+            res_json = lc.generate_structured_content(
+                prompt=prompt,
+                schema={
+                    "sql_query": {
+                        "type": "string",
+                        "description": "The valid SQLite SQL query to execute."
+                    },
+                    "explanation": {
+                        "type": "string",
+                        "description": "A brief explanation of how this query computes the requested answer."
+                    }
+                },
+                temperature=0.1
+            )
+
+            if not res_json or not isinstance(res_json, dict):
+                raise ValueError("The AI model failed to produce a structured JSON response.")
+
+            sql_query = res_json.get("sql_query", "").strip()
+            explanation = res_json.get("explanation", "").strip()
+
+            if not sql_query:
+                raise ValueError("LLM failed to generate a valid SQL query.")
+
+            ext = Path(decoded_title).suffix.lower()
+            current_version = active.get("version", 1)
+
+            from backend.session import get_user_discussion_assets_path
+            assets_dir = get_user_discussion_assets_path(owner_username) / discussion_id
+            file_path = assets_dir / f"{decoded_title}_v{current_version}{ext}"
+            if not file_path.exists():
+                file_path = assets_dir / f"{decoded_title}{ext}"
+
+            conn = sqlite3.connect(":memory:")
+            if ext in (".db", ".sqlite", ".sqlite3"):
+                disk_conn = sqlite3.connect(str(file_path))
+                disk_conn.backup(conn)
+                disk_conn.close()
+            elif ext in (".xlsx", ".xls"):
+                xl = pd.ExcelFile(str(file_path))
+                for sheet_name in xl.sheet_names:
+                    t_name = sheet_name.replace(" ", "_")
+                    df = pd.read_excel(str(file_path), sheet_name=sheet_name)
+                    df.to_sql(t_name, conn, index=False, if_exists="replace")
+            else:
+                sep = ";" if ext == ".csv" and ";" in file_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0] else ","
+                df = pd.read_csv(str(file_path), sep=sep)
+                df.to_sql(decoded_title.replace(" ", "_"), conn, index=False, if_exists="replace")
+
+            df_res = pd.read_sql_query(sql_query, conn)
+            conn.close()
+
+            df_res = df_res.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
+
+            return {
+                "success": True,
+                "sql_query": sql_query,
+                "explanation": explanation,
+                "columns": list(df_res.columns),
+                "rows": df_res.to_dict(orient="records")
+            }
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
 
     @router.post("/{discussion_id}/artefacts/import-from-source", response_model=ArtefactAndDataZoneUpdateResponse)
     async def import_artefact_from_source_discussion(

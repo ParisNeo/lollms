@@ -1094,7 +1094,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     </button>
 
                     <!-- Load/Unload Toggle (applies to selected version) -->
-                    <button v-if="!isSavedLibraryItem" @click.stop="toggleLoad" :title="(group.selectedFile || group.latest).is_loaded ? 'Exclude from context' : 'Include in context'" class="cursor-pointer hover:scale-110 transition-transform">
+                    <button v-if="!isSavedLibraryItem" @click.stop="toggleArtefactLoad(group.selectedFile || group.latest)" :title="(group.selectedFile || group.latest).is_loaded ? 'Exclude from context' : 'Include in context'" class="cursor-pointer hover:scale-110 transition-transform">
                         <IconCheckCircle v-if="(group.selectedFile || group.latest).is_loaded" class="w-4 h-4 text-green-500"/>
                         <IconCircle v-else class="w-4 h-4" />
                     </button>

@@ -65,7 +65,7 @@ async def get_user_from_api_key(authorization: Optional[HTTPAuthorizationCredent
 @ollama_v1_router.get("/models")
 async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
     loop = asyncio.get_running_loop()
-    
+
     def _list():
         all_models = []
         active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
@@ -88,19 +88,28 @@ async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session
 
 @ollama_v1_router.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
-    binding_alias, model_name = resolve_model_name(db, request.model)
     loop = asyncio.get_running_loop()
+
+    # Offload potentially blocking database model resolution
+    binding_alias, model_name = await loop.run_in_executor(
+        executor,
+        lambda: resolve_model_name(db, request.model)
+    )
 
     # Wrap client build
     lc = await loop.run_in_executor(
         executor, 
         lambda: build_lollms_client_from_params(user.username, binding_alias, model_name, llm_params={"temperature": request.temperature}, load_llm=True)
     )
-    
+
     messages = list(request.messages)
     if request.personality:
         from backend.db.models.personality import Personality as DBPersonality
-        personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
+        def _fetch_personality():
+            personality = db.query(DBPersonality).filter(DBPersonality.id == request.personality).first()
+            return personality
+
+        personality = await loop.run_in_executor(executor, _fetch_personality)
         if personality:
              messages.insert(0, ChatMessage(role="system", content=personality.prompt_text))
 
