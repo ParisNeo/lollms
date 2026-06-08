@@ -19,7 +19,7 @@ import threading
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 # from fastapi.middleware.gzip import GZipMiddleware # Disabled to improve streaming performance
 from sqlalchemy.orm import Session
@@ -875,5 +875,46 @@ if __name__ == "__main__":
     
     content+=f"[green]Using {workers} Workers[/green]"
     ASCIIColors.panel(content,f"LoLLMs Plateform (v{APP_VERSION})", )
+
+    # --- Dynamic Direct Generation Endpoint for AI Builder ---
+    from pydantic import BaseModel, Field
+    from backend.session import get_current_active_user, UserAuthDetails
+
+    class GenerateTextRequest(BaseModel):
+        prompt: str
+        max_new_tokens: Optional[int] = Field(default=1024, alias="max_new_tokens")
+        temperature: Optional[float] = 0.2
+
+    @app.post("/api/lollms/generate")
+    async def lollms_generate(
+        request: GenerateTextRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        try:
+            user_model_full = current_user.lollms_model_name
+            binding_alias = None
+            model_name = None
+            if user_model_full and '/' in user_model_full:
+                binding_alias, model_name = user_model_full.split('/', 1)
+
+            lc = build_lollms_client_from_params(
+                username=current_user.username,
+                binding_alias=binding_alias,
+                model_name=model_name,
+                load_llm=True
+            )
+
+            # Use asyncio.to_thread to run the blocking generation thread-safely
+            generated_text = await asyncio.to_thread(
+                lc.generate_text,
+                prompt=request.prompt,
+                n_predict=request.max_new_tokens,
+                temperature=request.temperature
+            )
+            return {"generated_text": generated_text}
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=str(e))
 
     uvicorn.run("main:app", host=host_setting, port=int(port_setting), reload=False, workers=workers, timeout_keep_alive=600, **ssl_params)

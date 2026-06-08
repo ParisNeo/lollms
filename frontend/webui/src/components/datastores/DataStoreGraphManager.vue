@@ -73,6 +73,24 @@ const showCodeDrawer = ref(false);
 const sparqlQueryInput = ref('');
 const sparqlResults = ref(null);
 
+// Interactive connection state
+const relationTargetId = ref(null);
+const relationType = ref('relation');
+
+const otherNodesList = computed(() => {
+    if (!cyInstance || !selectedNodeData.value) return [];
+    return cyInstance.nodes().toArray()
+        .filter(n => n.id() !== selectedNodeData.value.id)
+        .map(n => ({ id: n.id(), label: n.data('label'), type: n.data('type') }));
+});
+
+function drawManualRelation() {
+    if (!selectedNodeData.value || !relationTargetId.value) return;
+    addEdgeDirect(relationType.value, selectedNodeData.value.id, relationTargetId.value);
+    relationTargetId.value = null; // Reset selection
+    uiStore.addNotification("Relation link drawn successfully.", "success");
+}
+
 // AI Assistant
 const aiPrompt = ref('');
 const isAIGenerating = ref(false);
@@ -208,8 +226,15 @@ function buildCyStyle(){
 
 async function initCytoscape() {
     if (!cyContainer.value) return;
+
+    // Safety check: destroy previous instances to prevent rendering overlay conflicts
+    if (cyInstance) {
+        cyInstance.destroy();
+        cyInstance = null;
+    }
+
     const cyMod = await loadCytoscape();
-    
+
     cyInstance = cyMod({
         container: cyContainer.value,
         style: buildCyStyle(),
@@ -223,6 +248,7 @@ async function initCytoscape() {
         if (selEl.value.isNode()) {
             selectedNodeData.value = selEl.value.data();
             selectedEdgeData.value = null;
+            relationTargetId.value = null; // Reset relation target on node selection change
         } else {
             selectedEdgeData.value = selEl.value.data();
             selectedNodeData.value = null;
@@ -266,8 +292,8 @@ function addNodeDirect(type, name, parentId = null) {
   const id = `${type}__${name.replace(/\W+/g,'_')}__${Date.now()}`;
   const cfg = typeStyles.value[type] || typeStyles.value.class;
   const dims = nodeDims(name, type);
-  
-  cyInstance.add({
+
+  const node = cyInstance.add({
     group: 'nodes',
     data: {
       id, label: name, type,
@@ -277,11 +303,14 @@ function addNodeDirect(type, name, parentId = null) {
     },
     position: { x: 200 + Math.random() * 200, y: 200 + Math.random() * 200 }
   });
-  
+
   if (parentId) {
       addEdgeDirect('subClassOf', parentId, id);
   }
-  
+
+  // Smoothly center the canvas viewport on the newly created node
+  cyInstance.animate({ center: { eles: node } }, { duration: 300 });
+
   syncOntologyToParams();
 }
 
@@ -1040,6 +1069,50 @@ watch(() => props.store.id, fetchGraph);
                                 <label class="text-xs font-semibold">Description (rdfs:comment)</label>
                                 <textarea :value="selectedNodeData.comment" @input="updateNodeProp('comment', $event.target.value)" rows="3" class="input-field mt-1 text-sm" placeholder="rdfs:comment..."></textarea>
                             </div>
+
+                            <!-- ── [NEW] Manual Relation Connection UI ── -->
+                            <div class="pt-4 border-t dark:border-gray-800 space-y-3">
+                                <h4 class="text-xs font-black uppercase text-gray-400">Connect to another Node</h4>
+
+                                <div v-if="otherNodesList.length > 0">
+                                    <div class="space-y-3">
+                                        <div>
+                                            <label class="text-[10px] font-bold text-gray-500 uppercase">Target Node</label>
+                                            <select v-model="relationTargetId" class="input-field mt-1 text-xs">
+                                                <option :value="null" disabled>-- Select Target Node --</option>
+                                                <option 
+                                                    v-for="node in otherNodesList" 
+                                                    :key="node.id" 
+                                                    :value="node.id"
+                                                >
+                                                    {{ node.label }} ({{ node.type }})
+                                                </option>
+                                            </select>
+                                        </div>
+
+                                        <div>
+                                            <label class="text-[10px] font-bold text-gray-500 uppercase">Relation Type</label>
+                                            <select v-model="relationType" class="input-field mt-1 text-xs">
+                                                <option v-for="(color, type) in EDGE_COLORS" :key="type" :value="type">
+                                                    {{ type }}
+                                                </option>
+                                            </select>
+                                        </div>
+
+                                        <button 
+                                            @click="drawManualRelation" 
+                                            :disabled="!relationTargetId"
+                                            class="btn btn-primary btn-xs w-full py-1.5 h-8 flex items-center justify-center gap-1.5"
+                                        >
+                                            <span>Draw Relation Link</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div v-else class="text-center py-2 text-[10px] text-gray-500 italic">
+                                    Add at least one more node to connect them.
+                                </div>
+                            </div>
+
                             <div class="pt-4 border-t dark:border-gray-800">
                                 <button @click="deleteSelectedElement" class="btn btn-danger btn-xs w-full">Delete Node</button>
                             </div>

@@ -28,6 +28,8 @@ import IconStepStart from '../../../assets/icons/IconStepStart.vue';
 import IconStepEnd from '../../../assets/icons/IconStepEnd.vue';
 import IconInfo from '../../../assets/icons/IconInfo.vue';
 import IconError from '../../../assets/icons/IconError.vue';
+import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
+import IconGlobeAlt from '../../../assets/icons/IconGlobeAlt.vue';
 
 import { useTasksStore } from '../../../stores/tasks';
 import { useDiscussionsStore } from '../../../stores/discussions';
@@ -327,10 +329,10 @@ const parsedStreamingContent = computed(() => {
     else if (match[12]) {
         // --- Raw Inline Widget (Direct Source Mode) ---
         const fullTag = match[12];
-        const matchInline = fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/);
-        const innerContent = matchInline ? matchInline[1].trim() : '';
+        const matchInline = typeof fullTag === 'string' ? fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/) : null;
+        const innerContent = (matchInline && matchInline[1]) ? matchInline[1].trim() : '';
         
-        const titleMatch = fullTag.match(/title=["']([^"']+)["']/);
+        const titleMatch = typeof fullTag === 'string' ? fullTag.match(/title=["']([^"']+)["']/i) : null;
         const title = titleMatch ? titleMatch[1] : 'Interactive Widget';
         
         // If it doesn't have a closing tag, it's still streaming
@@ -457,31 +459,39 @@ const hashString = (str) => {
 
 // Form Parser for InteractiveForm
 function _parse_form_xml(attrs_str, body) {
-    // Robustly extract attributes using a non-greedy regex
+    // Robustly extract attributes using a non-greedy, whitespace-insensitive regex
     const attrs = {};
-    const attrMatch = attrs_str.matchAll(/(\w+)=["']([^"']+)["']/g);
-    for (const match of attrMatch) {
-        attrs[match[1]] = match[2];
+    if (typeof attrs_str === 'string') {
+        const attrMatch = attrs_str.matchAll(/(\w+)\s*=\s*["']([^"']+)["']/g);
+        for (const match of attrMatch) {
+            attrs[match[1]] = match[2];
+        }
     }
 
-    // Extract fields supporting self-closing and block tags (with children like <option>)
-    const fieldRegex = /<field\s+([^>]*?)(?:\/>|>([\s\S]*?)<\/field>)/gi;
-    const fields = [...body.matchAll(fieldRegex)].map(m => {
-        const fieldAttrsStr = m[1];
-        const innerContent = m[2];
-        const fAttrs = {};
-        const fAttrMatch = fieldAttrsStr.matchAll(/(\w+)=["']([^"']*)["']/g);
-        for (const ma of fAttrMatch) {
-            fAttrs[ma[1]] = ma[2];
-        }
-        if (innerContent) {
-            const options = [...innerContent.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)].map(om => om[1].trim());
-            if (options.length > 0) {
-                fAttrs.options = options;
+    // Extract fields supporting self-closing, unclosed, and block tags (with children like <option>)
+    const fields = [];
+    if (typeof body === 'string') {
+        const fieldRegex = /<field\s+([^>]*?)(?:\/?>|>([\s\S]*?)<\/field>)/gi;
+        const matches = [...body.matchAll(fieldRegex)];
+        for (const m of matches) {
+            const fieldAttrsStr = m[1];
+            const innerContent = m[2];
+            const fAttrs = {};
+            if (typeof fieldAttrsStr === 'string') {
+                const fAttrMatch = fieldAttrsStr.matchAll(/(\w+)\s*=\s*["']([^"']*)["']/g);
+                for (const ma of fAttrMatch) {
+                    fAttrs[ma[1]] = ma[2];
+                }
             }
+            if (typeof innerContent === 'string') {
+                const options = [...innerContent.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)].map(om => om[1].trim());
+                if (options.length > 0) {
+                    fAttrs.options = options;
+                }
+            }
+            fields.push(fAttrs);
         }
-        return fAttrs;
-    });
+    }
 
     console.log("[Form Debug] Parsed fields:", fields);
     return { 

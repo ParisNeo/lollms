@@ -28,6 +28,19 @@ const getOptions = (field) => {
         opts = field.value;
     }
 
+    // Handle bracketed python/JSON list formats (e.g. "['Red', 'Green', 'Blue']")
+    if (typeof opts === 'string' && opts.trim().startsWith('[')) {
+        try {
+            const cleaned = opts.trim().replace(/'/g, '"');
+            const parsed = JSON.parse(cleaned);
+            if (Array.isArray(parsed)) {
+                opts = parsed;
+            }
+        } catch (e) {
+            console.warn("Failed to parse options string as JSON array:", e);
+        }
+    }
+
     // Handle Array of Objects or Strings
     if (Array.isArray(opts)) {
         return opts.map(o => {
