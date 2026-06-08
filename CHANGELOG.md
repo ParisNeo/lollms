@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-06-08 14:54]
+
+- chore(build): regenerate frontend dist assets and update backend services
+
 ## [2026-06-08 02:14]
 
 - build(frontend): regenerate distribution assets

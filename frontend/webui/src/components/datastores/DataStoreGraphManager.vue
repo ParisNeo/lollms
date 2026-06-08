@@ -76,6 +76,56 @@ const sparqlResults = ref(null);
 // Interactive connection state
 const relationTargetId = ref(null);
 const relationType = ref('relation');
+const owlFileInputRef = ref(null);
+
+const sparqlQueryMode = ref('SELECT'); // 'SELECT', 'CONSTRUCT', 'DESCRIBE'
+const isFilterActive = ref(false);
+const ontologyElements = ref([]); // Caches the TBox Schema elements on-the-fly
+
+const ontologyClasses = computed(() => {
+    // If we are currently in ontology mode, read directly from the canvas
+    if (cyInstance && viewMode.value === 'ontology') {
+        return cyInstance.nodes()
+            .filter(n => n.data('type') === 'class')
+            .map(n => n.data('label'));
+    }
+    // If not, read from the cached elements array
+    return ontologyElements.value
+        .filter(el => el.group === 'nodes' && el.data?.type === 'class')
+        .map(el => el.data.label);
+});
+
+function addIndividualOfClass(className) {
+    if (!cyInstance) return;
+    
+    const timestamp = Date.now().toString().slice(-4);
+    const instanceName = `${className}_${timestamp}`;
+    
+    // Resolve matching display color based on class name
+    const color = getNodeColor(className, uiStore.currentTheme === 'dark');
+    const dims = nodeDims(instanceName, 'individual');
+    const id = `individual__${instanceName}__${Date.now()}`;
+    
+    const node = cyInstance.add({
+        group: 'nodes',
+        data: {
+            id, 
+            label: instanceName, 
+            type: 'individual',
+            shape: 'ellipse',
+            fill: color + '15', // translucent fill matching the schema class color
+            stroke: color,
+            textColor: uiStore.currentTheme === 'dark' ? '#e2e5f0' : '#111318',
+            iri: baseIRI.value + instanceName,
+            annotations: { "rdf:type": className },
+            ...dims
+        },
+        position: { x: 200 + Math.random() * 200, y: 200 + Math.random() * 200 }
+    });
+    
+    cyInstance.animate({ center: { eles: node } }, { duration: 300 });
+    uiStore.addNotification(`Created individual of type ${className}: ${instanceName}`, 'success');
+}
 
 const otherNodesList = computed(() => {
     if (!cyInstance || !selectedNodeData.value) return [];
@@ -89,6 +139,225 @@ function drawManualRelation() {
     addEdgeDirect(relationType.value, selectedNodeData.value.id, relationTargetId.value);
     relationTargetId.value = null; // Reset selection
     uiStore.addNotification("Relation link drawn successfully.", "success");
+}
+
+function triggerOWLImport() {
+    owlFileInputRef.value?.click();
+}
+
+async function handleOWLImport(event) {
+    const file = event.target.files[0];
+    if (!file || !cyInstance) return;
+
+    try {
+        const text = await file.text();
+        const ext = file.name.split('.').pop().toLowerCase();
+
+        // Clear existing canvas elements
+        cyInstance.elements().remove();
+
+        if (ext === 'ttl' || ext === 'owl' || ext === 'txt') {
+            parseAndLoadTurtle(text);
+        } else {
+            // Fallback: parse as generic XML/RDF
+            parseAndLoadRDFXML(text);
+        }
+
+        runCoseLayout();
+        uiStore.addNotification(`Ontology file '${file.name}' loaded successfully!`, 'success');
+    } catch (e) {
+        console.error(e);
+        uiStore.addNotification("Failed to parse the ontology file.", "error");
+    } finally {
+        event.target.value = '';
+    }
+}
+
+function parseAndLoadTurtle(text) {
+    const lines = text.split('\n');
+    const prefixes = {};
+
+    // Default base IRI
+    let base = baseIRI.value;
+
+    // Parse prefixes and base
+    lines.forEach(line => {
+        const cleanLine = line.trim();
+        if (cleanLine.toLowerCase().startsWith('@prefix') || cleanLine.toLowerCase().startsWith('prefix')) {
+            const match = cleanLine.match(/(?:@prefix|prefix)\s+(\w*):?\s*<([^>]+)>/i);
+            if (match) {
+                const prefix = match[1] || '';
+                const uri = match[2];
+                prefixes[prefix] = uri;
+                if (prefix === '') base = uri;
+            }
+        }
+    });
+
+    baseIRI.value = base;
+
+    // Helper to resolve prefixed values to full IRIs and local names
+    function resolveNode(val) {
+        if (!val) return null;
+        let clean = val.trim();
+        if (clean.startsWith('<') && clean.endsWith('>')) {
+            const uri = clean.slice(1, -1);
+            const name = uri.split(/[#/]/).pop();
+            return { uri, name };
+        }
+        if (clean.includes(':')) {
+            const [prefix, name] = clean.split(':', 2);
+            const ns = prefixes[prefix] || base;
+            return { uri: ns + name, name };
+        }
+        return { uri: base + clean, name: clean };
+    }
+
+    // Process triples
+    let currentSubject = null;
+
+    lines.forEach(line => {
+        let cleanLine = line.trim();
+        if (!cleanLine || cleanLine.startsWith('#') || cleanLine.startsWith('@prefix') || cleanLine.startsWith('prefix')) return;
+
+        // Remove trailing dot if it's the end of a statement
+        const isEnd = cleanLine.endsWith('.');
+        if (isEnd) cleanLine = cleanLine.slice(0, -1).trim();
+
+        const semicolonSplit = cleanLine.split(';');
+        semicolonSplit.forEach((part, partIdx) => {
+            const segment = part.trim();
+            if (!segment) return;
+
+            const words = segment.match(/(?:[^\s"]+|"[^"]*")+/g);
+            if (!words) return;
+
+            let s, p, o;
+            if (partIdx === 0 && words.length >= 3) {
+                s = resolveNode(words[0]);
+                p = words[1];
+                o = words[2];
+                currentSubject = s;
+            } else if (currentSubject && words.length >= 2) {
+                s = currentSubject;
+                p = words[0];
+                o = words[1];
+            } else {
+                return;
+            }
+
+            if (!s || !p || !o) return;
+
+            const pClean = p.toLowerCase();
+            const oRes = resolveNode(o);
+
+            // Ensure subject node is created
+            let sNode = cyInstance.getElementById(`class__${s.name}`) || cyInstance.getElementById(`property__${s.name}`) || cyInstance.getElementById(`individual__${s.name}`);
+            if (sNode.length === 0) {
+                // Default to class, will refine if we see rdf:type individual or property
+                addNodeDirect('class', s.name);
+                sNode = cyInstance.nodes().filter(n => n.data('label') === s.name);
+            }
+
+            if (pClean === 'a' || pClean === 'rdf:type') {
+                const oType = oRes.name.toLowerCase();
+                if (oType === 'class') {
+                    sNode.data('type', 'class');
+                } else if (oType === 'objectproperty') {
+                    sNode.data('type', 'property');
+                } else if (oType === 'datatypeproperty') {
+                    sNode.data('type', 'dataprop');
+                } else if (oType === 'namedindividual') {
+                    sNode.data('type', 'individual');
+                } else if (oType === 'concept') {
+                    sNode.data('type', 'concept');
+                } else {
+                    // It's an individual of some class
+                    sNode.data('type', 'individual');
+                    const targetClassNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                    if (targetClassNode.length > 0) {
+                        addEdgeDirect('type', sNode.id(), targetClassNode.id());
+                    }
+                }
+            } else if (pClean === 'rdfs:subclassof') {
+                let targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                if (targetNode.length === 0) {
+                    addNodeDirect('class', oRes.name);
+                    targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                }
+                addEdgeDirect('subClassOf', sNode.id(), targetNode.id());
+            } else if (pClean === 'rdfs:subpropertyof') {
+                let targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                if (targetNode.length === 0) {
+                    addNodeDirect('property', oRes.name);
+                    targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                }
+                addEdgeDirect('subPropertyOf', sNode.id(), targetNode.id());
+            } else if (pClean === 'rdfs:domain') {
+                let targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                if (targetNode.length === 0) {
+                    addNodeDirect('class', oRes.name);
+                    targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                }
+                addEdgeDirect('domain', sNode.id(), targetNode.id());
+            } else if (pClean === 'rdfs:range') {
+                let targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                if (targetNode.length === 0) {
+                    addNodeDirect('class', oRes.name);
+                    targetNode = cyInstance.nodes().filter(n => n.data('label') === oRes.name);
+                }
+                addEdgeDirect('range', sNode.id(), targetNode.id());
+            } else if (pClean === 'rdfs:label') {
+                sNode.data('rdfsLabel', o.replace(/"/g, ''));
+            } else if (pClean === 'rdfs:comment') {
+                sNode.data('comment', o.replace(/"/g, ''));
+            }
+        });
+    });
+}
+
+function parseAndLoadRDFXML(text) {
+    try {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(text, "text/xml");
+
+        // Simple XML parser looking for Class, ObjectProperty, DatatypeProperty tags
+        const classes = xmlDoc.getElementsByTagName("owl:Class");
+        for (let i = 0; i < classes.length; i++) {
+            const el = classes[i];
+            const about = el.getAttribute("rdf:about") || el.getAttribute("rdf:ID") || '';
+            const name = about.split(/[#/]/).pop();
+            if (name) {
+                addNodeDirect('class', name);
+                const node = cyInstance.nodes().filter(n => n.data('label') === name);
+
+                const labelEl = el.getElementsByTagName("rdfs:label")[0];
+                if (labelEl) node.data('rdfsLabel', labelEl.textContent);
+
+                const commentEl = el.getElementsByTagName("rdfs:comment")[0];
+                if (commentEl) node.data('comment', commentEl.textContent);
+
+                const subClassEl = el.getElementsByTagName("rdfs:subClassOf")[0];
+                if (subClassEl) {
+                    const resource = subClassEl.getAttribute("rdf:resource");
+                    if (resource) {
+                        const parentName = resource.split(/[#/]/).pop();
+                        if (parentName) {
+                            let parentNode = cyInstance.nodes().filter(n => n.data('label') === parentName);
+                            if (parentNode.length === 0) {
+                                addNodeDirect('class', parentName);
+                                parentNode = cyInstance.nodes().filter(n => n.data('label') === parentName);
+                            }
+                            addEdgeDirect('subClassOf', node.id(), parentNode.id());
+                        }
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.error("RDF/XML Parsing failed:", e);
+        throw e;
+    }
 }
 
 // AI Assistant
@@ -265,12 +534,59 @@ async function initCytoscape() {
         applyHighlighting();
     });
 
-    // Populate initial node if empty
+    // --- TBox & ABox UNIFICATION: Ingest both schema and live document data onto the same canvas ---
+    const isDark = uiStore.currentTheme === 'dark';
+
+    // 1. Ingest Data Instances (ABox)
+    if (props.nodes && props.nodes.length > 0) {
+        props.nodes.forEach(n => {
+            const type = 'individual';
+            const label = n.properties?.identifying_value || n.properties?.name || n.properties?.label || n.label || n.id;
+            const color = getNodeColor(n.label, isDark);
+            const dims = nodeDims(label, type);
+
+            cyInstance.add({
+                group: 'nodes',
+                data: {
+                    id: String(n.id),
+                    label: label,
+                    type: type,
+                    shape: 'ellipse',
+                    fill: color + '20', // Translucent tinted fill for instances
+                    stroke: color,
+                    textColor: isDark ? '#e2e5f0' : '#111318',
+                    iri: baseIRI.value + label,
+                    annotations: n.properties || {},
+                    ...dims
+                }
+            });
+        });
+
+        props.edges.forEach(e => {
+            const source = e.source ?? e.source_id ?? e.from ?? e.start ?? e.start_node_id;
+            const target = e.target ?? e.target_id ?? e.to ?? e.end ?? e.end_node_id;
+            if (!source || !target) return;
+
+            cyInstance.add({
+                group: 'edges',
+                data: {
+                    id: e.id,
+                    source: String(source),
+                    target: String(target),
+                    label: e.label || e.type || '',
+                    relType: 'relation',
+                    ec: '#7c8494'
+                }
+            });
+        });
+    }
+
+    // 2. Populate default Initial Schema Node if canvas remains completely empty
     if (cyInstance.elements().length === 0) {
         addNodeDirect('class', 'Entity');
-        runCoseLayout();
     }
-    
+
+    runCoseLayout();
     syncOntologyToParams();
 }
 
@@ -573,43 +889,203 @@ function runSPARQLQuery() {
   const query = sparqlQueryInput.value;
   if (!query) return;
   try {
+      isFilterActive.value = false;
+
+      // Clean query and determine type
       const cleanQuery = query
-        .split('\n')
-        .filter(line => !line.trim().toLowerCase().startsWith('prefix'))
-        .join('\n')
-        .replace(/#.*$/gm, '')
+        .replace(/#.*$/gm, '') // Remove comments
         .replace(/\s+/g, ' ')
         .trim();
 
-      const selectMatch = cleanQuery.match(/SELECT\s+([\s\S]+?)\s+WHERE/i);
-      if (!selectMatch) throw new Error("Missing SELECT clause");
-      const selectVars = selectMatch[1].trim().split(/\s+/).map(v => v.trim());
+      const isConstruct = /CONSTRUCT\s*\{/i.test(cleanQuery);
+      const isDescribe = /DESCRIBE\s+/i.test(cleanQuery);
 
-      const whereMatch = cleanQuery.match(/WHERE\s*\{([\s\S]+?)\}/i);
-      if (!whereMatch) throw new Error("Missing WHERE clause block");
-      const whereBody = whereMatch[1].trim();
+      if (isConstruct) {
+          sparqlQueryMode.value = 'CONSTRUCT';
+          executeConstructQuery(cleanQuery);
+      } else if (isDescribe) {
+          sparqlQueryMode.value = 'DESCRIBE';
+          executeDescribeQuery(cleanQuery);
+      } else {
+          sparqlQueryMode.value = 'SELECT';
+          executeSelectQuery(cleanQuery);
+      }
+  } catch (err) {
+      uiStore.addNotification(`SPARQL Error: ${err.message}`, 'error');
+  }
+}
 
-      const patterns = [];
-      const rawPatterns = whereBody.split(/\.(?=(?:[^"]|"[^"]*")*$)/);
-      rawPatterns.forEach(pat => {
+function getOntologyTriples() {
+    if (!cyInstance) return [];
+    const triples = [];
+
+    // Add Node type triples (e.g. :Main a owl:Class)
+    cyInstance.nodes().forEach(node => {
+        const label = node.data('label');
+        const type = node.data('type') || 'class';
+
+        // Map individual classes natively if tagged in annotations
+        if (type === 'individual' && node.data('annotations')?.['rdf:type']) {
+            triples.push({ s: `:${label}`, p: 'rdf:type', o: `:${node.data('annotations')['rdf:type']}`, elementId: node.id() });
+        } else {
+            triples.push({ s: `:${label}`, p: 'rdf:type', o: `owl:${type.charAt(0).toUpperCase() + type.slice(1)}`, elementId: node.id() });
+        }
+
+        if (node.data('rdfsLabel')) {
+            triples.push({ s: `:${label}`, p: 'rdfs:label', o: `"${node.data('rdfsLabel')}"`, elementId: node.id() });
+        }
+        if (node.data('comment')) {
+            triples.push({ s: `:${label}`, p: 'rdfs:comment', o: `"${node.data('comment')}"`, elementId: node.id() });
+        }
+    });
+
+    // Add Edge triples (e.g. :Main rdfs:subClassOf :Entity)
+    cyInstance.edges().forEach(edge => {
+        const src = cyInstance.getElementById(edge.data('source')).data('label');
+        const tgt = cyInstance.getElementById(edge.data('target')).data('label');
+        const rel = edge.data('label') || 'relation';
+
+        triples.push({ s: `:${src}`, p: `rdfs:${rel}`, o: `:${tgt}`, elementId: edge.id() });
+    });
+
+    return triples;
+}
+
+function executeSelectQuery(query) {
+    const selectMatch = query.match(/SELECT\s+([\s\S]+?)\s+WHERE/i);
+    if (!selectMatch) throw new Error("Missing SELECT clause");
+    const selectVars = selectMatch[1].trim().split(/\s+/).map(v => v.trim());
+
+    const whereMatch = query.match(/WHERE\s*\{([\s\S]+?)\}/i);
+    if (!whereMatch) throw new Error("Missing WHERE clause block");
+    const whereBody = whereMatch[1].trim();
+
+    const patterns = parseTriplePatterns(whereBody);
+    const db = getOntologyTriples();
+    const rows = evaluatePatterns(patterns, db, selectVars);
+
+    sparqlResults.value = { vars: selectVars, rows, matchedElementIds: [] };
+}
+
+function executeConstructQuery(query) {
+    const constructMatch = query.match(/CONSTRUCT\s*\{([\s\S]+?)\}\s*WHERE\s*\{([\s\S]+?)\}/i);
+    if (!constructMatch) throw new Error("Malformed CONSTRUCT query");
+
+    const templateBody = constructMatch[1].trim();
+    const whereBody = constructMatch[2].trim();
+
+    const templatePatterns = parseTriplePatterns(templateBody);
+    const wherePatterns = parseTriplePatterns(whereBody);
+
+    // Extract all variables used in template and where
+    const allVars = new Set();
+    templatePatterns.forEach(p => {
+        if (p.s.startsWith('?')) allVars.add(p.s);
+        if (p.p.startsWith('?')) allVars.add(p.p);
+        if (p.o.startsWith('?')) allVars.add(p.o);
+    });
+    wherePatterns.forEach(p => {
+        if (p.s.startsWith('?')) allVars.add(p.s);
+        if (p.p.startsWith('?')) allVars.add(p.p);
+        if (p.o.startsWith('?')) allVars.add(p.o);
+    });
+
+    const db = getOntologyTriples();
+    const matches = evaluatePatterns(wherePatterns, db, Array.from(allVars));
+
+    // Bind template patterns with matched solutions to build the subgraph
+    const subgraphTriples = [];
+    const matchedElementIds = new Set();
+
+    matches.forEach(solution => {
+        templatePatterns.forEach(pat => {
+            const s = pat.s.startsWith('?') ? solution[pat.s] : pat.s;
+            const p = pat.p.startsWith('?') ? solution[pat.p] : pat.p;
+            const o = pat.o.startsWith('?') ? solution[pat.o] : pat.o;
+
+            if (s && p && o) {
+                subgraphTriples.push({ s, p, o });
+
+                // Track source & target element IDs to draw them
+                const sLabel = s.startsWith(':') ? s.slice(1) : s;
+                const oLabel = o.startsWith(':') ? o.slice(1) : o;
+
+                const sNode = cyInstance.nodes().filter(n => n.data('label') === sLabel);
+                const oNode = cyInstance.nodes().filter(n => n.data('label') === oLabel);
+
+                if (sNode.length) matchedElementIds.add(sNode.id());
+                if (oNode.length) matchedElementIds.add(oNode.id());
+            }
+        });
+        if (solution._elementIds) {
+            solution._elementIds.forEach(id => matchedElementIds.add(id));
+        }
+    });
+
+    sparqlResults.value = { 
+        vars: ['Subject', 'Predicate', 'Object'], 
+        rows: subgraphTriples.map(t => ({ 'Subject': t.s, 'Predicate': t.p, 'Object': t.o })),
+        matchedElementIds: Array.from(matchedElementIds)
+    };
+
+    uiStore.addNotification(`CONSTRUCT matched subgraph with ${subgraphTriples.length} triples. Click 'Filter Canvas' to isolate.`, 'info');
+}
+
+function executeDescribeQuery(query) {
+    const describeMatch = query.match(/DESCRIBE\s+(\?\w+)\s*WHERE\s*\{([\s\S]+?)\}/i);
+    if (!describeMatch) throw new Error("Malformed DESCRIBE query");
+
+    const targetVar = describeMatch[1].trim();
+    const whereBody = describeMatch[2].trim();
+
+    const wherePatterns = parseTriplePatterns(whereBody);
+    const db = getOntologyTriples();
+    const matches = evaluatePatterns(wherePatterns, db, [targetVar]);
+
+    const targetValues = new Set(matches.map(sol => sol[targetVar]).filter(Boolean));
+    const subgraphTriples = db.filter(t => targetValues.has(t.s) || targetValues.has(t.o));
+    const matchedElementIds = new Set(subgraphTriples.map(t => t.elementId).filter(Boolean));
+
+    subgraphTriples.forEach(t => {
+        const sLabel = t.s.startsWith(':') ? t.s.slice(1) : t.s;
+        const oLabel = t.o.startsWith(':') ? t.o.slice(1) : t.o;
+        const sNode = cyInstance.nodes().filter(n => n.data('label') === sLabel);
+        const oNode = cyInstance.nodes().filter(n => n.data('label') === oLabel);
+        if (sNode.length) matchedElementIds.add(sNode.id());
+        if (oNode.length) matchedElementIds.add(oNode.id());
+    });
+
+    sparqlResults.value = {
+        vars: ['Subject', 'Predicate', 'Object'],
+        rows: subgraphTriples.map(t => ({ 'Subject': t.s, 'Predicate': t.p, 'Object': t.o })),
+        matchedElementIds: Array.from(matchedElementIds)
+    };
+}
+
+function parseTriplePatterns(bodyText) {
+    const patterns = [];
+    const rawPatterns = bodyText.split(/\.(?=(?:[^"]|"[^"]*")*$)/);
+    rawPatterns.forEach(pat => {
         const parts = pat.trim().match(/(?:[^\s"]+|"[^"]*")+/g);
         if (parts && parts.length >= 3) {
-          patterns.push({ s: parts[0], p: parts[1], o: parts[2] });
+            patterns.push({ s: parts[0], p: parts[1], o: parts[2] });
         }
-      });
+    });
+    return patterns;
+}
 
-      const db = getOntologyTriples();
-      const results = [];
+function evaluatePatterns(patterns, db, selectVars) {
+    const results = [];
 
-      function matchPattern(patternIdx, env, matchedIds) {
+    function matchPattern(patternIdx, env, matchedIds) {
         if (patternIdx === patterns.length) {
-          const resultRow = {};
-          selectVars.forEach(v => {
-            resultRow[v] = env[v] !== undefined ? env[v] : '';
-          });
-          resultRow._elementIds = Array.from(matchedIds);
-          results.push(resultRow);
-          return;
+            const resultRow = {};
+            selectVars.forEach(v => {
+                resultRow[v] = env[v] !== undefined ? env[v] : '';
+            });
+            resultRow._elementIds = Array.from(matchedIds);
+            results.push(resultRow);
+            return;
         }
 
         const pat = patterns[patternIdx];
@@ -618,56 +1094,74 @@ function runSPARQLQuery() {
         const oVal = pat.o.startsWith('?') ? env[pat.o] : pat.o;
 
         for (const triple of db) {
-          const newEnv = { ...env };
+            const newEnv = { ...env };
 
-          if (pat.s.startsWith('?')) {
-            if (sVal !== undefined && sVal !== triple.s) continue;
-            newEnv[pat.s] = triple.s;
-          } else {
-            if (pat.s !== triple.s) continue;
-          }
+            if (pat.s.startsWith('?')) {
+                if (sVal !== undefined && sVal !== triple.s) continue;
+                newEnv[pat.s] = triple.s;
+            } else {
+                if (pat.s !== triple.s) continue;
+            }
 
-          if (pat.p.startsWith('?')) {
-            if (pVal !== undefined && pVal !== triple.p) continue;
-            newEnv[pat.p] = triple.p;
-          } else {
-            if (pat.p !== triple.p) continue;
-          }
+            if (pat.p.startsWith('?')) {
+                if (pVal !== undefined && pVal !== triple.p) continue;
+                newEnv[pat.p] = triple.p;
+            } else {
+                if (pat.p !== triple.p) continue;
+            }
 
-          if (pat.o.startsWith('?')) {
-            if (oVal !== undefined && oVal !== triple.o) continue;
-            newEnv[pat.o] = triple.o;
-          } else {
-            if (pat.o !== triple.o) continue;
-          }
+            if (pat.o.startsWith('?')) {
+                if (oVal !== undefined && oVal !== triple.o) continue;
+                newEnv[pat.o] = triple.o;
+            } else {
+                if (pat.o !== triple.o) continue;
+            }
 
-          const nextMatched = new Set(matchedIds);
-          if (triple.elementId) {
-            nextMatched.add(triple.elementId);
-          }
+            const nextMatched = new Set(matchedIds);
+            if (triple.elementId) {
+                nextMatched.add(triple.elementId);
+            }
 
-          matchPattern(patternIdx + 1, newEnv, nextMatched);
+            matchPattern(patternIdx + 1, newEnv, nextMatched);
         }
-      }
+    }
 
-      matchPattern(0, {}, new Set());
+    matchPattern(0, {}, new Set());
 
-      const uniqueResults = [];
-      const seen = new Set();
-      results.forEach(row => {
+    // Deduplicate solutions
+    const uniqueResults = [];
+    const seen = new Set();
+    results.forEach(row => {
         const temp = { ...row };
         delete temp._elementIds;
         const str = JSON.stringify(temp);
         if (!seen.has(str)) {
-          seen.add(str);
-          uniqueResults.push(row);
+            seen.add(str);
+            uniqueResults.push(row);
         }
-      });
+    });
 
-      sparqlResults.value = { vars: selectVars, rows: uniqueResults };
-  } catch (err) {
-      uiStore.addNotification(`SPARQL Query error: ${err.message}`, 'error');
-  }
+    return uniqueResults;
+}
+
+function toggleCanvasFilter() {
+    if (!cyInstance || !sparqlResults.value?.matchedElementIds) return;
+
+    isFilterActive.value = !isFilterActive.value;
+
+    if (isFilterActive.value) {
+        const activeIds = new Set(sparqlResults.value.matchedElementIds);
+        cyInstance.elements().forEach(el => {
+            if (!activeIds.has(el.id())) {
+                el.addClass('hidden-element');
+            } else {
+                el.removeClass('hidden-element');
+            }
+        });
+        uiStore.addNotification("Canvas filtered to matched SPARQL subgraph.", "info");
+    } else {
+        cyInstance.elements().removeClass('hidden-element');
+    }
 }
 
 function selectSPARQLRow(idx) {
@@ -911,6 +1405,38 @@ watch(() => props.store.id, fetchGraph);
                     </div>
                 </div>
 
+                <!-- Type Selector Quick Actions (Knowledge Graph mode) -->
+                <div v-else class="space-y-4">
+                    <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">Graph Instances</h3>
+                    <div class="flex flex-col gap-1.5">
+                        <!-- Generic Individual Spawner -->
+                        <button @click="addNodeDirect('individual', 'Entity_' + Date.now().toString().slice(-4))" class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="flex items-center gap-2">
+                                <span class="w-2.5 h-2.5 rounded-full bg-[#94a3b8]"></span>
+                                Generic Individual
+                            </span>
+                            <span class="text-[10px] opacity-50">+ Add</span>
+                        </button>
+
+                        <!-- Dynamic Class-Specific Spawner Buttons -->
+                        <button 
+                            v-for="className in ontologyClasses" 
+                            :key="className"
+                            @click="addIndividualOfClass(className)" 
+                            class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-gray-700 border border-transparent hover:border-emerald-500/20"
+                        >
+                            <span class="flex items-center gap-2">
+                                <span 
+                                    class="w-2.5 h-2.5 rounded-full" 
+                                    :style="{ backgroundColor: getNodeColor(className, uiStore.currentTheme === 'dark') }"
+                                ></span>
+                                Individual ({{ className }})
+                            </span>
+                            <span class="text-[10px] opacity-50">+ Add</span>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- LLM Model Config -->
                 <div class="p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 space-y-3">
                     <label class="block text-[10px] font-black uppercase tracking-widest text-gray-400">Generation Model</label>
@@ -1014,7 +1540,16 @@ watch(() => props.store.id, fetchGraph);
                             <div class="w-1/2 flex flex-col p-3 gap-2">
                                 <div class="flex justify-between items-center">
                                     <span class="text-[10px] font-black uppercase text-gray-400">Playground Query</span>
-                                    <button @click="runSPARQLQuery" class="btn btn-primary btn-xs px-4 h-7">Run</button>
+                                    <div class="flex gap-1.5">
+                                        <button 
+                                            v-if="sparqlResults?.matchedElementIds?.length > 0"
+                                            @click="toggleCanvasFilter" 
+                                            :class="['btn btn-xs px-3 h-7 font-bold', isFilterActive ? 'btn-danger' : 'btn-secondary']"
+                                        >
+                                            {{ isFilterActive ? 'Clear Filter' : 'Filter Canvas' }}
+                                        </button>
+                                        <button @click="runSPARQLQuery" class="btn btn-primary btn-xs px-4 h-7">Run</button>
+                                    </div>
                                 </div>
                                 <textarea v-model="sparqlQueryInput" class="grow w-full bg-white dark:bg-gray-950 p-2 font-mono text-xs rounded border dark:border-gray-800 outline-none resize-none"></textarea>
                             </div>
@@ -1128,7 +1663,31 @@ watch(() => props.store.id, fetchGraph);
                                 <button @click="deleteSelectedElement" class="btn btn-danger btn-xs w-full">Delete Edge Relation</button>
                             </div>
                         </div>
-                        <div v-else class="text-center py-20 text-gray-400 italic text-xs">Select elements on canvas to configure schema values.</div>
+                        <div v-else class="space-y-4">
+                            <h3 class="text-sm font-black uppercase text-gray-400">Ontology Settings</h3>
+                            <div>
+                                <label class="text-xs font-semibold">Ontology Label</label>
+                                <input v-model="ontoLabel" type="text" class="input-field mt-1 text-sm" @input="syncOntologyToParams">
+                            </div>
+                            <div>
+                                <label class="text-xs font-semibold">Base IRI Namespace</label>
+                                <input v-model="baseIRI" type="text" class="input-field mt-1 text-xs font-mono" @input="syncOntologyToParams">
+                            </div>
+                            <div>
+                                <label class="text-xs font-semibold">Ontology URI</label>
+                                <input v-model="ontoIRI" type="text" class="input-field mt-1 text-xs font-mono" @input="syncOntologyToParams">
+                            </div>
+
+                            <div class="pt-4 border-t dark:border-gray-800 space-y-3">
+                                <h4 class="text-xs font-black uppercase text-gray-400">Import Schema File</h4>
+                                <p class="text-[10px] text-gray-500 leading-normal">Load a local Turtle (.ttl), RDF/XML (.rdf), or OWL file to parse and visualize it.</p>
+                                <input type="file" ref="owlFileInputRef" class="hidden" accept=".ttl,.owl,.rdf,.xml" @change="handleOWLImport">
+                                <button @click="triggerOWLImport" class="btn btn-secondary btn-xs w-full py-1.5 h-8 flex items-center justify-center gap-1.5">
+                                    <IconArrowUpTray class="w-4 h-4"/>
+                                    <span>Load OWL / Turtle file</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Tab: Visual Customization -->

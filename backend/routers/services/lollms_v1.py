@@ -220,7 +220,22 @@ async def detokenize_tokens(request: DetokenizeRequest, user: DBUser = Depends(g
 async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(get_user_for_lollms_service), db: Session = Depends(get_db)):
     alias, name = resolve_model_name(db, request.model)
     loop = asyncio.get_running_loop()
-    
+
+    # Check alias configuration for context size override (forced by admin)
+    binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == alias).first()
+    if binding:
+        model_aliases = binding.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception:
+                model_aliases = {}
+
+        alias_info = model_aliases.get(name)
+        # If alias exists and has a context size set, use it preferentially
+        if alias_info and 'ctx_size' in alias_info and alias_info['ctx_size']:
+             return ContextSizeResponse(context_size=int(alias_info['ctx_size']))
+
     def _get_ctx_size():
         lc = build_lollms_client_from_params(user.username, alias, name, load_llm=True)
         context_size = lc.get_ctx_size(name)
