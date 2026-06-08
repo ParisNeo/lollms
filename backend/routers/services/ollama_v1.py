@@ -64,6 +64,21 @@ async def get_user_from_api_key(authorization: Optional[HTTPAuthorizationCredent
 
 @ollama_v1_router.get("/models")
 async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
+    # --- FORCE MODEL MODE FOR LISTING ---
+    force_model_mode = settings.get("force_model_mode", "disabled")
+    forced_model = settings.get("force_model_name")
+    if force_model_mode == "force_always" and forced_model:
+        return {
+            "object": "list",
+            "data": [{
+                "id": forced_model,
+                "name": forced_model,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "lollms"
+            }]
+        }
+
     loop = asyncio.get_running_loop()
 
     def _list():

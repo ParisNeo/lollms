@@ -1125,12 +1125,23 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                          <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
                         <DropdownSubmenu title="Add Document" icon="file-text" collection="ui">
                             <div class="p-1 min-w-[250px]">
-                                <button @click="triggerFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
+                                <button @click="triggerFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text</span></button>
                                 <button @click="triggerFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
-                                <button @click="triggerFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
-                                <button @click="triggerFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
-                                <button @click="triggerFileUpload('ocr')" class="menu-item"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision Transcript)</span></button>
-                                <button @click="triggerFileUpload('data')" class="menu-item border-t dark:border-gray-700 mt-1 pt-2"><IconDatabase class="w-4 h-4 mr-3 text-green-500" /> <span>Data / Spreadsheet</span></button>
+                                <button @click="triggerFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
+                                <button @click="triggerFileUpload('ocr')" class="menu-item"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR</span></button>
+                                <button @click="triggerFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images</span></button>
+                            </div>
+                        </DropdownSubmenu>
+                        <DropdownSubmenu title="Add Data" icon="database" collection="ui">
+                            <div class="p-1 min-w-[320px]">
+                                <button @click="triggerFileUpload('data')" class="menu-item">
+                                    <IconDatabase class="w-4 h-4 mr-3 text-green-500" />
+                                    <span>Data Interface (Spreadsheet / SQLite DB Tables)</span>
+                                </button>
+                                <button @click="triggerFileUpload('data_bundle')" class="menu-item">
+                                    <IconFolder class="w-4 h-4 mr-3 text-yellow-500" />
+                                    <span>Folder Bundle (Consolidates all data files in folder)</span>
+                                </button>
                             </div>
                         </DropdownSubmenu>
                         <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>

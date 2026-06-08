@@ -193,8 +193,14 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                     }
 
         user_model_full = db_user.lollms_model_name
+
+        force_model_mode = settings.get("force_model_mode", "disabled")
+        forced_model = settings.get("force_model_name")
+        if force_model_mode == "force_always" and forced_model:
+            user_model_full = forced_model
+
         session = user_sessions[username]
-        
+
         if session.get("lollms_model_name") != user_model_full:
             session["lollms_model_name"] = user_model_full
 
@@ -548,14 +554,26 @@ def build_lollms_client_from_params(
         user_model_full = session.get("lollms_model_name") or user_db.lollms_model_name
 
         if load_llm:
-            # If a model_name is provided, attempt to resolve it through the central aliasing engine
-            if model_name:
-                try:
-                    resolved_alias, resolved_model = resolve_model_name(db, model_name, fallback_to_default=False)
-                    binding_alias = resolved_alias
-                    model_name = resolved_model
-                except Exception:
-                    pass
+            # --- FORCE MODEL ENFORCEMENT ---
+            force_model_mode = settings.get("force_model_mode", "disabled")
+            forced_model = settings.get("force_model_name")
+
+            if force_model_mode == "force_always" and forced_model:
+                user_model_full = forced_model
+                if '/' in forced_model:
+                    binding_alias, model_name = forced_model.split('/', 1)
+                else:
+                    binding_alias = None
+                    model_name = forced_model
+            else:
+                # If a model_name is provided, attempt to resolve it through the central aliasing engine
+                if model_name:
+                    try:
+                        resolved_alias, resolved_model = resolve_model_name(db, model_name, fallback_to_default=False)
+                        binding_alias = resolved_alias
+                        model_name = resolved_model
+                    except Exception:
+                        pass
 
             if user_model_full:
                 target_binding_alias = binding_alias
@@ -1020,6 +1038,8 @@ def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], O
 def invalidate_model_cache(db: Session):
     db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").delete()
     db.commit()
+    with _registry_lock:
+        _global_client_registry.clear()
 
 
 def resolve_model_name(db: Session, requested_model: str, fallback_to_default: bool = True) -> Tuple[str, str]:

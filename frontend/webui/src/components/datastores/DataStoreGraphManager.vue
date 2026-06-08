@@ -1,11 +1,16 @@
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue';
+import { ref, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent, nextTick } from 'vue';
 import { useDataStore } from '../../stores/data';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { useTasksStore } from '../../stores/tasks';
 import { storeToRefs } from 'pinia';
+import apiClient from '../../services/api';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
+import JsonRenderer from '../ui/JsonRenderer.vue';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
+
+// Icon imports
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
@@ -14,7 +19,7 @@ import IconSave from '../../assets/icons/IconSave.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconPlay from '../../assets/icons/IconPlayCircle.vue';
 
-// Async import for interactive graph to avoid initial load block
+// Async import for Interactive Graph Viewer
 const InteractiveGraphViewer = defineAsyncComponent({
   loader: () => import('./InteractiveGraphViewer.vue'),
   loadingComponent: null,
@@ -41,75 +46,691 @@ const tasksStore = useTasksStore();
 const { user } = storeToRefs(authStore);
 const { availableLLMModelsGrouped } = storeToRefs(dataStore);
 
+const isComponentMounted = ref(true);
+const viewMode = ref('graph'); // 'graph' or 'ontology'
+
+// --- Graph Visualization State ---
 const graphViewer = ref(null);
 const graphStats = ref({ nodes: 0, edges: 0 });
 const graphData = ref({ nodes: [], edges: [] });
 const isLoadingGraph = ref(false);
-const ontologyFileInput = ref(null);
-const isComponentMounted = ref(true);
-const viewMode = ref('graph'); // 'graph' or 'ontology'
 
-onBeforeUnmount(() => {
-    isComponentMounted.value = false;
-});
-const ontologyEditorMode = ref('edit'); // 'edit' or 'view'
+// --- Ontology Designer State ---
+const cyContainer = ref(null);
+let cyInstance = null;
+const baseIRI = ref('http://example.org/onto#');
+const ontoIRI = ref('http://example.org/onto');
+const ontoLabel = ref('Untitled');
+const curCT = ref('turtle'); // turtle, jsonld, skos, manchester, rdfxml, sparql
+const curIT = ref('d'); // details, style, annotations, ai
+const selEl = ref(null);
+const selectedNodeData = ref(null);
+const selectedEdgeData = ref(null);
+const hideOrphans = ref(false);
+const highlightConnectionsMode = ref(false);
+const showCodeDrawer = ref(false);
 
-const defaultOntology = `@prefix : <http://lollms.com/ontology#> .
-@prefix owl: <http://www.w3.org/2002/07/owl#> .
-@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
-@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+const sparqlQueryInput = ref('');
+const sparqlResults = ref(null);
 
-:MainConcept rdf:type owl:Class ;
-             rdfs:label "Base Entity" .
+// AI Assistant
+const aiPrompt = ref('');
+const isAIGenerating = ref(false);
 
-:relatedTo rdf:type owl:ObjectProperty ;
-           rdfs:domain :MainConcept ;
-           rdfs:range :MainConcept .`;
-
+const selectedFullModel = ref('');
 const generationParams = ref({
     model_binding: '',
     model_name: '',
     chunk_size: 2048,
     overlap_size: 256,
-    ontology: defaultOntology
+    ontology: ''
 });
 
-const selectedFullModel = ref('');
-const query = ref('');
-const queryResults = ref([]);
-const isQuerying = ref(false);
+// Per-type visual config
+const typeStyles = ref({
+  class:      { shape:'ellipse',         fill:'#1a1730', stroke:'#7c6ff7', textColor:'#b3abfa', size:110 },
+  property:   { shape:'round-rectangle', fill:'#0e2424', stroke:'#2dd4bf', textColor:'#7de8df', size:130 },
+  dataprop:   { shape:'round-rectangle', fill:'#241d0a', stroke:'#fbbf24', textColor:'#fcd34d', size:130 },
+  individual: { shape:'ellipse',         fill:'#0e2318', stroke:'#4ade80', textColor:'#86efac', size:110 },
+  concept:    { shape:'hexagon',         fill:'#240e1c', stroke:'#f472b6', textColor:'#f9a8d4', size:120 },
+});
 
-const selectedNode = ref(null);
-const selectedEdge = ref(null);
+const EDGE_COLORS = {
+  subClassOf:'#7c6ff7', equivalentClass:'#e879f9', disjointWith:'#f87171',
+  subPropertyOf:'#2dd4bf', domain:'#fbbf24', range:'#fb923c',
+  type:'#4ade80', relation:'#7c8494', broader:'#f472b6', narrower:'#f472b6',
+};
 
-const ontologyLanguage = ref('json');
-const presets = ref([]);
-const selectedPreset = ref(null);
+const SHAPES = [
+  {id:'ellipse',label:'Ellipse'},
+  {id:'round-rectangle',label:'Rect'},
+  {id:'rectangle',label:'Sharp Rect'},
+  {id:'diamond',label:'Diamond'},
+  {id:'hexagon',label:'Hexagon'},
+  {id:'pentagon',label:'Pentagon'},
+  {id:'triangle',label:'Triangle'},
+  {id:'barrel',label:'Barrel'},
+];
 
-const ontologyAsTag = computed(() => `<owl>${generationParams.value.ontology}</owl>`);
+const PALETTE = [
+  {c:'#7c6ff7',bg:'#1a1730'},{c:'#2dd4bf',bg:'#0e2424'},{c:'#4ade80',bg:'#0e2318'},
+  {c:'#fbbf24',bg:'#241d0a'},{c:'#f87171',bg:'#240e0e'},{c:'#f472b6',bg:'#240e1c'},
+  {c:'#38bdf8',bg:'#0c1e2a'},{c:'#fb923c',bg:'#221408'},{c:'#a3e635',bg:'#121e0a'},
+  {c:'#e879f9',bg:'#21092a'},{c:'#94a3b8',bg:'#161b22'},{c:'#fde68a',bg:'#221e0a'},
+];
 
-// [FIX] Persistence implementation
-watch(() => generationParams.value.ontology, (newCode) => {
-    if (props.store?.id) {
-        dataStore.persistOntology(props.store.id, newCode);
+function loadCytoscape() {
+    return new Promise((resolve) => {
+        if (window.cytoscape) {
+            resolve(window.cytoscape);
+            return;
+        }
+        const script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.28.1/cytoscape.min.js';
+        script.onload = () => resolve(window.cytoscape);
+        document.head.appendChild(script);
+    });
+}
+
+function nodeDims(label, type){
+  const cfg = typeStyles.value[type] || typeStyles.value.class;
+  const baseSize = cfg.size;
+  const chars = (label||'').length;
+  const minW = baseSize;
+  const perChar = 7.5;
+  const labW = chars * perChar + 28;
+  const w = Math.max(minW, labW);
+  const wrapCols = Math.floor(w / 8);
+  const lines = Math.ceil(chars / Math.max(wrapCols, 1));
+  const h = Math.max(cfg.shape === 'ellipse' ? 48 : 40, lines * 18 + 16);
+  const tw = w - 16;
+  const fs = chars > 18 ? 11 : 12;
+  return { w: Math.round(w), h: Math.round(h), tw: Math.round(tw), fs };
+}
+
+function buildCyStyle(){
+  const isDark = uiStore.currentTheme === 'dark';
+  const labelColor = isDark ? '#e2e5f0' : '#111318';
+  
+  return [
+    { selector:'node', style:{
+        'shape':'data(shape)',
+        'width':'data(w)',
+        'height':'data(h)',
+        'background-color':'data(fill)',
+        'border-color':'data(stroke)',
+        'border-width':1.5,
+        'label':'data(label)',
+        'color': 'data(textColor)',
+        'font-family':'"DM Sans",sans-serif',
+        'font-size':'data(fs)',
+        'font-weight':500,
+        'text-valign':'center',
+        'text-halign':'center',
+        'text-wrap':'wrap',
+        'text-max-width':'data(tw)',
+        'text-overflow-wrap':'anywhere',
+        'min-zoomed-font-size':6,
+        'transition-property': 'background-color, border-color, opacity',
+        'transition-duration': '0.18s'
+    }},
+    { selector:'node:selected', style:{
+        'border-width':2.5,
+        'border-color':'#ffffff',
+        'overlay-opacity':0.06,
+    }},
+    { selector:'edge', style:{
+        'width':1.5,
+        'line-color':'data(ec)',
+        'target-arrow-color':'data(ec)',
+        'target-arrow-shape':'triangle',
+        'curve-style':'bezier',
+        'label':'data(label)',
+        'font-size':9,
+        'color':'#5e6680',
+        'text-background-color': isDark ? '#0b0d12' : '#ffffff',
+        'text-background-opacity':1,
+        'text-background-padding':'3px',
+        'font-family':'"DM Sans",sans-serif',
+        'edge-text-rotation':'autorotate',
+        'min-zoomed-font-size':6,
+    }},
+    { selector:'edge[dashed]', style:{'line-style':'dashed','line-dash-pattern':[6,3]}},
+    { selector:'edge:selected', style:{'line-color':'#ffffff','target-arrow-color':'#ffffff','overlay-opacity':0.08}},
+    { selector:'.hidden-element', style:{'display':'none'}},
+    { selector:'.orphan-hidden', style:{'display':'none'}},
+    { selector:'node.dimmed', style:{'opacity':0.15, 'events':'no'}},
+    { selector:'edge.dimmed', style:{'opacity':0.15, 'events':'no'}},
+    { selector:'node.highlighted-node', style:{'border-width':3.5, 'border-color':'#ffffff'}},
+    { selector:'edge.highlighted-edge', style:{'width':3, 'line-color':'#ffffff', 'target-arrow-color':'#ffffff'}},
+  ];
+}
+
+async function initCytoscape() {
+    if (!cyContainer.value) return;
+    const cyMod = await loadCytoscape();
+    
+    cyInstance = cyMod({
+        container: cyContainer.value,
+        style: buildCyStyle(),
+        layout: { name: 'cose', padding: 30 },
+        minZoom: 0.1,
+        maxZoom: 5
+    });
+
+    cyInstance.on('select', 'node, edge', e => {
+        selEl.value = e.target;
+        if (selEl.value.isNode()) {
+            selectedNodeData.value = selEl.value.data();
+            selectedEdgeData.value = null;
+        } else {
+            selectedEdgeData.value = selEl.value.data();
+            selectedNodeData.value = null;
+        }
+        applyHighlighting();
+    });
+
+    cyInstance.on('unselect', 'node, edge', () => {
+        if (cyInstance.$(':selected').length === 0) {
+            selEl.value = null;
+            selectedNodeData.value = null;
+            selectedEdgeData.value = null;
+        }
+        applyHighlighting();
+    });
+
+    // Populate initial node if empty
+    if (cyInstance.elements().length === 0) {
+        addNodeDirect('class', 'Entity');
+        runCoseLayout();
     }
-});
+    
+    syncOntologyToParams();
+}
 
-watch(selectedFullModel, (newVal) => {
-    if (newVal) {
-        const [binding, ...modelParts] = newVal.split('/');
-        generationParams.value.model_binding = binding;
-        generationParams.value.model_name = modelParts.join('/');
+function runCoseLayout() {
+    if (!cyInstance || cyInstance.nodes().length === 0) return;
+    cyInstance.layout({
+        name: 'cose',
+        animate: true,
+        animationDuration: 400,
+        padding: 40,
+        nodeRepulsion: 45005,
+        idealEdgeLength: 100,
+    }).run();
+}
+
+// Node and Edge Manipulation
+function addNodeDirect(type, name, parentId = null) {
+  if (!cyInstance) return;
+  const id = `${type}__${name.replace(/\W+/g,'_')}__${Date.now()}`;
+  const cfg = typeStyles.value[type] || typeStyles.value.class;
+  const dims = nodeDims(name, type);
+  
+  cyInstance.add({
+    group: 'nodes',
+    data: {
+      id, label: name, type,
+      shape: cfg.shape, fill: cfg.fill, stroke: cfg.stroke, textColor: cfg.textColor,
+      iri: baseIRI.value + name, annotations: {},
+      ...dims,
+    },
+    position: { x: 200 + Math.random() * 200, y: 200 + Math.random() * 200 }
+  });
+  
+  if (parentId) {
+      addEdgeDirect('subClassOf', parentId, id);
+  }
+  
+  syncOntologyToParams();
+}
+
+function addEdgeDirect(relType, srcId, tgtId) {
+  if (!cyInstance || !srcId || !tgtId) return;
+  const id = `e__${relType}__${srcId}__${tgtId}__${Date.now()}`;
+  const isDashed = ['equivalentClass','disjointWith'].includes(relType);
+  
+  cyInstance.add({
+    group: 'edges',
+    data: {
+      id, source: srcId, target: tgtId,
+      label: relType, relType,
+      ec: EDGE_COLORS[relType] || EDGE_COLORS.relation,
+      ...(isDashed ? { dashed: true } : {}),
+    }
+  });
+  
+  syncOntologyToParams();
+}
+
+function deleteSelectedElement() {
+    if (!selEl.value) return;
+    selEl.value.remove();
+    selEl.value = null;
+    selectedNodeData.value = null;
+    selectedEdgeData.value = null;
+    syncOntologyToParams();
+}
+
+function updateNodeProp(key, value) {
+    if (!selEl.value || !selEl.value.isNode()) return;
+    selEl.value.data(key, value);
+    if (key === 'label') {
+        const dims = nodeDims(value, selEl.value.data('type'));
+        selEl.value.data('w', dims.w);
+        selEl.value.data('h', dims.h);
+        selEl.value.data('tw', dims.tw);
+        selEl.value.data('fs', dims.fs);
+    }
+    selectedNodeData.value = { ...selEl.value.data() };
+    syncOntologyToParams();
+}
+
+function applyHighlighting() {
+  if (!cyInstance) return;
+  if (!highlightConnectionsMode.value) {
+    cyInstance.elements().removeClass('dimmed').removeClass('highlighted-edge').removeClass('highlighted-node');
+    return;
+  }
+  const selected = cyInstance.$(':selected');
+  if (selected.length === 0) {
+    cyInstance.elements().removeClass('dimmed').removeClass('highlighted-edge').removeClass('highlighted-node');
+    return;
+  }
+  
+  cyInstance.elements().addClass('dimmed').removeClass('highlighted-edge').removeClass('highlighted-node');
+  
+  selected.forEach(ele => {
+    ele.removeClass('dimmed');
+    if (ele.isNode()) {
+      ele.closedNeighborhood().removeClass('dimmed');
+      ele.connectedEdges().addClass('highlighted-edge').removeClass('dimmed');
+      ele.neighborhood().addClass('highlighted-node').removeClass('dimmed');
     } else {
-        generationParams.value.model_binding = '';
-        generationParams.value.model_name = '';
+      ele.source().removeClass('dimmed');
+      ele.target().removeClass('dimmed');
+      ele.addClass('highlighted-edge').removeClass('dimmed');
     }
-});
+  });
+}
+
+function toggleOrphans() {
+  hideOrphans.value = !hideOrphans.value;
+  applyOrphansFilter();
+}
+
+function applyOrphansFilter() {
+  if (!cyInstance) return;
+  if (hideOrphans.value) {
+    cyInstance.nodes().forEach(n => {
+      if (n.connectedEdges().length === 0) {
+        n.addClass('orphan-hidden');
+      } else {
+        n.removeClass('orphan-hidden');
+      }
+    });
+  } else {
+    cyInstance.nodes().removeClass('orphan-hidden');
+  }
+}
+
+function changeNodeShape(shape) {
+    if (!selEl.value || !selEl.value.isNode()) return;
+    selEl.value.data('shape', shape);
+    selectedNodeData.value = { ...selEl.value.data() };
+    syncOntologyToParams();
+}
+
+function changeNodeColor(stroke, fill) {
+    if (!selEl.value || !selEl.value.isNode()) return;
+    selEl.value.data('stroke', stroke);
+    selEl.value.data('fill', fill);
+    
+    // text light adaptation
+    const r=parseInt(stroke.slice(1,3),16), g=parseInt(stroke.slice(3,5),16), b=parseInt(stroke.slice(5,7),16);
+    const lr=Math.min(255,r+Math.round((255-r)*0.35));
+    const lg=Math.min(255,g+Math.round((255-g)*0.35));
+    const lb=Math.min(255,b+Math.round((255-b)*0.35));
+    const textColor = '#' + [lr,lg,lb].map(x=>x.toString(16).padStart(2,'0')).join('');
+    
+    selEl.value.data('textColor', textColor);
+    selectedNodeData.value = { ...selEl.value.data() };
+    syncOntologyToParams();
+}
+
+// --- Serializations (Turtle, JSON-LD, SKOS, Manchester, RDF/XML) ---
+function genTurtle() {
+  if (!cyInstance) return '';
+  const n = cyInstance.nodes(), e = cyInstance.edges();
+  let t = `@prefix : <${baseIRI.value}> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+<${ontoIRI.value}> a owl:Ontology .\n\n`;
+
+  n.filter(c => c.data('type') === 'class').forEach(c => {
+    const lines = [];
+    if (c.data('rdfsLabel')) lines.push(`    rdfs:label "${c.data('rdfsLabel')}"@en`);
+    if (c.data('comment'))   lines.push(`    rdfs:comment "${c.data('comment')}"@en`);
+    e.filter(x => x.data('source') === c.id() && x.data('relType') === 'subClassOf')
+      .forEach(x => { lines.push(`    rdfs:subClassOf :${cyInstance.getElementById(x.data('target')).data('label')}`); });
+    t += `:${c.data('label')} a owl:Class`;
+    t += lines.length ? ' ;\n' + lines.join(' ;\n') + ' .\n\n' : ' .\n\n';
+  });
+  return t.trim();
+}
+
+function genJSONLD() {
+  if (!cyInstance) return '';
+  const n = cyInstance.nodes(), e = cyInstance.edges();
+  
+  const graph = [];
+  n.forEach(node => {
+      const item = {
+          "@id": `${baseIRI.value}${node.data('label')}`,
+          "@type": node.data('type') === 'class' ? "owl:Class" : "owl:Individual",
+          "rdfs:label": node.data('rdfsLabel') || node.data('label')
+      };
+      if (node.data('comment')) {
+          item["rdfs:comment"] = node.data('comment');
+      }
+      graph.push(item);
+  });
+  
+  e.forEach(edge => {
+      const sourceLabel = cyInstance.getElementById(edge.data('source')).data('label');
+      const targetLabel = cyInstance.getElementById(edge.data('target')).data('label');
+      graph.push({
+          "@id": `${baseIRI.value}${sourceLabel}`,
+          [`rdfs:${edge.data('relType') || 'related'}`]: {
+              "@id": `${baseIRI.value}${targetLabel}`
+          }
+      });
+  });
+
+  const output = {
+      "@context": {
+          "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+          "owl": "http://www.w3.org/2002/07/owl#",
+          "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+          "skos": "http://www.w3.org/2004/02/skos/core#",
+          "@vocab": baseIRI.value
+      },
+      "@graph": graph
+  };
+  return JSON.stringify(output, null, 2);
+}
+
+function genSKOS() {
+  if (!cyInstance) return '';
+  const n = cyInstance.nodes(), e = cyInstance.edges();
+  let s = `@prefix : <${baseIRI.value}> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+<${ontoIRI.value}> a skos:ConceptScheme .\n\n`;
+
+  n.filter(c => c.data('type') === 'concept' || c.data('type') === 'class').forEach(c => {
+      const lines = [`    skos:prefLabel "${c.data('rdfsLabel') || c.data('label')}"@en`];
+      if (c.data('comment')) {
+          lines.push(`    skos:definition "${c.data('comment')}"@en`);
+      }
+      e.filter(x => x.data('source') === c.id()).forEach(x => {
+          const tgt = cyInstance.getElementById(x.data('target')).data('label');
+          if (x.data('relType') === 'broader') lines.push(`    skos:broader :${tgt}`);
+          else if (x.data('relType') === 'narrower') lines.push(`    skos:narrower :${tgt}`);
+          else lines.push(`    skos:related :${tgt}`);
+      });
+      s += `:${c.data('label')} a skos:Concept ;\n${lines.join(' ;\n')} .\n\n`;
+  });
+  return s.trim();
+}
+
+function genManchester() {
+  if (!cyInstance) return '';
+  const n = cyInstance.nodes(), e = cyInstance.edges();
+  let o = `Prefix: owl: <http://www.w3.org/2002/07/owl#>
+Prefix: rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+Prefix: rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+Prefix: : <${baseIRI.value}>\n
+Ontology: <${ontoIRI.value}>\n\n`;
+
+  n.filter(x => x.data('type') === 'class').forEach(c => {
+    o += `Class: :${c.data('label')}\n`;
+    if (c.data('rdfsLabel')) o += `    Annotations: rdfs:label "${c.data('rdfsLabel')}"\n`;
+    e.filter(x => x.data('source') === c.id() && x.data('relType') === 'subClassOf')
+      .forEach(x => { o += `    SubClassOf: :${cyInstance.getElementById(x.data('target')).data('label')}\n`; });
+    o += '\n';
+  });
+  return o.trim();
+}
+
+function genRDFXML() {
+  if (!cyInstance) return '';
+  const n = cyInstance.nodes(), e = cyInstance.edges();
+  let x = `<?xml version="1.0"?>
+<rdf:RDF
+  xml:base="${baseIRI.value}"
+  xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+  xmlns:owl="http://www.w3.org/2002/07/owl#"
+  xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+
+  <owl:Ontology rdf:about="${ontoIRI.value}"/>\n\n`;
+
+  n.filter(c => c.data('type') === 'class').forEach(c => {
+    x += `  <owl:Class rdf:about="${baseIRI.value}${c.data('label')}">\n`;
+    if (c.data('rdfsLabel')) x += `    <rdfs:label xml:lang="en">${c.data('rdfsLabel')}</rdfs:label>\n`;
+    x += `  </owl:Class>\n\n`;
+  });
+  x += `</rdf:RDF>`;
+  return x;
+}
+
+function syncOntologyToParams() {
+    let output = '';
+    if (curCT.value === 'turtle') output = genTurtle();
+    else if (curCT.value === 'jsonld') output = genJSONLD();
+    else if (curCT.value === 'skos') output = genSKOS();
+    else if (curCT.value === 'manchester') output = genManchester();
+    else if (curCT.value === 'rdfxml') output = genRDFXML();
+    
+    generationParams.value.ontology = output;
+}
+
+// SPARQL local engine queries
+function runSPARQLQuery() {
+  const query = sparqlQueryInput.value;
+  if (!query) return;
+  try {
+      const cleanQuery = query
+        .split('\n')
+        .filter(line => !line.trim().toLowerCase().startsWith('prefix'))
+        .join('\n')
+        .replace(/#.*$/gm, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const selectMatch = cleanQuery.match(/SELECT\s+([\s\S]+?)\s+WHERE/i);
+      if (!selectMatch) throw new Error("Missing SELECT clause");
+      const selectVars = selectMatch[1].trim().split(/\s+/).map(v => v.trim());
+
+      const whereMatch = cleanQuery.match(/WHERE\s*\{([\s\S]+?)\}/i);
+      if (!whereMatch) throw new Error("Missing WHERE clause block");
+      const whereBody = whereMatch[1].trim();
+
+      const patterns = [];
+      const rawPatterns = whereBody.split(/\.(?=(?:[^"]|"[^"]*")*$)/);
+      rawPatterns.forEach(pat => {
+        const parts = pat.trim().match(/(?:[^\s"]+|"[^"]*")+/g);
+        if (parts && parts.length >= 3) {
+          patterns.push({ s: parts[0], p: parts[1], o: parts[2] });
+        }
+      });
+
+      const db = getOntologyTriples();
+      const results = [];
+
+      function matchPattern(patternIdx, env, matchedIds) {
+        if (patternIdx === patterns.length) {
+          const resultRow = {};
+          selectVars.forEach(v => {
+            resultRow[v] = env[v] !== undefined ? env[v] : '';
+          });
+          resultRow._elementIds = Array.from(matchedIds);
+          results.push(resultRow);
+          return;
+        }
+
+        const pat = patterns[patternIdx];
+        const sVal = pat.s.startsWith('?') ? env[pat.s] : pat.s;
+        const pVal = pat.p.startsWith('?') ? env[pat.p] : pat.p;
+        const oVal = pat.o.startsWith('?') ? env[pat.o] : pat.o;
+
+        for (const triple of db) {
+          const newEnv = { ...env };
+
+          if (pat.s.startsWith('?')) {
+            if (sVal !== undefined && sVal !== triple.s) continue;
+            newEnv[pat.s] = triple.s;
+          } else {
+            if (pat.s !== triple.s) continue;
+          }
+
+          if (pat.p.startsWith('?')) {
+            if (pVal !== undefined && pVal !== triple.p) continue;
+            newEnv[pat.p] = triple.p;
+          } else {
+            if (pat.p !== triple.p) continue;
+          }
+
+          if (pat.o.startsWith('?')) {
+            if (oVal !== undefined && oVal !== triple.o) continue;
+            newEnv[pat.o] = triple.o;
+          } else {
+            if (pat.o !== triple.o) continue;
+          }
+
+          const nextMatched = new Set(matchedIds);
+          if (triple.elementId) {
+            nextMatched.add(triple.elementId);
+          }
+
+          matchPattern(patternIdx + 1, newEnv, nextMatched);
+        }
+      }
+
+      matchPattern(0, {}, new Set());
+
+      const uniqueResults = [];
+      const seen = new Set();
+      results.forEach(row => {
+        const temp = { ...row };
+        delete temp._elementIds;
+        const str = JSON.stringify(temp);
+        if (!seen.has(str)) {
+          seen.add(str);
+          uniqueResults.push(row);
+        }
+      });
+
+      sparqlResults.value = { vars: selectVars, rows: uniqueResults };
+  } catch (err) {
+      uiStore.addNotification(`SPARQL Query error: ${err.message}`, 'error');
+  }
+}
+
+function selectSPARQLRow(idx) {
+  if (!sparqlResults.value || !sparqlResults.value.rows[idx] || !cyInstance) return;
+  const row = sparqlResults.value.rows[idx];
+  cyInstance.elements().unselect();
+
+  const idsToSelect = new Set(row._elementIds || []);
+  sparqlResults.value.vars.forEach(v => {
+    const val = row[v];
+    if (val && val.startsWith(':')) {
+      const label = val.slice(1);
+      const node = cyInstance.nodes().filter(n => n.data('label') === label);
+      if (node.length) idsToSelect.add(node.id());
+    }
+  });
+
+  const targetElements = cyInstance.elements().filter(el => idsToSelect.has(el.id()));
+  if (targetElements.length) {
+    targetElements.select();
+    cyInstance.animate({ center: { eles: targetElements } }, { duration: 300 });
+  }
+}
+
+// --- AI Assisted Building ---
+async function generateAIExtensions() {
+    if (!aiPrompt.value.trim() || !cyInstance) return;
+    isAIGenerating.value = true;
+    
+    const schema = genTurtle();
+    const sysPrompt = `You are an expert Semantic Ontologist. Process the user's request and extend the OWL/Turtle schema with new concepts.
+    You MUST respond with a strictly valid JSON object inside a single markdown code block starting with \`\`\`json.
+    
+    The schema format is:
+    {
+      "nodes": [
+        { "type": "class|property|dataprop|individual|concept", "name": "UniqueName", "rdfsLabel": "Human readable label", "comment": "Definition" }
+      ],
+      "edges": [
+        { "source": "SourceNodeName", "target": "TargetNodeName", "relType": "subClassOf|domain|range|equivalentClass|disjointWith|type|broader|narrower" }
+      ]
+    }`;
+
+    const prompt = `Current Ontology Schema:\n${schema}\n\nUser request: ${aiPrompt.value}`;
+
+    try {
+        const response = await apiClient.post('/api/lollms/generate', {
+            prompt: `${sysPrompt}\n\n${prompt}`,
+            max_new_tokens: 1536,
+            temperature: 0.2
+        });
+        
+        const rawText = response.data.generated_text || response.data;
+        const jsonMatch = rawText.match(/```json\s*([\s\S]+?)\s*```/);
+        
+        if (jsonMatch) {
+            const result = JSON.parse(jsonMatch[1]);
+            
+            if (result.nodes) {
+                result.nodes.forEach(n => {
+                    addNodeDirect(n.type, n.name);
+                });
+            }
+            if (result.edges) {
+                await nextTick();
+                result.edges.forEach(e => {
+                    const srcId = cyInstance.nodes().filter(n => n.data('label') === e.source).id();
+                    const tgtId = cyInstance.nodes().filter(n => n.data('label') === e.target).id();
+                    if (srcId && tgtId) {
+                        addEdgeDirect(e.relType, srcId, tgtId);
+                    }
+                });
+            }
+            
+            runCoseLayout();
+            aiPrompt.value = '';
+            uiStore.addNotification("Ontology extended successfully by AI Assistant!", "success");
+        } else {
+            throw new Error("AI did not respond with a valid JSON block.");
+        }
+    } catch (e) {
+        console.error(e);
+        uiStore.addNotification("Failed to execute AI ontology extension.", "error");
+    } finally {
+        isAIGenerating.value = false;
+    }
+}
+
+// Standard datastore actions
 async function fetchGraph() {
     if (!isComponentMounted.value) return;
     isLoadingGraph.value = true;
-    selectedNode.value = null;
-    selectedEdge.value = null;
     try {
         const data = await dataStore.fetchDataStoreGraph(props.store.id);
         if (!isComponentMounted.value) return;
@@ -119,7 +740,6 @@ async function fetchGraph() {
             edges: data?.edges?.length || 0
         };
     } catch (error) {
-        console.error("Failed to fetch graph:", error);
         graphData.value = { nodes: [], edges: [] };
         graphStats.value = { nodes: 0, edges: 0 };
     } finally {
@@ -128,10 +748,18 @@ async function fetchGraph() {
 }
 
 function handleGenerateGraph() {
-    if (!generationParams.value.model_binding || !generationParams.value.model_name) {
+    const binding = generationParams.value.model_binding || user.value?.default_binding;
+    const name = generationParams.value.model_name || user.value?.default_model;
+
+    if (!binding || !name) {
         uiStore.addNotification('Please select a model for generation.', 'warning');
         return;
     }
+
+    generationParams.value.model_binding = binding;
+    generationParams.value.model_name = name;
+
+    syncOntologyToParams();
     dataStore.generateDataStoreGraph({
         storeId: props.store.id,
         graphData: generationParams.value
@@ -139,10 +767,18 @@ function handleGenerateGraph() {
 }
 
 function handleUpdateGraph() {
-     if (!generationParams.value.model_binding || !generationParams.value.model_name) {
+    const binding = generationParams.value.model_binding || user.value?.default_binding;
+    const name = generationParams.value.model_name || user.value?.default_model;
+
+    if (!binding || !name) {
         uiStore.addNotification('Please select a model for update.', 'warning');
         return;
     }
+
+    generationParams.value.model_binding = binding;
+    generationParams.value.model_name = name;
+
+    syncOntologyToParams();
     dataStore.updateDataStoreGraph({
         storeId: props.store.id,
         graphData: generationParams.value
@@ -152,7 +788,7 @@ function handleUpdateGraph() {
 async function handleWipeGraph() {
     const confirmed = await uiStore.showConfirmation({
         title: 'Wipe Knowledge Graph?',
-        message: 'This will permanently delete all nodes and edges from this datastore\'s graph. This action cannot be undone.',
+        message: 'This will permanently delete all nodes and edges from this datastore\'s graph.',
         confirmText: 'Wipe Graph'
     });
     if (confirmed.confirmed) {
@@ -166,219 +802,30 @@ async function handleWipeGraph() {
     }
 }
 
-async function handleQuery() {
-    if (!query.value.trim()) return;
-    isQuerying.value = true;
-    try {
-        queryResults.value = await dataStore.queryDataStoreGraph({
-            storeId: props.store.id,
-            query: query.value,
-            max_k: 10
-        });
-    } finally {
-        isQuerying.value = false;
-    }
-}
-
-function handleNodeSelect(node) {
-    selectedNode.value = node;
-    selectedEdge.value = null;
-}
-
-function handleEdgeSelect(edge) {
-    selectedEdge.value = edge;
-    selectedNode.value = null;
-}
-
-function handleDeselect() {
-    selectedNode.value = null;
-    selectedEdge.value = null;
-}
-
-// Updated Modal Calls using Component Names usually registered in GenericModal or similar
-function openAddNodeModal() {
-    uiStore.openModal('NodeEditModal', {
-        onConfirm: async (nodeData) => {
-            try {
-                await dataStore.addGraphNode({ storeId: props.store.id, nodeData });
-                uiStore.addNotification('Node added successfully', 'success');
-                fetchGraph();
-            } catch (error) {
-                uiStore.addNotification('Failed to add node', 'error');
-                console.error(error);
-            }
-        }
-    });
-}
-
-function openAddEdgeModal() {
-    uiStore.openModal('EdgeEditModal', {
-        sourceId: selectedNode.value?.id || '',
-        onConfirm: async (edgeData) => {
-            try {
-                await dataStore.addGraphEdge({ storeId: props.store.id, edgeData });
-                uiStore.addNotification('Edge added successfully', 'success');
-                fetchGraph();
-            } catch (error) {
-                uiStore.addNotification('Failed to add edge', 'error');
-                console.error(error);
-            }
-        }
-    });
-}
-
-function openEditNodeModal() {
-    if (!selectedNode.value) return;
-    uiStore.openModal('NodeEditModal', {
-        node: selectedNode.value,
-        onConfirm: async (nodeData) => {
-             try {
-                await dataStore.updateGraphNode({ storeId: props.store.id, nodeId: selectedNode.value.id, nodeData });
-                uiStore.addNotification('Node updated successfully', 'success');
-                fetchGraph();
-            } catch (error) {
-                uiStore.addNotification('Failed to update node', 'error');
-                console.error(error);
-            }
-        }
-    });
-}
-
-async function deleteSelectedNode() {
-    if (!selectedNode.value) return;
-    const { confirmed } = await uiStore.showConfirmation({ title: 'Delete Node?', message: `Delete node "${selectedNode.value.label}" (ID: ${selectedNode.value.id})? This will also delete connected edges.`});
-    if (confirmed) {
-        try {
-            await dataStore.deleteGraphNode({ storeId: props.store.id, nodeId: selectedNode.value.id });
-            uiStore.addNotification('Node deleted', 'success');
-            fetchGraph();
-        } catch (error) {
-             uiStore.addNotification('Failed to delete node', 'error');
-        }
-    }
-}
-
-async function deleteSelectedEdge() {
-    if (!selectedEdge.value) return;
-    const { confirmed } = await uiStore.showConfirmation({ title: 'Delete Edge?', message: `Delete edge "${selectedEdge.value.label}"?`});
-    if (confirmed) {
-         try {
-            await dataStore.deleteGraphEdge({ storeId: props.store.id, edgeId: selectedEdge.value.id });
-            uiStore.addNotification('Edge deleted', 'success');
-            fetchGraph();
-        } catch (error) {
-             uiStore.addNotification('Failed to delete edge', 'error');
-        }
-    }
-}
-
-function handleImportOntology() {
-    ontologyFileInput.value.click();
-}
-
-async function onOntologyFileSelected(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-
-    uiStore.addNotification('Importing ontology file...', 'info');
-    try {
-        const textContent = await dataStore.extractTextFromFile(file);
-        generationParams.value.ontology = textContent;
-        // Simple heuristic for language detection
-        if (file.name.endsWith('.json')) ontologyLanguage.value = 'json';
-        else if (file.name.endsWith('.yaml') || file.name.endsWith('.yml')) ontologyLanguage.value = 'yaml';
-        else if (file.name.endsWith('.xml') || file.name.endsWith('.owl') || file.name.endsWith('.rdf')) ontologyLanguage.value = 'xml';
-        else if (file.name.endsWith('.ttl')) ontologyLanguage.value = 'python'; // Approx for turtle
-        else ontologyLanguage.value = 'markdown';
-        
-        uiStore.addNotification('Ontology file imported successfully.', 'success');
-    } catch (error) {
-        console.error("Ontology import failed:", error);
-    } finally {
-        if (ontologyFileInput.value) {
-            ontologyFileInput.value.value = '';
-        }
-    }
-}
-
-function fitGraph() {
-    if(graphViewer.value) {
-        graphViewer.value.resetView();
-    }
-}
-
-function loadPresets() {
-    const defaults = [
-        { name: 'Default (JSON)', language: 'json', content: defaultOntology },
-        { name: 'Simple (YAML)', language: 'yaml', content: "entities:\n  - Person\n  - Place\nrelationships:\n  - visited" },
-        { name: 'OWL/RDF (Turtle)', language: 'python', content: "@prefix : <http://example.org/> .\n:Person a :Class .\n:knows a :ObjectProperty ." },
-        { name: 'Free Text (Markdown)', language: 'markdown', content: "Define Entities:\n- Person\n- Location\n\nDefine Relations:\n- Person lives in Location" }
-    ];
-    try {
-        const stored = JSON.parse(localStorage.getItem('lollms_graph_presets') || '[]');
-        presets.value = [...defaults, ...stored];
-    } catch (e) {
-        presets.value = defaults;
-    }
-}
-
-function applyPreset() {
-    if(selectedPreset.value) {
-        generationParams.value.ontology = selectedPreset.value.content;
-        ontologyLanguage.value = selectedPreset.value.language || 'json';
-    }
-}
-
-async function savePreset() {
-    // Simple prompt for now
-    // Ideally use a modal
-    const name = prompt("Enter a name for this ontology preset:");
-    if(name) {
-        const newPreset = {
-            name,
-            language: ontologyLanguage.value,
-            content: generationParams.value.ontology
-        };
-        try {
-            const stored = JSON.parse(localStorage.getItem('lollms_graph_presets') || '[]');
-            stored.push(newPreset);
-            localStorage.setItem('lollms_graph_presets', JSON.stringify(stored));
-            loadPresets();
-            // Select the newly created preset
-            selectedPreset.value = presets.value[presets.value.length - 1];
-            uiStore.addNotification("Preset saved", "success");
-        } catch(e) {
-            console.error(e);
-            uiStore.addNotification("Failed to save preset", "error");
-        }
-    }
-}
-
 onMounted(() => {
     fetchGraph();
-    loadPresets();
-    
-    // [FIX] Guard against accessing storeOntologies if not initialized or if store ID missing
-    if (props.store?.id && dataStore.storeOntologies && dataStore.storeOntologies[props.store.id]) {
-        generationParams.value.ontology = dataStore.storeOntologies[props.store.id];
+    if (viewMode.value === 'ontology') {
+        nextTick(() => initCytoscape());
+    }
+});
+
+watch(viewMode, (newMode) => {
+    if (newMode === 'ontology') {
+        nextTick(() => initCytoscape());
+    } else {
+        if (cyInstance) {
+            cyInstance.destroy();
+            cyInstance = null;
+        }
     }
 });
 
 watch(() => props.store.id, fetchGraph);
-watch(() => props.task, (newTask, oldTask) => {
-    const wasRunning = oldTask && (oldTask.status === 'running' || oldTask.status === 'pending');
-    if (wasRunning && !newTask) {
-        // Task finished
-        fetchGraph();
-    }
-});
-
 </script>
 
-=======
 <template>
     <div class="h-full flex flex-col overflow-hidden">
-        <!-- ── Navigation Header ── -->
+        <!-- Tab Sub-Header -->
         <div class="flex items-center justify-between px-4 py-2 bg-gray-50 dark:bg-gray-800 border-b dark:border-gray-700 z-10 shrink-0">
             <div class="flex gap-1 p-1 bg-gray-200 dark:bg-gray-900 rounded-xl">
                 <button @click="viewMode = 'graph'" :class="['px-6 py-2 text-xs font-black uppercase tracking-widest rounded-lg transition-all', viewMode === 'graph' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">
@@ -400,196 +847,261 @@ watch(() => props.task, (newTask, oldTask) => {
         </div>
 
         <div class="grow flex flex-col lg:flex-row gap-0 overflow-hidden">
-            <!-- ── Left Sidebar (Dynamic Content) ── -->
-            <div class="w-full lg:w-80 lg:shrink-0 space-y-6 h-full overflow-y-auto custom-scrollbar p-4 border-r dark:border-gray-700 bg-white dark:bg-gray-900">
+            <!-- Left Sidebar Navigation -->
+            <div class="w-full lg:w-80 lg:shrink-0 h-full overflow-y-auto custom-scrollbar p-4 border-r dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col gap-4">
                 
-                <!-- View-Specific Context Info -->
                 <div class="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
                     <h4 class="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 mb-1">Current Workspace</h4>
-                    <p class="text-xs font-bold">{{ viewMode === 'graph' ? 'Semantic Explorer' : 'Schema Designer' }}</p>
+                    <p class="text-xs font-bold">{{ viewMode === 'graph' ? 'Semantic Explorer' : 'Visual Designer' }}</p>
                 </div>
 
-                <!-- Stats (Always relevant) -->
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600 shadow-inner">
-                        <h4 class="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Total Nodes</h4>
-                        <p class="text-xl font-bold">{{ graphStats.nodes }}</p>
-                    </div>
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-center border dark:border-gray-600 shadow-inner">
-                        <h4 class="text-[10px] font-black uppercase text-gray-500 dark:text-gray-400">Total Edges</h4>
-                        <p class="text-xl font-bold">{{ graphStats.edges }}</p>
+                <!-- Type Selector Quick Actions (Ontology mode only) -->
+                <div v-if="viewMode === 'ontology'" class="space-y-4">
+                    <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">Ontology Elements</h3>
+                    <div class="flex flex-col gap-1.5">
+                        <button @click="addNodeDirect('class', 'Class_' + Date.now().toString().slice(-4))" class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#7c6ff7]"></span>Class</span>
+                            <span class="text-[10px] opacity-50">+ Add</span>
+                        </button>
+                        <button @click="addNodeDirect('property', 'prop_' + Date.now().toString().slice(-4))" class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#2dd4bf]"></span>Object Property</span>
+                            <span class="text-[10px] opacity-50">+ Add</span>
+                        </button>
+                        <button @click="addNodeDirect('dataprop', 'data_' + Date.now().toString().slice(-4))" class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#fbbf24]"></span>Data Property</span>
+                            <span class="text-[10px] opacity-50">+ Add</span>
+                        </button>
+                        <button @click="addNodeDirect('concept', 'Concept_' + Date.now().toString().slice(-4))" class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#f472b6]"></span>SKOS Concept</span>
+                            <span class="text-[10px] opacity-50">+ Add</span>
+                        </button>
+                        <button @click="addNodeDirect('individual', 'ind_' + Date.now().toString().slice(-4))" class="flex items-center justify-between px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-semibold hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <span class="flex items-center gap-2"><span class="w-2.5 h-2.5 rounded-full bg-[#4ade80]"></span>Individual</span>
+                            <span class="text-[10px] opacity-50">+ Add</span>
+                        </button>
                     </div>
                 </div>
 
-                <!-- Task Progress (Always relevant) -->
-                <div v-if="task" class="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800 animate-pulse">
-                    <h4 class="font-semibold text-blue-800 dark:text-blue-200 text-sm flex justify-between">
-                        {{ task.name }}
-                        <span class="text-xs opacity-75">{{ task.progress }}%</span>
-                    </h4>
-                    <div class="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-1.5 mt-2">
-                        <div class="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-500" :style="{ width: task.progress + '%' }"></div>
-                    </div>
+                <!-- LLM Model Config -->
+                <div class="p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 space-y-3">
+                    <label class="block text-[10px] font-black uppercase tracking-widest text-gray-400">Generation Model</label>
+                    <select v-model="selectedFullModel" class="input-field text-xs">
+                        <option disabled value="">Select engine...</option>
+                        <optgroup v-for="group in availableLLMModelsGrouped" :key="group.label" :label="group.label">
+                            <option v-for="model in group.items" :key="model.id" :value="`${group.label}/${model.id}`">{{ model.name }}</option>
+                        </optgroup>
+                    </select>
                 </div>
 
-                <!-- ── SIDEBAR CONTENT: GRAPH MODE ── -->
-                <template v-if="viewMode === 'graph'">
-                    <!-- Node Selection Info -->
-                    <div v-if="selectedNode" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border-2 border-blue-500 space-y-3 animate-in fade-in zoom-in-95">
-                        <div class="flex justify-between items-start">
-                            <h3 class="font-semibold text-lg">{{ selectedNode.label }}</h3>
-                            <span class="px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 text-[10px] font-black uppercase">{{ selectedNode.group }}</span>
+                <!-- Danger / Wipe Zone -->
+                <div class="mt-auto p-4 bg-red-50 dark:bg-red-950/20 rounded-xl border border-red-100 dark:border-red-900/40">
+                    <h4 class="text-[10px] font-black uppercase text-red-600 dark:text-red-400 tracking-widest mb-3">Maintenance</h4>
+                    <button @click="handleWipeGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-ghost text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 w-full btn-xs flex items-center justify-center gap-2 border border-red-200 dark:border-red-800">
+                        <IconTrash class="w-3.5 h-3.5"/> Wipe Graph Data
+                    </button>
+                </div>
+            </div>
+
+            <!-- Main Canvas / Graph View Workspace -->
+            <div class="grow h-full bg-white dark:bg-gray-950 relative overflow-hidden flex flex-col">
+                <div class="grow relative min-h-0">
+                    
+                    <!-- Graph Exploration Mode -->
+                    <div v-if="viewMode === 'graph'" class="h-full w-full">
+                        <div v-if="graphStats.nodes === 0 && !isLoadingGraph" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 dark:bg-gray-900/80 z-10 p-6 text-center">
+                            <div class="bg-white dark:bg-gray-800 p-10 rounded-3xl shadow-2xl border dark:border-gray-700 max-w-lg">
+                                <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-3">Graph is Offline</h3>
+                                <p class="text-gray-500 dark:text-gray-400 text-sm mb-8 leading-relaxed">
+                                    No semantic map has been built yet. Switch to the <strong>Ontology Designer</strong> to model your schema and start.
+                                </p>
+                                <button @click="viewMode = 'ontology'" class="btn btn-primary px-10 py-3 rounded-2xl shadow-xl">
+                                    Open Designer &rarr;
+                                </button>
+                            </div>
                         </div>
-                        <div class="text-[10px] text-gray-500 font-mono opacity-50">#{{ selectedNode.id }}</div>
+
+                        <InteractiveGraphViewer 
+                            v-if="graphStats.nodes > 0 || isLoadingGraph"
+                            ref="graphViewer"
+                            :nodes="graphData.nodes" 
+                            :edges="graphData.edges" 
+                            :is-loading="isLoadingGraph" 
+                        />
+                    </div>
+
+                    <!-- Ontology Canvas Mode -->
+                    <div v-else class="h-full w-full relative">
+                        <!-- Cytoscape Target Container (Main designer) -->
+                        <div ref="cyContainer" class="absolute inset-0 h-full w-full bg-white dark:bg-gray-950"></div>
                         
-                        <div class="bg-gray-50 dark:bg-gray-900 p-2 rounded border dark:border-gray-700 max-h-40 overflow-auto custom-scrollbar">
-                            <JsonRenderer :json="selectedNode.properties" />
+                        <!-- Floating HUD Controls -->
+                        <div class="absolute top-4 left-4 flex gap-2 z-20">
+                            <button @click="cyInstance.zoom(cyInstance.zoom() * 1.25)" class="p-2 bg-white dark:bg-gray-800 rounded-md shadow-md text-gray-700 dark:text-gray-200 hover:bg-gray-50 border dark:border-gray-700" title="Zoom in">Zoom In</button>
+                            <button @click="cyInstance.zoom(cyInstance.zoom() * 0.8)" class="p-2 bg-white dark:bg-gray-800 rounded-md shadow-md text-gray-700 dark:text-gray-200 hover:bg-gray-50 border dark:border-gray-700" title="Zoom out">Zoom Out</button>
+                            <button @click="cyInstance.fit(null, 40)" class="p-2 bg-white dark:bg-gray-800 rounded-md shadow-md text-gray-700 dark:text-gray-200 hover:bg-gray-50 border dark:border-gray-700" title="Fit all">Fit View</button>
+                            <button @click="runCoseLayout" class="p-2 bg-white dark:bg-gray-800 rounded-md shadow-md text-gray-700 dark:text-gray-200 hover:bg-gray-50 border dark:border-gray-700" title="Format Layout">Re-arrange Layout</button>
                         </div>
-                        
-                        <div class="flex gap-2 pt-2">
-                            <button @click="openEditNodeModal" class="btn btn-secondary btn-xs flex-1">Edit</button>
-                            <button @click="deleteSelectedNode" class="btn btn-danger btn-xs flex-1">Delete</button>
+
+                        <div class="absolute top-4 right-4 flex gap-2 z-20">
+                            <button @click="toggleOrphans" :class="['p-2 rounded-md shadow-md border text-xs font-bold transition-all', hideOrphans ? 'bg-blue-500 border-blue-600 text-white' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200']">
+                                Orphans Filter
+                            </button>
+                            <button @click="highlightConnectionsMode = !highlightConnectionsMode; applyHighlighting();" :class="['p-2 rounded-md shadow-md border text-xs font-bold transition-all', highlightConnectionsMode ? 'bg-blue-500 border-blue-600 text-white' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200']">
+                                Highlight Connections
+                            </button>
+                            <button @click="showCodeDrawer = !showCodeDrawer" :class="['p-2 rounded-md shadow-md border text-xs font-bold transition-all', showCodeDrawer ? 'bg-emerald-500 border-emerald-600 text-white' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-200']">
+                                {{ showCodeDrawer ? 'Hide Code' : 'View Code' }}
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- Collapsible Bottom Code Drawer -->
+                <div v-if="viewMode === 'ontology' && showCodeDrawer" class="h-64 border-t dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-col shrink-0">
+                    <div class="h-10 border-b dark:border-gray-800 px-4 flex items-center justify-between shrink-0">
+                        <div class="flex gap-2">
+                            <button @click="curCT = 'turtle'; syncOntologyToParams()" :class="['px-3 py-1 text-xs rounded font-bold transition-all', curCT === 'turtle' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-500']">Turtle</button>
+                            <button @click="curCT = 'jsonld'; syncOntologyToParams()" :class="['px-3 py-1 text-xs rounded font-bold transition-all', curCT === 'jsonld' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-500']">JSON-LD</button>
+                            <button @click="curCT = 'skos'; syncOntologyToParams()" :class="['px-3 py-1 text-xs rounded font-bold transition-all', curCT === 'skos' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-500']">SKOS</button>
+                            <button @click="curCT = 'manchester'; syncOntologyToParams()" :class="['px-3 py-1 text-xs rounded font-bold transition-all', curCT === 'manchester' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-500']">Manchester OWL</button>
+                            <button @click="curCT = 'rdfxml'; syncOntologyToParams()" :class="['px-3 py-1 text-xs rounded font-bold transition-all', curCT === 'rdfxml' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-500']">RDF/XML</button>
+                            <button @click="curCT = 'sparql'" :class="['px-3 py-1 text-xs rounded font-bold transition-all', curCT === 'sparql' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' : 'text-gray-500']">SPARQL Query</button>
                         </div>
                     </div>
                     
-                    <div v-else-if="selectedEdge" class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border-2 border-indigo-500 space-y-3 animate-in fade-in zoom-in-95">
-                        <h3 class="text-[10px] font-black uppercase text-indigo-500 tracking-widest border-b pb-2 dark:border-gray-700">Semantic Relationship</h3>
-                        <div class="font-bold text-sm text-gray-700 dark:text-gray-200">{{ selectedEdge.label }}</div>
-                        <div class="text-[10px] text-gray-500 space-y-1 bg-gray-50 dark:bg-gray-950 p-2 rounded">
-                            <div class="truncate"><span class="font-bold text-indigo-400">FROM:</span> {{ selectedEdge.source }}</div>
-                            <div class="truncate"><span class="font-bold text-indigo-400">TO:</span> {{ selectedEdge.target }}</div>
-                        </div>
-                        <button @click="deleteSelectedEdge" class="btn btn-danger btn-xs w-full">Delete Link</button>
-                    </div>
-
-                    <!-- Graph Exploration Tools -->
-                    <div class="space-y-4 p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
-                        <h3 class="text-xs font-black uppercase text-gray-500 tracking-widest">Exploration Tools</h3>
-                        <form @submit.prevent="handleQuery" class="flex gap-1">
-                            <input v-model="query" type="text" placeholder="Search concepts..." class="input-field grow text-xs h-8">
-                            <button type="submit" :disabled="isQuerying || !query.trim()" class="btn btn-primary btn-xs px-3">Find</button>
-                        </form>
-                        
-                        <div v-if="isQuerying" class="flex justify-center p-4">
-                            <IconAnimateSpin class="w-5 h-5 text-blue-500 animate-spin" />
-                        </div>
-                        
-                        <div v-if="queryResults.length > 0" class="space-y-2 max-h-60 overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-950 p-2 rounded-md shadow-inner">
-                            <div v-for="(result, index) in queryResults" :key="index" class="p-2 bg-white dark:bg-gray-800 rounded border dark:border-gray-700 text-[10px] leading-relaxed shadow-sm">
-                               {{ result }}
-                            </div>
-                        </div>
-                        
-                        <div class="flex gap-2 pt-2 border-t dark:border-gray-700">
-                             <button @click="openAddNodeModal" class="btn btn-secondary btn-xs flex-1">New Node</button>
-                             <button @click="fitGraph" class="btn btn-ghost btn-xs px-2" title="Fit to screen"><IconMaximize class="w-3.5 h-3.5"/></button>
-                        </div>
-                    </div>
-                </template>
-
-                <!-- ── SIDEBAR CONTENT: ONTOLOGY MODE ── -->
-                <template v-else>
-                    <div class="space-y-6">
-                        <!-- Model Selection -->
-                        <div class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700">
-                            <label class="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-2">Generation Model</label>
-                            <select v-model="selectedFullModel" class="input-field text-xs">
-                                <option disabled value="">Select engine...</option>
-                                <optgroup v-for="group in availableLLMModelsGrouped" :key="group.label" :label="group.label">
-                                    <option v-for="model in group.items" :key="model.id" :value="model.id">{{ model.name }}</option>
-                                </optgroup>
-                            </select>
-                            <p class="text-[9px] text-gray-500 mt-2 italic">This model will be used to extract relationships from your files using the schema defined on the right.</p>
-                        </div>
-
-                        <!-- Presets -->
-                        <div class="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-sm border dark:border-gray-700 space-y-3">
-                            <label class="block text-[10px] font-black uppercase tracking-widest text-gray-400">Ontology Presets</label>
-                            <select v-model="selectedPreset" @change="applyPreset" class="input-field text-xs">
-                                <option :value="null" disabled>Load specialized preset...</option>
-                                <option v-for="(p, i) in presets" :key="i" :value="p">{{ p.name }}</option>
-                            </select>
-                            <button @click="savePreset" class="btn btn-secondary btn-xs w-full flex items-center justify-center gap-2">
-                                <IconSave class="w-3.5 h-3.5" /> Save Current as Preset
-                            </button>
-                        </div>
-
-                        <!-- Dangerous Zone -->
-                         <div class="p-4 bg-red-50 dark:bg-red-950/20 rounded-lg border border-red-100 dark:border-red-900/40">
-                             <h4 class="text-[10px] font-black uppercase text-red-600 tracking-widest mb-3">Maintenance</h4>
-                             <button @click="handleWipeGraph" :disabled="!!task || graphStats.nodes === 0" class="btn btn-ghost text-red-600 hover:bg-red-100 dark:hover:bg-red-900/30 w-full btn-xs flex items-center justify-center gap-2 border border-red-200 dark:border-red-800">
-                                <IconTrash class="w-3.5 h-3.5"/> Wipe Graph Data
-                            </button>
-                         </div>
-                    </div>
-                </template>
-            </div>
-
-            <!-- ── Main Workspace ── -->
-            <div class="grow h-full bg-white dark:bg-gray-950 relative overflow-hidden">
-                
-                <!-- MODE: GRAPH VIEW -->
-                <div v-if="viewMode === 'graph'" class="h-full w-full relative">
-                    <!-- Empty State Overlay -->
-                    <div v-if="graphStats.nodes === 0 && !isLoadingGraph" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/80 dark:bg-gray-900/80 z-10 p-6 text-center">
-                        <div class="bg-white dark:bg-gray-800 p-10 rounded-3xl shadow-2xl border dark:border-gray-700 max-w-lg animate-in zoom-in-95 duration-500">
-                            <div class="w-20 h-20 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mx-auto mb-6 text-blue-600 dark:text-blue-400">
-                                <IconDatabase class="w-10 h-10" />
-                            </div>
-                            <h3 class="text-2xl font-black text-gray-900 dark:text-white mb-3 tracking-tight">Graph is Offline</h3>
-                            <p class="text-gray-500 dark:text-gray-400 text-sm mb-8 leading-relaxed">
-                                No semantic map has been built for this Data Store yet. Switch to the <strong>Ontology Designer</strong> to define your schema and start the extraction process.
-                            </p>
-                            <button @click="viewMode = 'ontology'" class="btn btn-primary px-10 py-3 rounded-2xl shadow-xl shadow-blue-500/20 flex items-center justify-center gap-2 mx-auto">
-                                Open Designer &rarr;
-                            </button>
-                        </div>
-                    </div>
-
-                    <InteractiveGraphViewer 
-                        v-if="graphStats.nodes > 0 || isLoadingGraph"
-                        ref="graphViewer"
-                        :nodes="graphData.nodes" 
-                        :edges="graphData.edges" 
-                        :is-loading="isLoadingGraph" 
-                        @node-select="handleNodeSelect" 
-                        @edge-select="handleEdgeSelect" 
-                        @deselect="handleDeselect"
-                    />
-                </div>
-
-                <!-- MODE: ONTOLOGY DESIGNER -->
-                <div v-else class="h-full flex flex-col">
-                    <div class="shrink-0 p-4 border-b dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50 flex justify-between items-center h-14">
-                        <div class="flex items-center gap-4">
-                            <div class="flex items-center gap-2 px-1 py-1 bg-gray-200 dark:bg-gray-800 rounded-lg">
-                                <button @click="ontologyEditorMode = 'edit'" :class="['px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all', ontologyEditorMode === 'edit' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">Code Editor</button>
-                                <button @click="ontologyEditorMode = 'view'" :class="['px-4 py-1 rounded-md text-[10px] font-black uppercase tracking-widest transition-all', ontologyEditorMode === 'view' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700']">Visualizer</button>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <button @click="handleImportOntology" class="btn btn-secondary btn-xs flex items-center gap-2 px-4 h-8 border-gray-300 dark:border-gray-700 shadow-sm">
-                                <IconArrowUpTray class="w-3.5 h-3.5" /> 
-                                <span class="hidden sm:inline">Import OWL</span>
-                            </button>
-                        </div>
-                    </div>
-                    <div class="grow relative bg-white dark:bg-gray-950">
+                    <div class="grow min-h-0 relative">
+                        <!-- Code Serialization Panel -->
                         <CodeMirrorEditor 
-                            v-if="ontologyEditorMode === 'edit'"
+                            v-if="curCT !== 'sparql'"
                             v-model="generationParams.ontology" 
                             :language="'python'" 
                             class="absolute inset-0 h-full w-full" 
-                            placeholder="Define your classes and properties using OWL/Turtle syntax..."
+                            placeholder="Generate ontology configuration..."
                         />
-                        <div v-else class="h-full p-10 overflow-auto custom-scrollbar flex justify-center bg-gray-50 dark:bg-gray-950/40">
-                             <div class="w-full max-w-4xl h-full shadow-2xl rounded-3xl overflow-hidden bg-white dark:bg-gray-950 border dark:border-gray-800">
-                                 <MessageContentRenderer :content="ontologyAsTag" />
-                             </div>
+                        
+                        <!-- SPARQL Local Playground -->
+                        <div v-else class="absolute inset-0 flex h-full w-full overflow-hidden divide-x dark:divide-gray-800">
+                            <div class="w-1/2 flex flex-col p-3 gap-2">
+                                <div class="flex justify-between items-center">
+                                    <span class="text-[10px] font-black uppercase text-gray-400">Playground Query</span>
+                                    <button @click="runSPARQLQuery" class="btn btn-primary btn-xs px-4 h-7">Run</button>
+                                </div>
+                                <textarea v-model="sparqlQueryInput" class="grow w-full bg-white dark:bg-gray-950 p-2 font-mono text-xs rounded border dark:border-gray-800 outline-none resize-none"></textarea>
+                            </div>
+                            
+                            <div class="w-1/2 flex flex-col p-3 gap-2 overflow-hidden">
+                                <span class="text-[10px] font-black uppercase text-gray-400">Local Axiom Triples Match</span>
+                                <div class="grow overflow-y-auto custom-scrollbar bg-white dark:bg-gray-950 rounded border dark:border-gray-800">
+                                    <div v-if="!sparqlResults" class="p-4 text-center text-xs text-gray-400 italic">Run a query to fetch graph instances.</div>
+                                    <table v-else class="w-full text-xs font-mono text-left">
+                                        <thead>
+                                            <tr class="bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-800 text-gray-400">
+                                                <th class="p-2">#</th>
+                                                <th v-for="v in sparqlResults.vars" :key="v" class="p-2">{{ v }}</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr v-for="(row, idx) in sparqlResults.rows" :key="idx" @click="selectSPARQLRow(idx)" class="hover:bg-blue-500/5 cursor-pointer border-b dark:border-gray-900">
+                                                <td class="p-2 text-gray-500">{{ idx + 1 }}</td>
+                                                <td v-for="v in sparqlResults.vars" :key="v" class="p-2 text-blue-600 dark:text-blue-400">{{ row[v] }}</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Inspector / Right Sidebar -->
+            <div class="w-full lg:w-80 lg:shrink-0 h-full border-l dark:border-gray-700 bg-white dark:bg-gray-900 flex flex-col overflow-hidden">
+                <div class="flex border-b dark:border-gray-800 shrink-0">
+                    <button @click="curIT = 'd'" :class="['flex-1 py-3 text-xs font-black uppercase tracking-wider text-center border-b-2 transition-all', curIT === 'd' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500']">Details</button>
+                    <button @click="curIT = 's'" :class="['flex-1 py-3 text-xs font-black uppercase tracking-wider text-center border-b-2 transition-all', curIT === 's' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500']">Style</button>
+                    <button @click="curIT = 'ai'" :class="['flex-1 py-3 text-xs font-black uppercase tracking-wider text-center border-b-2 transition-all', curIT === 'ai' ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500']">AI Builder</button>
+                </div>
+                
+                <div class="grow overflow-y-auto custom-scrollbar p-4">
+                    <!-- Tab: Details -->
+                    <div v-if="curIT === 'd'" class="space-y-4">
+                        <div v-if="selectedNodeData" class="space-y-4">
+                            <h3 class="text-sm font-black uppercase text-gray-400">Node Properties</h3>
+                            <div>
+                                <label class="text-xs font-semibold">Local Label</label>
+                                <input :value="selectedNodeData.label" @input="updateNodeProp('label', $event.target.value)" type="text" class="input-field mt-1 text-sm">
+                            </div>
+                            <div>
+                                <label class="text-xs font-semibold">Base IRI URL</label>
+                                <input :value="selectedNodeData.iri" @input="updateNodeProp('iri', $event.target.value)" type="text" class="input-field mt-1 text-xs font-mono">
+                            </div>
+                            <div>
+                                <label class="text-xs font-semibold">Description (rdfs:comment)</label>
+                                <textarea :value="selectedNodeData.comment" @input="updateNodeProp('comment', $event.target.value)" rows="3" class="input-field mt-1 text-sm" placeholder="rdfs:comment..."></textarea>
+                            </div>
+                            <div class="pt-4 border-t dark:border-gray-800">
+                                <button @click="deleteSelectedElement" class="btn btn-danger btn-xs w-full">Delete Node</button>
+                            </div>
+                        </div>
+                        <div v-else-if="selectedEdgeData" class="space-y-4">
+                             <h3 class="text-sm font-black uppercase text-gray-400">Edge Axiom</h3>
+                             <div class="p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-xs space-y-1.5 font-mono">
+                                  <div><span class="font-bold text-blue-500">Source:</span> {{ selectedEdgeData.source }}</div>
+                                  <div><span class="font-bold text-blue-500">Target:</span> {{ selectedEdgeData.target }}</div>
+                                  <div><span class="font-bold text-blue-500">Relation:</span> {{ selectedEdgeData.label }}</div>
+                             </div>
+                             <div class="pt-4 border-t dark:border-gray-800">
+                                <button @click="deleteSelectedElement" class="btn btn-danger btn-xs w-full">Delete Edge Relation</button>
+                            </div>
+                        </div>
+                        <div v-else class="text-center py-20 text-gray-400 italic text-xs">Select elements on canvas to configure schema values.</div>
+                    </div>
+
+                    <!-- Tab: Visual Customization -->
+                    <div v-else-if="curIT === 's'" class="space-y-4">
+                        <div v-if="selectedNodeData" class="space-y-4">
+                            <h3 class="text-sm font-black uppercase text-gray-400">Style Overrides</h3>
+                            
+                            <div>
+                                <label class="text-xs font-semibold block mb-2">Element Shape</label>
+                                <div class="grid grid-cols-4 gap-1.5">
+                                    <button v-for="s in SHAPES" :key="s.id" @click="changeNodeShape(s.id)" :class="['p-1.5 border rounded-lg text-[10px] text-center transition-all', selectedNodeData.shape === s.id ? 'border-blue-500 bg-blue-500/10 text-blue-600' : 'border-gray-200 dark:border-gray-700']">
+                                        {{ s.label }}
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label class="text-xs font-semibold block mb-2">Palette Colour</label>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button v-for="p in PALETTE" :key="p.c" @click="changeNodeColor(p.c, p.bg)" :style="{ backgroundColor: p.c }" :class="['w-6 h-6 rounded-md border-2 transition-all', selectedNodeData.stroke === p.c ? 'border-white scale-110 shadow-md' : 'border-transparent']"></button>
+                                </div>
+                            </div>
+                        </div>
+                        <div v-else class="text-center py-20 text-gray-400 italic text-xs">Styles can be overridden per individual node instance.</div>
+                    </div>
+
+                    <!-- Tab: AI Ontology Assisted Building -->
+                    <div v-else-if="curIT === 'ai'" class="space-y-4">
+                        <h3 class="text-sm font-black uppercase text-gray-400">AI Prompt Assistant</h3>
+                        <p class="text-xs text-gray-500 leading-relaxed">The AI Builder adds classes, properties, and axioms directly into the workspace from free-text descriptions.</p>
+                        <textarea v-model="aiPrompt" rows="5" class="input-field text-sm" placeholder="e.g. Generate an e-commerce model with classes like Order, Customer, and Product and object properties..."></textarea>
+                        
+                        <button @click="generateAIExtensions" :disabled="isAIGenerating || !aiPrompt.trim()" class="btn btn-primary w-full flex items-center justify-center gap-2 h-9 shadow-lg shadow-blue-500/20">
+                            <IconAnimateSpin v-if="isAIGenerating" class="w-4 h-4 animate-spin" />
+                            <span>{{ isAIGenerating ? 'Analyzing Concepts...' : 'Extend Ontology' }}</span>
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 </template>
+
+<style>
+/* Clean visual defaults for ontology canvas element */
+.vis-network {
+    outline: none !important;
+}
+</style>

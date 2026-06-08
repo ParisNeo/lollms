@@ -929,6 +929,33 @@ async function handleImportStore() {
                 <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">The selected data store could not be loaded.</p>
             </div>
             <div v-else class="bg-white dark:bg-gray-800 rounded-lg shadow-md h-full overflow-hidden flex flex-col">
+                <!-- Quick Status Bar -->
+                <div class="px-6 py-3 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-100 dark:border-gray-700/50 flex flex-wrap items-center justify-between gap-4 text-xs shrink-0 select-none">
+                    <div class="flex items-center gap-4 flex-wrap">
+                        <div class="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                            <span class="font-black uppercase tracking-wider text-[9px] opacity-70">Vectorizer:</span>
+                            <span class="px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold capitalize">
+                                {{ currentSelectedStore.vectorizer_name }}
+                            </span>
+                        </div>
+                        <div v-if="currentSelectedStore.vectorizer_config && (currentSelectedStore.vectorizer_config.model_name || currentSelectedStore.vectorizer_config.model)" class="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                            <span class="font-black uppercase tracking-wider text-[9px] opacity-70">Model:</span>
+                            <span class="font-mono bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-gray-700 dark:text-gray-300 font-semibold">
+                                {{ currentSelectedStore.vectorizer_config.model_name || currentSelectedStore.vectorizer_config.model }}
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                            <span class="font-black uppercase tracking-wider text-[9px] opacity-70">Chunking:</span>
+                            <span class="font-semibold text-gray-700 dark:text-gray-300">
+                                {{ currentSelectedStore.chunk_size }} chars <span class="opacity-50">/</span> {{ currentSelectedStore.chunk_overlap }} overlap
+                            </span>
+                        </div>
+                    </div>
+                    <div v-if="currentSelectedStore.description" class="text-gray-500 dark:text-gray-400 truncate max-w-xs md:max-w-md italic" :title="currentSelectedStore.description">
+                        {{ currentSelectedStore.description }}
+                    </div>
+                </div>
+
                 <!-- Content Area Tabs -->
                 <div v-show="activeTab === 'documents'" class="p-6 grow overflow-y-auto space-y-8">
                     <div v-if="canReadWrite(currentSelectedStore)" class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 space-y-4">

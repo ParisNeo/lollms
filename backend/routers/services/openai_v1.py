@@ -33,7 +33,7 @@ from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.files import extract_text_from_file_bytes 
-from backend.utils import track_service_usage, check_rate_limit
+from backend.utils import track_service_usage, check_rate_limit, get_system_cache, set_system_cache
 
 # --- Router Definition ---
 openai_v1_router = APIRouter(prefix="/v1")
@@ -612,11 +612,26 @@ async def list_models(
 ):
     ASCIIColors.panel(f"{user.username} is listing the models", f"Open AI V1")
 
+    # --- FORCE MODEL MODE FOR LISTING ---
+    force_model_mode = settings.get("force_model_mode", "disabled")
+    forced_model = settings.get("force_model_name")
+    if force_model_mode == "force_always" and forced_model:
+        return {
+            "object": "list",
+            "data": [{
+                "id": forced_model,
+                "name": forced_model,
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "lollms"
+            }]
+        }
+
     # 1. Try DB Cache first (unless forced)
     if not force_refresh:
         # Wrap DB query or cache lookup to keep event loop free
         loop = asyncio.get_running_loop()
-        cached = await loop.run_in_executor(executor, lambda: get_cached_models(db))
+        cached = await loop.run_in_executor(executor, lambda: get_system_cache(db, "cache_available_models"))
         if cached:
             ASCIIColors.success("Returning cached model list.")
             return {"object": "list", "data": cached}
@@ -684,9 +699,9 @@ async def list_models(
     final_list = sorted(list(unique_models.values()), key=lambda x: x['id'])
     
     # Update Cache
-    set_cached_models(db, final_list)
+    await loop.run_in_executor(executor, lambda: set_system_cache(db, "cache_available_models", final_list))
     ASCIIColors.info(f"------------ DONE (Cache Updated) --------------")
-    
+
     return {"object": "list", "data": final_list}
 
 

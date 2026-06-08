@@ -40,7 +40,8 @@ from backend.session import (
     get_current_admin_user,
     user_sessions,
     get_user_lollms_client,
-    build_lollms_client_from_params
+    build_lollms_client_from_params,
+    invalidate_model_cache
 )
 from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
@@ -364,7 +365,7 @@ async def get_all_bindings(db: Session = Depends(get_db)):
 async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(get_db)):
     if db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_data.alias).first():
         raise HTTPException(status_code=400, detail="A binding with this alias already exists.")
-    
+
     if binding_data.config:
         binding_data.config = _process_binding_config(binding_data.name, binding_data.config, "llm")
 
@@ -373,7 +374,7 @@ async def create_binding(binding_data: LLMBindingCreate, db: Session = Depends(g
         db.add(new_binding)
         db.commit()
         db.refresh(new_binding)
-        set_system_cache(db, "cache_available_models", None)
+        invalidate_model_cache(db)
         manager.broadcast_sync({"type": "bindings_updated"})
         return new_binding
     except IntegrityError:
@@ -388,24 +389,24 @@ async def update_binding(binding_id: int, update_data: LLMBindingUpdate, db: Ses
     binding_to_update = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding_to_update:
         raise HTTPException(status_code=404, detail="Binding not found.")
-    
+
     if update_data.alias and update_data.alias != binding_to_update.alias:
         if db.query(DBLLMBinding).filter(DBLLMBinding.alias == update_data.alias).first():
             raise HTTPException(status_code=400, detail="A binding with the new alias already exists.")
 
     update_dict = update_data.model_dump(exclude_unset=True)
-    
+
     if 'config' in update_dict and update_dict['config'] is not None:
         binding_name = update_dict.get('name', binding_to_update.name)
         update_dict['config'] = _process_binding_config(binding_name, update_dict['config'], "llm")
 
     for key, value in update_dict.items():
         setattr(binding_to_update, key, value)
-    
+
     try:
         db.commit()
         db.refresh(binding_to_update)
-        set_system_cache(db, "cache_available_models", None)
+        invalidate_model_cache(db)
         manager.broadcast_sync({"type": "bindings_updated"})
         return binding_to_update
     except Exception as e:
@@ -417,17 +418,11 @@ async def delete_binding(binding_id: int, db: Session = Depends(get_db)):
     binding_to_delete = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding_to_delete:
         raise HTTPException(status_code=404, detail="Binding not found.")
-    
+
     try:
         db.delete(binding_to_delete)
         db.commit()
-        
-        # Clear global registry in case this worker had a "degraded" instance cached
-        from backend.session import _global_client_registry, _registry_lock
-        with _registry_lock:
-            _global_client_registry.clear()
-            
-        set_system_cache(db, "cache_available_models", None)
+        invalidate_model_cache(db)
         manager.broadcast_sync({"type": "bindings_updated"})
         return {"message": "Binding deleted successfully."}
     except Exception as e:
@@ -1312,16 +1307,16 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding:
         raise HTTPException(status_code=404, detail="Binding not found.")
-    
+
     if binding.model_aliases is None:
         binding.model_aliases = {}
-    
+
     binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
-    
+
     db.commit()
     db.refresh(binding)
-    set_system_cache(db, "cache_available_models", None)
+    invalidate_model_cache(db)
     manager.broadcast_sync({"type": "bindings_updated"})
     return binding
 
@@ -1375,14 +1370,14 @@ async def delete_model_alias(binding_id: int, payload: ModelAliasDelete, db: Ses
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding:
         raise HTTPException(status_code=404, detail="Binding not found.")
-        
+
     if binding.model_aliases and payload.original_model_name in binding.model_aliases:
         del binding.model_aliases[payload.original_model_name]
         flag_modified(binding, "model_aliases")
-    
+
     db.commit()
     db.refresh(binding)
-    set_system_cache(db, "cache_available_models", None)
+    invalidate_model_cache(db)
     manager.broadcast_sync({"type": "bindings_updated"})
     return binding
 
