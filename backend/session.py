@@ -633,18 +633,20 @@ def build_lollms_client_from_params(
                 alias_info = model_aliases.get(model_name_for_binding)
 
                 if alias_info:
-                    override_allowed = alias_info.get('allow_parameters_override', True)
-                    alias_params = {k: v for k, v in alias_info.items() if v is not None}
+                    alias_config = alias_info.get('alias', {}) if 'alias' in alias_info else alias_info
+                    override_allowed = alias_config.get('allow_parameters_override', True)
+                    alias_params = {k: v for k, v in alias_config.items() if v is not None}
 
                     if override_allowed:
                         llm_init_params.update({**alias_params, **final_user_params})
                     else:
                         llm_init_params.update(final_user_params)
                         llm_init_params.update(alias_params)
-                    
+
                     # Respect Alias context size if provided
-                    if 'ctx_size' in alias_info and alias_info['ctx_size']:
-                        llm_init_params["ctx_size"] = alias_info['ctx_size']
+                    ctx_size = alias_config.get('ctx_size')
+                    if ctx_size:
+                        llm_init_params["ctx_size"] = int(ctx_size)
                 else:
                     llm_init_params.update(final_user_params)
 
@@ -1030,8 +1032,10 @@ def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], O
         for original_name, alias_data in model_aliases.items():
             if original_name == "smart-routing":
                 continue 
-            if alias_data and alias_data.get('title') == alias_title:
-                return binding.alias, original_name
+            if alias_data:
+                title = alias_data.get('title') or alias_data.get('alias', {}).get('title')
+                if title == alias_title:
+                    return binding.alias, original_name
     return None, None
 
 

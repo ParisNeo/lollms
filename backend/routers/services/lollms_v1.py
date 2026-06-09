@@ -233,8 +233,11 @@ async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(g
 
         alias_info = model_aliases.get(name)
         # If alias exists and has a context size set, use it preferentially
-        if alias_info and 'ctx_size' in alias_info and alias_info['ctx_size']:
-             return ContextSizeResponse(context_size=int(alias_info['ctx_size']))
+        if alias_info:
+             alias_config = alias_info.get('alias', {}) if 'alias' in alias_info else alias_info
+             ctx_size = alias_config.get('ctx_size')
+             if ctx_size:
+                  return ContextSizeResponse(context_size=int(ctx_size))
 
     def _get_ctx_size():
         lc = build_lollms_client_from_params(user.username, alias, name, load_llm=True)
