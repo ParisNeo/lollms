@@ -80,16 +80,17 @@ const isLatex = computed(() => ['latex', 'tex'].includes(props.language?.toLower
 const isLatexBuilderEnabled = computed(() => authStore.latex_builder_enabled);
 const isGenerativeImage = computed(() => props.language?.toLowerCase() === 'generate_image');
 const isNote = computed(() => props.language?.toLowerCase() === 'note');
-const canExecute = computed(() => ['python', 'javascript', 'html', 'svg', 'mermaid'].includes(props.language?.toLowerCase()));
+const canExecute = computed(() => ['python', 'javascript', 'html', 'svg', 'mermaid', 'owl', 'turtle', 'rdf', 'ttl'].includes(props.language?.toLowerCase()));
 
 const executeButtonText = computed(() => {
     if (isExecuting.value) {
         const lang = props.language.toLowerCase();
         if (lang === 'mermaid') return 'Rendering...';
         if (lang === 'svg' || lang === 'html') return 'Showing...';
+        if (['owl', 'turtle', 'rdf', 'ttl'].includes(lang)) return 'Rendering...';
         return 'Running...';
     }
-    if (['svg', 'mermaid', 'html'].includes(props.language?.toLowerCase())) return 'Show';
+    if (['svg', 'mermaid', 'html', 'owl', 'turtle', 'rdf', 'ttl'].includes(props.language?.toLowerCase())) return 'Show';
     return 'Run';
 });
 
@@ -311,7 +312,7 @@ async function executeCode() {
                 });
 
                 const id = `mermaid-svg-${Date.now()}`;
-                
+
                 // Rendering into a temporary DOM element helps browsers resolve 
                 // dynamic modules correctly in certain bundled environments.
                 const container = document.createElement('div');
@@ -323,9 +324,9 @@ async function executeCode() {
                 // Render to SVG string using the container anchor
                 const { svg } = await mermaid.render(id, props.code, container);
                 lastRenderedMermaidSvg.value = svg;
-                
+
                 document.body.removeChild(container);
-                
+
                 const background = uiStore.currentTheme === 'dark' ? '#111827' : '#ffffff';
                 const htmlContent = `
                     <div style="
@@ -348,14 +349,14 @@ async function executeCode() {
                     contentType: 'mermaid',
                     sourceCode: props.code
                 });
-                
+
                 executionOutput.value = 'Mermaid diagram rendered and opened.';
             } catch (err) {
                 isError.value = true;
                 const msg = err instanceof Error ? err.message : String(err);
                 executionOutput.value = `Mermaid Syntax Error: ${msg}`;
                 console.error("Mermaid rendering failed:", err);
-                
+
                 // Fallback: If SVG rendering fails, open the modal with source code
                 // allowing the modal component to attempt its own rendering.
                 uiStore.openModal('interactiveOutput', {
@@ -364,6 +365,15 @@ async function executeCode() {
                     sourceCode: props.code
                 });
             }
+        } else if (['owl', 'turtle', 'rdf', 'ttl'].includes(lang)) {
+            await new Promise(resolve => setTimeout(resolve, 50));
+            uiStore.openModal('interactiveOutput', { 
+                contentType: 'owl', 
+                sourceCode: props.code,
+                fullScreen: true,
+                title: `Ontology Graph (${props.language.toUpperCase()})`
+            });
+            executionOutput.value = 'Ontology parsed and rendered in a modal window.';
         } else if (lang === 'javascript') {
             let capturedOutput = '';
             const originalLog = console.log;

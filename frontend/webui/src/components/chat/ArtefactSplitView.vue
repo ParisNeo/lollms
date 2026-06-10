@@ -264,8 +264,9 @@ async function handleExecute() {
             // Config
             'dockerfile': 'dockerfile', 'makefile': 'makefile', 'cmake': 'cmake',
             'gradle': 'gradle', 'maven': 'xml', 'pom': 'xml',
-            // Other
+              // Other
             'svg': 'svg', 'mermaid': 'mermaid', 'mmd': 'mermaid', 'graphql': 'graphql', 'proto': 'protobuf',
+            'owl': 'xml', 'ttl': 'turtle', 'rdf': 'xml',
             };
 
             // Return detected type from extension if found

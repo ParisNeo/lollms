@@ -117,12 +117,12 @@ const manualMetadata = ref({});
 const vectorizeWithMetadata = ref(true);
 
 const extensionOptions = [
-    { label: 'Docs', items: ['.pdf', '.docx', '.pptx', '.txt', '.md', '.msg'] },
-    { label: 'Code', items: ['.py', '.js', '.ts', '.html', '.css', '.cpp', '.c', '.cs', '.java', '.sh', '.sql', '.vue'] },
+    { label: 'Docs', items: ['.pdf', '.docx', '.pptx', '.txt', '.md', '.msg', '.owl', '.ttl', '.rdf'] },
+    { label: 'Code', items: ['.py', '.js', '.ts', '.html', '.css', '.cpp', '.c', '.cs', '.java', '.sh', '.bash', '.zsh', '.bat', '.cmd', '.sql', '.vue'] },
     { label: 'Data', items: ['.json', '.yaml', '.yml', '.csv', '.xml', '.log'] }
 ];
 
-const selectedExtensions = ref(new Set(['.pdf', '.docx', '.txt', '.md', '.py', '.js', '.json', '.csv'])); // Sensible defaults
+const selectedExtensions = ref(new Set(['.pdf', '.docx', '.txt', '.md', '.py', '.js', '.json', '.csv', '.owl', '.ttl', '.rdf', '.sh', '.bash', '.zsh', '.bat', '.cmd'])); // Sensible defaults
 
 function toggleExtension(ext) {
     if (selectedExtensions.value.has(ext)) {
@@ -1029,7 +1029,7 @@ async function handleImportStore() {
                                 class="border-2 border-dashed rounded-lg p-6 text-center transition-colors flex flex-col justify-center min-h-[180px]" 
                                 :class="{ 'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragOver, 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500': !dragOver }"
                             >
-                                <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv">
+                                <input type="file" multiple ref="fileInputRef" @change="handleFileChange" class="hidden" accept=".pdf,.docx,.pptx,.xlsx,.msg,.vcf,.txt,.md,.py,.js,.ts,.html,.css,.c,.cpp,.h,.hpp,.cs,.java,.json,.xml,.sh,.bash,.zsh,.bat,.cmd,.owl,.ttl,.rdf,.vhd,.v,.rb,.php,.go,.rs,.swift,.kt,.yaml,.yml,.sql,.log,.csv">
                                 <input type="file" ref="folderInputRef" @change="handleFileChange" class="hidden" webkitdirectory directory multiple>
                                 
                                 <p class="text-gray-600 dark:text-gray-300 font-medium mb-4">Drag & drop files here</p>

@@ -4,6 +4,7 @@ import { useUiStore } from '../../stores/ui';
 import GenericModal from './GenericModal.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 import MermaidViewer from './InteractiveMermaid.vue';
+import InteractiveGraphViewer from '../datastores/InteractiveGraphViewer.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconMaximize from '../../assets/icons/IconMaximize.vue';
@@ -20,7 +21,12 @@ const title = computed(() => modalProps.value?.title || 'Execution Results');
 const results = computed(() => {
     const rawResults = modalProps.value?.results;
     if (rawResults && Object.keys(rawResults).length > 0) return rawResults;
-    
+
+    // Provide a valid placeholder for visualizers to mount successfully
+    if (modalProps.value?.contentType === 'owl' || modalProps.value?.contentType === 'mermaid') {
+        return { "Viewer": { "output": "" } };
+    }
+
     // Fallback for direct content display (e.g. from ChatInput feature info)
     if (modalProps.value?.content) {
         return { "Info": { "content": modalProps.value.content } };
@@ -166,6 +172,21 @@ function handleClose() {
                                     <MermaidViewer 
                                         :mermaid-code="modalProps.sourceCode" 
                                         :message-id="modalProps.messageId"
+                                    />
+                                </div>
+
+                                <!-- OWL RENDERING -->
+                                <div v-else-if="modalProps?.contentType === 'owl' && modalProps?.sourceCode" 
+                                     :class="[
+                                         'w-full border dark:border-gray-700 rounded-lg overflow-hidden bg-white dark:bg-gray-950 shadow-sm relative',
+                                         modalProps?.fullScreen ? 'flex-1 !h-full !rounded-none !border-none' : 'h-[600px]'
+                                     ]">
+                                    <InteractiveGraphViewer 
+                                        :nodes="[]" 
+                                        :edges="[]" 
+                                        :is-loading="false"
+                                        :owl-source="modalProps.sourceCode" 
+                                        class="w-full h-full"
                                     />
                                 </div>
 

@@ -238,7 +238,15 @@ class ConnectionManager:
                 username = data.get("username")
                 if username in user_sessions:
                     user_sessions[username]['lollms_clients_cache'] = {}
-            
+
+            elif event_type == "global_model_cache_invalidate":
+                from backend.session import _global_client_registry, _registry_lock
+                with _registry_lock:
+                    _global_client_registry.clear()
+                for username, session in user_sessions.items():
+                    if 'lollms_clients_cache' in session:
+                        session['lollms_clients_cache'] = {}
+
             elif event_type == "user_disconnect":
                 user_id = data.get("user_id")
                 if user_id:

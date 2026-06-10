@@ -1045,6 +1045,10 @@ def invalidate_model_cache(db: Session):
     with _registry_lock:
         _global_client_registry.clear()
 
+    # Broadcast to all other workers to clear their registries and client caches
+    from backend.ws_manager import manager
+    manager.broadcast_internal_event_sync("global_model_cache_invalidate", {})
+
 
 def resolve_model_name(db: Session, requested_model: str, fallback_to_default: bool = True) -> Tuple[str, str]:
     if not requested_model:
@@ -1058,6 +1062,19 @@ def resolve_model_name(db: Session, requested_model: str, fallback_to_default: b
         parts = requested_model.split('/', 1)
         binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
         if binding:
+            # Check if parts[1] is an alias name for this binding
+            model_aliases = binding.model_aliases or {}
+            if isinstance(model_aliases, str):
+                try:
+                    model_aliases = json.loads(model_aliases)
+                except Exception:
+                    model_aliases = {}
+
+            for original_name, alias_data in model_aliases.items():
+                if alias_data:
+                    title = alias_data.get('title') or alias_data.get('alias', {}).get('title')
+                    if title == parts[1]:
+                        return parts[0], original_name
             return parts[0], parts[1]
 
     binding_alias, model_name = find_model_by_alias(db, requested_model)
