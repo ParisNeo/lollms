@@ -73,11 +73,12 @@ const formatThinkingTime = (seconds) => {
 };
 
 // Watch the messageParts to start/stop timers for each thinking block
+// Watch the messageParts to start/stop timers for each thinking block
 watch(() => messageParts.value, (newParts) => {
     newParts.forEach(part => {
         if (part.type === 'think') {
-            const isClosed = part.raw && part.raw.trim().endsWith('</think>');
-
+            const isClosed = part.isClosed;
+            
             // If the timer doesn't exist yet, initialize it
             if (!thinkingTimers.value[part.id]) {
                 const startTime = Date.now();
@@ -86,7 +87,7 @@ watch(() => messageParts.value, (newParts) => {
                     done: false,
                     intervalId: null
                 };
-
+                
                 if (!isClosed && props.isStreaming) {
                     thinkingTimers.value[part.id].intervalId = setInterval(() => {
                         if (thinkingTimers.value[part.id] && !thinkingTimers.value[part.id].done) {
@@ -312,7 +313,8 @@ const parsedStreamingContent = computed(() => {
 
     if (match[1]) {
         const content = match[1].replace(/<think>|<\/think>/g, '').trim();
-        return { type: 'think', content };
+        const isClosed = match[1].trim().endsWith('</think>');
+        return { type: 'think', content, isClosed };
     } 
     else if (match[2]) {
         let annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
@@ -1269,12 +1271,13 @@ function onMermaidReady({ svg }, partIndex) {
 
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
             <summary class="think-summary">
-              <IconThinking :class="['h-5 w-5 shrink-0 transition-all duration-300', !thinkingTimers[part.id]?.done ? 'text-blue-500 animate-pulse' : 'text-blue-400']" />
+              <IconAnimateSpin v-if="!part.isClosed" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
+              <IconThinking v-else class="h-5 w-5 text-blue-400 shrink-0" />
               <div class="flex items-center justify-between w-full pr-2">
                   <div class="flex items-center gap-2">
                       <span>Thinking</span>
                       <!-- Bouncing dots indicator when active -->
-                      <span v-if="!thinkingTimers[part.id]?.done" class="flex gap-1 items-center mt-1.5">
+                      <span v-if="!part.isClosed" class="flex gap-1 items-center mt-1.5">
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.3s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.15s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce"></span>
@@ -1282,7 +1285,7 @@ function onMermaidReady({ svg }, partIndex) {
                   </div>
                   <!-- Inline duration timer -->
                   <span class="text-[10px] font-mono opacity-60 tracking-wider">
-                      {{ thinkingTimers[part.id]?.done ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` }}
+                      {{ part.isClosed ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` }}
                   </span>
               </div>
             </summary>
