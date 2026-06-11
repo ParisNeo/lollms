@@ -1,11 +1,13 @@
 /* Cyberpunk Vibe */
 .vibe-cyberpunk {
-  --brand-primary: #f0abfc;
-  --brand-primary-hover: #e879f9;
-  --brand-accent: #22d3ee;
-  --brand-bg-app: #05050d;      /* Synthwave black */
-  --brand-bg-card: #0c0c17;     /* Cyber card */
-  --brand-border-main: #24142c;  /* Subtle purple border */
-  --brand-text-main: #f5d0fe;
+  --brand-primary: #d946ef;
+  --brand-primary-hover: #c084fc;
+  --brand-accent: #06b6d4;
+  --brand-bg-app: #040209;
+  --brand-bg-app-hover: #170b24;
+  --brand-bg-card: #0a0614;
+  --brand-border-main: #2e1047;
+  --brand-border-muted: #4a1d6d;
+  --brand-text-main: #fae8ff;
   --brand-text-dim: #22d3ee;
 }

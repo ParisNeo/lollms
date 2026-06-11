@@ -1,19 +1,26 @@
 /* Forest Vibe */
 .vibe-forest {
-  --brand-primary: #10b981;
-  --brand-primary-hover: #059669;
+  --brand-primary: #059669;
+  --brand-primary-hover: #047857;
   --brand-accent: #84cc16;
-  --brand-bg-app: #f4fbf7;      /* Clean sage tint */
+  --brand-bg-app: #f4f9f5;
+  --brand-bg-app-hover: #e8f4ec;
   --brand-bg-card: #ffffff;
-  --brand-border-main: #e1f5eb;
+  --brand-border-main: #d1ebd9;
+  --brand-border-muted: #e6f4ed;
   --brand-text-main: #064e3b;
   --brand-text-dim: #059669;
 }
 
 .dark.vibe-forest {
-  --brand-bg-app: #020f0c;      /* Deep forest black */
-  --brand-bg-card: #051b15;     /* Dark moss card */
-  --brand-border-main: #0d2b22;  /* Green slate border */
-  --brand-text-main: #ecfdf5;
+  --brand-primary: #10b981;
+  --brand-primary-hover: #34d399;
+  --brand-accent: #a3e635;
+  --brand-bg-app: #020b08;
+  --brand-bg-app-hover: #092a20;
+  --brand-bg-card: #051812;
+  --brand-border-main: #0e3a29;
+  --brand-border-muted: #134e3b;
+  --brand-text-main: #f0fdf4;
   --brand-text-dim: #34d399;
 }

@@ -241,9 +241,67 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 
 /* ==========================================================================
    7. Data Zone & Complex Components
-   ========================================================================== */
+========================================================================== */
 .progress-segment { @apply absolute top-0 h-full transition-all duration-300 ease-out opacity-80; }
 .category-header { @apply px-3 py-1.5 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400 sticky top-0 bg-gray-50 dark:bg-gray-700 z-10; }
+
+/* ==========================================================================
+   8. Dynamic Vibe Semantic Overrides (Pristine Contrast Layer)
+========================================================================== */
+
+/* Core Layout Backgrounds */
+body, .bg-bg-app {
+    background-color: var(--brand-bg-app) !important;
+    color: var(--brand-text-main) !important;
+}
+
+.bg-bg-card {
+    background-color: var(--brand-bg-card) !important;
+}
+
+/* Sidebar & Borders */
+.sidebar-panel {
+    background-color: var(--brand-bg-app) !important;
+    border-color: var(--brand-border-main) !important;
+}
+
+.border-border-main {
+    border-color: var(--brand-border-main) !important;
+}
+
+/* Dropdown Menus & Popovers */
+.dropdown-menu, [role="menu"], .popover-content, .bg-white\/40, .dark .bg-black\/30 {
+    background-color: var(--brand-bg-card) !important;
+    border-color: var(--brand-border-main) !important;
+    color: var(--brand-text-main) !important;
+}
+
+/* Dropdown Menu Items Legibility & Hovers */
+.menu-item, [role="menuitem"], .dropdown-item, .dropdown-menu button, .dropdown-menu a {
+    color: var(--brand-text-main) !important;
+    transition: all 0.15s ease;
+}
+
+.menu-item:hover, [role="menuitem"]:hover, .dropdown-item:hover, .dropdown-menu button:hover, .dropdown-menu a:hover {
+    background-color: var(--brand-bg-app-hover) !important;
+    color: var(--brand-primary) !important;
+}
+
+/* Modals & Dialogs */
+.modal-panel, .modal-content, [role="dialog"] {
+    background-color: var(--brand-bg-card) !important;
+    border-color: var(--brand-border-main) !important;
+    color: var(--brand-text-main) !important;
+}
+
+/* Text Overrides for Dimmed & Main Text */
+.text-text-main, .text-slate-900, .dark .text-gray-100 {
+    color: var(--brand-text-main) !important;
+}
+
+.text-text-dim, .text-slate-500 {
+    color: var(--brand-text-dim) !important;
+}
 
 /* From: ChatView.vue - refined and integrated */
 .enhanced-header { @apply p-4 border-b border-gray-200 dark:border-gray-700 bg-gradient-to-r from-blue-50/50 to-indigo-50/50 dark:from-gray-800/50; }
@@ -412,10 +470,44 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .custom-scrollbar::-webkit-scrollbar-thumb:hover { @apply bg-gray-300 dark:bg-gray-700; }
 
 /* Welcome / Hero Typography */
+/* Welcome / Hero Typography */
 .welcome-title {
     @apply text-gray-900 dark:text-white leading-tight tracking-tighter;
     font-family: Georgia, Cambria, serif;
     font-size: clamp(2rem, 6vw, 4.5rem);
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--brand-text-main) 30%, var(--brand-accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 0px transparent !important;
+    text-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
+
+.dark .welcome-title {
+    background: linear-gradient(135deg, #ffffff 40%, var(--brand-primary) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 4px 30px rgba(99, 102, 241, 0.15);
+}
+
+/* Splash / Loading Specifics */
+.splash-title {
+    @apply text-gray-900 dark:text-white leading-none tracking-tighter mb-2;
+    font-family: Georgia, Cambria, serif;
+    font-size: clamp(3rem, 12vw, 8rem);
+    font-weight: 800;
+    background: linear-gradient(135deg, var(--brand-text-main) 30%, var(--brand-accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    -webkit-text-stroke: 0px transparent !important;
+    text-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
+
+.dark .splash-title {
+    background: linear-gradient(135deg, #ffffff 40%, var(--brand-primary) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    text-shadow: 0 4px 30px rgba(99, 102, 241, 0.15);
 }
 
 .welcome-slogan {
@@ -427,13 +519,6 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 .welcome-btn {
     @apply flex items-center justify-center gap-3 px-8 py-4 rounded-2xl font-black uppercase tracking-[0.2em] text-[11px] transition-all duration-300 transform hover:-translate-y-1 active:translate-y-0 shadow-lg hover:shadow-xl;
     font-family: system-ui, sans-serif;
-}
-
-/* Splash / Loading Specifics */
-.splash-title {
-    @apply text-gray-900 dark:text-white leading-none tracking-tighter mb-2;
-    font-family: Georgia, Cambria, serif;
-    font-size: clamp(3rem, 12vw, 8rem);
 }
 
 .splash-loading-label {

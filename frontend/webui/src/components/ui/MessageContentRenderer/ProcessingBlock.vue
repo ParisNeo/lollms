@@ -54,7 +54,7 @@ const steps = computed(() => {
 </script>
 
 <template>
-    <div class="my-3 processing-block-root font-sans overflow-visible">
+    <div class="my-3 processing-block-root font-sans overflow-visible not-prose">
         <!-- 1. Trigger Area: Discreet Breadcrumb -->
         <button 
             @click="isExpanded = !isExpanded"
@@ -66,11 +66,11 @@ const steps = computed(() => {
                 style="width: 12px; height: 12px; min-width: 12px;" 
             />
 
-            <div class="flex items-center gap-1 text-[11px] text-gray-400 dark:text-gray-500 group-hover:text-gray-600 dark:group-hover:text-gray-300">
-                <span class="uppercase font-bold tracking-wider opacity-80">{{ typeLabel }}:</span>
-                <span class="truncate max-w-[180px] sm:max-w-md font-medium">{{ title }}</span>
-                
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 14px; height: 14px;" class="transition-transform duration-300 opacity-40 shrink-0" :class="{ 'rotate-90': isExpanded }">
+            <div class="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-300 group-hover:text-gray-700 dark:group-hover:text-white">
+                <span class="uppercase font-bold tracking-wider opacity-90">{{ typeLabel }}:</span>
+                <span class="truncate max-w-[180px] sm:max-w-md font-semibold">{{ title }}</span>
+
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" style="width: 14px; height: 14px;" class="transition-transform duration-300 opacity-60 shrink-0" :class="{ 'rotate-90': isExpanded }">
                     <path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd" />
                 </svg>
             </div>

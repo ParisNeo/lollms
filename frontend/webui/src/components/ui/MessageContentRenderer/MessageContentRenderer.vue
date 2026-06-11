@@ -62,6 +62,55 @@ const { activeAiTasks, liveArtefactBuffers } = storeToRefs(discussionsStore);
 const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
 
+const thinkingTimers = ref({});
+
+const formatThinkingTime = (seconds) => {
+    if (seconds === undefined || seconds === null) return '0s';
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}m ${secs}s`;
+};
+
+// Watch the messageParts to start/stop timers for each thinking block
+watch(() => messageParts.value, (newParts) => {
+    newParts.forEach(part => {
+        if (part.type === 'think') {
+            const isClosed = part.raw && part.raw.trim().endsWith('</think>');
+
+            // If the timer doesn't exist yet, initialize it
+            if (!thinkingTimers.value[part.id]) {
+                const startTime = Date.now();
+                thinkingTimers.value[part.id] = {
+                    elapsed: 0,
+                    done: false,
+                    intervalId: null
+                };
+
+                if (!isClosed && props.isStreaming) {
+                    thinkingTimers.value[part.id].intervalId = setInterval(() => {
+                        if (thinkingTimers.value[part.id] && !thinkingTimers.value[part.id].done) {
+                            thinkingTimers.value[part.id].elapsed = Math.floor((Date.now() - startTime) / 1000);
+                        }
+                    }, 1000);
+                } else {
+                    thinkingTimers.value[part.id].done = true;
+                }
+            } else {
+                // If it exists but is now closed or streaming stopped, freeze it
+                const timer = thinkingTimers.value[part.id];
+                if ((isClosed || !props.isStreaming) && !timer.done) {
+                    timer.done = true;
+                    if (timer.intervalId) {
+                        clearInterval(timer.intervalId);
+                        timer.intervalId = null;
+                    }
+                }
+            }
+        }
+    });
+}, { deep: true, immediate: true });
+
 
 /**
  * Wraps the raw widget source in a sandboxed HTML environment.
@@ -172,7 +221,28 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('message', handleWidgetMessage);
+  // Clean up all active intervals to avoid memory leaks
+  Object.values(thinkingTimers.value).forEach(timer => {
+      if (timer.intervalId) {
+          clearInterval(timer.intervalId);
+      }
+  });
 });
+
+const highlightInlineXmlTags = (text) => {
+    if (!text) return '';
+    const parts = text.split(/(`[^`\n]+`|```[\s\S]*?```)/g);
+    return parts.map((part, index) => {
+        if (index % 2 === 0) {
+            const xmlTagRegex = /<\/?(think|annotate|generate_image|edit_image|generate_slides|street_view|schedule_task|note|skill|lollms_widget|lollms_inline|lollms_building|lollms_form_anchor|lollms_working|artefact_image|processing|lollms_form|owl)\b[^>]*>/gi;
+            return part.replace(xmlTagRegex, (match) => {
+                const escaped = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return `<code class="inline-xml-tag px-1 py-0.5 rounded font-mono text-xs bg-blue-100/80 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40">${escaped}</code>`;
+            });
+        }
+        return part;
+    }).join('');
+};
 
 const parsedMarkdown = (content) => {
   if (!content) return '';
@@ -185,7 +255,8 @@ const parsedMarkdown = (content) => {
       return placeholder;
     }
   );
-  let html = rawParsedMarkdown(sanitizedContent);
+  const highlightedContent = highlightInlineXmlTags(sanitizedContent);
+  let html = rawParsedMarkdown(highlightedContent);
   if (mathBlocks.length > 0) {
     html = html.replace(new RegExp(placeholder, 'g'), () => mathBlocks.shift());
   }
@@ -550,14 +621,32 @@ const messageParts = computed(() => {
 
     const parts = [];
 
-    // 1. Define patterns using specific, non-overlapping tags
+    // 1. Define patterns using specific, non-overlapping tags.
+    // For XML block tags, they must be at the start of a line (tolerating leading spaces/tabs but nothing else).
+    // Note: We explicitly avoid the 'm' multiline flag so that the '$' anchor matches only the absolute end of string.
     const patterns = [
         { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
-        { type: 'lollms_form', regex: /<lollms_form\b([^>]*)>([\s\S]*?)<\/lollms_form>/g },
-        { type: 'lollms_inline', regex: /<lollms_inline\b[^>]*\btitle=["']([^"']+)["'][^>]*>([\s\S]*?)<\/lollms_inline>/g },
-        { type: 'processing', regex: /(<processing\s+type=["']([^"']*)["']\s+title=["']([^"']*)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))/gi },
         { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g },
-        { type: 'artefact_image', regex: /<artefact_image\s+id=["']([^"']+)["']\s*\/?>/g }
+
+        // Block-level XML tags (must be at the start of a line)
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<think>([\s\S]*?)(?:<\/think>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<annotate>([\s\S]*?)(?:<\/annotate>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_image[^>]*>([\s\S]*?)(?:<\/generate_image>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<edit_image[^>]*>([\s\S]*?)(?:<\/edit_image>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_slides[^>]*>([\s\S]*?)(?:<\/generate_slides>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<street_view>([\s\S]*?)(?:<\/street_view>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<schedule_task[^>]*>([\s\S]*?)(?:<\/schedule_task>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<note[^>]*>([\s\S]*?)(?:<\/note>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<skill[^>]*>([\s\S]*?)(?:<\/skill>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_building[^>]*\/>)/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\s+type=["']([^"']*)["']\s+title=["']([^"']*)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
+        { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi }
     ];
 
     const allElements = [];
@@ -568,7 +657,20 @@ const messageParts = computed(() => {
         // Reset regex state for global searches
         p.regex.lastIndex = 0;
         while ((m = p.regex.exec(content)) !== null) {
-            allElements.push({ start: m.index, end: m.index + m[0].length, raw: m[0], match: m, type: p.type });
+            const rawMatch = m[0];
+            const prefixMatch = rawMatch.match(/^(?:\n|^)[ \t]*/);
+            const prefixLength = prefixMatch ? prefixMatch[0].length : 0;
+            const absoluteStart = m.index + prefixLength;
+            const absoluteEnd = m.index + rawMatch.length;
+            const rawTag = rawMatch.substring(prefixLength);
+
+            allElements.push({ 
+                start: absoluteStart, 
+                end: absoluteEnd, 
+                raw: rawTag, 
+                match: m, 
+                type: p.type 
+            });
         }
     });
 
@@ -598,7 +700,7 @@ const messageParts = computed(() => {
     activeElements.forEach((el, index) => {
         let uniqueKey = null;
         if (el.type === 'tool') {
-             const parsed = parseSpecialBlock(el.raw, el.match);
+             const parsed = parseSpecialBlock(el.raw);
              const rawKey = parsed.id || parsed.title || parsed.prompt;
              if (rawKey) uniqueKey = `${parsed.type}-${rawKey}`;
         } else if (el.type === 'form_ready') {
@@ -639,7 +741,7 @@ const messageParts = computed(() => {
         // Determine if this is the chosen occurrence for this element
         let uniqueKey = null;
         if (el.type === 'tool') {
-             const p = parseSpecialBlock(el.raw, el.match);
+             const p = parseSpecialBlock(el.raw);
              const rawKey = p.id || p.title || p.prompt;
              if (rawKey) uniqueKey = `${p.type}-${rawKey}`;
         } else if (el.type === 'form_ready') {
@@ -671,7 +773,7 @@ const messageParts = computed(() => {
             }
         } else if (el.type === 'tool') {
             // Re-evaluate using parseSpecialBlock which handles all XML tags
-            const parsed = parseSpecialBlock(el.raw, el.match);
+            const parsed = parseSpecialBlock(el.raw);
             if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
             parts.push({ ...parsed, id: `${parsed.type}-${el.start}` });
         } else if (el.type === 'processing') {
@@ -1167,8 +1269,22 @@ function onMermaidReady({ svg }, partIndex) {
 
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
             <summary class="think-summary">
-              <IconThinking class="h-5 w-5 shrink-0" />
-              <span>Thinking...</span>
+              <IconThinking :class="['h-5 w-5 shrink-0 transition-all duration-300', !thinkingTimers[part.id]?.done ? 'text-blue-500 animate-pulse' : 'text-blue-400']" />
+              <div class="flex items-center justify-between w-full pr-2">
+                  <div class="flex items-center gap-2">
+                      <span>Thinking</span>
+                      <!-- Bouncing dots indicator when active -->
+                      <span v-if="!thinkingTimers[part.id]?.done" class="flex gap-1 items-center mt-1.5">
+                          <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.3s"></span>
+                          <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.15s"></span>
+                          <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce"></span>
+                      </span>
+                  </div>
+                  <!-- Inline duration timer -->
+                  <span class="text-[10px] font-mono opacity-60 tracking-wider">
+                      {{ thinkingTimers[part.id]?.done ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` }}
+                  </span>
+              </div>
             </summary>
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>

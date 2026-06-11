@@ -1,11 +1,13 @@
 /* Midnight Vibe - High Contrast Dark Mode only */
 .vibe-midnight {
-  --brand-primary: #38bdf8;
-  --brand-primary-hover: #0ea5e9; 
+  --brand-primary: #0ea5e9;
+  --brand-primary-hover: #0284c7; 
   --brand-accent: #818cf8;
-  --brand-bg-app: #030712;      /* Deep black-blue */
-  --brand-bg-card: #0b0f19;     /* Deep navy-charcoal card */
-  --brand-border-main: #161f30;  /* Slate border */
-  --brand-text-main: #f1f5f9;
-  --brand-text-dim: #94a3b8;
+  --brand-bg-app: #030712;
+  --brand-bg-app-hover: #111827;
+  --brand-bg-card: #0b0f19;
+  --brand-border-main: #1e293b;
+  --brand-border-muted: #334155;
+  --brand-text-main: #f8fafc;
+  --brand-text-dim: #64748b;
 }
