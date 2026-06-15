@@ -12,8 +12,6 @@ import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
 import IconClock from '../../assets/icons/IconClock.vue';
 import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
-import IconMaximize from '../../assets/icons/IconMaximize.vue';
-import IconMinimize from '../../assets/icons/IconMinimize.vue';
 import IconError from '../../assets/icons/IconError.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
@@ -33,7 +31,14 @@ const skillsStore = useSkillsStore();
 const dataStore = useDataStore(); // ADDED: Required for isTtsActive check
 
 const title = computed(() => uiStore.activeSplitArtefactTitle);
-const isFullscreen = ref(false);
+
+const editorExtensions = computed(() => {
+    const extensions = [];
+    if (uiStore.currentTheme === 'dark') {
+        extensions.push(oneDark);
+    }
+    return extensions;
+});
 
 const isTtsActive = computed(() => {
     return !!authStore.user?.tts_binding_model_name && 
@@ -296,8 +301,19 @@ async function handleExecute() {
             'json': 'javascript',
             'mermaid': 'mermaid',
             'markdown': 'markdown',
+            'xml': 'xml',
+            'owl': 'xml',
+            'rdf': 'xml',
+            'ttl': 'xml',
+            'turtle': 'xml'
         };
         return cmLangMap[type] || 'markdown';
+    });
+
+    // Only markdown, html, svg, and mermaid should have a visual render preview tab by default
+    const isRenderable = computed(() => {
+        const type = detectedContentType.value;
+        return ['markdown', 'html', 'svg', 'mermaid'].includes(type);
     });
 
     async function loadVersion(v) {
@@ -509,10 +525,7 @@ function download() {
 </script>
 
 <template>
-    <div 
-        class="h-full flex flex-col bg-white dark:bg-gray-950"
-        :class="{'fixed inset-0 !w-full z-[100]': isFullscreen}"
-    >
+    <div class="h-full flex flex-col bg-white dark:bg-gray-950">
         <div class="flex-1 flex flex-col min-w-0">
         <div class="p-3 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-800 shadow-sm relative overflow-hidden">
             <!-- ── [NEW] Generation Animation Bar ── -->
@@ -562,12 +575,6 @@ function download() {
                     </div>
                     <span class="font-bold text-sm truncate dark:text-gray-100">{{ title }}</span>
                 </div>
-            </div>
-            <div class="flex items-center gap-1">
-                <button @click="isFullscreen = !isFullscreen" class="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg text-gray-500 transition-colors" :title="isFullscreen ? 'Exit Fullscreen' : 'Fullscreen'">
-                    <IconMinimize v-if="isFullscreen" class="w-5 h-5" />
-                    <IconMaximize v-else class="w-5 h-5" />
-                </button>
             </div>
         </div>
         <div class="p-2 border-b border-border-main flex gap-2 items-center bg-bg-card shadow-sm relative z-10">
@@ -717,8 +724,9 @@ function download() {
                     v-else
                     v-model="dbContent" 
                     class="absolute inset-0 h-full" 
-                    :initialMode="dbContent ? 'view' : 'edit'"
-                    :renderable="true"
+                    :initialMode="isRenderable ? 'view' : 'edit'"
+                    :renderable="isRenderable"
+                    :extensions="editorExtensions"
                     :contentType="detectedContentType"
                     :language="detectedLanguage"
                     placeholder="Start typing to add content or update the document..."

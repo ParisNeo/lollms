@@ -88,7 +88,7 @@ class FlowEngine:
             try:
                 # Compile code with a filename for better tracebacks
                 compiled_code = compile(node_def.code, f"node_logic:{node_def.name}", "exec")
-                exec(compiled_code, {}, local_scope)
+                exec(compiled_code, {"__builtins__": {}}, local_scope)
             except Exception as e:
                 error_msg = f"Syntax/Compilation Error in node '{node_def.label}': {str(e)}"
                 if self._is_admin:

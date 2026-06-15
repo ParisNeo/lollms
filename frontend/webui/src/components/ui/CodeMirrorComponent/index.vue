@@ -151,7 +151,8 @@ watch(() => props.initialMode, (newMode) => {
 const getLanguageExtension = () => {
     const lang = props.language ? props.language.toLowerCase() : '';
     switch (lang) {
-        case 'html': return html();
+        case 'html':
+        case 'xml': return html();
         case 'python': return python();
         case 'javascript': return javascript();
         case 'mermaid': 

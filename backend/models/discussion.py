@@ -71,6 +71,7 @@ class DiscussionInfo(BaseModel):
     permission_level: Optional[str] = None
     share_id: Optional[int] = None
     group_id: Optional[str] = None # NEW
+    has_artefacts: Optional[bool] = False # NEW
 
 class DiscussionCreate(BaseModel):
     group_id: Optional[str] = None

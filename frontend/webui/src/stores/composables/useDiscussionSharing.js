@@ -3,7 +3,13 @@ import apiClient from '../../services/api';
 
 export function useDiscussionSharing(state, stores, getActions) {
     const { sharedWithMe, currentDiscussionId, discussions } = state;
-    const { uiStore } = stores;
+
+    const uiStore = {
+        addNotification(...args) { return stores.uiStore.addNotification(...args); },
+        openModal(...args) { return stores.uiStore.openModal(...args); },
+        showConfirmation(...args) { return stores.uiStore.showConfirmation(...args); },
+        closeModal(...args) { return stores.uiStore.closeModal(...args); }
+    };
 
     async function fetchSharedWithMe() {
         try {

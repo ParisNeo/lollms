@@ -15,6 +15,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         liveDataZoneTokens
     } = composableState;
 
+
     const { uiStore, tasksStore } = stores;
 
     function _handleArtefactAndDataZoneUpdate(response) {
@@ -23,9 +24,9 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         
         if (activeDiscussion.value) {
             // CRITICAL: We stop syncing 'discussion_data_zone' text here. 
-            // This zone is now purely for manual User instructions.
             activeDiscussion.value.discussion_images = response.data.discussion_images || [];
             activeDiscussion.value.active_discussion_images = response.data.active_discussion_images || [];
+            activeDiscussion.value.has_artefacts = response.data.artefacts && response.data.artefacts.length > 0;
         }
         
         // Update tokens for status bar (library still counts artefacts tokens internally)
@@ -40,6 +41,9 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         try {
             const response = await apiClient.get(`/api/discussions/${discussionId}/artefacts`);
             activeDiscussionArtefacts.value = response.data;
+            if (activeDiscussion.value && activeDiscussion.value.id === discussionId) {
+                activeDiscussion.value.has_artefacts = response.data && response.data.length > 0;
+            }
         } catch (error) {
             console.error("Failed to fetch artefacts:", error);
             activeDiscussionArtefacts.value = [];

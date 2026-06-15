@@ -2,7 +2,13 @@
 import apiClient from '../../services/api';
 
 export function useDiscussionExports(state, stores, getActions) {
-    const { uiStore, authStore, tasksStore } = stores;
+    const uiStore = {
+        addNotification(...args) { return stores.uiStore.addNotification(...args); },
+        showConfirmation(...args) { return stores.uiStore.showConfirmation(...args); }
+    };
+    const authStore = {
+        get user() { return stores.authStore.user; }
+    };
 
     async function exportDiscussions(discussionIds) {
         uiStore.addNotification('Preparing export...', 'info');

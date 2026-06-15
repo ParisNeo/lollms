@@ -230,7 +230,7 @@ def test_node_code(
 
         local_scope = {}
         try:
-            exec(req.code, {}, local_scope)
+            exec(req.code, {"__builtins__": {}}, local_scope)
         except Exception as e:
             return {"status": "error", "error": f"Compilation Error: {str(e)}", "traceback": traceback.format_exc()}
         

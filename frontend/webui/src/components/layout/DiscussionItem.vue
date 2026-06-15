@@ -161,6 +161,11 @@ function handleClickOutside() {
       </div>
       <div v-else>
         <p class="discussion-title" :title="discussion.title">
+          <span v-if="discussion.has_artefacts" class="inline-flex items-center mr-1.5 text-blue-500 dark:text-blue-400" title="Contains documents/artefacts">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4 inline-block -mt-0.5 align-middle">
+              <path fill-rule="evenodd" d="M4.5 2A1.5 1.5 0 003 3.5v13A1.5 1.5 0 004.5 18h11a1.5 1.5 0 001.5-1.5V7.621a1.5 1.5 0 00-.44-1.06l-4.12-4.121A1.5 1.5 0 0011.379 2H4.5zm7 5a1 1 0 001-1V3l4 4h-5z" clip-rule="evenodd" />
+            </svg>
+          </span>
           {{ discussion.title }}
         </p>
         <div class="flex items-center space-x-2 mt-1">

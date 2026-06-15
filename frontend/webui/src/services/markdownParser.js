@@ -119,8 +119,8 @@ function sanitizeDangerousTags(html) {
     // 3. Neutralize inline style attributes on ANY tag (prevents layout shifting)
     clean = clean.replace(/\sstyle\s*=\s*["'][^"']*["']/gi, '');
     
-    // 4. Neutralize event handlers (onclick, etc)
-    clean = clean.replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '');
+    // 4. Neutralize event handlers (onclick, onerror, etc) - both quoted and unquoted
+    clean = clean.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]*)/gi, '');
 
     return clean;
 }

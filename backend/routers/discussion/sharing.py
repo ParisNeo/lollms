@@ -26,17 +26,28 @@ def build_discussion_sharing_router(router: APIRouter):
             DBSharedDiscussionLink.owner_user_id != current_user.id
         ).order_by(DBSharedDiscussionLink.shared_at.desc()).all()
 
-        return [
-            DiscussionInfo(
-                id=link.discussion_id,
-                title=link.discussion_title,
-                is_starred=False,
-                last_activity_at=link.shared_at,
-                owner_username=link.owner.username,
-                permission_level=link.permission_level,
-                share_id=link.id
-            ) for link in shared_links
-        ]
+        infos = []
+        for link in shared_links:
+            has_art = False
+            try:
+                shared_discussion_obj = get_user_discussion(link.owner.username, link.discussion_id)
+                if shared_discussion_obj:
+                    has_art = len(shared_discussion_obj.list_artefacts()) > 0
+            except Exception:
+                pass
+            infos.append(
+                DiscussionInfo(
+                    id=link.discussion_id,
+                    title=link.discussion_title,
+                    is_starred=False,
+                    last_activity_at=link.shared_at,
+                    owner_username=link.owner.username,
+                    permission_level=link.permission_level,
+                    share_id=link.id,
+                    has_artefacts=has_art
+                )
+            )
+        return infos
 
     @router.post("/{discussion_id}/share", status_code=status.HTTP_201_CREATED)
     async def share_discussion(

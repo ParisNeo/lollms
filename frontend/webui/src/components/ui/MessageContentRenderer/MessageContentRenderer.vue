@@ -48,21 +48,29 @@ const props = defineProps({
   hasImages: { type: Boolean, default: false },
   lastUserImage: { type: String, default: null },
   messageId: { type: String, default: null },
+  metadata: { type: Object, default: () => ({}) }
 });
 
 const emit = defineEmits(['regenerate', 'citation-click']);
 
 const messageContentRef = ref(null);
-const tasksStore = useTasksStore();
-const discussionsStore = useDiscussionsStore();
-const uiStore = useUiStore();
-const { tasks } = storeToRefs(tasksStore);
-const { activeAiTasks, liveArtefactBuffers } = storeToRefs(discussionsStore);
+
+// Lazy store computed getters to prevent eager initialization and circular dependencies on startup/welcome pages
+const tasks = computed(() => useTasksStore().tasks);
+const activeAiTasks = computed(() => useDiscussionsStore().activeAiTasks);
+const liveArtefactBuffers = computed(() => useDiscussionsStore().liveArtefactBuffers);
+const currentDiscussionId = computed(() => useDiscussionsStore().currentDiscussionId);
+const messages = computed(() => useDiscussionsStore().messages);
+const activeDiscussionArtefacts = computed(() => useDiscussionsStore().activeDiscussionArtefacts);
 
 const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
 
 const thinkingTimers = ref({});
+
+const embeddedViews = computed(() => {
+    return props.metadata?.embedded_views || [];
+});
 
 const formatThinkingTime = (seconds) => {
     if (seconds === undefined || seconds === null) return '0s';
@@ -75,6 +83,7 @@ const formatThinkingTime = (seconds) => {
 // Watch the messageParts to start/stop timers for each thinking block
 // Watch the messageParts to start/stop timers for each thinking block
 watch(() => messageParts.value, (newParts) => {
+    if (!newParts || !Array.isArray(newParts)) return;
     newParts.forEach(part => {
         if (part.type === 'think') {
             const isClosed = part.isClosed;
@@ -302,10 +311,10 @@ const parsedStreamingContent = computed(() => {
     return parsedMarkdown(content);
 });
 
-    const parseSpecialBlock = (rawBlock, match = null) => {
+const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        // [FIX] Standardized capture groups for the monolithic parser
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\s+type=["']([^"']+)["']\s+title=["']([^"']+)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)|(<owl>[\s\S]*?(?:<\/owl>|$))/;
+        // [FIX] Standardized capture groups for the monolithic parser (Robust Attribute Order)
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\b([^>]*?)>()()([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/;
         match = regex.exec(rawBlock);
     }
     
@@ -420,15 +429,15 @@ const parsedStreamingContent = computed(() => {
         const msgMatch = typeof raw === 'string' ? raw.match(/message=["']([^"']+)["']/) : null;
         const lblMatch = typeof raw === 'string' ? raw.match(/label=["']([^"']+)["']/) : null;
         const label = (msgMatch && msgMatch[1]) || (lblMatch && lblMatch[1]) || 'Processing';
-        
+
         const title = typeof raw === 'string' ? raw.match(/title=["']([^"']+)["']/)?.[1] || '' : '';
         const sub_content = typeof raw === 'string' ? raw.match(/sub_content=["']([^"']+)["']/)?.[1] || '' : '';
         const id = typeof raw === 'string' ? raw.match(/id=["']([^"']+)["']/)?.[1] : undefined;
-        
+
         // Determine if still active (isDone check)
         const isDone = (props.forms?.some(f => f.id === id || f.form_id === id)) || 
                        (props.inlineWidgets?.some(w => w.id === id && !w.is_loading)) ||
-                       (title && discussionsStore.activeDiscussionArtefacts?.some(a => a.title === title));
+                       (title && activeDiscussionArtefacts.value?.some(a => a.title === title));
                        
         return { type: 'building_indicator', label, title, sub_content, isDone, id, raw };
     }
@@ -463,12 +472,18 @@ const parsedStreamingContent = computed(() => {
         return { type: 'artefact_image', title: parts[0], index: parseInt(parts[parts.length - 1]), raw };
     }
     else if (match[19]) {
-        // --- NEW: Unified Processing UI Logic ---
+        // --- NEW: Unified Processing UI Logic (Robust Attribute Order) ---
         const raw = match[19];
-        const pType = match[20];
-        const title = match[21];
+        const attrsStr = match[20] || '';
         const inner = match[23] || '';
-        
+
+        // Dynamically extract type and title from the attributes string
+        const typeMatch = attrsStr.match(/type=["']([^"']*)["']/i);
+        const titleMatch = attrsStr.match(/title=["']([^"']*)["']/i);
+
+        const pType = typeMatch ? typeMatch[1] : 'process';
+        const title = titleMatch ? titleMatch[1] : 'Processing';
+
         const isClosed = raw.trim().endsWith('</processing>');
 
         return { 
@@ -479,6 +494,27 @@ const parsedStreamingContent = computed(() => {
             isClosed, 
             raw 
         };
+    }
+    else if (rawBlock.includes('<tool_call')) {
+        const raw = rawBlock;
+        // Strip the tags manually to extract inner content
+        const innerContent = rawBlock.replace(/<tool_call[^>]*>/i, '').replace(/<\/tool_call>/i, '').trim();
+        let parsedJson = null;
+        try {
+            parsedJson = JSON.parse(innerContent);
+        } catch (e) {
+            try {
+                const cleaned = innerContent.replace(/<\/?[^>]+>/g, '').trim();
+                parsedJson = JSON.parse(cleaned);
+            } catch (e2) {}
+        }
+        return { type: 'tool_call', name: parsedJson?.name || 'Tool Call', parameters: parsedJson?.parameters || {}, raw };
+    }
+    else if (rawBlock.includes('<mem_load')) {
+        const raw = rawBlock;
+        const idMatch = rawBlock.match(/id=["']([^"']+)["']/i);
+        const id = idMatch ? idMatch[1] : '';
+        return { type: 'mem_load', memoryId: id, raw };
     }
     else if (match[27]) {
         // --- NEW: OWL/RDF Semantic Block ---
@@ -621,230 +657,346 @@ const messageParts = computed(() => {
         }
     }
 
+    // Partition the content into think and normal blocks
+    const segments = [];
+    let idx = 0;
+    let inThink = false;
+
+    while (idx < content.length) {
+        if (!inThink) {
+            const nextOpen = content.indexOf('<think>', idx);
+            const nextClose = content.indexOf('</think>', idx);
+
+            if (nextOpen > -1 && nextClose > -1) {
+                if (nextOpen < nextClose) {
+                    // Standard opening tag is closer
+                    if (nextOpen > idx) {
+                        segments.push({ type: 'normal', content: content.substring(idx, nextOpen) });
+                    }
+                    inThink = true;
+                    idx = nextOpen + 7;
+                } else {
+                    // Stray closing tag is closer (Case B)
+                    segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
+                    idx = nextClose + 8;
+                }
+            } else if (nextOpen > -1) {
+                // Only opening tag found (Case A)
+                if (nextOpen > idx) {
+                    segments.push({ type: 'normal', content: content.substring(idx, nextOpen) });
+                }
+                segments.push({ type: 'think', content: content.substring(nextOpen + 7), isClosed: false });
+                idx = content.length;
+            } else if (nextClose > -1) {
+                // Only closing tag found (Case B)
+                segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
+                idx = nextClose + 8;
+                if (idx < content.length) {
+                    segments.push({ type: 'normal', content: content.substring(idx) });
+                }
+                idx = content.length;
+            } else {
+                // Neither found
+                segments.push({ type: 'normal', content: content.substring(idx) });
+                idx = content.length;
+            }
+        } else {
+            // We are inside a thinking block, looking for the closing tag
+            const nextClose = content.indexOf('</think>', idx);
+            if (nextClose > -1) {
+                segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
+                inThink = false;
+                idx = nextClose + 8;
+            } else {
+                // No closing tag found till the end of content (Case A)
+                segments.push({ type: 'think', content: content.substring(idx), isClosed: false });
+                idx = content.length;
+            }
+        }
+    }
+
     const parts = [];
 
-    // 1. Define patterns using specific, non-overlapping tags.
-    // For XML block tags, they must be at the start of a line (tolerating leading spaces/tabs but nothing else).
-    // Note: We explicitly avoid the 'm' multiline flag so that the '$' anchor matches only the absolute end of string.
-    const patterns = [
-        { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
-        { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g },
-
-        // Block-level XML tags (must be at the start of a line)
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<think>([\s\S]*?)(?:<\/think>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<annotate>([\s\S]*?)(?:<\/annotate>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_image[^>]*>([\s\S]*?)(?:<\/generate_image>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<edit_image[^>]*>([\s\S]*?)(?:<\/edit_image>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_slides[^>]*>([\s\S]*?)(?:<\/generate_slides>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<street_view>([\s\S]*?)(?:<\/street_view>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<schedule_task[^>]*>([\s\S]*?)(?:<\/schedule_task>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<note[^>]*>([\s\S]*?)(?:<\/note>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<skill[^>]*>([\s\S]*?)(?:<\/skill>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_building[^>]*\/>)/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\s+type=["']([^"']*)["']\s+title=["']([^"']*)["']([^>]*?)>([\s\S]*?)(?:<\/processing>|$))/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
-        { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi }
-    ];
-
-    const allElements = [];
-
-    // 2. Extract all elements from text patterns
-    patterns.forEach(p => {
-        let m;
-        // Reset regex state for global searches
-        p.regex.lastIndex = 0;
-        while ((m = p.regex.exec(content)) !== null) {
-            const rawMatch = m[0];
-            const prefixMatch = rawMatch.match(/^(?:\n|^)[ \t]*/);
-            const prefixLength = prefixMatch ? prefixMatch[0].length : 0;
-            const absoluteStart = m.index + prefixLength;
-            const absoluteEnd = m.index + rawMatch.length;
-            const rawTag = rawMatch.substring(prefixLength);
-
-            allElements.push({ 
-                start: absoluteStart, 
-                end: absoluteEnd, 
-                raw: rawTag, 
-                match: m, 
-                type: p.type 
-            });
-        }
-    });
-
-    // Metadata event injection removed to ensure only tags within content are rendered
-
-    // 4. Sort and Resolve overlaps
-    allElements.sort((a, b) => (a.start - b.start) || (b.end - a.end));
-    
-    const activeElements = [];
-    let lastEnd = 0;
-
-    for (const el of allElements) {
-        if (el.start >= lastEnd || el.type === 'form_ready') {
-            activeElements.push(el);
-            lastEnd = Math.max(lastEnd, el.end);
-        }
-    }
-
-    // 4. Assemble final parts with strictly stable start-index IDs
-    let cursor = 0;
-    const renderedFormIds = new Set();
-    
-    // [NEW] Logic to prevent UI duplication when LLM repeats tags
-    // We identify the LAST occurrence of each unique ID/Title combo 
-    // and only render that one as a block.
-    const lastOccurrenceMap = new Map();
-    activeElements.forEach((el, index) => {
-        let uniqueKey = null;
-        if (el.type === 'tool') {
-             const parsed = parseSpecialBlock(el.raw);
-             const rawKey = parsed.id || parsed.title || parsed.prompt;
-             if (rawKey) uniqueKey = `${parsed.type}-${rawKey}`;
-        } else if (el.type === 'form_ready') {
-             let actualForm = el.form;
-             if (!actualForm && el.event && el.event.content) {
-                 actualForm = el.event.content.form || el.event.content;
-             }
-             const rawKey = actualForm?.id || actualForm?.title || el.id;
-             if (rawKey) uniqueKey = `form_ready-${rawKey}`;
-        }
-        if (uniqueKey) {
-            lastOccurrenceMap.set(uniqueKey, index);
-        }
-    });
-
-    // Ensure any embedded data views in the message metadata are added to the layout
-    const embeddedViews = props.inlineWidgets?.filter(w => w.type === 'data_grid_view') || [];
-    if (props.messageId && discussionsStore.messages) {
-        const msgObj = discussionsStore.messages.find(m => m.id === props.messageId);
-        if (msgObj?.metadata?.ui_data_views) {
-            msgObj.metadata.ui_data_views.forEach(title => {
-                embeddedViews.push({
-                    type: 'data_grid_view',
-                    title: title,
-                    version: msgObj.metadata.version || null
-                });
-            });
-        }
-    }
-
-    activeElements.forEach((el, index) => {
-        // Add preceding text
-        if (el.start > cursor) {
-            const text = content.substring(cursor, el.start);
-            parts.push({ type: 'content', content: text, id: `text-${cursor}` });
-        }
-
-        // Determine if this is the chosen occurrence for this element
-        let uniqueKey = null;
-        if (el.type === 'tool') {
-             const p = parseSpecialBlock(el.raw);
-             const rawKey = p.id || p.title || p.prompt;
-             if (rawKey) uniqueKey = `${p.type}-${rawKey}`;
-        } else if (el.type === 'form_ready') {
-             let actualForm = el.form;
-             if (!actualForm && el.event && el.event.content) {
-                 actualForm = el.event.content.form || el.event.content;
-             }
-             const rawKey = actualForm?.id || actualForm?.title || el.id;
-             if (rawKey) uniqueKey = `form_ready-${rawKey}`;
-        }
-
-        const isLastOne = !uniqueKey || lastOccurrenceMap.get(uniqueKey) === index;
-
-        // If it's not the last occurrence, render it as raw text/comment 
-        // to avoid multiple big UI blocks for the same thing
-        if (!isLastOne) {
-            parts.push({ type: 'content', content: `\n> *(Superseded process log ignored)*\n`, id: `ignored-${el.start}` });
-            cursor = Math.max(cursor, el.end);
-            return;
-        }
-
-        if (el.type === 'code') {
-            const lang = (el.match[2] || 'plaintext').trim();
-            const inner = el.match[3];
-            if (lang.toLowerCase() === 'mermaid') {
-                parts.push({ type: 'mermaid', code: inner.trim(), id: `mermaid-${el.start}` });
-            } else {
-                parts.push({ type: 'code', lang, code: inner, id: `code-${el.start}` });
-            }
-        } else if (el.type === 'tool') {
-            // Re-evaluate using parseSpecialBlock which handles all XML tags
-            const parsed = parseSpecialBlock(el.raw);
-            if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
-            parts.push({ ...parsed, id: `${parsed.type}-${el.start}` });
-        } else if (el.type === 'processing') {
-            // Manually extract from el.match which comes from the simple processing regex
-            // Group 1: raw, 2: type, 3: title, 4: attrs, 5: content
-            parts.push({ 
-                type: 'processing', 
-                pType: el.match[2], 
-                title: el.match[3], 
-                statusContent: el.match[5], 
-                isClosed: el.raw.trim().endsWith('</processing>'), 
-                id: `proc-${el.start}` 
-            });
-        } else if (el.type === 'block_doc') {
-            const subType = el.match[1].toLowerCase();
-            const finalType = subType === 'skill' ? 'skill_block' : (subType === 'note' ? 'note_block' : 'document');
-            parts.push({ 
-                type: finalType, 
-                title: (el.match[2] || 'Untitled').trim(), 
-                content: el.match[3]?.trim() || '', 
-                raw: el.raw,
-                id: `block-${subType}-${el.start}`
-            });
-        } else if (el.type === 'lollms_form') {
-            const parsed = _parse_form_xml(el.match[1], el.match[2]);
-            parts.push({ type: 'form_ready', form: parsed, id: parsed.id });
-        } else if (el.type === 'lollms_inline') {
-            parts.push({ type: 'interactive_widget', widget: { title: el.match[1], source: el.match[2] }, id: `widget-${el.start}` });
-        } else if (el.type === 'processing') {
-            parts.push({ 
-                type: 'processing', 
-                pType: el.match[2], 
-                title: el.match[3], 
-                statusContent: el.match[5], 
-                isClosed: el.raw.trim().endsWith('</processing>'), 
-                id: `proc-${el.start}` 
-            });
-        } else if (el.type === 'artefact_image') {
-            const fullId = el.match[1];
-            const parts_arr = fullId.split('::');
+    segments.forEach(segment => {
+        if (segment.type === 'think') {
             parts.push({
-                type: 'artefact_image',
-                title: parts_arr[0],
-                index: parseInt(parts_arr[parts_arr.length - 1]),
-                raw: el.raw,
-                id: `artimg-${el.start}`
+                type: 'think',
+                content: segment.content.trim(),
+                isClosed: segment.isClosed,
+                id: `think-${parts.length}`
             });
-        }
-        // Forms handled via parsing logic inside parseSpecialBlock if <lollms_form> is in content
-        cursor =  Math.max(cursor,el.end);
-    });
+        } else {
+            // For normal segments, run the existing patterns extraction
+            const segContent = segment.content;
+            const patterns = [
+                { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
+                { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g },
 
-    // Add remaining text
-    if (cursor < content.length) {
-        parts.push({ type: 'content', content: content.substring(cursor), id: `text-${cursor}` });
-    }
+                // Block-level XML tags (except think, which we already parsed!)
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<annotate>([\s\S]*?)(?:<\/annotate>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_image[^>]*>([\s\S]*?)(?:<\/generate_image>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<edit_image[^>]*>([\s\S]*?)(?:<\/edit_image>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_slides[^>]*>([\s\S]*?)(?:<\/generate_slides>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<street_view>([\s\S]*?)(?:<\/street_view>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<schedule_task[^>]*>([\s\S]*?)(?:<\/schedule_task>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<note[^>]*>([\s\S]*?)(?:<\/note>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<skill[^>]*>([\s\S]*?)(?:<\/skill>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_building[^>]*\/>)/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b([^>]*?)>()()([\s\S]*?)(?:<\/processing>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<tool_call[^>]*>([\s\S]*?)(?:<\/tool_call>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<mem_load\s+id=["']([^"']+)["']\s*\/?>)/gi }
+            ];
+
+            const allElements = [];
+
+            // Extract all elements from text patterns
+            patterns.forEach(p => {
+                let m;
+                p.regex.lastIndex = 0;
+                while ((m = p.regex.exec(segContent)) !== null) {
+                    const rawMatch = m[0];
+                    const prefixMatch = rawMatch.match(/^(?:\n|^)[ \t]*/);
+                    const prefixLength = prefixMatch ? prefixMatch[0].length : 0;
+                    const absoluteStart = m.index + prefixLength;
+                    const absoluteEnd = m.index + rawMatch.length;
+                    const rawTag = rawMatch.substring(prefixLength);
+
+                    allElements.push({ 
+                        start: absoluteStart, 
+                        end: absoluteEnd, 
+                        raw: rawTag, 
+                        match: m, 
+                        type: p.type 
+                    });
+                }
+            });
+
+            allElements.sort((a, b) => (a.start - b.start) || (b.end - a.end));
+            
+            const activeElements = [];
+            let lastEnd = 0;
+
+            for (const el of allElements) {
+                if (el.start >= lastEnd || el.type === 'form_ready') {
+                    activeElements.push(el);
+                    lastEnd = Math.max(lastEnd, el.end);
+                }
+            }
+
+            let cursor = 0;
+            const renderedFormIds = new Set();
+            
+            const lastOccurrenceMap = new Map();
+            activeElements.forEach((el, index) => {
+                let uniqueKey = null;
+                if (el.type === 'tool') {
+                     const parsed = parseSpecialBlock(el.raw);
+                     if (parsed.id) uniqueKey = `${parsed.type}-${parsed.id}`;
+                } else if (el.type === 'form_ready') {
+                     let actualForm = el.form;
+                     if (!actualForm && el.event && el.event.content) {
+                         actualForm = el.event.content.form || el.event.content;
+                     }
+                     const rawKey = actualForm?.id || el.id;
+                     if (rawKey) uniqueKey = `form_ready-${rawKey}`;
+                }
+                if (uniqueKey) {
+                    lastOccurrenceMap.set(uniqueKey, index);
+                }
+            });
+
+            activeElements.forEach((el, index) => {
+                // Add preceding text
+                if (el.start > cursor) {
+                    const text = segContent.substring(cursor, el.start);
+                    parts.push({ type: 'content', content: text, id: `text-${parts.length}-${cursor}` });
+                }
+
+                let uniqueKey = null;
+                if (el.type === 'tool') {
+                     const p = parseSpecialBlock(el.raw);
+                     if (p.id) uniqueKey = `${p.type}-${p.id}`;
+                } else if (el.type === 'form_ready') {
+                     let actualForm = el.form;
+                     if (!actualForm && el.event && el.event.content) {
+                         actualForm = el.event.content.form || el.event.content;
+                     }
+                     const rawKey = actualForm?.id || el.id;
+                     if (rawKey) uniqueKey = `form_ready-${rawKey}`;
+                }
+
+                const isLastOne = !uniqueKey || lastOccurrenceMap.get(uniqueKey) === index;
+
+                if (!isLastOne) {
+                    parts.push({ type: 'content', content: `\n> *(Superseded process log ignored)*\n`, id: `ignored-${parts.length}-${el.start}` });
+                    cursor = Math.max(cursor, el.end);
+                    return;
+                }
+
+                if (el.type === 'code') {
+                    const lang = (el.match[2] || 'plaintext').trim();
+                    const inner = el.match[3];
+                    if (lang.toLowerCase() === 'mermaid') {
+                        parts.push({ type: 'mermaid', code: inner.trim(), id: `mermaid-${parts.length}-${el.start}` });
+                    } else {
+                        parts.push({ type: 'code', lang, code: inner, id: `code-${parts.length}-${el.start}` });
+                    }
+                } else if (el.type === 'tool') {
+                    const parsed = parseSpecialBlock(el.raw);
+                    if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
+                    parts.push({ ...parsed, id: `${parsed.type}-${parts.length}-${el.start}` });
+                } else if (el.type === 'processing') {
+                    parts.push({ 
+                        type: 'processing', 
+                        pType: el.match[2], 
+                        title: el.match[3], 
+                        statusContent: el.match[5], 
+                        isClosed: el.raw.trim().endsWith('</processing>'), 
+                        id: `proc-${parts.length}-${el.start}` 
+                    });
+                } else if (el.type === 'block_doc') {
+                    const subType = el.match[1].toLowerCase();
+                    const finalType = subType === 'skill' ? 'skill_block' : (subType === 'note' ? 'note_block' : 'document');
+                    parts.push({ 
+                        type: finalType, 
+                        title: (el.match[2] || 'Untitled').trim(), 
+                        content: el.match[3]?.trim() || '', 
+                        raw: el.raw,
+                        id: `block-${subType}-${parts.length}-${el.start}`
+                    });
+                } else if (el.type === 'lollms_form') {
+                    const parsed = _parse_form_xml(el.match[1], el.match[2]);
+                    parts.push({ type: 'form_ready', form: parsed, id: parsed.id });
+                } else if (el.type === 'lollms_inline') {
+                    parts.push({ type: 'interactive_widget', widget: { title: el.match[1], source: el.match[2] }, id: `widget-${parts.length}-${el.start}` });
+                } else if (el.type === 'processing') {
+                    parts.push({ 
+                        type: 'processing', 
+                        pType: el.match[2], 
+                        title: el.match[3], 
+                        statusContent: el.match[5], 
+                        isClosed: el.raw.trim().endsWith('</processing>'), 
+                        id: `proc-${parts.length}-${el.start}` 
+                    });
+                } else if (el.type === 'artefact_image') {
+                    const fullId = el.match[1];
+                    const parts_arr = fullId.split('::');
+                    parts.push({
+                        type: 'artefact_image',
+                        title: parts_arr[0],
+                        index: parseInt(parts_arr[parts_arr.length - 1]),
+                        raw: el.raw,
+                        id: `artimg-${parts.length}-${el.start}`
+                    });
+                }
+                cursor = Math.max(cursor, el.end);
+            });
+
+            // Add remaining text
+            if (cursor < segContent.length) {
+                parts.push({ type: 'content', content: segContent.substring(cursor), id: `text-${parts.length}-${cursor}` });
+            }
+        }
+    });
 
     // Append embedded spreadsheets to the end of the message parts
-    embeddedViews.forEach((view, idx) => {
+    embeddedViews.value.forEach((view, idx) => {
         parts.push({
             type: 'data_grid_view',
             title: view.title,
             version: view.version,
-            id: `datagrid-${idx}-${cursor}`
+            id: `datagrid-${idx}-${parts.length}`
         });
     });
 
     return parts;
 });
+// Watch the messageParts to start/stop timers for each thinking block
+watch(() => messageParts.value, (newParts) => {
+    if (!newParts || !Array.isArray(newParts)) return;
+    newParts.forEach(part => {
+        if (part.type === 'think') {
+            const isClosed = part.isClosed;
+            
+            // If the timer doesn't exist yet, initialize it
+            if (!thinkingTimers.value[part.id]) {
+                const startTime = Date.now();
+                thinkingTimers.value[part.id] = {
+                    elapsed: 0,
+                    done: false,
+                    intervalId: null
+                };
+                
+                if (!isClosed && props.isStreaming) {
+                    thinkingTimers.value[part.id].intervalId = setInterval(() => {
+                        if (thinkingTimers.value[part.id] && !thinkingTimers.value[part.id].done) {
+                            thinkingTimers.value[part.id].elapsed = Math.floor((Date.now() - startTime) / 1000);
+                        }
+                    }, 1000);
+                } else {
+                    thinkingTimers.value[part.id].done = true;
+                }
+            } else {
+                // If it exists but is now closed or streaming stopped, freeze it
+                const timer = thinkingTimers.value[part.id];
+                if ((isClosed || !props.isStreaming) && !timer.done) {
+                    timer.done = true;
+                    if (timer.intervalId) {
+                        clearInterval(timer.intervalId);
+                        timer.intervalId = null;
+                    }
+                }
+            }
+        }
+    });
+}, { deep: true, immediate: true });
+
+// Watch the messageParts to start/stop timers for each thinking block
+watch(() => messageParts.value, (newParts) => {
+    if (!newParts || !Array.isArray(newParts)) return;
+    newParts.forEach(part => {
+        if (part.type === 'think') {
+            const isClosed = part.isClosed;
+
+            // If the timer doesn't exist yet, initialize it
+            if (!thinkingTimers.value[part.id]) {
+                const startTime = Date.now();
+                thinkingTimers.value[part.id] = {
+                    elapsed: 0,
+                    done: false,
+                    intervalId: null
+                };
+
+                if (!isClosed && props.isStreaming) {
+                    thinkingTimers.value[part.id].intervalId = setInterval(() => {
+                        if (thinkingTimers.value[part.id] && !thinkingTimers.value[part.id].done) {
+                            thinkingTimers.value[part.id].elapsed = Math.floor((Date.now() - startTime) / 1000);
+                        }
+                    }, 1000);
+                } else {
+                    thinkingTimers.value[part.id].done = true;
+                }
+            } else {
+                // If it exists but is now closed or streaming stopped, freeze it
+                const timer = thinkingTimers.value[part.id];
+                if ((isClosed || !props.isStreaming) && !timer.done) {
+                    timer.done = true;
+                    if (timer.intervalId) {
+                        clearInterval(timer.intervalId);
+                        timer.intervalId = null;
+                    }
+                }
+            }
+        }
+    });
+}, { deep: true, immediate: true });
 
 // Module-level cache to prevent duplicate requests across unmounts/remounts or multiple instances
 const globalResolvedArtefactImages = {};
@@ -907,10 +1059,10 @@ const getTokens = (text) => {
 
 const activeTask = computed(() => {
     if (!props.messageId) return null;
-    const discussionId = discussionsStore.currentDiscussionId;
+    const discussionId = currentDiscussionId.value;
     if (!discussionId) return null;
     const runningTasks = tasks.value.filter(t => t.status === 'running' || t.status === 'pending');
-    const messageObj = discussionsStore.messages.find(m => m.id === props.messageId);
+    const messageObj = messages.value.find(m => m.id === props.messageId);
     if (messageObj?.metadata?.active_task_id) {
         const linkedTask = runningTasks.find(t => t.id === messageObj.metadata.active_task_id);
         if (linkedTask) return linkedTask;
@@ -1401,7 +1553,7 @@ function onMermaidReady({ svg }, partIndex) {
             <!-- Note content — token-aware so code blocks get syntax highlighting -->
             <div class="note-body px-5 py-4 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-200 dark:border-amber-800/60">
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
-                <template v-for="(token, ti) in getTokens(discussionsStore.liveArtefactBuffers[part.title] || part.content)" :key="`note-token-${ti}`">
+                <template v-for="(token, ti) in getTokens(liveArtefactBuffers[part.title] || part.content)" :key="`note-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
                   <div v-else v-html="parsedMarkdown(token.raw)"></div>
                 </template>
@@ -1438,7 +1590,7 @@ function onMermaidReady({ svg }, partIndex) {
             <div class="note-body px-5 py-4 bg-teal-50/40 dark:bg-amber-950/20 border-t border-teal-200 dark:border-teal-800/60">
                <div v-if="part.description" class="text-xs text-gray-500 dark:text-gray-400 italic mb-2">{{ part.description }}</div>
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
-                <template v-for="(token, ti) in getTokens(discussionsStore.liveArtefactBuffers[part.title] || part.content)" :key="`skill-token-${ti}`">
+                <template v-for="(token, ti) in getTokens(liveArtefactBuffers[part.title] || part.content)" :key="`skill-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
                   <div v-else v-html="parsedMarkdown(token.raw)"></div>
                 </template>
@@ -1467,6 +1619,31 @@ function onMermaidReady({ svg }, partIndex) {
                :status-content="part.statusContent"
                :is-closed="part.isClosed"
           />
+
+          <!-- ── Active Tool Execution ──────────────────────────────────────── -->
+          <div v-else-if="part.type === 'tool_call'" class="my-4 p-4 rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/30 dark:bg-purple-950/10 shadow-sm flex items-start gap-3 animate-in fade-in">
+              <div class="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
+                  <IconWrenchScrewdriver class="w-5 h-5" />
+              </div>
+              <div class="flex-1 min-w-0">
+                  <span class="text-[9px] font-black uppercase tracking-widest text-purple-500 dark:text-purple-400 block mb-1">Active Tool Execution</span>
+                  <h5 class="text-sm font-bold text-gray-800 dark:text-gray-200">{{ part.name }}</h5>
+                  <div v-if="Object.keys(part.parameters).length > 0" class="mt-2">
+                       <StepDetail :data="part.parameters" :level="1" />
+                  </div>
+              </div>
+          </div>
+
+          <!-- ── Deep Memory Retrieval ──────────────────────────────────────── -->
+          <div v-else-if="part.type === 'mem_load'" class="my-4 p-4 rounded-xl border border-teal-200 dark:border-teal-800/40 bg-teal-50/30 dark:bg-teal-950/10 shadow-sm flex items-start gap-3 animate-in fade-in">
+              <div class="p-2 rounded-lg bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 shrink-0">
+                  <IconThinking class="w-5 h-5 animate-pulse" />
+              </div>
+              <div class="flex-1 min-w-0">
+                  <span class="text-[9px] font-black uppercase tracking-widest text-teal-500 dark:text-teal-400 block mb-1">Deep Memory Retrieval</span>
+                  <h5 class="text-xs font-mono font-bold text-gray-700 dark:text-gray-300">Retrieving Fact ID: [{{ part.memoryId.substring(0, 8) }}...]</h5>
+              </div>
+          </div>
 
           <!-- Forms no longer rendered here as they must be embedded in content -->
 
@@ -1507,7 +1684,7 @@ function onMermaidReady({ svg }, partIndex) {
                <div class="my-4 p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
                   <InteractiveForm 
                       :form="part.form" 
-                      :discussion-id="discussionsStore.currentDiscussionId"
+                      :discussion-id="currentDiscussionId"
                   />
                </div>
             </template>
@@ -1516,7 +1693,7 @@ function onMermaidReady({ svg }, partIndex) {
             <template v-else-if="part.type === 'data_grid_view'">
                <div class="my-6 border dark:border-gray-700 rounded-2xl overflow-hidden shadow-xl bg-white dark:bg-gray-950 h-96">
                   <InteractiveDataGrid 
-                      :discussionId="discussionsStore.currentDiscussionId"
+                      :discussionId="currentDiscussionId"
                       :title="part.title"
                       :version="part.version"
                       class="w-full h-full"
@@ -1537,7 +1714,7 @@ function onMermaidReady({ svg }, partIndex) {
              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
                   <div class="relative">
                       <AuthenticatedImage 
-                          :src="`/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(part.title)}/images/${part.index}`" 
+                          :src="`/api/discussions/${currentDiscussionId}/artefacts/${encodeURIComponent(part.title)}/images/${part.index}`" 
                           class="w-full h-auto max-h-[600px] object-contain mx-auto"
                       />
                       <!-- Actions Overlay / Delete Button -->

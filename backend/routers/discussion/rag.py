@@ -113,5 +113,6 @@ def build_rag_router(router: APIRouter):
             active_tools=discussion_obj.metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            last_activity_at=discussion_obj.updated_at,
+            has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )

@@ -1202,10 +1202,12 @@ def build_llm_generation_router(router: APIRouter):
         binding_alias = None
         if user_model_full and '/' in user_model_full:
             binding_alias, _ = user_model_full.split('/', 1)
-        
+
         lc = get_user_lollms_client(owner_username, binding_alias)
+        if lc:
+            lc.cancel_generation = False
         discussion_obj.lollms_client = lc
-        
+
         if not lc:
             async def error_stream():
                 yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client. Check your binding settings."}) + "\n"
@@ -1772,6 +1774,14 @@ def build_llm_generation_router(router: APIRouter):
                         # We use the parent_message_id (which should be the User message ID) directly
                         effective_parent_id = parent_message_id
 
+                    # Retrieve the user's active memory manager instance to reuse database connections
+                    from backend.routers.memories import get_user_memory_manager
+                    mm_instance = None
+                    try:
+                        mm_instance = get_user_memory_manager(owner_username)
+                    except Exception as e:
+                        print(f"Warning: Failed to retrieve get_user_memory_manager: {e}")
+
                     result = {}
                     try:
                         # Call the library's native chat method. 
@@ -1790,13 +1800,24 @@ def build_llm_generation_router(router: APIRouter):
                             enable_image_generation=owner_db_user.image_generation_enabled,
                             enable_image_editing=owner_db_user.image_editing_enabled,
                             auto_activate_artefacts=True,
+                            enable_show_tools=True,
+                            enable_extract_artefact=True,
+                            enable_final_answer=True,
+                            enable_repl_tools=True,
                             enable_inline_widgets=owner_db_user.inline_widgets_enabled,
                             enable_notes=owner_db_user.note_generation_enabled,
                             enable_skills=owner_db_user.skills_building_enabled,
                             enable_forms=owner_db_user.form_building_enabled,
                             enable_books=enable_books if enable_books is not None else owner_db_user.book_generation_enabled,
+                            enable_presentations=owner_db_user.slide_maker_enabled,
                             enable_silent_artefact_explanation=True, # Library handles explanation if only XML was emitted
-                            enable_artefacts=owner_db_user.artefacts_enabled
+                            enable_artefacts=owner_db_user.artefacts_enabled,
+                            memory_manager=mm_instance,
+                            enable_memory=owner_db_user.memory_enabled,
+                            enable_auto_dream=owner_db_user.auto_memory_enabled,
+                            enable_deep_memory_pulling=owner_db_user.memory_enabled,
+                            enable_in_message_status=True,
+                            enable_specialized_events_stream=True
                             )
                     finally:
                         # Ensure discussion state is committed even on client disconnect/stop signal
@@ -1893,8 +1914,15 @@ def build_llm_generation_router(router: APIRouter):
     async def stop_discussion_generation(discussion_id: str, current_user: UserAuthDetails = Depends(get_current_active_user)):
         username = current_user.username
         stop_event = user_sessions.get(username, {}).get("active_generation_control", {}).get(discussion_id)
+
         if stop_event and isinstance(stop_event, threading.Event):
             stop_event.set()
-            return {"message": "Stop signal sent."}
-        else:
-            raise HTTPException(status_code=404, detail="No active generation found for this discussion.")
+
+        try:
+            lc = get_user_lollms_client(username)
+            if lc:
+                lc.cancel_generation = True
+        except Exception as e:
+            print(f"Warning: Failed to set cancel_generation on lollms_client: {e}")
+
+        return {"message": "Stop signal sent."}

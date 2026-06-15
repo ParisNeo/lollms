@@ -796,6 +796,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             :has-images="allImages.length > 0"
                             :last-user-image="lastUserImage"
                             :message-id="message.id"
+                            :metadata="message.metadata"
                             @regenerate="handleTagRegeneration"
                             @citation-click="handleCitationClick"
                         />

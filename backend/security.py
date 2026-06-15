@@ -78,6 +78,7 @@ def verify_custom_node_code(code: str, lollms_client: Optional[Any] = None) -> T
         'pickle', 'marshal', 'pty', 'platform', 'requests', 'urllib', 'http'
     }
     blocked_builtins = {'eval', 'exec', 'compile', 'open', '__import__', 'getattr', 'setattr', 'delattr'}
+    dangerous_names = {"__builtins__", "__import__"}
 
     for node in ast.walk(tree):
         # Check Imports
@@ -93,12 +94,15 @@ def verify_custom_node_code(code: str, lollms_client: Optional[Any] = None) -> T
                 if base_mod in blocked_modules:
                     return False, f"Security Violation: Import from blocked module '{base_mod}' is forbidden."
 
+        # Check dangerous bare identifiers (e.g., __builtins__, __import__)
+        elif isinstance(node, ast.Name):
+            if node.id in dangerous_names:
+                return False, f"Security Violation: Use of forbidden name '{node.id}' is forbidden."
+
         # Check Attribute Access (prevent dunder escapes like __globals__, __subclasses__)
         elif isinstance(node, ast.Attribute):
             if node.attr.startswith('__') and node.attr.endswith('__'):
-                dangerous_dunders = {'__subclasses__', '__globals__', '__code__', '__builtins__', '__dict__', '__class__', '__bases__', '__mro__'}
-                if node.attr in dangerous_dunders:
-                    return False, f"Security Violation: Access to dangerous attribute '{node.attr}' is forbidden."
+                return False, f"Security Violation: Dunder attribute access is forbidden."
 
         # Check Function Calls (blocked builtins)
         elif isinstance(node, ast.Call):
@@ -131,7 +135,7 @@ IMPORTANT: Output ONLY the valid JSON block. No markdown wrappers or additional 
                 if data.get("safe") is False:
                     return False, f"AI Auditor Rejection: {data.get('reason', 'Malicious patterns detected.')}"
         except Exception as e:
-            print(f"Warning: AI Auditor failed ({e}), relying on AST analysis.")
+            return False, f"Security Violation: LLM security audit unavailable or failed ({e})."
 
     return True, ""
 

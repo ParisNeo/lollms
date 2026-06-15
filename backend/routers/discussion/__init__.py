@@ -80,11 +80,19 @@ def build_discussions_router():
             try:
                 disc_id = disc_data['id']
                 metadata = disc_data.get('discussion_metadata', {})
-                
+
                 # CRITICAL: Strip base64 image data from the list view.
                 # This prevents the browser from crashing (STATUS_BREAKPOINT) 
                 # when loading dozens of discussions.
                 is_shared_by_me = disc_id in owned_shared_ids
+
+                has_art = False
+                try:
+                    discussion_obj = get_user_discussion(username, disc_id)
+                    if discussion_obj:
+                        has_art = len(discussion_obj.list_artefacts()) > 0
+                except Exception:
+                    pass
 
                 info = DiscussionInfo(
                     id=disc_id,
@@ -100,7 +108,8 @@ def build_discussions_router():
                     group_id=metadata.get('group_id'),
                     owner_username=None,
                     permission_level="shared_by_me" if is_shared_by_me else None,
-                    share_id=None
+                    share_id=None,
+                    has_artefacts=has_art
                 )
                 infos.append(info)
             except Exception as e:
@@ -130,7 +139,8 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            last_activity_at=discussion_obj.updated_at,
+            has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
     @router.get("/{discussion_id}/participants", response_model=List[UserPublic])
     async def get_discussion_participants(
@@ -278,7 +288,8 @@ def build_discussions_router():
             active_tools=[],
             active_branch_id=None,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            last_activity_at=discussion_obj.updated_at,
+            has_artefacts=False
         )
 
     @router.post("/from_message", response_model=DiscussionInfo, status_code=201)
@@ -377,7 +388,8 @@ def build_discussions_router():
             active_tools=new_discussion.metadata.get('active_tools', []),
             active_branch_id=new_discussion.active_branch_id, created_at=new_discussion.created_at,
             last_activity_at=new_discussion.updated_at, discussion_images=discussion_images_b64,
-            active_discussion_images=active_discussion_images, group_id=new_discussion.metadata.get('group_id')
+            active_discussion_images=active_discussion_images, group_id=new_discussion.metadata.get('group_id'),
+            has_artefacts=len(new_discussion.list_artefacts()) > 0
         )
 
     @router.post("/{discussion_id}/clone", response_model=DiscussionInfo, status_code=201)
@@ -408,7 +420,8 @@ def build_discussions_router():
                 created_at=cloned_discussion.created_at,
                 last_activity_at=cloned_discussion.updated_at,
                 discussion_images=cloned_discussion.images or [],
-                active_discussion_images= [img_info['active'] for img_info in cloned_discussion.images] if cloned_discussion.images else []
+                active_discussion_images= [img_info['active'] for img_info in cloned_discussion.images] if cloned_discussion.images else [],
+                has_artefacts=len(cloned_discussion.list_artefacts()) > 0
             )
         except Exception as e:
             trace_exception(e)
@@ -656,7 +669,8 @@ def build_discussions_router():
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            last_activity_at=discussion_obj.updated_at,
+            has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
 
     return router

@@ -4,8 +4,13 @@ import useEventBus from '../../services/eventBus';
 
 export function useDiscussionDataZones(state, stores, getActions) {
     const { discussions, currentDiscussionId, activeDiscussionContextStatus, liveDataZoneTokens, activeAiTasks, _clearActiveAiTask, sharedWithMe } = state;
-    const { uiStore, tasksStore } = stores;
     const { emit } = useEventBus();
+
+    const uiStore = {
+        addNotification(...args) { return stores.uiStore.addNotification(...args); },
+        openModal(...args) { return stores.uiStore.openModal(...args); },
+        closeModal(...args) { return stores.uiStore.closeModal(...args); }
+    };
 
     function updateLiveTokenCount(zone, count) {
         if (liveDataZoneTokens.value.hasOwnProperty(zone)) {

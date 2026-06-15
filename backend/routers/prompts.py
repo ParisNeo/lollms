@@ -16,6 +16,7 @@ from backend.ws_manager import manager
 from backend.task_manager import task_manager, Task
 from backend.settings import settings
 from backend.zoo_cache import get_all_items
+from backend.security import sanitize_content
 
 prompts_router = APIRouter(
     prefix="/api/prompts",
@@ -268,6 +269,7 @@ async def share_prompt_as_dm(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot share a prompt with yourself.")
     
     formatted_content = f"--- SHARED PROMPT ---\n\n{payload.prompt_content}"
+    formatted_content = sanitize_content(formatted_content)
 
     new_message = DBDirectMessage(
         sender_id=current_user.id,

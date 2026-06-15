@@ -782,7 +782,8 @@ def build_artefacts_router(router: APIRouter):
             is_starred=False,
             active_tools=[],
             created_at=target_discussion.created_at,
-            last_activity_at=target_discussion.updated_at
+            last_activity_at=target_discussion.updated_at,
+            has_artefacts=len(target_discussion.list_artefacts()) > 0
         )
 
     @router.post("/{discussion_id}/artefacts/manual", response_model=ArtefactAndDataZoneUpdateResponse, status_code=status.HTTP_201_CREATED)

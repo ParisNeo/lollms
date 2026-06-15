@@ -54,6 +54,30 @@ def get_skills(current_user: UserAuthDetails = Depends(get_current_active_user),
 
 @skills_router.post("", response_model=SkillPublic, status_code=status.HTTP_201_CREATED)
 def create_skill(skill: SkillCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
+    # Check if a skill with the same name already exists for this user
+    existing_skill = db.query(DBSkill).filter(
+        DBSkill.owner_user_id == current_user.id,
+        DBSkill.name == skill.name
+    ).first()
+
+    if existing_skill:
+        # Update existing skill in-place instead of creating a duplicate
+        existing_skill.content = skill.content
+        if skill.description:
+            existing_skill.description = skill.description
+        if skill.category:
+            existing_skill.category = skill.category
+        if skill.language:
+            existing_skill.language = skill.language
+        existing_skill.updated_at = datetime.datetime.now()
+        try:
+            db.commit()
+            db.refresh(existing_skill)
+            return existing_skill
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(status_code=400, detail="Error updating existing skill.")
+
     new_skill = DBSkill(**skill.model_dump(), owner_user_id=current_user.id)
     db.add(new_skill)
     try:

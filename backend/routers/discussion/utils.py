@@ -153,7 +153,8 @@ def build_utils_router(router: APIRouter):
             created_at=discussion_obj.created_at,
             last_activity_at=discussion_obj.updated_at,
             owner_username=owner.username,
-            permission_level=permission
+            permission_level=permission,
+            has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
 
     def _extract_code_files(content: str):

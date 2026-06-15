@@ -131,7 +131,10 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
 
                 case 'processing_open':
-                    // [FIX] Ensure the opening tag is added to content so the renderer catches it
+                    // [FIX] Ensure the opening tag starts on a new line and is added to content so the renderer catches it
+                    if (messageToUpdate.content && !messageToUpdate.content.endsWith('\n')) {
+                        messageToUpdate.content += '\n';
+                    }
                     const openAttrs = data.attrs || {};
                     let openTag = `<processing type="${data.processing_type}" title="${data.title || 'Processing'}"`;
                     for (const [k, v] of Object.entries(openAttrs)) { openTag += ` ${k}="${v}"`; }
@@ -145,8 +148,8 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
 
                 case 'processing_close':
-                    // [FIX] Close the tag to finalize the UI block appearance
-                    messageToUpdate.content += '</processing>';
+                    // [FIX] Close the tag to finalize the UI block appearance with a trailing newline
+                    messageToUpdate.content += '</processing>\n';
                     break;
 
                 case 'thought':

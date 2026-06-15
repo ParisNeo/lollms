@@ -98,7 +98,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
      */
 
     // --- WATCHER for task updates ---
-    watch(tasks, async (newTasks) => {
+    watch(() => useTasksStore().tasks, async (newTasks) => {
+        if (!newTasks) return;
         // 1. Handle Artefact Audio Export (Auto-download)
         const artefactAudioTask = newTasks.find(t => t.name.startsWith('Audio Export:') && t.status === 'completed' && t.result?.download_url);
         if (artefactAudioTask && !artefactAudioTask._processed_for_download) {
@@ -197,15 +198,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
 
     const activePersonality = computed(() => {
+        const authStore = useAuthStore();
+        const dataStore = useDataStore();
         const personalityId = authStore.user?.active_personality_id;
         if (!personalityId) return null;
-        // Resolved via dataStore (which is often already loaded in the UI)
-        try {
-            const { useDataStore } = require('./data'); 
-            return useDataStore().getPersonalityById(personalityId);
-        } catch(e) {
-            return null;
-        }
+        return dataStore.getPersonalityById(personalityId);
     });
 
     /**
@@ -255,6 +252,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     const discussionGroupsTree = computed(() => {
+        const authStore = useAuthStore();
         // 1. Get Sort Preference (Default to 'date')
         const sortMode = authStore.user?.discussion_sorting_mode || 'date';
         const sortOrder = authStore.user?.discussion_sorting_order || 'desc';
@@ -356,7 +354,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         activeDiscussionParticipants, generationState, imageGenerationSystemPrompt,
         currentModelVisionSupport
     };
-    const composableStores = { uiStore, authStore, dataStore, tasksStore };
+    const composableStores = { 
+        get uiStore() { return useUiStore(); }, 
+        get authStore() { return useAuthStore(); }, 
+        get dataStore() { return useDataStore(); }, 
+        get tasksStore() { return useTasksStore(); } 
+    };
 
     Object.assign(_actions, useDiscussionCore(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionArtefacts(composableState, composableStores, getActions));
@@ -401,7 +404,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/generate_audio`);
             const task = response.data;
-            tasksStore.addTask(task);
+            useTasksStore().addTask(task);
 
             // Mark message as generating audio locally for UI feedback
             const msg = messages.value.find(m => m.id === messageId);
