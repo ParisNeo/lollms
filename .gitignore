@@ -192,3 +192,5 @@ models/
 
 # Videos
 *.mp4
+
+logs/
