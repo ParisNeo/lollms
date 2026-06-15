@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-06-15 22:22]
+
+- build(deps): downgrade lollms-client to 1.14.23
+
 ## [2026-06-15 01:12]
 
 - build(frontend): rebuild production assets
