@@ -60,6 +60,22 @@ The easiest way to get started is by using the provided run scripts, which handl
         ```
     The first time you run the script, it will create a Python virtual environment, install all required dependencies, and create a default `.env` file from `.env.example`. Subsequent runs will just start the application.
 
+### Docker
+
+Build a multi-architecture image locally:
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 -t lollms:latest .
+```
+
+Run it with persistent app data:
+
+```bash
+docker run -p 9642:9642 -v lollms-data:/app/data -e SECRET_KEY=replace_me lollms:latest
+```
+
+The image serves the compiled Vue app from `frontend/dist` and publishes automated amd64/arm64 builds to GHCR from the repository workflow.
+
 ### Usage
 
 1.  **Access the UI:** Once the server is running, open your web browser and go to `http://localhost:9642` (or the host and port you configured).
