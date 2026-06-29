@@ -1287,7 +1287,7 @@ def build_llm_generation_router(router: APIRouter):
                 try:
                     mm = get_user_memory_manager(owner_username)
                     with mm._session() as s:
-                        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+                        from lollms_client.lollms_memory import _MemoryRecord
                         memories = mm._q(s).order_by(_MemoryRecord.created_at.asc()).all()
                         if 1 <= index <= len(memories):
                             s.delete(memories[index-1])
@@ -1302,7 +1302,7 @@ def build_llm_generation_router(router: APIRouter):
                 try:
                     mm = get_user_memory_manager(owner_username)
                     with mm._session() as s:
-                        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+                        from lollms_client.lollms_memory import _MemoryRecord
                         results = mm.search(query, session=s, limit=10)
                         formatted_results = [
                             {"title": r.content[:30], "content": r.content, "created_at": r.created_at.isoformat() if r.created_at else None}

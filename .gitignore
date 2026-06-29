@@ -194,3 +194,4 @@ models/
 *.mp4
 
 logs/
+data_workspace

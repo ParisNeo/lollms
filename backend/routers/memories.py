@@ -13,7 +13,7 @@ from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.models import UserAuthDetails
 from backend.session import get_current_active_user, get_current_db_user_from_token, get_user_data_root
-from lollms_client.lollms_discussion.lollms_memory import LollmsMemoryManager, MemoryConfig
+from lollms_client.lollms_memory import LollmsMemoryManager, MemoryConfig
 
 memories_router = APIRouter(prefix="/api/memories", tags=["Cognitive Memories"])
 
@@ -38,7 +38,7 @@ async def get_user_memories(
     mm = get_user_memory_manager(current_user.username)
     # Return all level 1, 2, and 3 records for interactive UI representation
     with mm._session() as s:
-        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+        from lollms_client.lollms_memory import _MemoryRecord
         records = mm._q(s).order_by(_MemoryRecord.level.asc(), _MemoryRecord.importance.desc()).all()
         return [
             {
@@ -85,7 +85,7 @@ async def update_memory(
 ):
     mm = get_user_memory_manager(current_user.username)
     with mm._session() as s:
-        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+        from lollms_client.lollms_memory import _MemoryRecord
         record = s.query(_MemoryRecord).filter(_MemoryRecord.id == memory_id).first()
         if not record:
             raise HTTPException(status_code=404, detail="Memory record not found.")
@@ -118,7 +118,7 @@ async def delete_memory(
 ):
     mm = get_user_memory_manager(current_user.username)
     with mm._session() as s:
-        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+        from lollms_client.lollms_memory import _MemoryRecord
         record = s.query(_MemoryRecord).filter(_MemoryRecord.id == memory_id).first()
         if not record:
             raise HTTPException(status_code=404, detail="Memory record not found.")
@@ -140,7 +140,7 @@ async def export_memories(
 ):
     mm = get_user_memory_manager(current_user.username)
     with mm._session() as s:
-        from lollms_client.lollms_discussion.lollms_memory import _MemoryRecord
+        from lollms_client.lollms_memory import _MemoryRecord
         records = mm._q(s).order_by(_MemoryRecord.created_at.asc()).all()
         memories_to_export = [
             {
