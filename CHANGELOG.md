@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-07-01 09:24]
+
+- fix(session): ensure user_ui_level is cast to integer
+
 ## [2026-06-29 00:53]
 
 - fix(memory): update lollms_memory import path and ignore data_workspace

@@ -1298,7 +1298,7 @@ def build_llm_generation_router(router: APIRouter):
                 except Exception as e:
                     return {"success": False, "error": str(e)}
 
-            def tool_memory_search(query: str):
+            def tool_memory_search(query: str): 
                 try:
                     mm = get_user_memory_manager(owner_username)
                     with mm._session() as s:
