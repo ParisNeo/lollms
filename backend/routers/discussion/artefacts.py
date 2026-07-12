@@ -977,6 +977,10 @@ def build_artefacts_router(router: APIRouter):
         except Exception:
             pass
 
+        # Safety check: if it's STILL encoded, reject to prevent library lookup failures
+        if "%" in decoded_title:
+            raise HTTPException(status_code=400, detail="Malformed artefact title: still URL-encoded.")
+
         if discussion_id == "saved":
             owner_id = current_user.id
             owner_exists = db.query(SavedArtefact).filter(
@@ -1007,10 +1011,12 @@ def build_artefacts_router(router: APIRouter):
                 raise HTTPException(status_code=404, detail=f"Saved artefact '{decoded_title}' not found in library.")
 
             from fastapi.responses import PlainTextResponse
+            from urllib.parse import quote
+            encoded_title = quote(decoded_title, safe='')
             return PlainTextResponse(
                 content=saved_art.content,
                 media_type="text/plain; charset=utf-8",
-                headers={"X-Artefact-Title": decoded_title, "X-Artefact-Version": str(saved_art.version)}
+                headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(saved_art.version)}
             )
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
@@ -1040,10 +1046,12 @@ def build_artefacts_router(router: APIRouter):
         content = artefact.get('content', '')
 
         from fastapi.responses import PlainTextResponse
+        from urllib.parse import quote
+        encoded_title = quote(decoded_title, safe='')
         return PlainTextResponse(
             content=content,
             media_type="text/plain; charset=utf-8",
-            headers={"X-Artefact-Title": decoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
+            headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
         )
 
     # Keep the old endpoint for backward compatibility (returns JSON with metadata)

@@ -40,7 +40,8 @@ openai_v1_router = APIRouter(prefix="/v1")
 bearer_scheme = HTTPBearer(auto_error=False) 
 
 # Create a thread pool for blocking operations
-executor = ThreadPoolExecutor(max_workers=50)
+# Increased to handle high concurrency for OpenAI API requests
+executor = ThreadPoolExecutor(max_workers=200)
 
 
 #Constants
@@ -917,6 +918,7 @@ async def chat_completions(
 
                     # ── TOOLS PATH ────────────────────────────────────────────────────────
                     if request.tools:
+                        # Offload to thread pool to avoid blocking the event loop
                         result_content = await asyncio.wait_for(
                             loop.run_in_executor(
                                 executor,
@@ -953,7 +955,7 @@ async def chat_completions(
                         yield "data: [DONE]\n\n"
                         return
 
-                    # ── STREAMING PATH ────────────────────────────────────────────────────
+                     # ── STREAMING PATH ────────────────────────────────────────────────────
                     def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
                         if lc.llm and lc.llm.is_cancelled():
                             return False
@@ -964,6 +966,7 @@ async def chat_completions(
                             )
                         return True
 
+                    # Use a dedicated thread for generation to prevent event loop starvation
                     def blocking_gen() -> None:
                         try:
                             lc.generate_from_messages(
@@ -976,7 +979,6 @@ async def chat_completions(
                             )
                         except Exception as ex:
                             ASCIIColors.error(f"[blocking_gen] {ex}")
-                            # Signal the error back to the consumer
                             main_loop.call_soon_threadsafe(
                                 stream_queue.put_nowait,
                                 make_error_chunk(str(ex))
@@ -984,7 +986,8 @@ async def chat_completions(
                         finally:
                             main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
-                    loop.run_in_executor(executor, blocking_gen)
+                    # Run in executor to isolate execution and prevent blocking
+                    gen_task = loop.run_in_executor(executor, blocking_gen)
                     yield make_chunk(DeltaMessage(role="assistant"))
 
                     first_token_received = False
@@ -1111,12 +1114,17 @@ async def chat_completions(
                         pass
 
         try:
+            # Fix: lollms_client returns {"status": "error", "message": err_msg}
+            # We need to check for string "error" as well as boolean False
             if isinstance(result_content, dict) and (
-                "error" in result_content or result_content.get("status") is False
+                result_content.get("status") == "error" or 
+                result_content.get("status") is False or
+                "error" in result_content
             ):
+                error_detail = result_content.get("message") or result_content.get("error", "LLM Binding error.")
                 raise HTTPException(
                     status_code=result_content.get("status_code", 500),
-                    detail=result_content.get("error", "LLM Binding error.")
+                    detail=error_detail
                 )
 
             content = result_content
@@ -1127,6 +1135,10 @@ async def chat_completions(
                 content, tool_calls = parse_tool_calls_from_text(result_content)
                 if tool_calls:
                     finish_reason = "tool_calls"
+
+            # Safety: Ensure content is a string or list before passing to Pydantic
+            if not isinstance(content, (str, list)):
+                content = str(content) if content is not None else ""
 
             msg_obj = ChatMessage(role="assistant", content=content, tool_calls=tool_calls)
             choice = ChatCompletionResponseChoice(index=0, message=msg_obj, finish_reason=finish_reason)
@@ -1144,6 +1156,8 @@ async def chat_completions(
                     total_tokens=prompt_tokens + completion_tokens,
                 ),
             )
+        except HTTPException:
+            raise
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")

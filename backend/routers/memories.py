@@ -1,6 +1,7 @@
 # backend/routers/memories.py
 import json
 import re
+import threading
 from typing import List, Dict, Optional, Any
 from datetime import datetime, timezone
 
@@ -17,19 +18,37 @@ from lollms_client.lollms_memory import LollmsMemoryManager, MemoryConfig
 
 memories_router = APIRouter(prefix="/api/memories", tags=["Cognitive Memories"])
 
+# --- Thread-Safe Singleton Cache for Memory Managers ---
+_memory_manager_cache: Dict[str, LollmsMemoryManager] = {}
+_memory_manager_lock = threading.Lock()
 
 def get_user_memory_manager(username: str) -> LollmsMemoryManager:
-    user_data_path = get_user_data_root(username)
-    db_path = user_data_path / "memories_v2.db"
-    return LollmsMemoryManager(
-        db_path=f"sqlite:///{db_path.resolve()}",
-        owner_id=f"user_{username}",
-        config=MemoryConfig(
-            working_token_budget=1024,
-            handles_token_budget=512,
-            dream_min_interval_hours=0
+    """
+    Retrieves or creates a cached LollmsMemoryManager instance for a given user.
+    This ensures we do not spawn hundreds of SQLite connections on parallel API calls.
+    """
+    # Fast path: return existing instance without locking if already created
+    if username in _memory_manager_cache:
+        return _memory_manager_cache[username]
+    
+    with _memory_manager_lock:
+        # Double-check lock in case another thread created it while we waited
+        if username in _memory_manager_cache:
+            return _memory_manager_cache[username]
+        
+        user_data_path = get_user_data_root(username)
+        db_path = user_data_path / "memories_v2.db"
+        mm = LollmsMemoryManager(
+            db_path=f"sqlite:///{db_path.resolve()}",
+            owner_id=f"user_{username}",
+            config=MemoryConfig(
+                working_token_budget=1024,
+                handles_token_budget=512,
+                dream_min_interval_hours=0
+            )
         )
-    )
+        _memory_manager_cache[username] = mm
+        return mm
 
 @memories_router.get("")
 async def get_user_memories(
@@ -134,6 +153,7 @@ async def trigger_dream_consolidation(
     # Set dreamer parameters through memory_manager.dream()
     report = mm.dream()
     return {"status": "success", "report": report}
+
 @memories_router.get("/export", response_class=StreamingResponse)
 async def export_memories(
     current_user: DBUser = Depends(get_current_db_user_from_token)
