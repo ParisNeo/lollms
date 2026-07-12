@@ -28,7 +28,7 @@ from backend.routers.discussion.helpers import get_discussion_and_owner_for_requ
 from backend.task_manager import task_manager
 from backend.tasks.artefact_tasks import _import_artefact_from_url_task, _import_artefact_task
 from backend.tasks.utils import _to_task_info
-from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
+from lollms_client.lollms_artefact import ArtefactVisibility
 # .msg handling
 try:
     import extract_msg  # pip install extract-msg
@@ -812,10 +812,20 @@ def build_artefacts_router(router: APIRouter):
                 payload.content, 
                 images=payload.images_b64, 
                 author=current_user.username,
-                active=auto_load,
+                active=False, # Add as inactive first
                 artefact_type=final_type
             )
             
+            # Explicitly set visibility based on auto_load and type
+            if auto_load:
+                # Data files should not be fully loaded into context automatically to prevent bloat
+                if final_type == "data":
+                    discussion.artefacts.set_visibility(payload.title, ArtefactVisibility.TREE_UNLOCKABLE)
+                else:
+                    discussion.artefacts.set_visibility(payload.title, ArtefactVisibility.FULL)
+            else:
+                discussion.artefacts.set_visibility(payload.title, ArtefactVisibility.TREE_UNLOCKABLE)
+                
             discussion.commit()
             
             # Fetch latest synchronized state
@@ -1360,7 +1370,7 @@ def build_artefacts_router(router: APIRouter):
             all_artefacts_infos = discussion.list_artefacts()
             
             for art_info in all_artefacts_infos:
-                discussion.artefacts.activate(art_info['title'], version=art_info['version'])
+                discussion.artefacts.set_visibility(art_info['title'], ArtefactVisibility.FULL, version=art_info['version'])
 
             discussion.commit()
             
@@ -1401,7 +1411,7 @@ def build_artefacts_router(router: APIRouter):
 
             # We only update the library metadata. The library handles 
             # context injection natively during chat() without modifying the data_zone string.
-            discussion.artefacts.activate(decoded_title, version=request.version)
+            discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL, version=request.version)
             discussion.commit()
             
             raw_artefacts = discussion.list_artefacts()
@@ -1441,7 +1451,7 @@ def build_artefacts_router(router: APIRouter):
                 pass
 
             # Deactivate in the library metadata only.
-            discussion.artefacts.deactivate(decoded_title, version=request.version)
+            discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE, version=request.version)
             discussion.commit()
             
             raw_artefacts = discussion.list_artefacts()
@@ -1838,9 +1848,16 @@ def build_artefacts_router(router: APIRouter):
             content=content_to_import,
             images=images_to_import,
             author=current_user.username,
-            active=True,
+            active=False, # Add as inactive first
             artefact_type=type_to_import
         )
+        
+        # Explicitly set visibility based on type
+        if type_to_import == "data":
+            target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE)
+        else:
+            target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL)
+            
         target_discussion.commit()
 
         raw_artefacts = target_discussion.list_artefacts()
@@ -2107,9 +2124,16 @@ def build_artefacts_router(router: APIRouter):
                         title=decoded_title,
                         content=source_art.content,
                         author=f"Shared by {current_user.username}",
-                        active=True,
+                        active=False, # Add as inactive first
                         artefact_type=source_art.artefact_type or 'document'
                     )
+                    
+                    # Explicitly set visibility based on type
+                    if (source_art.artefact_type or 'document') == "data":
+                        target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE)
+                    else:
+                        target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL)
+                        
                     target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
                     target_discussion.add_message(
                         sender="System",
