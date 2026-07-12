@@ -22,6 +22,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { usePyodideStore } from '../../stores/pyodide';
 import InteractiveDataGrid from '../ui/DataGrid/InteractiveDataGrid.vue';
+import { oneDark } from '@codemirror/theme-one-dark';
 
 const uiStore = useUiStore();
 const authStore = useAuthStore();
