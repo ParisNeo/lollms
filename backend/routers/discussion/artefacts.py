@@ -1224,18 +1224,16 @@ def build_artefacts_router(router: APIRouter):
         title = unquote(artefact_title) # Ensure URL encoded titles match correctly
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            # Check if it exists first
-            if discussion.get_artefact(title=title):
-                discussion.remove_artefact(title=title)
-                discussion.commit()
+            # Use the ArtefactManager directly to ensure proper cleanup of both main and companion artifacts
+            removed_main = discussion.artefacts.remove(title)
+            removed_comp = discussion.artefacts.remove(f"{title}::images")
+            
+            # Explicitly commit the discussion to persist metadata changes to the database
+            discussion.commit()
+            
+            if removed_main > 0 or removed_comp > 0:
                 return {"message": f"Artefact '{title}' deleted."}
             else:
-                # Already removed or not found, but we want to make sure any loose local state is cleared
-                try:
-                    discussion.remove_artefact(title=title)
-                    discussion.commit()
-                except Exception:
-                    pass
                 return {"message": f"Artefact '{title}' was already removed."}
         except Exception as e:
             trace_exception(e)
