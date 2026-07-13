@@ -1213,6 +1213,7 @@ def build_artefacts_router(router: APIRouter):
 
         raise HTTPException(status_code=404, detail="Requested sub-image not found in bundle.")
 
+
     @router.delete("/{discussion_id}/artefact", status_code=status.HTTP_200_OK)
     async def delete_discussion_artefact(
         discussion_id: str,
@@ -1221,14 +1222,42 @@ def build_artefacts_router(router: APIRouter):
         db: Session = Depends(get_db)
     ):
         from urllib.parse import unquote
-        title = unquote(artefact_title) # Ensure URL encoded titles match correctly
+        from pathlib import Path
+        import os
+
+        title = unquote(artefact_title)
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        
         try:
-            # Use the ArtefactManager directly to ensure proper cleanup of both main and companion artifacts
+            # 1. Explicitly delete the physical files from the workspace_data directory
+            # This prevents the workspace auto-ingestion logic from re-registering the artifact on refresh
+            workspace_data_dir = Path(discussion.workspace_data_path) if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path else None
+            
+            if workspace_data_dir and workspace_data_dir.exists():
+                # Attempt to find and delete the main file
+                # We check a few common extensions to be safe
+                possible_extensions = [".md", ".py", ".txt", ".csv", ".db", ".sqlite", ".json", ".yaml", ".yml", ".html", ".css", ".js", ".ts", ""]
+                for ext in possible_extensions:
+                    file_path = workspace_data_dir / f"{title}{ext}"
+                    if file_path.exists():
+                        try:
+                            os.remove(file_path)
+                        except Exception:
+                            pass
+                
+                # Also attempt to delete the companion images file if it exists
+                comp_file_path = workspace_data_dir / f"{title}::images.md"
+                if comp_file_path.exists():
+                    try:
+                        os.remove(comp_file_path)
+                    except Exception:
+                        pass
+
+            # 2. Remove the artifact records from the database
             removed_main = discussion.artefacts.remove(title)
             removed_comp = discussion.artefacts.remove(f"{title}::images")
             
-            # Explicitly commit the discussion to persist metadata changes to the database
+            # 3. Commit the changes
             discussion.commit()
             
             if removed_main > 0 or removed_comp > 0:
