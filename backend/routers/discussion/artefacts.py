@@ -1,5 +1,4 @@
 # backend/routers/discussion/artefacts.py
-# Standard Library Imports
 import base64
 import io
 import asyncio
@@ -29,13 +28,12 @@ from backend.task_manager import task_manager
 from backend.tasks.artefact_tasks import _import_artefact_from_url_task, _import_artefact_task
 from backend.tasks.utils import _to_task_info
 from lollms_client.lollms_artefact import ArtefactVisibility
-# .msg handling
+
 try:
-    import extract_msg  # pip install extract-msg
+    import extract_msg
 except ImportError:
     extract_msg = None
 
-# YouTube Transcript handling
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
 except ImportError:
@@ -46,10 +44,9 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
 from pydantic import BaseModel
 
-# --- New Models for Search/Select ---
 class IndividualShareRequest(BaseModel):
     target_username: str
-    permission_level: str = "interact" # "view" or "interact"
+    permission_level: str = "interact"
 
 class WikipediaSearchRequest(BaseModel):
     query: str
@@ -71,7 +68,7 @@ class ArxivSearchRequest(BaseModel):
 class ArxivImportItem(BaseModel):
     id: str
     title: str
-    mode: str = "abstract" # "abstract" or "full"
+    mode: str = "abstract"
 
 class ArxivImportSelectedRequest(BaseModel):
     items: List[ArxivImportItem]
@@ -121,27 +118,14 @@ class AudioExportRequest(BaseModel):
     content: str
 
 def _map_artefact_for_ui(art: dict, discussion_id: str = None) -> dict:
-    """
-    Standardizes Artefact metadata for the UI.
-    Maps internal library keys ('type', 'active') to public API keys ('artefact_type', 'is_loaded').
-    """
     mapped = {k: v for k, v in art.items() if k not in ['content', 'images']}
-
-    # Ensure discussion_id is preserved
     if 'discussion_id' not in mapped and discussion_id:
         mapped['discussion_id'] = discussion_id
-
-    # Map library internal 'type' to UI 'artefact_type'
     mapped['artefact_type'] = art.get('type', 'document')
-
-    # Map library 'active' (boolean) to UI 'is_loaded'
     mapped['is_loaded'] = bool(art.get('active', False))
-
-    # Handle serialization of dates
     for date_key in ['created_at', 'updated_at']:
         if isinstance(mapped.get(date_key), datetime):
             mapped[date_key] = mapped[date_key].isoformat()
-
     return mapped
 
 def _map_saved_artefact_for_ui(saved: SavedArtefact, current_user_id: Optional[int] = None) -> dict:
@@ -160,11 +144,10 @@ def _map_saved_artefact_for_ui(saved: SavedArtefact, current_user_id: Optional[i
         "created_at": saved.created_at.isoformat() if saved.created_at else datetime.now().isoformat(),
         "updated_at": saved.updated_at.isoformat() if saved.updated_at else datetime.now().isoformat(),
         "content": saved.content,
-        "discussion_id": "saved" # Special marker to tell the UI this is from the global saved library
+        "discussion_id": "saved"
     }
 
 def build_artefacts_router(router: APIRouter):
-    # Ensure Arxiv is available
     try:
         import arxiv
     except ImportError:
@@ -186,6 +169,54 @@ def build_artefacts_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Search failed: {e}")
 
+    @router.delete("/{discussion_id}/artefacts/{artefact_title:path}/version/{version}")
+    async def delete_artefact_version(
+        discussion_id: str,
+        artefact_title: str,
+        version: int,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Deletes a specific version of an artefact.
+        If the deleted version was the active one, the system automatically 
+        promotes the next highest available version to be the active one.
+        """
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        decoded_title = unquote(artefact_title)
+        
+        # 1. Determine if the version being deleted is currently active
+        history = discussion.artefacts.get_version_history(decoded_title)
+        target_version_record = next((v for v in history if v["version"] == version), None)
+        is_deleting_active = target_version_record and target_version_record.get("is_active", False)
+
+        # 2. Perform the deletion
+        removed = discussion.artefacts.remove(decoded_title, version=version)
+        if removed == 0:
+            raise HTTPException(status_code=404, detail="Version not found.")
+            
+        # 3. Handle Active Fallback Promotion
+        if is_deleting_active:
+            # Filter out the deleted version and find the next highest version
+            remaining_versions = [v for v in history if v["version"] != version]
+            if remaining_versions:
+                # Sort descending to get the highest remaining version
+                remaining_versions.sort(key=lambda x: x["version"], reverse=True)
+                new_active_version = remaining_versions[0]["version"]
+                
+                # Promote to FULL visibility
+                discussion.artefacts.set_visibility(
+                    decoded_title, 
+                    ArtefactVisibility.FULL, 
+                    version=new_active_version
+                )
+                print(f"INFO: Active version {version} deleted. Automatically promoted version {new_active_version} to active.")
+            else:
+                print(f"INFO: Deleted last remaining version of '{decoded_title}'.")
+
+        discussion.commit()
+        return {"message": f"Version {version} deleted."}
+
     @router.delete("/{discussion_id}/artefacts/{artefact_title:path}/images/{index}")
     async def delete_binary_image_endpoint(
         discussion_id: str,
@@ -194,13 +225,9 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        """Removes a specific sub-image of an artefact by index and updates text content."""
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-
-        from urllib.parse import unquote
         decoded_title = unquote(artefact_title)
 
-        # Resolve title case-insensitively
         try:
             for art in discussion.list_artefacts():
                 if art.get("title", "").lower() == decoded_title.lower():
@@ -210,7 +237,6 @@ def build_artefacts_router(router: APIRouter):
             pass
 
         try:
-            # 1. Retrieve the existing image list
             associated_images = discussion.artefacts.get_associated_images(decoded_title)
             if associated_images:
                 sorted_images = sorted(associated_images, key=lambda x: x.get('index', 0))
@@ -225,15 +251,11 @@ def build_artefacts_router(router: APIRouter):
             if not images or index < 0 or index >= len(images):
                 raise HTTPException(status_code=404, detail="Image index out of range")
 
-            # 2. Re-assign the targeted index to an empty string to prevent index shifting
             images[index] = ""
-
-            # 3. Update the artefact's images list in place
             latest_art = discussion.get_artefact(title=decoded_title)
             existing_content = latest_art.get('content', '') if latest_art else ''
             existing_type = latest_art.get('artefact_type', 'document') if latest_art else 'document'
 
-            # 4. Remove the specific tag from the content to prevent rendering broken frames
             escaped_title = re.escape(decoded_title)
             tag_pattern = re.compile(rf'<artefact_image\s+id=["\']{escaped_title}::{index}["\']\s*/?>', re.IGNORECASE)
             updated_content = tag_pattern.sub("", existing_content)
@@ -247,7 +269,6 @@ def build_artefacts_router(router: APIRouter):
                 active=True
             )
 
-            # 5. Synchronize the companion ::images artefact if it exists
             comp_title = f"{decoded_title}::images"
             if discussion.get_artefact(title=comp_title):
                 discussion.update_artefact(
@@ -266,171 +287,11 @@ def build_artefacts_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=str(e))
 
-
-    class SaveArtefactRequest(BaseModel):
-        title: str
-        content: str
-        artefact_type: Optional[str] = "document"
-
-    @router.post("/artefacts/save", response_model=ArtefactInfo)
-    async def save_artefact_to_library(
-        payload: SaveArtefactRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Saves raw content or custom document as a featured artefact in the global library.
-        """
-        existing_versions = db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id,
-            SavedArtefact.title == payload.title
-        ).all()
-
-        if existing_versions:
-            max_version = max(v.version for v in existing_versions)
-            new_version = max_version + 1
-        else:
-            new_version = 1
-
-        new_save = SavedArtefact(
-            title=payload.title,
-            content=payload.content,
-            artefact_type=payload.artefact_type,
-            owner_user_id=current_user.id,
-            version=new_version
-        )
-        db.add(new_save)
-        db.commit()
-        db.refresh(new_save)
-
-        return _map_saved_artefact_for_ui(new_save)
-
-    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/save", response_model=ArtefactInfo)
-    async def save_discussion_artefact_to_library(
-        discussion_id: str,
-        artefact_title: str,
-        version: Optional[int] = Query(None),
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Saves an existing discussion artefact to the user's global library.
-        """
-        from urllib.parse import unquote
-        decoded_title = unquote(artefact_title)
-
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-        art = discussion.get_artefact(title=decoded_title, version=version)
-        if not art:
-            raise HTTPException(status_code=404, detail="Artefact not found in discussion.")
-
-        # Find existing versions in the library
-        existing_versions = db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id,
-            SavedArtefact.title == decoded_title
-        ).all()
-
-        if existing_versions:
-            max_version = max(v.version for v in existing_versions)
-            new_version = max_version + 1
-        else:
-            new_version = 1
-
-        new_save = SavedArtefact(
-            title=decoded_title,
-            content=art.get('content', ''),
-            artefact_type=art.get('artefact_type', 'document'),
-            owner_user_id=current_user.id,
-            version=new_version
-        )
-        db.add(new_save)
-        db.commit()
-        db.refresh(new_save)
-
-        return _map_saved_artefact_for_ui(new_save, current_user.id)
-
-    @router.delete("/artefacts/save/{artefact_title:path}", status_code=status.HTTP_200_OK)
-    async def delete_saved_artefact(
-        artefact_title: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Removes an artefact from the global saved library (or revokes/unsubscribes if shared).
-        """
-        from urllib.parse import unquote
-        decoded_title = unquote(artefact_title)
-
-        owned_art = db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id,
-            SavedArtefact.title == decoded_title
-        ).first()
-
-        if owned_art:
-            db.query(SavedArtefact).filter(
-                SavedArtefact.owner_user_id == current_user.id,
-                SavedArtefact.title == decoded_title
-            ).delete()
-            db.query(SharedArtefactLink).filter(
-                SharedArtefactLink.owner_user_id == current_user.id,
-                SharedArtefactLink.artefact_title == decoded_title
-            ).delete()
-        else:
-            db.query(SharedArtefactLink).filter(
-                SharedArtefactLink.shared_with_user_id == current_user.id,
-                SharedArtefactLink.artefact_title == decoded_title
-            ).delete()
-
-        db.commit()
-        return {"message": "Artefact removed from saved library."}
-
-    class SaveArtefactRequest(BaseModel):
-        title: str
-        content: str
-        artefact_type: Optional[str] = "document"
-
-    @router.post("/artefacts/save", response_model=ArtefactInfo)
-    async def save_artefact_to_library(
-        payload: SaveArtefactRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Saves raw content or custom document as a featured artefact in the global library.
-        """
-        existing = db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id,
-            SavedArtefact.title == payload.title
-        ).first()
-
-        if existing:
-            existing.content = payload.content
-            existing.artefact_type = payload.artefact_type
-            db.commit()
-            db.refresh(existing)
-            saved = existing
-        else:
-            new_save = SavedArtefact(
-                title=payload.title,
-                content=payload.content,
-                artefact_type=payload.artefact_type,
-                owner_user_id=current_user.id
-            )
-            db.add(new_save)
-            db.commit()
-            db.refresh(new_save)
-            saved = new_save
-
-        return _map_saved_artefact_for_ui(saved, current_user.id)
-
     @router.get("/artefacts/all", response_model=List[ArtefactInfo])
     async def list_all_user_artefacts(
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        """
-        Retrieves all saved (featured) artefacts for the current user (owned + shared with me).
-        """
         from sqlalchemy import or_, and_
 
         shared_links = db.query(SharedArtefactLink).filter(
@@ -457,7 +318,6 @@ def build_artefacts_router(router: APIRouter):
             query = db.query(SavedArtefact).filter(SavedArtefact.owner_user_id == current_user.id)
 
         saved_list = query.order_by(SavedArtefact.updated_at.desc()).all()
-
         return [_map_saved_artefact_for_ui(s, current_user.id) for s in saved_list]
 
     @router.get("/{discussion_id}/artefacts", response_model=List[ArtefactInfo])
@@ -469,8 +329,6 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         if not discussion:
             raise HTTPException(status_code=404, detail="Discussion not found")
-        
-        # Fetch raw artefacts from the manager and use centralized mapper
         raw_artefacts = discussion.list_artefacts()
         return [_map_artefact_for_ui(art, discussion_id) for art in raw_artefacts]
 
@@ -484,13 +342,8 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db) 
     ):
-        """
-        Launches a background task to import a file into the discussion's artefact system
-        using the library's integrated import mechanism with real-time progress updates.
-        """
         _, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
-        # Save to a temporary file under user's upload folder so the background worker can read it
         from backend.session import get_user_temp_uploads_path
         temp_dir = get_user_temp_uploads_path(current_user.username)
         temp_id = str(uuid.uuid4())
@@ -503,7 +356,6 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to write uploaded file to temp disk: {e}")
 
-        # Submit background task
         task = task_manager.submit_task(
             name=f"Importing document: {file.filename or 'unnamed'}",
             target=_import_artefact_task,
@@ -528,6 +380,155 @@ def build_artefacts_router(router: APIRouter):
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Wikipedia search failed: {e}")
 
+    @router.post("/{discussion_id}/artefacts/sync", response_model=Dict[str, int])
+    async def sync_discussion_workspace(
+        discussion_id: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Runs a bidirectional sync scan between disk workspace_data/ and the database.
+        Detects new tool-written files and restores accidentally deleted files.
+        """
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            report = discussion.sync_workspace_to_artefacts()
+            discussion.commit()
+            return report
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Workspace sync failed: {e}")
+
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/export_archive")
+    async def export_standalone_archive(
+        discussion_id: str,
+        artefact_title: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Exports a single artefact along with its entire version history into a .laa archive."""
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+        decoded_title = unquote(artefact_title)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / f"{unquote(artefact_title)}.laa"
+            try:
+                discussion.artefacts.export_artefact_to_archive(decoded_title, str(output_path))
+                return Response(
+                    content=output_path.read_bytes(),
+                    media_type="application/octet-stream",
+                    headers={"Content-Disposition": f'attachment; filename="{decoded_title}.laa"'}
+                )
+            except Exception as e:
+                trace_exception(e)
+                raise HTTPException(status_code=500, detail=f"Failed to export standalone archive: {e}")
+
+    @router.post("/{discussion_id}/artefacts/import_archive", response_model=ArtefactInfo)
+    async def import_standalone_archive(
+        discussion_id: str,
+        file: UploadFile = File(...),
+        activate: bool = Query(True),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Imports an artefact with its complete history from a .laa archive."""
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".laa") as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
+            temp_path = Path(temp_file.name)
+
+        try:
+            imported_record = discussion.artefacts.import_artefact_from_archive(str(temp_path), activate=activate)
+            discussion.commit()
+            return _map_artefact_for_ui(imported_record, discussion_id)
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to import standalone archive: {e}")
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    @router.post("/{discussion_id}/artefacts/export_bundle")
+    async def export_linked_bundle(
+        discussion_id: str,
+        paths: List[str] = Body(..., description="Relative paths inside workspace_data to package"),
+        include_versions: bool = Body(False),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Bundles multiple linked artefacts into a unified .lab package preserving folder structures."""
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = Path(temp_dir) / "bundle.lab"
+            try:
+                discussion.artefacts.export_artefact_bundle(
+                    paths=paths,
+                    output_path=str(output_path),
+                    include_versions=include_versions
+                )
+                return Response(
+                    content=output_path.read_bytes(),
+                    media_type="application/octet-stream",
+                    headers={"Content-Disposition": 'attachment; filename="bundle.lab"'}
+                )
+            except Exception as e:
+                trace_exception(e)
+                raise HTTPException(status_code=500, detail=f"Failed to package linked bundle: {e}")
+
+    @router.post("/{discussion_id}/artefacts/import_bundle", response_model=List[ArtefactInfo])
+    async def import_linked_bundle(
+        discussion_id: str,
+        file: UploadFile = File(...),
+        activate: bool = Query(True),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Ingests a .lab package, unzipping into workspace_data and auto-registering files."""
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".lab") as temp_file:
+            shutil.copyfileobj(file.file, temp_file)
+            temp_path = Path(temp_file.name)
+
+        try:
+            discussion.artefacts.import_artefact_bundle(str(temp_path), activate=activate)
+            discussion.commit()
+            return [_map_artefact_for_ui(art, discussion_id) for art in discussion.list_artefacts()]
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to ingest linked bundle: {e}")
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    @router.put("/{discussion_id}/artefacts/{artefact_title:path}/visibility", response_model=ArtefactInfo)
+    async def update_artefact_visibility(
+        discussion_id: str,
+        artefact_title: str,
+        visibility: str = Query(..., description="FULL, METADATA, TREE_UNLOCKABLE, LOCKED, HIDDEN"),
+        version: Optional[int] = Query(None),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Updates the active visibility tier in the context state machine."""
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        decoded_title = unquote(artefact_title)
+
+        try:
+            # Resolves string visibility keys directly to the ArtefactVisibility enum
+            from lollms_client.lollms_artefact import ArtefactVisibility
+            target_visibility = getattr(ArtefactVisibility, visibility.upper())
+
+            discussion.artefacts.set_visibility(decoded_title, target_visibility, version=version)
+            discussion.commit()
+
+            updated_record = discussion.get_artefact(title=decoded_title, version=version)
+            return _map_artefact_for_ui(updated_record, discussion_id)
+        except AttributeError:
+            raise HTTPException(status_code=400, detail=f"Invalid visibility level: {visibility}")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+
     @router.post("/{discussion_id}/artefacts/wikipedia/import", response_model=ArtefactAndDataZoneUpdateResponse)
     async def import_wikipedia_selected(
         discussion_id: str,
@@ -542,15 +543,12 @@ def build_artefacts_router(router: APIRouter):
                 discussion.import_wikipedia(item.title, item.url, request.auto_load)
 
             discussion.commit()
-
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
-
+            artefacts = [
+                _map_artefact_for_ui(art, discussion_id)
+                for art in discussion.list_artefacts()
+            ]
             all_images_info = discussion.get_discussion_images()
 
-            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
                 "artefacts": artefacts,
                 "discussion_images": [img['data'] for img in all_images_info],
@@ -589,15 +587,12 @@ def build_artefacts_router(router: APIRouter):
                 discussion.import_arxiv(item.id, item.mode, request.auto_load)
 
             discussion.commit()
-
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
-
+            artefacts = [
+                _map_artefact_for_ui(art, discussion_id)
+                for art in discussion.list_artefacts()
+            ]
             all_images_info = discussion.get_discussion_images()
 
-            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
             return {
                 "artefacts": artefacts,
                 "discussion_images": [img['data'] for img in all_images_info],
@@ -636,12 +631,10 @@ def build_artefacts_router(router: APIRouter):
                 raise HTTPException(status_code=400, detail="Failed to import GitHub content.")
 
             discussion.commit()
-
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
-
+            artefacts = [
+                _map_artefact_for_ui(a, discussion_id)
+                for a in discussion.list_artefacts()
+            ]
             all_images_info = discussion.get_discussion_images()
 
             return {
@@ -682,12 +675,10 @@ def build_artefacts_router(router: APIRouter):
                 raise HTTPException(status_code=400, detail="Failed to import StackOverflow content.")
 
             discussion.commit()
-
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
-
+            artefacts = [
+                _map_artefact_for_ui(a, discussion_id)
+                for a in discussion.list_artefacts()
+            ]
             all_images_info = discussion.get_discussion_images()
 
             return {
@@ -713,12 +704,10 @@ def build_artefacts_router(router: APIRouter):
                 raise HTTPException(status_code=400, detail="Failed to import YouTube video transcript.")
 
             discussion.commit()
-
-            artefacts = discussion.list_artefacts()
-            for artefact in artefacts:
-                if isinstance(artefact.get('created_at'), datetime): artefact['created_at'] = artefact['created_at'].isoformat()
-                if isinstance(artefact.get('updated_at'), datetime): artefact['updated_at'] = artefact['updated_at'].isoformat()
-
+            artefacts = [
+                _map_artefact_for_ui(a, discussion_id)
+                for a in discussion.list_artefacts()
+            ]
             all_images_info = discussion.get_discussion_images()
 
             return {
@@ -729,62 +718,6 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to process YouTube transcript: {str(e)}")
-
-    class RenameArtefactRequest(BaseModel):
-        old_title: str
-        new_title: str
-        new_type: Optional[str] = None
-
-    @router.post("/{discussion_id}/artefacts/{artefact_title}/create_discussion_with_version", response_model=DiscussionInfo)
-    async def create_discussion_from_artefact_version(
-        discussion_id: str,
-        artefact_title: str,
-        version: int = Query(...),
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Creates a brand new discussion and pre-loads it with a specific version 
-        of an artefact from an existing discussion.
-        """
-        from urllib.parse import unquote
-        title = unquote(artefact_title)
-
-        # 1. Get the source discussion and artefact
-        source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-        source_art = source_discussion.get_artefact(title=title, version=version)
-
-        if not source_art:
-            raise HTTPException(status_code=404, detail="Source artefact version not found.")
-
-        # 2. Create the target discussion
-        new_discussion_id = str(uuid.uuid4())
-        target_discussion = get_user_discussion(current_user.username, new_discussion_id, create_if_missing=True)
-
-        # 3. Copy the artefact content and metadata
-        # We use add_artefact to create Version 1 in the new discussion using source data
-        target_discussion.add_artefact(
-            title=title,
-            content=source_art.get('content', ''),
-            images=source_art.get('images', []),
-            author=current_user.username,
-            active=True, # Auto-load it into context
-            artefact_type=source_art.get('artefact_type', 'document')
-        )
-
-        target_discussion.set_metadata_item('title', f"Chat about {title}")
-        target_discussion.commit()
-
-        metadata = target_discussion.metadata or {}
-        return DiscussionInfo(
-            id=new_discussion_id,
-            title=metadata.get('title'),
-            is_starred=False,
-            active_tools=[],
-            created_at=target_discussion.created_at,
-            last_activity_at=target_discussion.updated_at,
-            has_artefacts=len(target_discussion.list_artefacts()) > 0
-        )
 
     @router.post("/{discussion_id}/artefacts/manual", response_model=ArtefactAndDataZoneUpdateResponse, status_code=status.HTTP_201_CREATED)
     async def create_manual_artefact(
@@ -798,7 +731,6 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         try:
-            # Type resolution logic
             raw_type = (artefact_type or "").lower()
             if "note" in raw_type: final_type = "note"
             elif "skill" in raw_type: final_type = "skill"
@@ -806,19 +738,16 @@ def build_artefacts_router(router: APIRouter):
                 ext = payload.title.split('.')[-1].lower() if '.' in payload.title else ""
                 final_type = "code" if ext in ['py', 'js', 'ts', 'html', 'css', 'sql', 'cpp', 'c', 'sh'] else "document"
 
-            # Use add_artefact for initial manual creation
-            artefact_info = discussion.add_artefact(
+            discussion.add_artefact(
                 payload.title, 
                 payload.content, 
                 images=payload.images_b64, 
                 author=current_user.username,
-                active=False, # Add as inactive first
+                active=False,
                 artefact_type=final_type
             )
             
-            # Explicitly set visibility based on auto_load and type
             if auto_load:
-                # Data files should not be fully loaded into context automatically to prevent bloat
                 if final_type == "data":
                     discussion.artefacts.set_visibility(payload.title, ArtefactVisibility.TREE_UNLOCKABLE)
                 else:
@@ -827,19 +756,20 @@ def build_artefacts_router(router: APIRouter):
                 discussion.artefacts.set_visibility(payload.title, ArtefactVisibility.TREE_UNLOCKABLE)
                 
             discussion.commit()
-            
-            # Fetch latest synchronized state
-            raw_artefacts = discussion.list_artefacts()
+            artefacts = [
+                _map_artefact_for_ui(art, discussion_id)
+                for art in discussion.list_artefacts()
+            ]
             all_images_info = discussion.get_discussion_images()
 
             return {
-                "artefacts": [_map_artefact_for_ui(art, discussion_id) for art in raw_artefacts],
+                "artefacts": artefacts,
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"Failed to create artefact: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to create manual artefact: {e}")
 
     @router.put("/{discussion_id}/artefacts/{artefact_title}", response_model=ArtefactInfo)
     async def update_manual_artefact(
@@ -849,7 +779,6 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        from urllib.parse import unquote
         decoded_title = unquote(artefact_title)
 
         if discussion_id == "saved":
@@ -914,15 +843,13 @@ def build_artefacts_router(router: APIRouter):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
 
         try:
-            # Use the library's internal manager for correct version bumping and state management.
-            # We map UI parameters to the library's ArtefactManager.update signature.
             artefact_info = discussion.artefacts.update(
                 title=decoded_title, 
                 new_content=payload.new_content, 
                 new_type=payload.artefact_type,
                 new_images=payload.kept_images_b64 + payload.new_images_b64,
                 bump_version=not payload.update_in_place,
-                active=True # UI updates generally imply an active document
+                active=True
             )
             discussion.commit()
 
@@ -931,13 +858,113 @@ def build_artefacts_router(router: APIRouter):
             if isinstance(artefact_info.get('updated_at'), datetime):
                 artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
             
-            return artefact_info
+            return _map_artefact_for_ui(artefact_info, discussion_id)
 
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"An unexpected error occurred while updating the artefact: {e}")
+
+    @router.post("/{discussion_id}/artefacts/load-all-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def load_all_artefacts_to_data_zone(
+        discussion_id: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            all_artefacts_infos = discussion.list_artefacts()
+            for art_info in all_artefacts_infos:
+                discussion.artefacts.set_visibility(art_info['title'], ArtefactVisibility.FULL, version=art_info['version'])
+
+            discussion.commit()
+            artefacts = [
+                _map_artefact_for_ui(art, discussion_id) 
+                for art in discussion.list_artefacts()
+            ]
+
+            all_images_info = discussion.get_discussion_images()
+            return {
+                "artefacts": artefacts,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to load all artefacts: {e}")
+
+    @router.post("/{discussion_id}/artefacts/load-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def load_artefact_to_data_zone(
+        discussion_id: str,
+        request: LoadArtefactRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            decoded_title = unquote(request.title)
+            try:
+                if "%" in decoded_title:
+                    decoded_title = unquote(decoded_title)
+            except Exception:
+                pass
+
+            discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL, version=request.version)
+            discussion.commit()
+            
+            artefacts = [
+                _map_artefact_for_ui(art, discussion_id)
+                for art in discussion.list_artefacts()
+            ]
+            all_images_info = discussion.get_discussion_images()
+
+            return {
+                "artefacts": artefacts,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to load artefact: {e}")
+
+    @router.post("/{discussion_id}/artefacts/unload-from-context", response_model=ArtefactAndDataZoneUpdateResponse)
+    async def unload_artefact_from_data_zone(
+        discussion_id: str,
+        request: UnloadArtefactRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        try:
+            decoded_title = unquote(request.title)
+            try:
+                if "%" in decoded_title:
+                    decoded_title = unquote(decoded_title)
+            except Exception:
+                pass
+
+            discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE, version=request.version)
+            discussion.commit()
+            
+            artefacts = [
+                _map_artefact_for_ui(art, discussion_id)
+                for art in discussion.list_artefacts()
+            ]
+            all_images_info = discussion.get_discussion_images()
+
+            return {
+                "artefacts": artefacts,
+                "discussion_images": [img['data'] for img in all_images_info],
+                "active_discussion_images": [img['active'] for img in all_images_info]
+            }
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to unload artefact: {e}")
 
     @router.post("/{discussion_id}/artefacts/export-context", response_model=ArtefactInfo)
     async def export_context_as_artefact(
@@ -951,7 +978,6 @@ def build_artefacts_router(router: APIRouter):
         if not content or not content.strip():
             raise HTTPException(status_code=400, detail="Data zone is empty.")
         try:
-            # Use update_artefact for consistent versioned storage of the context snapshot
             artefact_info = discussion.update_artefact(
                 request.title, 
                 content, 
@@ -969,25 +995,18 @@ def build_artefacts_router(router: APIRouter):
         discussion_id: str,
         artefact_title: str,
         version: Optional[int] = Query(None),
-        strategy: str = Query("raw"),  # 'raw' or 'formatted'
+        strategy: str = Query("raw"),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        """
-        Get the raw content of a specific artefact version.
-        Path-style route to avoid conflicts with SPA catch-all.
-        """
-        from urllib.parse import unquote
         decoded_title = unquote(artefact_title)
 
-        # Decode twice in case of double encoding of path segments
         try:
             if "%" in decoded_title:
                 decoded_title = unquote(decoded_title)
         except Exception:
             pass
 
-        # Safety check: if it's STILL encoded, reject to prevent library lookup failures
         if "%" in decoded_title:
             raise HTTPException(status_code=400, detail="Malformed artefact title: still URL-encoded.")
 
@@ -1031,7 +1050,6 @@ def build_artefacts_router(router: APIRouter):
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
-        # Performance Optimisation: Attempt to locate version directly in memory-cached list
         artefact = None
         try:
             for art in discussion.list_artefacts():
@@ -1052,7 +1070,6 @@ def build_artefacts_router(router: APIRouter):
         if not artefact:
             raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found")
 
-        # Return raw content as plain text for the workspace editor
         content = artefact.get('content', '')
 
         from fastapi.responses import PlainTextResponse
@@ -1064,7 +1081,6 @@ def build_artefacts_router(router: APIRouter):
             headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
         )
 
-    # Keep the old endpoint for backward compatibility (returns JSON with metadata)
     @router.get("/{discussion_id}/artefact", response_model=ArtefactInfo)
     async def get_discussion_artefact_info(
         discussion_id: str,
@@ -1073,10 +1089,6 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        """
-        Get artefact metadata (JSON). Use /content endpoint for raw content.
-        """
-        from urllib.parse import unquote
         decoded_title = unquote(artefact_title)
 
         if discussion_id == "saved":
@@ -1111,7 +1123,6 @@ def build_artefacts_router(router: APIRouter):
 
         discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
 
-        # Performance Optimisation: Attempt to locate version directly in memory-cached list
         artefact = None
         try:
             for art in discussion.list_artefacts():
@@ -1133,18 +1144,15 @@ def build_artefacts_router(router: APIRouter):
             raise HTTPException(status_code=404, detail="Artefact not found")
 
         try:
-            # 1. Try to query the integrated associated images lists from the discussion manager
             associated_images = discussion.artefacts.get_associated_images(decoded_title)
             if associated_images:
                 sorted_images = sorted(associated_images, key=lambda x: x.get('index', 0))
                 artefact['images'] = [img['data'] for img in sorted_images]
             else:
-                # 2. Fallback: Fetch companion images artefact directly
                 comp_art = discussion.get_artefact(title=f"{decoded_title}::images")
                 if comp_art and 'images' in comp_art:
                     artefact['images'] = comp_art['images']
                 else:
-                    # 3. Fallback: Check if the main-title or metadata itself has the images
                     if 'images' in artefact:
                         pass
                     else:
@@ -1157,62 +1165,7 @@ def build_artefacts_router(router: APIRouter):
             artefact['created_at'] = artefact['created_at'].isoformat()
         if isinstance(artefact.get('updated_at'), datetime):
             artefact['updated_at'] = artefact['updated_at'].isoformat()
-        return artefact
-
-    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/images/{index}")
-    async def get_binary_image(
-        discussion_id: str,
-        artefact_title: str,
-        index: int,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """Locates and serves decoded base64 sub-images as a binary stream."""
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-
-        from urllib.parse import unquote
-        decoded_title = unquote(artefact_title)
-
-        # Resolve title case-insensitively against active artefacts
-        try:
-            for art in discussion.list_artefacts():
-                if art.get("title", "").lower() == decoded_title.lower():
-                    decoded_title = art["title"]
-                    break
-        except Exception:
-            pass
-
-        try:
-            associated_images = discussion.artefacts.get_associated_images(decoded_title)
-            for img in associated_images:
-                img_idx = img.get("index")
-                if img_idx is not None and str(img_idx) == str(index):
-                    import base64
-                    binary_data = base64.b64decode(img["data"])
-                    return Response(content=binary_data, media_type=img.get("media_type", "image/png"))
-
-            # Fallback to direct companion direct read
-            comp_art = discussion.get_artefact(title=f"{decoded_title}::images")
-            if comp_art and 'images' in comp_art:
-                images = comp_art['images']
-                if 0 <= index < len(images):
-                    import base64
-                    img_b64 = images[index]
-                    if "," in img_b64:
-                        img_b64 = img_b64.split(",")[1]
-                    binary_data = base64.b64decode(img_b64)
-                    return Response(content=binary_data, media_type="image/png")
-            
-            # If no image matches, raise 404 explicitly instead of returning None
-            raise HTTPException(status_code=404, detail="Image not found")
-        except HTTPException as he:
-            raise he
-        except Exception as e:
-            trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"Failed to load image: {e}")
-
-        raise HTTPException(status_code=404, detail="Requested sub-image not found in bundle.")
-
+        return _map_artefact_for_ui(artefact, discussion_id)
 
     @router.delete("/{discussion_id}/artefact", status_code=status.HTTP_200_OK)
     async def delete_discussion_artefact(
@@ -1221,21 +1174,13 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        from urllib.parse import unquote
-        from pathlib import Path
-        import os
-
         title = unquote(artefact_title)
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         
         try:
-            # 1. Explicitly delete the physical files from the workspace_data directory
-            # This prevents the workspace auto-ingestion logic from re-registering the artifact on refresh
             workspace_data_dir = Path(discussion.workspace_data_path) if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path else None
             
             if workspace_data_dir and workspace_data_dir.exists():
-                # Attempt to find and delete the main file
-                # We check a few common extensions to be safe
                 possible_extensions = [".md", ".py", ".txt", ".csv", ".db", ".sqlite", ".json", ".yaml", ".yml", ".html", ".css", ".js", ".ts", ""]
                 for ext in possible_extensions:
                     file_path = workspace_data_dir / f"{title}{ext}"
@@ -1245,7 +1190,6 @@ def build_artefacts_router(router: APIRouter):
                         except Exception:
                             pass
                 
-                # Also attempt to delete the companion images file if it exists
                 comp_file_path = workspace_data_dir / f"{title}::images.md"
                 if comp_file_path.exists():
                     try:
@@ -1253,11 +1197,8 @@ def build_artefacts_router(router: APIRouter):
                     except Exception:
                         pass
 
-            # 2. Remove the artifact records from the database
             removed_main = discussion.artefacts.remove(title)
             removed_comp = discussion.artefacts.remove(f"{title}::images")
-            
-            # 3. Commit the changes
             discussion.commit()
             
             if removed_main > 0 or removed_comp > 0:
@@ -1292,7 +1233,6 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        from urllib.parse import unquote
         decoded_title = unquote(artefact_title)
 
         if discussion_id == "saved":
@@ -1353,464 +1293,6 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/cleanup")
-    async def cleanup_artefact_versions(
-        discussion_id: str,
-        artefact_title: str,
-        payload: ArtefactCleanupRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        result = discussion.artefacts.cleanup_old_versions(
-            unquote(artefact_title),
-            keep_count=payload.keep_count,
-            min_age_hours=payload.min_age_hours
-        )
-        discussion.commit()
-        return result
-
-    @router.delete("/{discussion_id}/artefacts/{artefact_title:path}/version/{version}")
-    async def delete_artefact_version(
-        discussion_id: str,
-        artefact_title: str,
-        version: int,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        removed = discussion.artefacts.remove(unquote(artefact_title), version=version)
-        if removed == 0:
-            raise HTTPException(status_code=404, detail="Version not found.")
-        discussion.commit()
-        return {"message": f"Version {version} deleted."}
-
-    @router.post("/{discussion_id}/artefacts/load-all-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
-    async def load_all_artefacts_to_data_zone(
-        discussion_id: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        try:
-            # The library manages the context layer. We just activate everything.
-            all_artefacts_infos = discussion.list_artefacts()
-            
-            for art_info in all_artefacts_infos:
-                discussion.artefacts.set_visibility(art_info['title'], ArtefactVisibility.FULL, version=art_info['version'])
-
-            discussion.commit()
-            
-            raw_artefacts = discussion.list_artefacts()
-            artefacts = [_map_artefact_for_ui(art) for art in raw_artefacts]
-
-            lc = get_user_lollms_client(current_user.username)
-            token_count = len(lc.tokenize(discussion.discussion_data_zone))
-            
-            all_images_info = discussion.get_discussion_images()
-            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
-            return {
-                "artefacts": artefacts,
-                "discussion_images": [img['data'] for img in all_images_info],
-                "active_discussion_images": [img['active'] for img in all_images_info]
-            }
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load all artefacts: {e}")        
-
-    @router.post("/{discussion_id}/artefacts/load-to-context", response_model=ArtefactAndDataZoneUpdateResponse)
-    async def load_artefact_to_data_zone(
-        discussion_id: str,
-        request: LoadArtefactRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        try:
-            from urllib.parse import unquote
-            decoded_title = unquote(request.title)
-            try:
-                if "%" in decoded_title:
-                    decoded_title = unquote(decoded_title)
-            except Exception:
-                pass
-
-            # We only update the library metadata. The library handles 
-            # context injection natively during chat() without modifying the data_zone string.
-            discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL, version=request.version)
-            discussion.commit()
-            
-            raw_artefacts = discussion.list_artefacts()
-            artefacts = [_map_artefact_for_ui(art) for art in raw_artefacts]
-            
-            lc = get_user_lollms_client(current_user.username)
-            token_count = len(lc.tokenize(discussion.discussion_data_zone))
-
-            all_images_info = discussion.get_discussion_images()
-            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
-            return {
-                "artefacts": artefacts,
-                "discussion_images": [img['data'] for img in all_images_info],
-                "active_discussion_images": [img['active'] for img in all_images_info]
-            }
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except Exception as e:
-            trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"Failed to load artefact: {e}")
-
-    @router.post("/{discussion_id}/artefacts/unload-from-context", response_model=ArtefactAndDataZoneUpdateResponse)
-    async def unload_artefact_from_data_zone(
-        discussion_id: str,
-        request: UnloadArtefactRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        try:
-            from urllib.parse import unquote
-            decoded_title = unquote(request.title)
-            try:
-                if "%" in decoded_title:
-                    decoded_title = unquote(decoded_title)
-            except Exception:
-                pass
-
-            # Deactivate in the library metadata only.
-            discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE, version=request.version)
-            discussion.commit()
-            
-            raw_artefacts = discussion.list_artefacts()
-            artefacts = [_map_artefact_for_ui(art) for art in raw_artefacts]
-
-            lc = get_user_lollms_client(current_user.username)
-            token_count = len(lc.tokenize(discussion.discussion_data_zone))
-
-            all_images_info = discussion.get_discussion_images()
-            # Pure Artefact Response: We no longer return or touch the discussion_data_zone text
-            return {
-                "artefacts": artefacts,
-                "discussion_images": [img['data'] for img in all_images_info],
-                "active_discussion_images": [img['active'] for img in all_images_info]
-            }
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to unload artefact: {e}")
-
-    @router.post("/{discussion_id}/artefacts/import_url", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
-    async def import_artefact_from_url(
-        discussion_id: str,
-        request: UrlImportRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        _, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        task = task_manager.submit_task(
-            name=f"Importing artefact from URL: {request.url}",
-            target=_import_artefact_from_url_task,
-            args=(owner_username, discussion_id, request.url, request.depth, request.process_with_ai),
-            description=f"Scraping content (depth {request.depth}) and saving as artefact.",
-            owner_username=current_user.username
-        )
-        return task
-
-    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/grid-data")
-    async def get_data_grid_data(
-        discussion_id: str,
-        artefact_title: str,
-        version: Optional[int] = Query(None),
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """Loads a specific versioned data artifact spreadsheet or SQLite DB."""
-        from urllib.parse import unquote
-        import pandas as pd
-
-        decoded_title = unquote(artefact_title)
-        try:
-            if "%" in decoded_title:
-                decoded_title = unquote(decoded_title)
-        except Exception:
-            pass
-
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-        active = discussion.get_artefact(title=decoded_title, version=version)
-
-        path_obj = Path(decoded_title)
-        stem = path_obj.stem
-        ext = path_obj.suffix.lower()
-        is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
-
-        if not active:
-            raise HTTPException(status_code=404, detail="Artifact not found.")
-
-        # Check both potential type keys, with a safe fallback to file extension check
-        art_type = active.get("artefact_type") or active.get("type")
-        if art_type != "data" and not is_data_extension:
-            raise HTTPException(status_code=404, detail="Data artifact not found.")
-
-        current_version = active.get("version", 1)
-
-        # Use original discussion ID where the file is physically stored on disk
-        source_discussion_id = active.get("discussion_id") or discussion_id
-
-        from backend.session import get_user_discussion_assets_path
-        assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
-
-        possible_paths = [
-            assets_dir / f"{stem}_consolidated.db",
-            assets_dir / f"{stem}_v{current_version}{ext}",
-            assets_dir / f"{decoded_title}",
-        ]
-
-        file_path = None
-        for path in possible_paths:
-            if path.exists():
-                file_path = path
-                break
-
-        if not file_path or not file_path.exists():
-            raise HTTPException(status_code=404, detail=f"Raw data file missing from workspace. Checked: {possible_paths}")
-
-        try:
-            if ext in (".xlsx", ".xls"):
-                xl = pd.ExcelFile(str(file_path))
-                result = {"type": "excel", "sheets": {}}
-                for sheet in xl.sheet_names:
-                    df = pd.read_excel(str(file_path), sheet_name=sheet).head(100)
-                    df = df.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
-                    result["sheets"][sheet] = {
-                        "columns": list(df.columns),
-                        "rows": df.to_dict(orient="records")
-                    }
-            elif ext in (".db", ".sqlite", ".sqlite3"):
-                import sqlite3
-                conn = sqlite3.connect(str(file_path))
-                cursor = conn.cursor()
-                cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-                tables = [row[0] for row in cursor.fetchall()]
-                result = {"type": "sqlite", "sheets": {}}
-                for table in tables:
-                    df = pd.read_sql_query(f"SELECT * FROM {table} LIMIT 100;", conn)
-                    df = df.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
-                    result["sheets"][table] = {
-                        "columns": list(df.columns),
-                        "rows": df.to_dict(orient="records")
-                    }
-                conn.close()
-            else:
-                sep = ";" if ext == ".csv" and ";" in file_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0] else ","
-                df = pd.read_csv(str(file_path), sep=sep).head(100)
-                df = df.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
-                result = {
-                    "type": "csv",
-                    "columns": list(df.columns),
-                    "rows": df.to_dict(orient="records")
-                }
-            return result
-        except Exception as e:
-            trace_exception(e)
-            raise HTTPException(status_code=500, detail=f"Failed to parse dataset: {e}")
-
-    class RawSQLQueryPayload(BaseModel):
-        sql_query: str
-
-    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/raw-query")
-    async def execute_raw_sql_query(
-        discussion_id: str,
-        artefact_title: str,
-        payload: RawSQLQueryPayload,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """Executes a raw, user-written SQLite SQL query on the active dataset tables."""
-        from urllib.parse import unquote
-        import sqlite3
-        import pandas as pd
-        decoded_title = unquote(artefact_title)
-
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-        active = discussion.get_artefact(title=decoded_title)
-
-        path_obj = Path(decoded_title)
-        stem = path_obj.stem
-        ext = path_obj.suffix.lower()
-        is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
-
-        if not active:
-            raise HTTPException(status_code=404, detail="Artifact not found.")
-
-        art_type = active.get("artefact_type") or active.get("type")
-        if art_type != "data" and not is_data_extension:
-            raise HTTPException(status_code=404, detail="Data artifact not found.")
-
-        current_version = active.get("version", 1)
-        source_discussion_id = active.get("discussion_id") or discussion_id
-
-        from backend.session import get_user_discussion_assets_path
-        assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
-        file_path = assets_dir / f"{stem}_v{current_version}{ext}"
-        if not file_path.exists():
-            file_path = assets_dir / f"{decoded_title}"
-
-        if not file_path.exists():
-            raise FileNotFoundError("Raw data file is missing.")
-
-        try:
-            conn = sqlite3.connect(":memory:")
-            if ext in (".db", ".sqlite", ".sqlite3"):
-                disk_conn = sqlite3.connect(str(file_path))
-                disk_conn.backup(conn)
-                disk_conn.close()
-            elif ext in (".xlsx", ".xls"):
-                xl = pd.ExcelFile(str(file_path))
-                for sheet_name in xl.sheet_names:
-                    t_name = sheet_name.replace(" ", "_")
-                    df = pd.read_excel(str(file_path), sheet_name=sheet_name)
-                    df.to_sql(t_name, conn, index=False, if_exists="replace")
-            else:
-                sep = ";" if ext == ".csv" and ";" in file_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0] else ","
-                df = pd.read_csv(str(file_path), sep=sep)
-                df.to_sql(decoded_title.replace(" ", "_"), conn, index=False, if_exists="replace")
-
-            # Execute
-            df_res = pd.read_sql_query(payload.sql_query, conn)
-            conn.close()
-
-            df_res = df_res.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
-
-            return {
-                "success": True,
-                "columns": list(df_res.columns),
-                "rows": df_res.to_dict(orient="records")
-            }
-        except Exception as e:
-            trace_exception(e)
-            return {"success": False, "error": str(e)}
-
-    class AIDataQueryPayload(BaseModel):
-        question: str
-
-    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/ai-query")
-    async def execute_ai_data_query(
-        discussion_id: str,
-        artefact_title: str,
-        payload: AIDataQueryPayload,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """Translates a natural language question into an SQL query, executes it, and returns the result."""
-        from urllib.parse import unquote
-        import sqlite3
-        import pandas as pd
-        decoded_title = unquote(artefact_title)
-
-        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-        active = discussion.get_artefact(title=decoded_title)
-
-        path_obj = Path(decoded_title)
-        stem = path_obj.stem
-        ext = path_obj.suffix.lower()
-        is_data_extension = ext in (".csv", ".xlsx", ".xls", ".db", ".sqlite", ".sqlite3")
-
-        if not active:
-            raise HTTPException(status_code=404, detail="Artifact not found.")
-
-        art_type = active.get("artefact_type") or active.get("type")
-        if art_type != "data" and not is_data_extension:
-            raise HTTPException(status_code=404, detail="Data artifact not found.")
-
-        current_version = active.get("version", 1)
-        source_discussion_id = active.get("discussion_id") or discussion_id
-
-        from backend.session import get_user_discussion_assets_path
-        assets_dir = get_user_discussion_assets_path(owner_username) / source_discussion_id
-
-        schema_text = active.get("content", "")
-
-        # Ask LLM for the SQL query
-        prompt = (
-            "You are a Senior SQL Developer and Database Specialist.\n"
-            f"Given the database schema for '{decoded_title}' below, translate the user's natural language question into a single, valid, optimized SQLite SQL query.\n\n"
-            "=== DATABASE SCHEMA ===\n"
-            f"{schema_text}\n"
-            "=======================\n\n"
-            f"User Question: \"{payload.question}\"\n\n"
-            "Requirements:\n"
-            "1. Output ONLY the raw SQLite SQL query inside a JSON object.\n"
-            "2. Ensure table names match the Sheet/Table names listed in the schema (spaces replaced by underscores, e.g., 'Order_Details').\n"
-            "3. Do NOT include markdown formatting, explanations, or code blocks outside the JSON."
-        )
-
-        try:
-            lc = get_user_lollms_client(current_user.username)
-            res_json = lc.generate_structured_content(
-                prompt=prompt,
-                schema={
-                    "sql_query": {
-                        "type": "string",
-                        "description": "The valid SQLite SQL query to execute."
-                    },
-                    "explanation": {
-                        "type": "string",
-                        "description": "A brief explanation of how this query computes the requested answer."
-                    }
-                },
-                temperature=0.1
-            )
-
-            if not res_json or not isinstance(res_json, dict):
-                raise ValueError("The AI model failed to produce a structured JSON response.")
-
-            sql_query = res_json.get("sql_query", "").strip()
-            explanation = res_json.get("explanation", "").strip()
-
-            if not sql_query:
-                raise ValueError("LLM failed to generate a valid SQL query.")
-
-            ext = Path(decoded_title).suffix.lower()
-            current_version = active.get("version", 1)
-
-            from backend.session import get_user_discussion_assets_path
-            assets_dir = get_user_discussion_assets_path(owner_username) / discussion_id
-            file_path = assets_dir / f"{decoded_title}_v{current_version}{ext}"
-            if not file_path.exists():
-                file_path = assets_dir / f"{decoded_title}{ext}"
-
-            conn = sqlite3.connect(":memory:")
-            if ext in (".db", ".sqlite", ".sqlite3"):
-                disk_conn = sqlite3.connect(str(file_path))
-                disk_conn.backup(conn)
-                disk_conn.close()
-            elif ext in (".xlsx", ".xls"):
-                xl = pd.ExcelFile(str(file_path))
-                for sheet_name in xl.sheet_names:
-                    t_name = sheet_name.replace(" ", "_")
-                    df = pd.read_excel(str(file_path), sheet_name=sheet_name)
-                    df.to_sql(t_name, conn, index=False, if_exists="replace")
-            else:
-                sep = ";" if ext == ".csv" and ";" in file_path.read_text(encoding="utf-8", errors="ignore").splitlines()[0] else ","
-                df = pd.read_csv(str(file_path), sep=sep)
-                df.to_sql(decoded_title.replace(" ", "_"), conn, index=False, if_exists="replace")
-
-            df_res = pd.read_sql_query(sql_query, conn)
-            conn.close()
-
-            df_res = df_res.replace({float('nan'): None, float('inf'): None, float('-inf'): None})
-
-            return {
-                "success": True,
-                "sql_query": sql_query,
-                "explanation": explanation,
-                "columns": list(df_res.columns),
-                "rows": df_res.to_dict(orient="records")
-            }
-        except Exception as e:
-            trace_exception(e)
-            raise HTTPException(status_code=500, detail=str(e))
-
     @router.post("/{discussion_id}/artefacts/import-from-source", response_model=ArtefactAndDataZoneUpdateResponse)
     async def import_artefact_from_source_discussion(
         discussion_id: str,
@@ -1819,16 +1301,10 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        from urllib.parse import unquote
-        from sqlalchemy import or_, and_
-
-        # 1. Get target and source discussions
         target_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-
         decoded_title = unquote(artefact_title)
 
         if source_discussion_id == 'saved':
-            # Load from SavedArtefact table
             owner_id = current_user.id
             owner_exists = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
@@ -1865,28 +1341,24 @@ def build_artefacts_router(router: APIRouter):
             images_to_import = source_art.get('images', [])
             type_to_import = source_art.get('artefact_type', 'document')
 
-        # Check for name collision in target discussion
         if target_discussion.get_artefact(title=decoded_title):
             decoded_title = f"{decoded_title} (Copy)"
 
-        # 2. Add the copied artefact to the target discussion
         target_discussion.add_artefact(
             title=decoded_title,
             content=content_to_import,
             images=images_to_import,
             author=current_user.username,
-            active=False, # Add as inactive first
+            active=False,
             artefact_type=type_to_import
         )
         
-        # Explicitly set visibility based on type
         if type_to_import == "data":
             target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE)
         else:
             target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL)
             
         target_discussion.commit()
-
         raw_artefacts = target_discussion.list_artefacts()
         all_images_info = target_discussion.get_discussion_images()
 
@@ -1904,14 +1376,8 @@ def build_artefacts_router(router: APIRouter):
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ):
-        from urllib.parse import unquote
-        from backend.db.models.user import User as DBUser
-        from backend.discussion import get_user_discussion
-        from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
-
         decoded_title = unquote(artefact_title)
 
-        # Decode twice in case of double encoding of path segments
         try:
             if "%" in decoded_title:
                 decoded_title = unquote(decoded_title)
@@ -1925,7 +1391,6 @@ def build_artefacts_router(router: APIRouter):
         if target_user.id == current_user.id:
             raise HTTPException(status_code=400, detail="Cannot share with yourself.")
 
-        # Ensure the source artefact exists
         if discussion_id == "saved":
             source_art = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
@@ -1939,8 +1404,6 @@ def build_artefacts_router(router: APIRouter):
             if not source_art:
                 raise HTTPException(status_code=404, detail="Source artefact not found.")
 
-            # If it's a local discussion artefact, we should first save it to the owner's global library!
-            # Let's save it to the owner's global library (SavedArtefact) if it doesn't exist
             existing = db.query(SavedArtefact).filter(
                 SavedArtefact.owner_user_id == current_user.id,
                 SavedArtefact.title == decoded_title
@@ -1955,7 +1418,6 @@ def build_artefacts_router(router: APIRouter):
                 db.add(new_save)
                 db.commit()
 
-        # Check if sharing link already exists
         existing_link = db.query(SharedArtefactLink).filter_by(
             artefact_title=decoded_title,
             owner_user_id=current_user.id,
@@ -1963,7 +1425,6 @@ def build_artefacts_router(router: APIRouter):
         ).first()
 
         if not existing_link:
-            # Create a SharedArtefactLink with permission_level from payload
             new_link = SharedArtefactLink(
                 artefact_title=decoded_title,
                 owner_user_id=current_user.id,
@@ -1973,12 +1434,9 @@ def build_artefacts_router(router: APIRouter):
             db.add(new_link)
             db.commit()
         else:
-            # Update existing link's permission level
             existing_link.permission_level = payload.permission_level
             db.commit()
 
-        # Create a new discussion for the target user to receive the shared artefact link
-        import uuid
         target_discussion_id = str(uuid.uuid4())
         lc_sender = get_user_lollms_client(current_user.username)
         target_discussion = get_user_discussion(target_user.username, target_discussion_id, create_if_missing=True, lollms_client=lc_sender)
@@ -1986,7 +1444,6 @@ def build_artefacts_router(router: APIRouter):
         if not target_discussion:
             raise HTTPException(status_code=500, detail="Failed to create target discussion for sharing.")
 
-        # Copy/mount the artefact into the target user's new discussion
         target_discussion.add_artefact(
             title=decoded_title,
             content=source_art.content if discussion_id == "saved" else source_art.get('content', ''),
@@ -1997,7 +1454,6 @@ def build_artefacts_router(router: APIRouter):
         )
         target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
 
-        # Add an introductory message so the discussion is not empty and appears in the sidebar clearly
         target_discussion.add_message(
             sender="System",
             content=f"👋 **{current_user.username}** has shared the document **{decoded_title}** with you.\n\nThe file is already loaded into this conversation's context and can be viewed or edited in the Workspace panel on the right.",
@@ -2005,14 +1461,12 @@ def build_artefacts_router(router: APIRouter):
         )
         target_discussion.commit()
 
-        # 4. Send real-time notifications to the receiver
         from backend.ws_manager import manager
         manager.send_personal_message_sync({
             "type": "notification",
             "data": {"message": f"🎁 {current_user.username} shared an artefact: {decoded_title}", "type": "success", "duration": 5000}
         }, target_user.id)
 
-        # Send a discussion update event to let the receiver's UI auto-refresh their discussions list
         manager.send_personal_message_sync({
             "type": "discussion_updated",
             "data": {
@@ -2022,294 +1476,6 @@ def build_artefacts_router(router: APIRouter):
         }, target_user.id)
 
         return {"message": f"Artefact successfully shared with {payload.target_username}."}
-
-    @router.delete("/{discussion_id}/artefacts/{artefact_title:path}/share/{target_user_id}", status_code=status.HTTP_200_OK)
-    async def unshare_discussion_artefact_from_user(
-        discussion_id: str,
-        artefact_title: str,
-        target_user_id: int,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Unshares a global saved library artefact from a specific user.
-        """
-        from urllib.parse import unquote
-        from backend.db.models.saved_artefact import SharedArtefactLink
-
-        decoded_title = unquote(artefact_title)
-
-        # Find and delete the matching link
-        link = db.query(SharedArtefactLink).filter_by(
-            artefact_title=decoded_title,
-            owner_user_id=current_user.id,
-            shared_with_user_id=target_user_id
-        ).first()
-
-        if not link:
-            raise HTTPException(status_code=404, detail="Sharing link not found.")
-
-        db.delete(link)
-        db.commit()
-
-        # Notify the unsubscribed participant to refresh their list
-        from backend.ws_manager import manager
-        manager.send_personal_message_sync({
-            "type": "notification",
-            "data": {"message": f"ℹ️ {current_user.username} has revoked your access to '{decoded_title}'", "type": "info"}
-        }, target_user_id)
-
-        return {"message": "Access revoked successfully."}
-
-    class GroupShareRequest(BaseModel):
-        group_id: int
-        permission_level: str = "interact"
-
-    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/share-group", status_code=status.HTTP_200_OK)
-    async def share_discussion_artefact_with_group(
-        discussion_id: str,
-        artefact_title: str,
-        payload: GroupShareRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Shares a global saved library artefact with all members of a user group.
-        """
-        from urllib.parse import unquote
-        from backend.db.models.group import Group as DBGroup
-        from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
-        from backend.discussion import get_user_discussion
-
-        decoded_title = unquote(artefact_title)
-
-        # Resolve target group
-        group = db.query(DBGroup).options(joinedload(DBGroup.members)).filter(
-            DBGroup.id == payload.group_id
-        ).first()
-
-        if not group:
-            raise HTTPException(status_code=404, detail="Target group not found.")
-
-        # Ensure the source artefact exists and is in global library
-        source_art = db.query(SavedArtefact).filter(
-            SavedArtefact.owner_user_id == current_user.id,
-            SavedArtefact.title == decoded_title
-        ).first()
-
-        if not source_art:
-            if discussion_id == "saved":
-                raise HTTPException(status_code=404, detail="Source saved library artefact not found.")
-
-            # Local discussion import to global library prior to sharing
-            source_discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
-            local_art = source_discussion.get_artefact(title=decoded_title)
-            if not local_art:
-                raise HTTPException(status_code=404, detail="Source local artefact not found.")
-
-            source_art = SavedArtefact(
-                title=decoded_title,
-                content=local_art.get('content', ''),
-                artefact_type=local_art.get('artefact_type', 'document'),
-                owner_user_id=current_user.id
-            )
-            db.add(source_art)
-            db.commit()
-
-        # Iterate and create shared links for members
-        added_count = 0
-        from backend.ws_manager import manager
-        import uuid
-
-        for member in group.members:
-            if member.id == current_user.id:
-                continue
-
-            existing_link = db.query(SharedArtefactLink).filter_by(
-                artefact_title=decoded_title,
-                owner_user_id=current_user.id,
-                shared_with_user_id=member.id
-            ).first()
-
-            if not existing_link:
-                new_link = SharedArtefactLink(
-                    artefact_title=decoded_title,
-                    owner_user_id=current_user.id,
-                    shared_with_user_id=member.id,
-                    permission_level=payload.permission_level
-                )
-                db.add(new_link)
-                added_count += 1
-
-                # Spawn active discussion for the new workspace share
-                try:
-                    target_discussion_id = str(uuid.uuid4())
-                    lc_sender = get_user_lollms_client(current_user.username)
-                    target_discussion = get_user_discussion(member.username, target_discussion_id, create_if_missing=True, lollms_client=lc_sender)
-
-                    target_discussion.add_artefact(
-                        title=decoded_title,
-                        content=source_art.content,
-                        author=f"Shared by {current_user.username}",
-                        active=False, # Add as inactive first
-                        artefact_type=source_art.artefact_type or 'document'
-                    )
-                    
-                    # Explicitly set visibility based on type
-                    if (source_art.artefact_type or 'document') == "data":
-                        target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE)
-                    else:
-                        target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL)
-                        
-                    target_discussion.set_metadata_item('title', f"Shared: {decoded_title}")
-                    target_discussion.add_message(
-                        sender="System",
-                        content=f"👋 **{current_user.username}** has shared the group document **{decoded_title}** with you.\n\nThe file is already loaded into your workspace.",
-                        sender_type="system"
-                    )
-                    target_discussion.commit()
-
-                    # Notify
-                    manager.send_personal_message_sync({
-                        "type": "notification",
-                        "data": {"message": f"🎁 Shared with Group: New artefact '{decoded_title}' added.", "type": "success"}
-                    }, member.id)
-
-                    manager.send_personal_message_sync({
-                        "type": "discussion_updated",
-                        "data": {
-                            "discussion_id": target_discussion_id,
-                            "sender_username": current_user.username
-                        }
-                    }, member.id)
-                except Exception as e:
-                    print(f"Warning: Failed to create target workspace mount for {member.username}: {e}")
-
-        db.commit()
-        return {"message": f"Artefact successfully shared with {added_count} group member(s)."}
-
-    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/unshare-group", status_code=status.HTTP_200_OK)
-    async def unshare_discussion_artefact_from_group(
-        discussion_id: str,
-        artefact_title: str,
-        payload: GroupShareRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        """
-        Unshares a global saved library artefact from all members of a user group.
-        """
-        from urllib.parse import unquote
-        from backend.db.models.group import Group as DBGroup
-        from backend.db.models.saved_artefact import SharedArtefactLink
-
-        decoded_title = unquote(artefact_title)
-
-        group = db.query(DBGroup).options(joinedload(DBGroup.members)).filter(
-            DBGroup.id == payload.group_id
-        ).first()
-
-        if not group:
-            raise HTTPException(status_code=404, detail="Target group not found.")
-
-        revoked_count = 0
-        from backend.ws_manager import manager
-
-        for member in group.members:
-            if member.id == current_user.id:
-                continue
-
-            link = db.query(SharedArtefactLink).filter_by(
-                artefact_title=decoded_title,
-                owner_user_id=current_user.id,
-                shared_with_user_id=member.id
-            ).first()
-
-            if link:
-                db.delete(link)
-                revoked_count += 1
-
-                manager.send_personal_message_sync({
-                    "type": "notification",
-                    "data": {"message": f"ℹ️ {current_user.username} revoked access to '{decoded_title}'", "type": "info"}
-                }, member.id)
-
-        db.commit()
-        return {"message": f"Revoked access for {revoked_count} group member(s)."}
-
-    @router.post("/{discussion_id}/artefacts/export_audio", response_model=TaskInfo, status_code=202)
-    async def export_artefact_as_audio(
-        discussion_id: str,
-        payload: AudioExportRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user)
-    ):
-        from backend.tasks.artefact_tasks import _export_audio_task
-        task = task_manager.submit_task(
-            name=f"Audio Export: {payload.title}",
-            target=_export_audio_task,
-            args=(current_user.username, payload.title, payload.content),
-            description="Generating high-fidelity audio from document text.",
-            owner_username=current_user.username
-        )
-        return task
-
-    @router.put("/{discussion_id}/artefacts/{artefact_title}/rename")
-    async def rename_discussion_artefact(
-        discussion_id: str,
-        artefact_title: str,
-        payload: ArtefactRenameRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        from urllib.parse import unquote
-        old_title = unquote(artefact_title)
-        new_title = payload.new_title.strip()
-
-        if not new_title:
-            raise HTTPException(status_code=400, detail="New title cannot be empty.")
-
-        discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-
-        # Check if original exists first
-        if not discussion.get_artefact(title=old_title):
-            raise HTTPException(status_code=404, detail="Original artefact not found.")
-
-        # Prevent collisions
-        if old_title != new_title and discussion.get_artefact(title=new_title):
-            raise HTTPException(status_code=400, detail=f"An artefact named '{new_title}' already exists.")
-
-        try:
-            # 1. Auto-detect type based on extension
-            ext = Path(new_title).suffix.lower()
-            auto_type = None
-            CODE_EXTS = {".py", ".js", ".ts", ".html", ".css", ".c", ".cpp", ".h", ".cs", ".java", ".sh", ".sql", ".vhd", ".v", ".rb", ".php", ".go", ".rs", ".swift", ".kt"}
-            if ext in CODE_EXTS:
-                auto_type = "code"
-            elif ext in {".md", ".txt", ".pdf", ".docx", ".xlsx", ".pptx"}:
-                auto_type = "document"
-
-            # 2. Rename via the LollmsDiscussion sub-manager (updates all versions and internal image anchors)
-            discussion.artefacts.rename(
-                old_title=old_title, 
-                new_title=new_title, 
-                new_type=auto_type
-            )
-
-            # 3. Update visual references in message content strings across the whole discussion tree
-            all_msgs = discussion.get_all_messages_flat()
-            old_anchor = f'id="{old_title}::'
-            new_anchor = f'id="{new_title}::'
-            for m in all_msgs:
-                if m.content and old_anchor in m.content:
-                    # Modifying m.content automatically modifies the underlying SQLAlchemy ORM object and flags it as dirty
-                    m.content = m.content.replace(old_anchor, new_anchor)
-
-            # Persist all dirty states (both renamed artifact versions and updated conversation messages)
-            discussion.commit()
-            return {"message": "Artefact renamed successfully.", "new_title": new_title}
-        except Exception as e:
-            trace_exception(e)
-            raise HTTPException(status_code=500, detail=str(e))
 
     @router.get("/{discussion_id}/artefacts/{artefact_title:path}/log")
     async def get_artefact_log(
@@ -2391,47 +1557,3 @@ def build_artefacts_router(router: APIRouter):
             return _map_artefact_for_ui(restored_art, discussion_id)
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
-
-    @router.get("/shared-with-users", response_model=List[Dict[str, Any]])
-    async def get_resource_shared_with(
-        resource_type: str,
-        resource_name: str,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        from urllib.parse import unquote
-        from sqlalchemy.orm import joinedload
-        decoded_name = unquote(resource_name)
-        shared_users = []
-
-        if resource_type == "artefact":
-            records = db.query(SharedArtefactLink).options(joinedload(SharedArtefactLink.shared_with_user)).filter(
-                SharedArtefactLink.artefact_title == decoded_name,
-                SharedArtefactLink.owner_user_id == current_user.id
-            ).all()
-            shared_users = [{"id": r.shared_with_user.id, "username": r.shared_with_user.username, "icon": r.shared_with_user.icon} for r in records if r.shared_with_user]
-        elif resource_type == "skill":
-            from backend.db.models.skill import Skill
-            records = db.query(Skill).options(joinedload(Skill.owner)).filter(
-                Skill.name == decoded_name,
-                Skill.author == f"Shared by {current_user.username}"
-            ).all()
-            shared_users = [{"id": r.owner.id, "username": r.owner.username, "icon": r.owner.icon} for r in records if r.owner]
-        elif resource_type == "note":
-            from backend.db.models.note import Note
-            sender_note = db.query(Note).filter(Note.owner_id == current_user.id, Note.title == decoded_name).first()
-            if sender_note and sender_note.description:
-                found_usernames = re.findall(r'\[Shared with (\w+) on', sender_note.description)
-                for uname in found_usernames:
-                    user_obj = db.query(DBUser).filter(DBUser.username == uname).first()
-                    if user_obj:
-                        shared_users.append({"id": user_obj.id, "username": user_obj.username, "icon": user_obj.icon})
-
-        # Deduplicate list of dicts
-        seen = set()
-        deduped = []
-        for u in shared_users:
-            if u["id"] not in seen:
-                seen.add(u["id"])
-                deduped.append(u)
-        return deduped

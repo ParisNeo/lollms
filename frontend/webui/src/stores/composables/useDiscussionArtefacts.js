@@ -336,23 +336,137 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         uiStore.addNotification('All artefacts loaded to data zone.', 'success');
     }
     
-    async function loadArtefactToContext({ discussionId, artefactTitle, version }) {
-        const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/load-to-context`, {
-            title: artefactTitle,
-            version: version
-        });
-        _handleArtefactAndDataZoneUpdate(response);
+    async function updateArtefactVisibility({ discussionId, artefactTitle, visibility, version = null }) {
+        /**
+         * Sets the strict multi-layered visibility level:
+         * - FULL: Inject full contents (or metadata schema for databases)
+         * - METADATA: Only inject column/size descriptors
+         * - TREE_UNLOCKABLE: Invisible to context but shown in tree
+         * - LOCKED: Excluded from active context and locked
+         * - HIDDEN: Hidden from workspace tree entirely
+         */
+        const encodedTitle = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        const response = await apiClient.put(
+            `/api/discussions/${discussionId}/artefacts/${encodedTitle}/visibility`,
+            null,
+            { params: { visibility, version } }
+        );
+
+        // Refresh local files tracking
+        await fetchArtefacts(discussionId);
+        getActions().fetchContextStatus(discussionId);
+        uiStore.addNotification(`Visibility updated to ${visibility}.`, 'success');
+        return response.data;
     }
-    
+
+    async function loadArtefactToContext({ discussionId, artefactTitle, version }) {
+        // Promotes the file to full context visibility
+        return await updateArtefactVisibility({ discussionId, artefactTitle, visibility: 'FULL', version });
+    }
+
     async function unloadArtefactFromContext({ discussionId, artefactTitle, version }) {
-        // Pure Artefact Approach: Signal deactivation to the library.
-        // We no longer manually manipulate the data zone string.
-        const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/unload-from-context`, {
-            title: artefactTitle,
-            version: version
-        });
-        
-        _handleArtefactAndDataZoneUpdate(response);
+        // Demotes the file back to TREE_UNLOCKABLE
+        return await updateArtefactVisibility({ discussionId, artefactTitle, visibility: 'TREE_UNLOCKABLE', version });
+    }
+
+    async function syncWorkspace({ discussionId }) {
+        uiStore.addNotification('Scanning workspace directory...', 'info');
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/artefacts/sync`);
+            await fetchArtefacts(discussionId);
+            uiStore.addNotification(
+                `Sync complete. Added: ${response.data.new_artefacts}, Updated: ${response.data.updated_artefacts}`,
+                'success'
+            );
+        } catch (e) {
+            uiStore.addNotification('Failed to sync directory.', 'error');
+        }
+    }
+
+    async function exportStandaloneArchive({ discussionId, artefactTitle }) {
+        const encodedTitle = encodeURIComponent(artefactTitle).replace(/\./g, '%2E').replace(/%/g, '%25');
+        uiStore.addNotification('Compiling historical archive...', 'info');
+        try {
+            const response = await apiClient.get(
+                `/api/discussions/${discussionId}/artefacts/${encodedTitle}/export_archive`,
+                { responseType: 'blob' }
+            );
+            const blob = new Blob([response.data], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${artefactTitle}.laa`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            uiStore.addNotification('Standalone archive downloaded.', 'success');
+        } catch (e) {
+            uiStore.addNotification('Failed to export historical archive.', 'error');
+        }
+    }
+
+    async function importStandaloneArchive({ discussionId, file, activate = true }) {
+        const formData = new FormData();
+        formData.append('file', file);
+        uiStore.addNotification('Ingesting archive history...', 'info');
+        try {
+            await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/import_archive`,
+                formData,
+                {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                    params: { activate }
+                }
+            );
+            await fetchArtefacts(discussionId);
+            uiStore.addNotification('Archive imported successfully.', 'success');
+        } catch (e) {
+            uiStore.addNotification('Failed to import archive.', 'error');
+        }
+    }
+
+    async function exportLinkedBundle({ discussionId, paths, includeVersions = false }) {
+        uiStore.addNotification('Packaging workspace bundle...', 'info');
+        try {
+            const response = await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/export_bundle`,
+                { paths, include_versions: includeVersions },
+                { responseType: 'blob' }
+            );
+            const blob = new Blob([response.data], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'bundle.lab';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+            uiStore.addNotification('Linked bundle downloaded.', 'success');
+        } catch (e) {
+            uiStore.addNotification('Failed to export bundle.', 'error');
+        }
+    }
+
+    async function importLinkedBundle({ discussionId, file, activate = true }) {
+        const formData = new FormData();
+        formData.append('file', file);
+        uiStore.addNotification('Ingesting linked bundle...', 'info');
+        try {
+            await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/import_bundle`,
+                formData,
+                {
+                    headers: { 'Content-Type': 'multipart/form-data' },
+                    params: { activate }
+                }
+            );
+            await fetchArtefacts(discussionId);
+            uiStore.addNotification('Bundle ingested successfully.', 'success');
+        } catch (e) {
+            uiStore.addNotification('Failed to import bundle.', 'error');
+        }
     }
 
     async function loadArtefactToPrompt({ discussionId, artefactTitle, version }) {

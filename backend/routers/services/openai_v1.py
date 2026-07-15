@@ -281,11 +281,17 @@ async def get_user_from_api_key(
 
     require_key = settings.get("openai_api_require_key", True)
 
+    loop = asyncio.get_running_loop()
+
     if not require_key:
-        admin_user = db.query(DBUser).filter(DBUser.is_admin == True).order_by(DBUser.id).first()
+        # Offload the database queries to a thread to keep the primary event loop unblocked
+        admin_user = await loop.run_in_executor(
+            executor,
+            lambda: db.query(DBUser).filter(DBUser.is_admin == True).order_by(DBUser.id).first()
+        )
         if not admin_user:
             raise HTTPException(status_code=503, detail="OpenAI API is enabled without a key, but no admin user is configured to handle requests.")
-        
+
         if admin_user.username not in user_sessions:
             session_llm_params = {
                 "temperature": admin_user.llm_temperature,
@@ -307,27 +313,38 @@ async def get_user_from_api_key(
     api_key = authorization.credentials
     if '_' not in api_key:
         raise HTTPException(status_code=401, detail="Invalid API Key format.")
-    
+
     parts = api_key.split('_')
     key_prefix = parts[0] + "_" + parts[1]
 
-    db_key = db.query(DBAPIKey).filter(DBAPIKey.key_prefix == key_prefix).first()
+    # Offload key verification and lookup transactions to prevent thread pools starvation
+    db_key = await loop.run_in_executor(
+        executor,
+        lambda: db.query(DBAPIKey).filter(DBAPIKey.key_prefix == key_prefix).first()
+    )
 
     if not db_key:
         raise HTTPException(status_code=401, detail="Invalid API Key prefix.")
-    
-    if not verify_api_key(api_key, db_key.key_hash):
+
+    is_valid = await loop.run_in_executor(
+        executor,
+        lambda: verify_api_key(api_key, db_key.key_hash)
+    )
+    if not is_valid:
         raise HTTPException(status_code=401, detail="Invalid API Key.")
-        
-    user = db.query(DBUser).filter(DBUser.id == db_key.user_id).first()
+
+    user = await loop.run_in_executor(
+        executor,
+        lambda: db.query(DBUser).filter(DBUser.id == db_key.user_id).first()
+    )
     if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found or inactive.")
 
     if user.username not in user_sessions:
         session_llm_params = {
             "temperature": user.llm_temperature,
-            "top_k": user.llm_top_k, "top_p": user.llm_top_p,
-            "repeat_penalty": user.llm_repeat_penalty, "repeat_last_n": user.llm_repeat_last_n
+            "top_k": user.top_k or user.llm_top_k, "top_p": user.top_p or user.llm_top_p,
+            "repeat_penalty": user.repeat_penalty or user.llm_repeat_penalty, "repeat_last_n": user.repeat_last_n or user.llm_repeat_last_n
         }
         user_sessions[user.username] = {
             "safe_store_instances": {}, "discussions": {},
@@ -337,13 +354,24 @@ async def get_user_from_api_key(
             "active_personality_id": user.active_personality_id,
         }
 
-    db_key.last_used_at = datetime.datetime.now(datetime.timezone.utc)
-    
+    # Asynchronously update usage telemetry
+    await loop.run_in_executor(
+        executor,
+        lambda: setattr(db_key, 'last_used_at', datetime.datetime.now(datetime.timezone.utc))
+    )
+
     # Rate Limit Check
-    if not check_rate_limit(api_key, "openai"):
+    is_rate_limited = await loop.run_in_executor(
+        executor,
+        lambda: check_rate_limit(api_key, "openai")
+    )
+    if not is_rate_limited:
         raise HTTPException(status_code=429, detail="Rate limit exceeded.")
 
-    track_service_usage("openai", user.id)
+    await loop.run_in_executor(
+        executor,
+        lambda: track_service_usage("openai", user.id)
+    )
     return user
 
 # --- Helper to Extract Images and Convert Messages ---
@@ -640,6 +668,11 @@ async def list_models(
     loop = asyncio.get_running_loop()
 
     def _fetch_models():
+        """
+        Queries available models from active bindings.
+        Enforces 'load_llm=False' to fetch available metadata names instantly
+        without compiling or mounting heavy model weights into GPU/VRAM.
+        """
         all_models = []
         active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
         model_display_mode = settings.get("model_display_mode", "mixed")
@@ -647,8 +680,9 @@ async def list_models(
         for binding in active_bindings:
             try:
                 ASCIIColors.rich_print(f">[bold green]{binding.alias}[\bold green]")
-                # Blocking IO: building client, listing models
-                lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
+                # CRITICAL: We pass load_llm=False here. 
+                # This queries model paths on disk or lightweight remote API lists without triggering heavy load allocations.
+                lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=False)
                 models = lc.list_models()
 
                 model_aliases = binding.model_aliases or {}

@@ -65,13 +65,19 @@ def build_discussions_router():
 
     @router.get("", response_model=List[DiscussionInfo])
     async def list_all_discussions(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)) -> List[DiscussionInfo]:
+        """
+        Retrieves high-level metadata for conversation listings.
+        Optimized to bypass LollmsDiscussion ORM instantiation and full message history
+        queries, reducing database roundtrips during frontend startup.
+        """
         username = current_user.username
         db_user = db.query(DBUser).filter(DBUser.username == username).one()
         dm = get_user_discussion_manager(username)
 
+        # Retrieve flat conversation entries (lightweight ID/metadata dictionary)
         discussions_from_db = dm.list_discussions()
         starred_ids = {star.discussion_id for star in db.query(UserStarredDiscussion.discussion_id).filter(UserStarredDiscussion.user_id == db_user.id).all()}
-        
+
         # Get set of discussion IDs that the current user has shared
         owned_shared_ids = {row[0] for row in db.query(SharedDiscussionLink.discussion_id).filter(SharedDiscussionLink.owner_user_id == db_user.id).distinct().all()}
 
@@ -80,19 +86,11 @@ def build_discussions_router():
             try:
                 disc_id = disc_data['id']
                 metadata = disc_data.get('discussion_metadata', {})
-
-                # CRITICAL: Strip base64 image data from the list view.
-                # This prevents the browser from crashing (STATUS_BREAKPOINT) 
-                # when loading dozens of discussions.
                 is_shared_by_me = disc_id in owned_shared_ids
 
-                has_art = False
-                try:
-                    discussion_obj = get_user_discussion(username, disc_id)
-                    if discussion_obj:
-                        has_art = len(discussion_obj.list_artefacts()) > 0
-                except Exception:
-                    pass
+                # Direct JSON/dictionary inspection instead of loading the full LollmsDiscussion class
+                # This prevents triggering 50 SQLite database attachments per API request
+                has_art = bool(metadata.get("has_artefacts", False))
 
                 info = DiscussionInfo(
                     id=disc_id,
@@ -103,8 +101,8 @@ def build_discussions_router():
                     active_branch_id=disc_data.get('active_branch_id'),
                     created_at=disc_data.get('created_at'),
                     last_activity_at=disc_data.get('updated_at'),
-                    discussion_images=[], # EMPTY in list view
-                    active_discussion_images=[], # EMPTY in list view
+                    discussion_images=[], 
+                    active_discussion_images=[], 
                     group_id=metadata.get('group_id'),
                     owner_username=None,
                     permission_level="shared_by_me" if is_shared_by_me else None,

@@ -931,17 +931,17 @@ datastore_router = APIRouter(prefix="/api/datastores", tags=["RAG DataStores"])
 
 @datastore_router.get("/available-vectorizers", response_model=List[Dict[str, Any]])
 async def list_available_vectorizers(db: Session = Depends(get_db)):
+    """
+    Lists available vectorizer models for RAG configuration.
+    Bypasses deep neural model instantiation to keep startup paths instant.
+    """
     if not safe_store:
         raise HTTPException(status_code=501, detail="SafeStore not available.")
-    
+
     try:
-        # [UPDATE] Ensure safe_store is initialized/ready by calling list_available_vectorizers first.
-        # This helps in some environments where plugins might not be loaded yet.
-        _ = safe_store.SafeStore.list_available_vectorizers()
-        
         # Get Display Mode
         mode_setting = settings.get("rag_model_display_mode", "mixed") # 'original', 'aliased', 'mixed'
-        
+
         # Query active bindings only
         rag_bindings = db.query(DBRAGBinding).filter(DBRAGBinding.is_active == True).all()
         results = []

@@ -186,8 +186,10 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     // Clean up buffers explicitly on finalize to prevent stale state
                     if (state.liveArtefactBuffers?.value) state.liveArtefactBuffers.value = {};
-                    
-                    if (data.discussion) getActions().handleDataZoneUpdate({ ...data.discussion, zone: 'discussion' });
+
+                    if (data.discussion && data.discussion.artefacts) {
+                        state.activeDiscussionArtefacts.value = data.discussion.artefacts;
+                    }
                     break;
 
                 default:

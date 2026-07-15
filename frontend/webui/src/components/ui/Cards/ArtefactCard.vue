@@ -17,14 +17,23 @@ import IconStar from '../../../assets/icons/IconStar.vue';
 import IconStarFilled from '../../../assets/icons/IconStarFilled.vue';
 import IconShare from '../../../assets/icons/IconShare.vue';
 import IconArrowUpTray from '../../../assets/icons/IconArrowUpTray.vue';
+import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
+import IconCircle from '../../../assets/icons/IconCircle.vue';
+import IconEye from '../../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
+import IconLock from '../../../assets/icons/IconLock.vue';
+import IconCog from '../../../assets/icons/IconCog.vue';
+import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
 import DropdownMenu from '../DropdownMenu/DropdownMenu.vue';
 
 const props = defineProps({
   artefactGroup: { type: Object, required: true },
-  isStarred: { type: Boolean, default: false }
+  isStarred: { type: Boolean, default: false },
+  selectionMode: { type: Boolean, default: false },
+  isSelected: { type: Boolean, default: false }
 });
 
-const emit = defineEmits(['star', 'share', 'import']);
+const emit = defineEmits(['star', 'share', 'import', 'toggle-select']);
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -87,7 +96,6 @@ async function handleSaveToLibrary() {
 
 async function handleStarClick() {
     if (!isSavedLibraryItem.value && !props.isStarred) {
-        // Auto-promote to global library if starred from a local discussion
         await handleSaveToLibrary();
     }
     emit('star');
@@ -99,9 +107,14 @@ const fileExtension = computed(() => {
     return parts.length > 1 ? parts.pop().toUpperCase() : 'DOC';
 });
 
-const isLoadedToDataZone = computed(() => {
+// Resolve current visibility tier from version records
+const currentVisibility = computed(() => {
     const versionData = props.artefactGroup.versions.find(v => v.version === selectedVersion.value);
-    return versionData ? versionData.is_loaded : false;
+    if (!versionData) return 'TREE_UNLOCKABLE';
+    
+    // Convert legacy active/loaded flag to standard visibility tiers
+    if (versionData.visibility) return versionData.visibility.toUpperCase();
+    return versionData.is_loaded ? 'FULL' : 'TREE_UNLOCKABLE';
 });
 
 const showImportOption = computed(() => {
@@ -176,7 +189,7 @@ async function executeArtefactContent(title, content, ext) {
         const outputText = result.error || result.output || (result.image || result.usesCanvas ? '' : 'Execution finished with no output.');
 
         if (result.usesCanvas) {
-            uiStore.openModal('interactiveOutput', { canvasId: canvasId, title: `Python Canvas: ${title}` });
+            uiStore.openModal('interactiveOutput', { canvasId: canvasId, title: 'Python Canvas' });
         } else if (result.image) {
             const htmlContent = `<div style="text-align: center;"><img src="data:image/png;base64,${result.image}" class="max-w-full h-auto mx-auto" /></div>`;
             uiStore.openModal('interactiveOutput', { htmlContent, title: `Python Output: ${title}` });
@@ -218,13 +231,11 @@ async function handleExecute() {
 }
 
 const currentType = computed(() => {
-    // Get type from the first (latest) version
     return props.artefactGroup.versions[0]?.artefact_type || 'file';
 });
 
 async function handleView() {
     if (isSavedLibraryItem.value) {
-        // If it's a global saved library item, fetch and display in the rich viewer modal
         try {
             uiStore.addNotification("Loading document...", "info");
             const data = await discussionsStore.fetchArtefactContent({
@@ -234,7 +245,6 @@ async function handleView() {
                 strategy: 'raw'
             });
 
-            // Normalize content structure
             let rawContent = '';
             if (typeof data === 'string') {
                 rawContent = data;
@@ -252,9 +262,8 @@ async function handleView() {
             uiStore.addNotification("Failed to load document.", "error");
         }
     } else {
-        // Normal local discussion artefact: open in split view workspace
         uiStore.activeSplitArtefactTitle = props.artefactGroup.title;
-        uiStore.dataZoneTab = 'workspace'; // Shift focus immediately
+        uiStore.dataZoneTab = 'workspace';
         if (!uiStore.isDataZoneVisible) uiStore.isDataZoneVisible = true;
     }
 }
@@ -291,12 +300,10 @@ async function handleDeletePermanently() {
     });
 
     if (confirmed.confirmed) {
-        // Delete from current discussion
         await discussionsStore.deleteArtefact({
             discussionId: cardDiscussionId.value,
             artefactTitle: props.artefactGroup.title,
         });
-        // Delete from global saved library
         await discussionsStore.deleteArtefact({
             discussionId: 'saved',
             artefactTitle: props.artefactGroup.title,
@@ -348,26 +355,42 @@ async function handleDownload() {
     URL.revokeObjectURL(url);
 }
 
-async function toggleLoad() {
-    if (isLoadedToDataZone.value) {
-        await discussionsStore.unloadArtefactFromContext({
-            discussionId: cardDiscussionId.value,
-            artefactTitle: props.artefactGroup.title,
-            version: selectedVersion.value,
-            artefactType: currentType.value // Ensure correct category for text removal
-        });
-    } else {
-        await discussionsStore.loadArtefactToContext({
-            discussionId: cardDiscussionId.value,
-            artefactTitle: props.artefactGroup.title,
-            version: selectedVersion.value
-        });
-    }
+// Multi-Tier Visibility Assignment
+async function setVisibilityTier(visibility) {
+    if (isSavedLibraryItem.value) return;
+    await discussionsStore.updateArtefactVisibility({
+        discussionId: cardDiscussionId.value,
+        artefactTitle: props.artefactGroup.title,
+        visibility,
+        version: selectedVersion.value
+    });
+}
+
+// Export Standalone .laa Archive
+async function handleExportArchive() {
+    await discussionsStore.exportStandaloneArchive({
+        discussionId: cardDiscussionId.value,
+        artefactTitle: props.artefactGroup.title
+    });
 }
 </script>
 
 <template>
-  <div class="artefact-list-item group" :class="{'is-active': isLoadedToDataZone}">
+  <div class="artefact-list-item group" :class="{
+        'is-active border-blue-500 bg-blue-50/10 dark:bg-blue-950/20': currentVisibility === 'FULL',
+        'border-sky-300 bg-sky-50/10 dark:bg-sky-950/10': currentVisibility === 'METADATA',
+        'opacity-50': currentVisibility === 'LOCKED' || currentVisibility === 'HIDDEN'
+  }">
+    <!-- Bulk Selection Checkbox -->
+    <div v-if="selectionMode" class="flex items-center justify-center pl-1 shrink-0" @click.stop>
+        <input 
+            type="checkbox" 
+            :checked="isSelected" 
+            @change="$emit('toggle-select', artefactGroup.title)" 
+            class="rounded text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-gray-700 bg-transparent h-4 w-4 cursor-pointer"
+        />
+    </div>
+
     <!-- File Icon Box -->
     <div class="file-icon-box" @click="handleView" :class="{
         'bg-blue-50 text-blue-600 border-blue-100 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-900/30': currentType === 'file' || currentType === 'document' || currentType === 'code',
@@ -417,7 +440,7 @@ async function toggleLoad() {
                 </select>
                 <span class="text-[7px] pointer-events-none opacity-60 ml-0.5 -mr-0.5 text-gray-400">▼</span>
             </div>
-            <span v-else class="text-[10px] font-bold text-gray-400">v{{ selectedVersion }}</span>
+            <span class="text-[10px] font-bold text-gray-400">v{{ selectedVersion }}</span>
         </div>
     </div>
 
@@ -440,10 +463,60 @@ async function toggleLoad() {
 
         <!-- Advanced Actions Dropdown -->
         <DropdownMenu icon="menu" buttonClass="p-1.5 text-gray-400 hover:text-gray-900 dark:hover:white transition-colors" title="Actions">
-            <button v-if="!isSavedLibraryItem" @click="toggleLoad" class="menu-item">
-                <IconRefresh class="w-4 h-4 mr-3" :class="{'text-green-500': isLoadedToDataZone}"/> 
-                <span>{{ isLoadedToDataZone ? 'Unload from Context' : 'Load to Context' }}</span>
+            <!-- Multi-Tier Visibility Configuration Submenu -->
+            <DropdownSubmenu v-if="!isSavedLibraryItem" title="Context Attention" icon="eye">
+                 <div class="p-1 min-w-[200px]">
+                     <!-- FULL visibility -->
+                     <button @click="setVisibilityTier('FULL')" class="menu-item flex justify-between items-center group/item">
+                         <span class="flex items-center gap-2">
+                             <IconCheckCircle class="w-4 h-4 text-green-500" />
+                             <span>Full Content [C]</span>
+                         </span>
+                         <IconCheckCircle v-if="currentVisibility === 'FULL'" class="w-3.5 h-3.5 text-green-500" />
+                     </button>
+                     <!-- METADATA visibility -->
+                     <button @click="setVisibilityTier('METADATA')" class="menu-item flex justify-between items-center group/item">
+                         <span class="flex items-center gap-2">
+                             <IconEye class="w-4 h-4 text-sky-500" />
+                             <span>Metadata-Only [M]</span>
+                         </span>
+                         <IconCheckCircle v-if="currentVisibility === 'METADATA'" class="w-3.5 h-3.5 text-sky-500" />
+                     </button>
+                     <!-- TREE_UNLOCKABLE visibility -->
+                     <button @click="setVisibilityTier('TREE_UNLOCKABLE')" class="menu-item flex justify-between items-center group/item">
+                         <span class="flex items-center gap-2">
+                             <IconCircle class="w-4 h-4 text-gray-400" />
+                             <span>Tree Unlockable [U]</span>
+                         </span>
+                         <IconCheckCircle v-if="currentVisibility === 'TREE_UNLOCKABLE'" class="w-3.5 h-3.5 text-gray-400" />
+                     </button>
+                     <!-- LOCKED visibility -->
+                     <button @click="setVisibilityTier('LOCKED')" class="menu-item flex justify-between items-center group/item">
+                         <span class="flex items-center gap-2">
+                             <IconLock class="w-4 h-4 text-orange-500" />
+                             <span>Tree Locked [L]</span>
+                         </span>
+                         <IconCheckCircle v-if="currentVisibility === 'LOCKED'" class="w-3.5 h-3.5 text-orange-500" />
+                     </button>
+                     <!-- HIDDEN visibility -->
+                     <button @click="setVisibilityTier('HIDDEN')" class="menu-item flex justify-between items-center group/item">
+                         <span class="flex items-center gap-2">
+                             <IconEyeOff class="w-4 h-4 text-red-500" />
+                             <span>Hidden</span>
+                         </span>
+                         <IconCheckCircle v-if="currentVisibility === 'HIDDEN'" class="w-3.5 h-3.5 text-red-500" />
+                     </button>
+                 </div>
+            </DropdownSubmenu>
+
+            <div class="menu-divider" v-if="!isSavedLibraryItem"></div>
+
+            <!-- Decoupled Portability Export -->
+            <button @click="handleExportArchive" class="menu-item">
+                <IconArrowDownTray class="w-4 h-4 mr-3 text-teal-500" />
+                <span>Export .laa History Archive</span>
             </button>
+
             <button v-if="!isSavedLibraryItem && !isAlsoInLibrary" @click="handleSaveToLibrary" class="menu-item text-blue-500">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
@@ -516,3 +589,4 @@ async function toggleLoad() {
     border-color: var(--brand-border-main);
 }
 </style>
+```

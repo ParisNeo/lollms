@@ -167,6 +167,25 @@ async def admin_get_all_users(
             trace_exception(e)
     return users_for_panel
 
+def _project_user_public(user: DBUser) -> UserPublic:
+    """
+    Transforms a DBUser ORM object into a completely decoupled, flat UserPublic model.
+    This guarantees that the JSON serializer never accesses lazy-loaded ORM relationships
+    (discussions, notes, memories) that cause huge payload warning loops.
+    """
+    return UserPublic(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        icon=user.icon,
+        is_active=user.is_active,
+        is_admin=getattr(user, "is_admin", False) or False,
+        is_moderator=getattr(user, "is_moderator", False) or False,
+        status=user.status,
+        created_at=user.created_at,
+        last_activity_at=user.last_activity_at
+    )
+
 @user_management_router.post("/users", response_model=UserPublic, status_code=201)
 async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(get_db)):
     if db.query(DBUser).filter(DBUser.username == user_data.username).first():
@@ -176,7 +195,7 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
 
     # Prepare user data with defaults from settings
     user_dict = user_data.model_dump(exclude={'username', 'password'})
-    
+
     # Apply defaults from settings for None values
     defaults_map = {
         'lollms_model_name': 'default_lollms_model_name',
@@ -190,11 +209,11 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         'rag_use_graph': 'default_rag_use_graph',
         'rag_graph_response_type': 'default_rag_graph_response_type',
     }
-    
+
     for field, setting_key in defaults_map.items():
         if user_dict.get(field) is None:
             user_dict[field] = settings.get(setting_key)
-    
+
     # --- NEW LOGIC: Remove fields that may cause ORM init errors ---
     # The ORM constructor can be sensitive to unexpected keyword arguments.
     # `google_client_secret_json` is a valid column but may clash with internal
@@ -209,11 +228,11 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         status="active",
         **user_dict
     )
-    
+
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    return _project_user_public(new_user)
 
 @user_management_router.get("/users/{user_id}/stats", response_model=UserStats)
 async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
@@ -271,7 +290,7 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
         raise HTTPException(status_code=403, detail="Cannot revoke own admin status.")
     if user.username == INITIAL_ADMIN_USER_CONFIG.get("username") and update_data.is_admin is False:
         raise HTTPException(status_code=403, detail="Cannot revoke initial superadmin status.")
-    
+
     # Log incoming payload for debugging
     print(f"[ADMIN UPDATE] User ID {user_id} payload: {update_data.dict(exclude_unset=True)}")
 
@@ -303,12 +322,12 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
 
     for key, value in update_dict.items():
         setattr(user, key, value)
-    
+
     db.commit()
     db.refresh(user)
     if user.username in user_sessions:
         user_sessions[user.username]["lollms_clients_cache"] = {}
-    return user
+    return _project_user_public(user)
 
 @user_management_router.post("/users/batch-update-settings", response_model=Dict[str, str])
 async def admin_batch_update_user_settings(update_data: BatchUsersSettingsUpdate, db: Session = Depends(get_db)):
@@ -337,7 +356,7 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
     user = db.query(DBUser).filter(DBUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
-    
+
     # Log activation attempt
     print(f"[ADMIN ACTIVATE] Activating user ID {user_id}")
 
@@ -346,7 +365,7 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
     user.activation_token = user.password_reset_token = user.reset_token_expiry = None
     db.commit()
     db.refresh(user)
-    return user
+    return _project_user_public(user)
 
 @user_management_router.post("/users/{user_id}/disconnect", response_model=Dict[str, str])
 async def admin_disconnect_user(user_id: int, db: Session = Depends(get_db)):
@@ -372,7 +391,7 @@ async def admin_deactivate_user(user_id: int, db: Session = Depends(get_db), cur
         raise HTTPException(status_code=404, detail="User not found.")
     if user.id == current_admin.id:
         raise HTTPException(status_code=403, detail="Cannot deactivate own account.")
-    
+
     # Log deactivation attempt
     print(f"[ADMIN DEACTIVATE] Deactivating user ID {user_id}")
 
@@ -382,7 +401,7 @@ async def admin_deactivate_user(user_id: int, db: Session = Depends(get_db), cur
     db.refresh(user)
     if user.username in user_sessions:
         del user_sessions[user.username]
-    return user
+    return _project_user_public(user)
 
 @user_management_router.post("/users/{user_id}/reset-password", response_model=Dict[str, str])
 async def admin_reset_user_password(user_id: int, payload: UserPasswordResetAdmin, db: Session = Depends(get_db)):

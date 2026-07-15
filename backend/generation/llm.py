@@ -1853,7 +1853,7 @@ def build_llm_generation_router(router: APIRouter):
                                 seen_sources.add(key)
                         ai_msg.set_metadata_item('sources', unique_sources, discussion_obj)
 
-                    # Finalize payload construction
+                    # Finalization payload construction with synchronized artefacts
                     def msg_to_out(m): 
                         if not m: return None
                         # Convert LollmsMessage to UI format
@@ -1868,6 +1868,17 @@ def build_llm_generation_router(router: APIRouter):
 
                     effective_user_msg = result.get('user_message') or user_msg
 
+                    # Re-fetch versioned artefacts dynamically for local UI rehydration
+                    current_artefacts = [
+                        {
+                            "title": art["title"],
+                            "version": art["version"],
+                            "artefact_type": art.get("type", "document"),
+                            "is_loaded": art.get("active", False)
+                        }
+                        for art in discussion_obj.list_artefacts()
+                    ]
+
                     finalize_payload = {
                         "type": "finalize",
                         "data": {
@@ -1875,8 +1886,8 @@ def build_llm_generation_router(router: APIRouter):
                             "ai_message": msg_to_out(ai_msg)
                         },
                         "discussion": {
-                            "id": discussion_id, 
-                            "discussion_data_zone": discussion_obj.discussion_data_zone
+                            "id": discussion_id,
+                            "artefacts": current_artefacts
                         }
                     }
 

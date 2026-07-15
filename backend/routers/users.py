@@ -17,6 +17,25 @@ users_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
+def _project_user_public(user: DBUser) -> UserPublic:
+    """
+    Transforms a DBUser ORM object into a completely decoupled, flat UserPublic model.
+    This guarantees that the JSON serializer never accesses lazy-loaded ORM relationships
+    (discussions, notes, memories) that cause huge payload warning loops.
+    """
+    return UserPublic(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        icon=user.icon,
+        is_active=user.is_active,
+        is_admin=getattr(user, "is_admin", False) or False,
+        is_moderator=getattr(user, "is_moderator", False) or False,
+        status=user.status,
+        created_at=user.created_at,
+        last_activity_at=user.last_activity_at
+    )
+
 @users_router.get("/search", response_model=List[UserPublic])
 def search_for_users(
     q: str = Query(..., min_length=2, max_length=50),
@@ -30,7 +49,7 @@ def search_for_users(
     - Excludes the current user from results.
     """
     search_term = f"%{q}%"
-    
+
     users = db.query(DBUser).filter(
         DBUser.id != current_user.id,
         or_(
@@ -41,8 +60,8 @@ def search_for_users(
             )
         )
     ).limit(10).all()
-    
-    return users
+
+    return [_project_user_public(u) for u in users]
 
 
 @users_router.get("/mention_search", response_model=List[UserPublic])
@@ -62,7 +81,7 @@ def search_for_mentions(
         DBUser.is_searchable == True,
         DBUser.username.ilike(search_term)
     ).limit(5).all()
-    return users
+    return [_project_user_public(u) for u in users]
 
 
 @users_router.get("/{username}", response_model=UserProfileResponse)
@@ -77,7 +96,7 @@ def get_user_profile(
     """
     # Resolve 'me' keyword to current user's username
     target_username = current_user.username if username == "me" else username
-    
+
     target_user = db.query(DBUser).filter(DBUser.username == target_username).first()
     if not target_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found.")
@@ -91,7 +110,7 @@ def get_user_profile(
     friendship_status = friendship.status if friendship else None
 
     return UserProfileResponse(
-        user=UserPublic.from_orm(target_user),
+        user=_project_user_public(target_user),
         relationship={
             "is_following": is_following,
             "friendship_status": friendship_status

@@ -14,7 +14,8 @@ from ascii_colors import ASCIIColors, trace_exception, Live, Panel, Console
 import asyncio
 import time
 import threading
-
+from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
@@ -210,13 +211,16 @@ def scheduled_email_proposal_job():
         owner_username=None
     )
 
+# Global Thread Pool Executor for offloading all synchronous database/model initializations
+startup_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="lollms_startup")
+
 def run_one_time_startup_tasks(lock: Lock):
     """
     Executes a series of one‑time initialization tasks.
     The function now presents a live, rich progress panel that updates after
     each major step, making the startup flow easier to follow.
     """
-    acquired = lock.acquire(block=False)
+    acquired = lock.acquire(blocking=False)
     if not acquired:
         return
 
@@ -572,19 +576,16 @@ def run_one_time_startup_tasks(lock: Lock):
         db_warmup = next(get_db())
         active_llm_bindings = db_warmup.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
         if active_llm_bindings:
-            ASCIIColors.info(f"Pre-warming {len(active_llm_bindings)} active LLM bindings...")
+            ASCIIColors.info(f"Pre-warming {len(active_llm_bindings)} LLM bindings in background...")
             for binding in active_llm_bindings:
-                try:
-                    # Explicitly passing None for callback to avoid scope issues in session.py
-                    build_lollms_client_from_params(
-                        "lollms", 
-                        binding_alias=binding.alias, 
-                        load_llm=True, 
-                        callback=lollms_init_watcher
-                    )
-                    ASCIIColors.green(f"  ✔ Binding '{binding.alias}' is ready.")
-                except Exception as ex:
-                    ASCIIColors.warning(f"  ✘ Failed to pre-warm '{binding.alias}': {ex}")
+                # Use executor thread pool to avoid blocking master process startup
+                startup_executor.submit(
+                    build_lollms_client_from_params,
+                    "lollms",
+                    binding_alias=binding.alias,
+                    load_llm=True,
+                    callback=lollms_init_watcher
+                )
         db_warmup.close()
         steps.append(("Pre-warm Active Bindings", True))
     except Exception as e:
@@ -595,36 +596,37 @@ def run_one_time_startup_tasks(lock: Lock):
 
 async def startup_event():
     global broadcast_listener_task, rss_scheduler, startup_lock
-    
+
     init_database(APP_DB_URL)
-    
+
     db = db_session_module.SessionLocal()
     try:
         settings.load_from_db(db)
-        
-        # --- PER-WORKER PRE-WARMING ---
-        # We load all active bindings into the global registry of THIS worker process.
-        # This makes subsequent 'first loads' for any user nearly instant.
+
+        # --- NON-BLOCKING PER-WORKER PRE-WARMING ---
+        # We offload all synchronous model / personality bindings load to the background thread pool executor.
+        # This keeps the ASGI event loop completely free to route authentication, SSE, or parallel login requests immediately.
         active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
         if active_bindings:
-            ASCIIColors.info(f"Worker {os.getpid()}: Pre-warming {len(active_bindings)} active bindings...")
+            ASCIIColors.info(f"Worker {os.getpid()}: Offloading pre-warming of {len(active_bindings)} active bindings to background...")
+            loop = asyncio.get_running_loop()
             for b in active_bindings:
-                try:
-                    # Using 'lollms' system user to trigger the shared registry build
-                    get_user_lollms_client("lollms", binding_alias_override=b.alias)
-                    ASCIIColors.green(f"  ✔ {b.alias} ready.")
-                except Exception as e:
-                    ASCIIColors.warning(f"  ✘ {b.alias} warmup failed: {e}")
+                loop.run_in_executor(
+                    startup_executor,
+                    get_user_lollms_client,
+                    "lollms",
+                    b.alias
+                )
     finally:
         db.close()
-    
+
     manager.set_loop(asyncio.get_running_loop())
     task_manager.init_app(db_session_module.SessionLocal)
-    
+
     # Only start listener if multiple workers to avoid overhead on single worker setups
     if SERVER_CONFIG.get("workers", 1) > 1:
         broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
-    
+
     if os.getpid() == os.getppid() or os.getenv("WORKER_ID") == "1":
         rss_scheduler = BackgroundScheduler(daemon=True)
 
@@ -632,14 +634,14 @@ async def startup_event():
             interval = settings.get("rss_feed_check_interval_minutes", 60)
             next_run = datetime.datetime.now() + datetime.timedelta(seconds=20)
             rss_scheduler.add_job(scheduled_rss_job, 'interval', minutes=interval, next_run_time=next_run)
-            
+
             retention_days = settings.get("rss_news_retention_days", 1)
             if retention_days > 0:
                 rss_scheduler.add_job(scheduled_news_cleanup_job, 'cron', hour=3, minute=0)
                 print(f"INFO: Daily news cleanup scheduled.")
 
             print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
-        
+
         rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1)
         print(f"INFO: Bot Auto-Posting schedule checker active.")
 

@@ -7,6 +7,8 @@ import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconScissors from '../../assets/icons/IconScissors.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
@@ -18,55 +20,54 @@ const discussionId = computed(() => modalData.value?.discussionId || discussions
 const history = ref([]);
 const isLoading = ref(false);
 const isActionRunning = ref(false);
-const tagToRevert = ref('');
 
 async function loadHistory() {
     if (!artefactTitle.value) return;
     isLoading.value = true;
     try {
-        // Fetch rich commit log instead of basic history
+        // Fetch detailed version and commit history
         history.value = await discussionsStore.fetchArtefactLog(discussionId.value, artefactTitle.value);
     } catch (e) {
-        // Fallback to basic history if log method fails
+        // Fallback to basic history list
         history.value = await discussionsStore.fetchArtefactHistory(discussionId.value, artefactTitle.value);
     } finally {
         isLoading.value = false;
     }
 }
 
-async function handleRevertToTag() {
-    if (!tagToRevert.value.trim() || !artefactTitle.value) return;
+async function handleActivateVersion(version) {
     isActionRunning.value = true;
     try {
-        await discussionsStore.revertArtefactToTag({
+        await discussionsStore.updateArtefactVisibility({
             discussionId: discussionId.value,
             artefactTitle: artefactTitle.value,
-            tag: tagToRevert.value.trim()
+            visibility: 'FULL',
+            version: version
         });
-        tagToRevert.value = '';
         await loadHistory();
+        uiStore.addNotification(`Version ${version} set as active.`, 'success');
+    } catch (e) {
+        console.error(e);
     } finally {
         isActionRunning.value = false;
     }
 }
 
-async function handleExportBundle() {
-    if (!artefactTitle.value) return;
-    await discussionsStore.exportArtefactBundle({
-        discussionId: discussionId.value,
-        artefactTitle: artefactTitle.value
-    });
-}
-
 watch(artefactTitle, loadHistory, { immediate: true });
 
-async function handleDeleteVersion(version) {
+async function handleDeleteVersion(version, isActive) {
+    let confirmMsg = `Are you sure you want to permanently delete version ${version}? This action cannot be undone.`;
+    if (isActive) {
+        confirmMsg = `⚠️ WARNING: You are deleting the CURRENT ACTIVE version. If you delete it, the system will automatically promote the previous highest version to be the active one. Do you wish to proceed?`;
+    }
+
     const confirmed = await uiStore.showConfirmation({
-        title: 'Delete Version',
-        message: `Permanently delete version ${version}? This cannot be undone.`,
+        title: isActive ? 'Delete Active Version' : 'Delete Version',
+        message: confirmMsg,
         confirmText: 'Delete',
         danger: true
     });
+    
     if (confirmed.confirmed) {
         isActionRunning.value = true;
         try {
@@ -76,6 +77,7 @@ async function handleDeleteVersion(version) {
                 version 
             });
             await loadHistory();
+            uiStore.addNotification(`Version ${version} deleted successfully.`, 'success');
         } finally {
             isActionRunning.value = false;
         }
@@ -118,20 +120,32 @@ async function handleCleanup() {
     }
 }
 
-const formatDate = (iso) => new Date(iso).toLocaleString();
+async function handleExportBundle() {
+    if (!artefactTitle.value) return;
+    await discussionsStore.exportArtefactBundle({
+        discussionId: discussionId.value,
+        artefactTitle: artefactTitle.value
+    });
+}
+
+const formatDate = (iso) => {
+    if (!iso) return 'Unknown';
+    return new Date(iso).toLocaleString();
+};
 </script>
 
 <template>
-    <GenericModal modalName="artefactVersionManager" :title="`Manage Versions: ${artefactTitle}`" maxWidthClass="max-w-3xl">
+    <GenericModal modalName="artefactVersionManager" :title="`Version History: ${artefactTitle}`" maxWidthClass="max-w-4xl">
         <template #body>
             <div class="space-y-4 p-1">
+                <!-- Top Info Section -->
                 <div class="flex items-center gap-4 bg-blue-50/50 dark:bg-blue-900/10 p-5 rounded-[2rem] border border-blue-100 dark:border-blue-800/30">
                     <div class="w-12 h-12 rounded-full bg-white dark:bg-gray-800 shadow-sm flex items-center justify-center shrink-0">
                         <IconRefresh class="w-6 h-6 text-blue-500" />
                     </div>
                     <div class="grow min-w-0">
                         <h4 class="text-sm font-bold text-gray-900 dark:text-gray-100 uppercase tracking-widest">History Optimization</h4>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Version control allows you to re-baseline your document or purge unwanted revisions.</p>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Version control allows you to re-baseline your document, set old versions as active, or purge unwanted revisions.</p>
                     </div>
                     <button @click="handleCleanup" class="btn btn-primary btn-sm px-6 h-10 shadow-lg shadow-blue-500/20" :disabled="isActionRunning || history.length < 5">
                         <IconScissors class="w-4 h-4 mr-2" />
@@ -139,39 +153,23 @@ const formatDate = (iso) => new Date(iso).toLocaleString();
                     </button>
                 </div>
 
-
-                <!-- Tag & Bundle Operations Control Bar -->
-                <div class="flex flex-col sm:flex-row items-center gap-3 bg-gray-50/50 dark:bg-gray-900/30 p-4 rounded-2xl border border-gray-150 dark:border-gray-800 shadow-inner">
-                    <div class="grow relative w-full sm:w-auto">
-                        <input 
-                            v-model="tagToRevert" 
-                            placeholder="Type tag to revert (e.g. stable-v1)..." 
-                            class="w-full px-3 py-1.5 pl-8 text-xs bg-white dark:bg-gray-850 border border-gray-200 dark:border-gray-700 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 dark:text-white transition-all h-9" 
-                        />
-                        <div class="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
-                            <IconGitBranch class="w-4 h-4 text-gray-400" />
-                        </div>
-                    </div>
-                    <button 
-                        @click="handleRevertToTag" 
-                        :disabled="!tagToRevert.trim() || isActionRunning" 
-                        class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all border border-gray-200 dark:border-gray-700 h-9 w-full sm:w-auto flex items-center justify-center disabled:opacity-50"
-                    >
-                        Revert to Tag
-                    </button>
+                <!-- Export Options -->
+                <div class="flex justify-end">
                     <button 
                         @click="handleExportBundle" 
-                        class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all border border-gray-200 dark:border-gray-700 h-9 w-full sm:w-auto flex items-center justify-center gap-1.5 disabled:opacity-50" 
-                        title="Export this complete multimodal bundle"
+                        class="px-4 py-1.5 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-all border border-gray-200 dark:border-gray-700 h-9 flex items-center gap-1.5" 
                     >
                         <IconArrowDownTray class="w-3.5 h-3.5" />
-                        Export Bundle
+                        Export .laa Bundle
                     </button>
                 </div>
+
+                <!-- Loading State -->
                 <div v-if="isLoading" class="flex justify-center py-12">
                     <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
                 </div>
 
+                <!-- History Table -->
                 <div v-else class="overflow-hidden border dark:border-gray-700 rounded-xl bg-white dark:bg-gray-900">
                     <table class="w-full text-left text-sm">
                         <thead class="bg-gray-50 dark:bg-gray-800 text-[10px] font-black uppercase tracking-widest text-gray-400">
@@ -199,28 +197,44 @@ const formatDate = (iso) => new Date(iso).toLocaleString();
                                         <span class="font-medium text-gray-700 dark:text-gray-300 italic" v-if="v.commit_message">
                                             "{{ v.commit_message }}"
                                         </span>
-                                        <div class="flex flex-wrap gap-1 mt-1" v-if="v.tags && v.tags.length > 0">
-                                            <span v-for="tag in v.tags" :key="tag" class="px-1.5 py-0.5 bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 rounded text-[9px] font-mono">
-                                                {{ tag }}
-                                            </span>
-                                        </div>
                                     </div>
                                 </td>
                                 <td class="px-4 py-3 text-xs text-gray-500">{{ formatDate(v.created_at) }}</td>
                                 <td class="px-4 py-3 text-xs font-mono text-gray-400">{{ v.size_chars || v.content_size || 0 }} chars</td>
-                                <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
+                                <td class="px-4 py-3 text-right space-x-1.5 whitespace-nowrap">
+                                    <!-- Activate Action -->
+                                    <button 
+                                        v-if="!v.is_active"
+                                        @click="handleActivateVersion(v.version)"
+                                        :disabled="isActionRunning"
+                                        class="p-1.5 rounded bg-green-50 dark:bg-green-900/30 text-green-600 hover:bg-green-100 dark:hover:bg-green-800 transition-all text-xs font-bold"
+                                        title="Make Active Version"
+                                    >
+                                        Activate
+                                    </button>
+                                    
+                                    <!-- Active Confirmation Indicator -->
+                                    <span v-else class="inline-flex items-center gap-1 p-1.5 text-xs text-green-500 font-bold bg-green-500/10 rounded">
+                                        <IconCheckCircle class="w-3.5 h-3.5" />
+                                        Active
+                                    </span>
+
+                                    <!-- Squash Baseline Action -->
                                     <button 
                                         @click="handleSquashToTarget(v.version)" 
+                                        :disabled="isActionRunning"
                                         class="p-1.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-500 hover:bg-blue-100 dark:hover:bg-blue-800 transition-all" 
                                         title="Set as baseline (Delete others)"
                                     >
                                         <IconRefresh class="w-4 h-4" />
                                     </button>
+
+                                    <!-- Delete Action (Allowed for all, with auto-fallback) -->
                                     <button 
-                                        v-if="!v.is_active"
-                                        @click="handleDeleteVersion(v.version)" 
-                                        class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-red-500 opacity-0 group-hover:opacity-100 transition-opacity" 
-                                        title="Delete specific version"
+                                        @click="handleDeleteVersion(v.version, v.is_active)" 
+                                        :disabled="isActionRunning"
+                                        class="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-red-500 transition-opacity" 
+                                        title="Delete this version"
                                     >
                                         <IconTrash class="w-4 h-4" />
                                     </button>
@@ -236,3 +250,4 @@ const formatDate = (iso) => new Date(iso).toLocaleString();
         </template>
     </GenericModal>
 </template>
+```

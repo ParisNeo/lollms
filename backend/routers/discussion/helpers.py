@@ -5,7 +5,6 @@ from lollms_client import LollmsDiscussion
 
 from backend.db.models.user import User as DBUser
 from backend.db.models.discussion import SharedDiscussionLink as DBSharedDiscussionLink
-from backend.db.models.notebook import Notebook as DBNotebook
 from backend.models.user import UserAuthDetails
 from backend.discussion import get_user_discussion
 from backend.session import get_user_lollms_client
@@ -18,19 +17,18 @@ async def get_discussion_and_owner_for_request(
 ) -> Tuple[LollmsDiscussion, str, str, Optional[DBUser]]:
     """
     Retrieves a discussion object. Handles owned chats, notebooks, and shared discussions.
-    Fixed: Priority logic to prevent recipient DB shadowing.
+    Ensures correct LollmsDiscussion instance is constructed with full context capability.
     """
-    # 1. Check if it's an existing owned Notebook or Chat (No auto-creation yet)
-    # We check the manager directly to see if the file exists for THIS user
     from backend.discussion_manager import get_user_discussion_manager
     dm_local = get_user_discussion_manager(current_user.username)
 
+    # 1. Active Owner Session check
     if dm_local.discussion_exists(discussion_id):
         discussion_obj = get_user_discussion(current_user.username, discussion_id)
         owner_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
         return discussion_obj, current_user.username, 'owner', owner_db
 
-    # 2. Check shared discussions (If not owned locally)
+    # 2. Check Shared Discussion Links
     shared_link = db.query(DBSharedDiscussionLink).options(
         joinedload(DBSharedDiscussionLink.owner)
     ).filter(
@@ -45,7 +43,7 @@ async def get_discussion_and_owner_for_request(
             raise HTTPException(status_code=403, detail=f"You need '{required_permission}' permission for this discussion.")
 
         owner_username = shared_link.owner.username
-        # Shared context uses the viewer's client for processing, but owner's DB manager
+        # Shared sessions utilize the viewer's LollmsClient for token counting & model constraints
         lc = get_user_lollms_client(current_user.username)
         shared_discussion_obj = get_user_discussion(owner_username, discussion_id, lollms_client=lc)
 
@@ -54,28 +52,11 @@ async def get_discussion_and_owner_for_request(
 
         return shared_discussion_obj, owner_username, user_permission, shared_link.owner
 
-    # 3. Final Fallback: If for the current user and we are allowed to create it
-    # (e.g. initial load of a new chat tab for the owner)
-    if required_permission == 'owner' or required_permission == 'interact':
+    # 3. Dynamic Creation Gate for New Conversations
+    if required_permission in ['owner', 'interact']:
         discussion_obj = get_user_discussion(current_user.username, discussion_id, create_if_missing=True)
         if discussion_obj:
             owner_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
             return discussion_obj, current_user.username, 'owner', owner_db
 
-    raise HTTPException(status_code=404, detail="Discussion not found or you don't have access.")
-
-    permission_hierarchy = {"view": ["view", "interact"], "interact": ["interact"]}
-    user_permission = shared_link.permission_level
-    if required_permission != 'owner' and user_permission not in permission_hierarchy.get(required_permission, []):
-        raise HTTPException(status_code=403, detail=f"You need '{required_permission}' permission for this discussion.")
-    
-    owner_username = shared_link.owner.username
-    # When retrieving for shared interactions, ensure we pass the current user's client
-    # to support correct tokenization and branching based on THEIR active model settings.
-    lc = get_user_lollms_client(current_user.username)
-    shared_discussion_obj = get_user_discussion(owner_username, discussion_id, lollms_client=lc)
-    
-    if not shared_discussion_obj:
-        raise HTTPException(status_code=404, detail="The shared discussion was deleted.")
-    
-    return shared_discussion_obj, owner_username, user_permission, shared_link.owner
+    raise HTTPException(status_code=404, detail="Discussion not found or access denied.")

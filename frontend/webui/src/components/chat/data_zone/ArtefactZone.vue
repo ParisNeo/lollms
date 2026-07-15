@@ -22,6 +22,12 @@ import IconFolder from '../../../assets/icons/IconFolder.vue';
 import IconPhoto from '../../../assets/icons/IconPhoto.vue';
 import IconEye from '../../../assets/icons/IconEye.vue';
 import IconDatabase from '../../../assets/icons/IconDatabase.vue';
+import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
+import IconXMark from '../../../assets/icons/IconXMark.vue';
+import IconTrash from '../../../assets/icons/IconTrash.vue';
+import IconLock from '../../../assets/icons/IconLock.vue';
+import IconCircle from '../../../assets/icons/IconCircle.vue';
+import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
 
 const props = defineProps({
     notebookId: { type: String, default: null }
@@ -31,6 +37,107 @@ const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
 const { activeDiscussionArtefacts, isLoadingArtefacts, starredArtefacts } = storeToRefs(discussionsStore);
+
+// --- Multi-Selection State ---
+const selectionMode = ref(false);
+const selectedTitles = ref(new Set());
+
+const isAllSelected = computed(() => {
+    if (groupedArtefacts.value.length === 0) return false;
+    return selectedTitles.value.size === groupedArtefacts.value.length;
+});
+
+function toggleSelectAll() {
+    if (isAllSelected.value) {
+        selectedTitles.value.clear();
+    } else {
+        groupedArtefacts.value.forEach(group => {
+            selectedTitles.value.add(group.title);
+        });
+    }
+}
+
+function toggleSelectTitle(title) {
+    if (selectedTitles.value.has(title)) {
+        selectedTitles.value.delete(title);
+    } else {
+        selectedTitles.value.add(title);
+    }
+}
+
+function exitSelectionMode() {
+    selectionMode.value = false;
+    selectedTitles.value.clear();
+}
+
+// Batch Visibility updates
+async function handleBatchVisibility(visibility) {
+    if (selectedTitles.value.size === 0 || !idToUse.value) return;
+    uiStore.addNotification(`Updating status for ${selectedTitles.value.size} file(s)...`, 'info');
+    try {
+        await Promise.all(
+            Array.from(selectedTitles.value).map(title =>
+                discussionsStore.updateArtefactVisibility({
+                    discussionId: idToUse.value,
+                    artefactTitle: title,
+                    visibility
+                })
+            )
+        );
+        uiStore.addNotification('Batch update complete.', 'success');
+        exitSelectionMode();
+    } catch (e) {
+        uiStore.addNotification('Failed to update some files.', 'error');
+    }
+}
+
+// Batch Deletion
+async function handleBatchDelete() {
+    if (selectedTitles.value.size === 0 || !idToUse.value) return;
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Delete Selected Files',
+        message: `Are you sure you want to permanently delete these ${selectedTitles.value.size} file(s) from the workspace? This action cannot be undone.`,
+        confirmText: 'Delete All',
+        danger: true
+    });
+
+    if (confirmed.confirmed) {
+        uiStore.addNotification('Deleting selected files...', 'info');
+        try {
+            await Promise.all(
+                Array.from(selectedTitles.value).map(title =>
+                    discussionsStore.deleteArtefact({
+                        discussionId: idToUse.value,
+                        artefactTitle: title
+                    })
+                )
+            );
+            uiStore.addNotification('Deletions completed.', 'success');
+            exitSelectionMode();
+        } catch (e) {
+            uiStore.addNotification('Failed to delete some files.', 'error');
+        }
+    }
+}
+
+// Batch Export .lab Bundle
+async function handleBatchExportBundle() {
+    if (selectedTitles.value.size === 0 || !idToUse.value) return;
+    
+    // Resolve relative paths inside the workspace_data folder
+    const paths = Array.from(selectedTitles.value).map(title => {
+        // Map the title directly to its workspace filename path
+        const matchingGroup = groupedArtefacts.value.find(g => g.title === title);
+        const fileExt = matchingGroup?.versions[0]?.file_ext || '';
+        return `workspace_data/${title}${fileExt}`;
+    });
+
+    await discussionsStore.exportLinkedBundle({
+        discussionId: idToUse.value,
+        paths,
+        includeVersions: false
+    });
+}
 
 function handleStarToggle(title) {
     discussionsStore.toggleStarArtefact(title);
@@ -80,7 +187,6 @@ const groupedArtefacts = computed(() => {
     
     const currentId = String(idToUse.value); // Coerce to string for comparison
     
-    // Filter artefacts for the current project context
     const filtered = allArtefacts.filter(a => {
         const artDiscId = String(a.discussion_id || '');
         return !a.discussion_id || artDiscId === currentId;
@@ -163,7 +269,6 @@ async function handleArtefactFileUpload(event) {
     isUploadingArtefact.value = true;
     uploadingMessage.value = 'Uploading and analyzing files...';
 
-    // Set a timer to provide feedback if the backend is slow (likely installing packages)
     const installHintTimer = setTimeout(() => {
         uploadingMessage.value = 'Preparing environment (this might involve installing required libraries)...';
     }, 5000);
@@ -177,12 +282,10 @@ async function handleArtefactFileUpload(event) {
     }
 }
 
-// Watch for notebook ID or active discussion change to refresh list
 watch(() => [props.notebookId, discussionsStore.currentDiscussionId], () => {
     handleRefreshArtefacts();
 }, { immediate: true });
 
-// Listen for global state change event from library to refresh sidebar list
 onMounted(() => {
     handleRefreshArtefacts();
 });
@@ -192,7 +295,6 @@ async function handleDrop(event) {
     const files = Array.from(event.dataTransfer.files);
     if (files.length > 0 && idToUse.value) {
         uiStore.addNotification('Adding files to workspace...', 'info');
-        // CRITICAL: Set the active split title to switch the workspace focus
         uiStore.activeSplitArtefactTitle = files[0].name; 
         await Promise.all(files.map(file => discussionsStore.addArtefact({ 
             discussionId: idToUse.value, 
@@ -203,18 +305,19 @@ async function handleDrop(event) {
 }
 
 function openArtefactInWorkspace(group) {
+    if (selectionMode.value) {
+        toggleSelectTitle(group.title);
+        return;
+    }
     if (!group || !group.versions || group.versions.length === 0) return;
-    
-    // Open the artefact in the workspace editor
     uiStore.isDataZoneVisible = true;
     uiStore.dataZoneTab = 'workspace';
     uiStore.activeSplitArtefactTitle = group.title;
 }
-function handleCreateNew() {
-    // [FIX] Correctly trigger the manual creation modal
-    uiStore.openModal('createArtefact', { 
-        discussionId: discussionsStore.currentDiscussionId 
-    });
+
+function toggleSelectionMode() {
+    selectionMode.value = !selectionMode.value;
+    selectedTitles.value.clear();
 }
 </script>
 
@@ -262,11 +365,17 @@ function handleCreateNew() {
                 </DropdownMenu>
                 <span class="text-xs font-bold uppercase tracking-widest text-gray-500 select-none">Repository</span>
             </div>
+            
+            <!-- Context Control Triggers -->
             <div class="flex items-center gap-1.5">
+                 <button @click="toggleSelectionMode" class="p-1.5 rounded-lg transition-all" :class="selectionMode ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-400 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'" title="Batch Operations (Select Multiple)">
+                     <IconGather class="w-4.5 h-4.5" />
+                 </button>
                  <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all" title="Import from URL"><IconWeb class="w-4.5 h-4.5 text-blue-500" /></button>
                  <button @click="handleRefreshArtefacts" class="p-1.5 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all" title="Refresh List"><IconRefresh class="w-4.5 h-4.5" :class="{'animate-spin': isLoadingArtefacts}" /></button>
             </div>
         </div>
+
         <div v-if="!isArtefactsCollapsed" class="grow overflow-y-auto custom-scrollbar">
             <!-- Active Processing Item -->
             <div v-if="isUploadingArtefact" class="mb-4 animate-in fade-in slide-in-from-top-2">
@@ -283,6 +392,20 @@ function handleCreateNew() {
                  </div>
             </div>
 
+            <!-- Global Selection Action Header -->
+            <div v-if="selectionMode && groupedArtefacts.length > 0" class="flex justify-between items-center p-2 mb-2 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-100 dark:border-blue-800 text-xs animate-in fade-in">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input 
+                        type="checkbox" 
+                        :checked="isAllSelected" 
+                        @change="toggleSelectAll" 
+                        class="rounded text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-gray-700 bg-transparent h-4 w-4"
+                    />
+                    <span class="font-bold text-gray-700 dark:text-gray-300">Select All ({{ selectedTitles.size }} / {{ groupedArtefacts.length }})</span>
+                </label>
+                <button @click="exitSelectionMode" class="text-blue-500 hover:text-red-500 font-bold uppercase text-[10px]">Cancel</button>
+            </div>
+
             <div v-if="isLoadingArtefacts && !isUploadingArtefact" class="text-center py-10"><IconAnimateSpin class="w-6 h-6 text-gray-300 animate-spin mx-auto" /></div>
             <div v-else-if="groupedArtefacts.length === 0 && !isUploadingArtefact" class="text-center py-10 text-gray-400 text-[10px] uppercase font-bold tracking-widest opacity-50">Empty</div>
             <div v-else class="space-y-1">
@@ -295,6 +418,9 @@ function handleCreateNew() {
                     <ArtefactCard 
                         :artefact-group="group" 
                         :is-starred="starredArtefacts.includes(group.title)"
+                        :selection-mode="selectionMode"
+                        :is-selected="selectedTitles.has(group.title)"
+                        @toggle-select="toggleSelectTitle"
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"
@@ -302,6 +428,59 @@ function handleCreateNew() {
                 </div>
             </div>
         </div>
+
+        <!-- ── [NEW] Floating Batch Actions Control Bar ── -->
+        <Transition
+            enter-active-class="transition-all duration-300 ease-out"
+            enter-from-class="opacity-0 translate-y-6"
+            enter-to-class="opacity-100 translate-y-0"
+            leave-active-class="transition-all duration-200 ease-in"
+            leave-from-class="opacity-100"
+            leave-to-class="opacity-0 translate-y-6"
+        >
+            <div v-if="selectionMode && selectedTitles.size > 0" class="absolute bottom-2 inset-x-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl p-3 z-40 flex items-center justify-between gap-4">
+                <div class="flex flex-col">
+                    <span class="text-[9px] font-black uppercase tracking-widest text-blue-500 mb-0.5">Batch Mode</span>
+                    <span class="text-xs font-bold text-gray-800 dark:text-gray-200">{{ selectedTitles.size }} item(s) selected</span>
+                </div>
+                
+                <div class="flex items-center gap-1.5">
+                    <!-- Batch Visibility Dropdown -->
+                    <DropdownMenu icon="eye" buttonClass="p-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300" title="Set Attention">
+                        <button @click="handleBatchVisibility('FULL')" class="menu-item gap-2">
+                            <IconCheckCircle class="w-4 h-4 text-green-500" />
+                            <span>Load Full Content [C]</span>
+                        </button>
+                        <button @click="handleBatchVisibility('METADATA')" class="menu-item gap-2">
+                            <IconEye class="w-4 h-4 text-sky-500" />
+                            <span>Metadata-Only [M]</span>
+                        </button>
+                        <button @click="handleBatchVisibility('TREE_UNLOCKABLE')" class="menu-item gap-2">
+                            <IconCircle class="w-4 h-4 text-gray-400" />
+                            <span>Tree Unlockable [U]</span>
+                        </button>
+                        <button @click="handleBatchVisibility('LOCKED')" class="menu-item gap-2">
+                            <IconLock class="w-4 h-4 text-orange-500" />
+                            <span>Tree Locked [L]</span>
+                        </button>
+                        <button @click="handleBatchVisibility('HIDDEN')" class="menu-item gap-2">
+                            <IconEyeOff class="w-4 h-4 text-red-500" />
+                            <span>Hidden</span>
+                        </button>
+                    </DropdownMenu>
+
+                    <!-- Export Bundle -->
+                    <button @click="handleBatchExportBundle" class="p-2 bg-blue-50 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-800/40 text-blue-600 dark:text-blue-400 rounded-lg" title="Export as Linked .lab Bundle">
+                        <IconFolder class="w-4 h-4" />
+                    </button>
+
+                    <!-- Batch Delete -->
+                    <button @click="handleBatchDelete" class="p-2 bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-800/40 text-red-600 dark:text-red-400 rounded-lg" title="Delete Selected">
+                        <IconTrash class="w-4 h-4" />
+                    </button>
+                </div>
+            </div>
+        </Transition>
     </div>
 </template>
 
@@ -310,3 +489,4 @@ function handleCreateNew() {
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 </style>
+```
