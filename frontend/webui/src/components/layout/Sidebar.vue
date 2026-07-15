@@ -189,34 +189,73 @@ async function handlePlusClick() {
           <IconFileText class="w-5 h-5 text-blue-500" />
         </button>
 
-        <router-link
-          to="/notebooks"
-          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
-          title="Notebook Studio"
-        >
-            <IconServer class="w-5 h-5 text-purple-500" />
-        </router-link>
+        <!-- ── [NEW] Unified Sovereign Studio Dock (Collapsed) ── -->
+        <div class="w-full flex flex-col items-center py-2 gap-2 border-t border-b border-gray-150 dark:border-gray-800">
+            <span class="text-[8px] font-black tracking-widest text-gray-400 select-none uppercase mb-1">Studios</span>
 
-        <router-link
-          to="/datastores"
-          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
-          title="Data Studio"
-        >
-            <IconDatabase class="w-5 h-5 text-green-500" />
-        </router-link>
+            <router-link
+              to="/notebook-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Notebook Studio"
+              active-class="bg-purple-100/50 text-purple-600 dark:bg-purple-900/20"
+            >
+                <IconServer class="w-5 h-5 text-purple-500" />
+            </router-link>
 
-        <router-link
-          to="/flow-studio"
-          class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
-          title="Flow Studio"
-        >
-            <IconShare class="w-5 h-5 text-cyan-500" />
-        </router-link>
+            <router-link
+              to="/datastores"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Data Studio"
+              active-class="bg-green-100/50 text-green-600 dark:bg-green-900/20"
+            >
+                <IconDatabase class="w-5 h-5 text-green-500" />
+            </router-link>
 
+            <router-link
+              to="/flow-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Flow Studio"
+              active-class="bg-cyan-100/50 text-cyan-600 dark:bg-cyan-900/20"
+            >
+                <IconShare class="w-5 h-5 text-cyan-500" />
+            </router-link>
+
+            <router-link
+              to="/image-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Canvas / Image Studio"
+              active-class="bg-pink-100/50 text-pink-600 dark:bg-pink-900/20"
+            >
+                <IconPhoto class="w-5 h-5 text-pink-500" />
+            </router-link>
+
+            <router-link
+              to="/voices-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Voices Studio"
+              active-class="bg-blue-100/50 text-blue-600 dark:bg-blue-900/20"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+            </router-link>
+
+            <router-link
+              to="/personality-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Personality Studio"
+              active-class="bg-amber-100/50 text-amber-600 dark:bg-amber-900/20"
+            >
+                <IconUser class="w-5 h-5 text-amber-500" />
+            </router-link>
+        </div>
+
+        <!-- Secondary Utilities -->
         <router-link
           to="/news"
           class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="News"
+          active-class="bg-gray-100 text-slate-800"
         >
             <IconFileText class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </router-link>
@@ -225,6 +264,7 @@ async function handlePlusClick() {
           to="/help" 
           class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Help"
+          active-class="bg-gray-100 text-slate-800"
         >
           <IconBookOpen class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </router-link>
@@ -233,6 +273,7 @@ async function handlePlusClick() {
           to="/settings" 
           class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Settings"
+          active-class="bg-gray-100 text-slate-800"
         >
           <IconSettings class="w-5 h-5 text-slate-500 dark:text-gray-400" />
         </router-link>
