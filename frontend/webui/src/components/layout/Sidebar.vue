@@ -18,6 +18,10 @@ import IconServer from '../../assets/icons/IconServer.vue';
 import IconDatabase from '../../assets/icons/IconDatabase.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
 
+import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconUser from '../../assets/icons/IconUser.vue';
+import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
+
 // Async import for Flow Wizard
 const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
 
@@ -192,6 +196,16 @@ async function handlePlusClick() {
         <!-- ── [NEW] Unified Sovereign Studio Dock (Collapsed) ── -->
         <div class="w-full flex flex-col items-center py-2 gap-2 border-t border-b border-gray-150 dark:border-gray-800">
             <span class="text-[8px] font-black tracking-widest text-gray-400 select-none uppercase mb-1">Studios</span>
+
+            <router-link
+              to="/"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Chat Studio (Conversations)"
+              active-class="bg-blue-100/50 text-blue-600 dark:bg-blue-900/20"
+              @click="uiStore.setMainView('chat')"
+            >
+                <IconChatBubbleLeftRight class="w-5 h-5 text-blue-600" />
+            </router-link>
 
             <router-link
               to="/notebook-studio"

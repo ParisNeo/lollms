@@ -341,17 +341,20 @@ async def get_user_from_api_key(
         raise HTTPException(status_code=401, detail="User not found or inactive.")
 
     if user.username not in user_sessions:
+        # Use defensive getattr to map database parameters without triggering AttributeErrors
         session_llm_params = {
-            "temperature": user.llm_temperature,
-            "top_k": user.top_k or user.llm_top_k, "top_p": user.top_p or user.llm_top_p,
-            "repeat_penalty": user.repeat_penalty or user.llm_repeat_penalty, "repeat_last_n": user.repeat_last_n or user.llm_repeat_last_n
+            "temperature": getattr(user, "llm_temperature", None),
+            "top_k": getattr(user, "llm_top_k", None),
+            "top_p": getattr(user, "llm_top_p", None),
+            "repeat_penalty": getattr(user, "llm_repeat_penalty", None),
+            "repeat_last_n": getattr(user, "llm_repeat_last_n", None)
         }
         user_sessions[user.username] = {
             "safe_store_instances": {}, "discussions": {},
-            "active_vectorizer": user.safe_store_vectorizer,
-            "lollms_model_name": user.lollms_model_name,
+            "active_vectorizer": getattr(user, "safe_store_vectorizer", None),
+            "lollms_model_name": getattr(user, "lollms_model_name", None),
             "llm_params": {k: v for k, v in session_llm_params.items() if v is not None},
-            "active_personality_id": user.active_personality_id,
+            "active_personality_id": getattr(user, "active_personality_id", None),
         }
 
     # Asynchronously update usage telemetry

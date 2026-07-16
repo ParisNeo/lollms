@@ -1782,6 +1782,31 @@ def build_llm_generation_router(router: APIRouter):
                     except Exception as e:
                         print(f"Warning: Failed to retrieve get_user_memory_manager: {e}")
 
+                    # Resolve if current model supports vision defensively by querying registered aliases
+                    model_supports_vision = True
+                    try:
+                        # Inspect the active model settings
+                        user_model_full = current_user.lollms_model_name
+                        if user_model_full and '/' in user_model_full:
+                            binding_alias_key, model_key = user_model_full.split('/', 1)
+                            db_verify = next(get_db())
+                            try:
+                                binding_rec = db_verify.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias_key).first()
+                                if binding_rec and binding_rec.model_aliases:
+                                    aliases = binding_rec.model_aliases
+                                    if isinstance(aliases, str):
+                                        aliases = json.loads(aliases)
+                                    alias_info = aliases.get(model_key)
+                                    if alias_info:
+                                        alias_config = alias_info.get('alias', {}) if 'alias' in alias_info else alias_info
+                                        # If has_vision is explicitly defined and False, flag it
+                                        if alias_config.get('has_vision') is False:
+                                            model_supports_vision = False
+                            finally:
+                                db_verify.close()
+                    except Exception as vision_ex:
+                        print(f"Warning: Failed to parse vision support profile, defaulting to True: {vision_ex}")
+
                     result = {}
                     try:
                         # Call the library's native chat method. 
@@ -1817,7 +1842,8 @@ def build_llm_generation_router(router: APIRouter):
                             enable_auto_dream=owner_db_user.auto_memory_enabled,
                             enable_deep_memory_pulling=owner_db_user.memory_enabled,
                             enable_in_message_status=True,
-                            enable_specialized_events_stream=True
+                            enable_specialized_events_stream=True,
+                            suppress_images=not model_supports_vision # 🛡️ Set to True for non-vision LLMs to prevent parsing crashes
                             )
                     finally:
                         # Ensure discussion state is committed even on client disconnect/stop signal
