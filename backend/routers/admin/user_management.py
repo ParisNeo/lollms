@@ -214,6 +214,12 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         if user_dict.get(field) is None:
             user_dict[field] = settings.get(setting_key)
 
+    # For new beginner users, override with specific beginner model if set
+    if user_dict.get('user_ui_level', 0) == 0:
+        beginner_default = settings.get('default_lollms_model_name_beginner')
+        if beginner_default:
+            user_dict['lollms_model_name'] = beginner_default
+
     # --- NEW LOGIC: Remove fields that may cause ORM init errors ---
     # The ORM constructor can be sensitive to unexpected keyword arguments.
     # `google_client_secret_json` is a valid column but may clash with internal

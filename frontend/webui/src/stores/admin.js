@@ -361,35 +361,35 @@ export const useAdminStore = defineStore('admin', () => {
     // Aliases & Commands
     async function fetchBindingModels(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/models`); return r.data; }
     async function getModelCtxSize(id, name) { const r = await apiClient.post(`/api/admin/bindings/${id}/context-size`, { model_name: name }); return r.data.ctx_size; }
-    async function saveModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}/alias`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; }
-    async function deleteModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/bindings/${id}/alias`, { data: { original_model_name: name } }); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) bindings.value[i] = r.data; }
+    async function saveModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/bindings/${id}/alias`, payload); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(bindings.value[i], r.data); }
+    async function deleteModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/bindings/${id}/alias`, { data: { original_model_name: name } }); const i = bindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(bindings.value[i], r.data); }
     async function executeBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
     async function fetchTtiBindingModels(id) { const r = await apiClient.get(`/api/admin/tti-bindings/${id}/models`); return r.data; }
-    async function saveTtiModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/tti-bindings/${id}/alias`, payload); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) ttiBindings.value[i] = r.data; }
-    async function deleteTtiModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/tti-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) ttiBindings.value[i] = r.data; }
+    async function saveTtiModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/tti-bindings/${id}/alias`, payload); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttiBindings.value[i], r.data); }
+    async function deleteTtiModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/tti-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttiBindings.value[i], r.data); }
     async function executeTtiBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/tti-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
     async function fetchTtsBindingModels(id) { const r = await apiClient.get(`/api/admin/tts-bindings/${id}/models`); return r.data; }
-    async function saveTtsModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/tts-bindings/${id}/alias`, payload); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) ttsBindings.value[i] = r.data; }
-    async function deleteTtsModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/tts-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) ttsBindings.value[i] = r.data; }
+    async function saveTtsModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/tts-bindings/${id}/alias`, payload); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttsBindings.value[i], r.data); }
+    async function deleteTtsModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/tts-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttsBindings.value[i], r.data); }
     async function executeTtsBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/tts-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
     async function fetchSttBindingModels(id) { const r = await apiClient.get(`/api/admin/stt-bindings/${id}/models`); return r.data; }
-    async function saveSttModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}/alias`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; }
-    async function deleteSttModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/stt-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; }
+    async function saveSttModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}/alias`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(sttBindings.value[i], r.data); }
+    async function deleteSttModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/stt-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(sttBindings.value[i], r.data); }
     async function executeSttBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/stt-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
     
     async function fetchTtvBindingModels(id) { const r = await apiClient.get(`/api/admin/ttv-bindings/${id}/models`); return r.data; }
-    async function saveTtvModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/ttv-bindings/${id}/alias`, payload); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; }
-    async function deleteTtvModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/ttv-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; }
+    async function saveTtvModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/ttv-bindings/${id}/alias`, payload); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttvBindings.value[i], r.data); }
+    async function deleteTtvModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/ttv-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttvBindings.value[i], r.data); }
     async function executeTtvBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/ttv-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
 
     async function fetchTtmBindingModels(id) { const r = await apiClient.get(`/api/admin/ttm-bindings/${id}/models`); return r.data; }
-    async function saveTtmModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/ttm-bindings/${id}/alias`, payload); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) ttmBindings.value[i] = r.data; }
-    async function deleteTtmModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/ttm-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) ttmBindings.value[i] = r.data; }
+    async function saveTtmModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/ttm-bindings/${id}/alias`, payload); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttmBindings.value[i], r.data); }
+    async function deleteTtmModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/ttm-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ttmBindings.value[i], r.data); }
     async function executeTtmBindingCommand(id, cmd, params = {}) { const r = await apiClient.post(`/api/admin/ttm-bindings/${id}/execute_command`, { command_name: cmd, parameters: params }); return r.data; }
 
     async function fetchRagBindingModels(id) { const r = await apiClient.get(`/api/admin/rag-bindings/${id}/models`); return r.data; }
-    async function saveRagModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/rag-bindings/${id}/alias`, payload); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
-    async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
+    async function saveRagModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/rag-bindings/${id}/alias`, payload); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ragBindings.value[i], r.data); }
+    async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ragBindings.value[i], r.data); }    async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
     async function fetchRagModelsForType(type) { const r = await apiClient.get(`/api/admin/rag-bindings/models-for-type/${type}`); return r.data; }
     async function addOrUpdateRagAlias(payload) { await apiClient.post('/api/admin/rag/aliases', payload); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${payload.alias_name}' saved.`, 'success'); }
     async function deleteRagAlias(name) { await apiClient.delete('/api/admin/rag/aliases', { data: { alias_name: name } }); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${name}' deleted.`, 'success'); }
@@ -576,6 +576,10 @@ export const useAdminStore = defineStore('admin', () => {
     async function downloadTrustScript(type) { try { const response = await apiClient.get('/api/admin/download-trust-script', { params: { script_type: type }, responseType: 'blob' }); const url = window.URL.createObjectURL(new Blob([response.data])); const link = document.createElement('a'); link.href = url; const ext = type === 'windows' ? 'bat' : 'sh'; link.setAttribute('download', `install_lollms_cert.${ext}`); document.body.appendChild(link); link.click(); link.remove(); } catch(e) { console.error(e); uiStore.addNotification('Failed to download trust script.', 'error'); } }
     async function importOpenWebUIData(file) { isImporting.value = true; const formData = new FormData(); formData.append('file', file); try { await apiClient.post('/api/admin/import-openwebui', formData); } finally { isImporting.value = false; } }
     async function fetchAdminAvailableLollmsModels(force=false) { if (!force && adminAvailableLollmsModels.value.length > 0) return; isLoadingLollmsModels.value = true; try { const response = await apiClient.get('/api/admin/available-models'); adminAvailableLollmsModels.value = response.data; } finally { isLoadingLollmsModels.value = false; } }
+    async function setAsBeginnerDefault(fullModelName) {
+        const response = await apiClient.post('/api/admin/bindings/force-settings-beginners', { model_name: fullModelName });
+        return response.data;
+    }
     async function generateIconForModel(prompt) { const response = await apiClient.post('/api/admin/bindings/generate_icon', { prompt }); tasksStore.addTask(response.data); return response.data; }
     async function triggerRssScraping() { const response = await apiClient.post('/api/admin/rss-feeds/scrape'); tasksStore.addTask(response.data); return response.data; }
     async function refreshZooCache() { const response = await apiClient.post('/api/admin/refresh-zoo-cache'); tasksStore.addTask(response.data); return response.data; }
@@ -687,5 +691,6 @@ export const useAdminStore = defineStore('admin', () => {
         fetchRequirements, installRequirement, fixAllRequirements,
         sanitizeDatabase, // EXPORTED
         createUser, deleteUser, // ADDED
+        setAsBeginnerDefault, // EXPORTED
     };
 });

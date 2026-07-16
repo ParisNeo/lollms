@@ -26,15 +26,34 @@ def build_discussion_sharing_router(router: APIRouter):
             DBSharedDiscussionLink.owner_user_id != current_user.id
         ).order_by(DBSharedDiscussionLink.shared_at.desc()).all()
 
+        from backend.discussion_manager import get_user_discussion_manager
+        import json
+
         infos = []
         for link in shared_links:
             has_art = False
             try:
-                shared_discussion_obj = get_user_discussion(link.owner.username, link.discussion_id)
-                if shared_discussion_obj:
-                    has_art = len(shared_discussion_obj.list_artefacts()) > 0
-            except Exception:
+                # Fast path: query the owner's flat SQLite database directly
+                # to extract the 'has_artefacts' metadata.
+                # Bypasses expensive LollmsClient & LollmsDiscussion constructions entirely.
+                dm = get_user_discussion_manager(link.owner.username)
+                discussion_db_session = dm.get_session()
+                try:
+                    disc_record = discussion_db_session.query(dm.DiscussionModel).filter_by(id=link.discussion_id).first()
+                    if disc_record:
+                        metadata = disc_record.discussion_metadata or {}
+                        if isinstance(metadata, str):
+                            try:
+                                metadata = json.loads(metadata)
+                            except Exception:
+                                metadata = {}
+                        has_art = bool(metadata.get("has_artefacts", False))
+                finally:
+                    discussion_db_session.close()
+            except Exception as e:
+                # Fallback to False on any local DB read issues
                 pass
+
             infos.append(
                 DiscussionInfo(
                     id=link.discussion_id,

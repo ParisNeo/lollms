@@ -541,13 +541,20 @@ def build_lollms_client_from_params(
             if not is_active:
                 user_db.stt_binding_model_name = None
         
+        # Auto-load peripheral services (TTI, TTS, STT) if the user has actually
+        # configured active models for them in their database profile. This ensures
+        # out-of-the-box capability for task execution (e.g. audio imports) and chat events.
+        has_tti_config = bool(user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name)
+        has_tts_config = bool(user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name)
+        has_stt_config = bool(user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name)
+
         client_init_params = {
             "load_llm": load_llm,
-            "load_tti": load_tti,
-            "load_tts": load_tts,
-            "load_stt": load_stt,
+            "load_tti": load_tti or has_tti_config,
+            "load_tts": load_tts or has_tts_config,
+            "load_stt": load_stt or has_stt_config,
         }
-        
+
         binding_to_use = None
         
         # Determine the model name from session or DB

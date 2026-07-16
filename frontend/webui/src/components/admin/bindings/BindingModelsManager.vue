@@ -30,6 +30,7 @@ const isLoading = ref(true);
 const isSaving = ref(false);
 const isSettingBindingDefault = ref(false);
 const isSettingGlobalDefault = ref(false);
+const isSettingBeginnerDefault = ref(false);
 const isFetchingCtxSize = ref(false);
 const iconGenerationTaskId = ref(null);
 const isSubmittingIconRequest = ref(false);
@@ -148,6 +149,12 @@ const globalDefaultModel = computed(() => {
 
 const isCurrentBindingDefault = computed(() => selectedModel.value && props.binding && selectedModel.value.original_model_name === props.binding.default_model_name);
 const isCurrentGlobalDefault = computed(() => selectedModel.value && props.binding && `${props.binding.alias}/${selectedModel.value.original_model_name}` === globalDefaultModel.value);
+const isCurrentBeginnerDefault = computed(() => {
+    if (!selectedModel.value || !props.binding || props.bindingType !== 'llm') return false;
+    const fullModelName = `${props.binding.alias}/${selectedModel.value.original_model_name}`;
+    const setting = globalSettings.value.find(s => s.key === 'default_lollms_model_name_beginner');
+    return setting ? setting.value === fullModelName : false;
+});
 const isBindingDefault = (modelName) => props.binding && modelName === props.binding.default_model_name;
 const isGlobalDefault = (modelName) => props.binding && `${props.binding.alias}/${modelName}` === globalDefaultModel.value;
 
@@ -337,6 +344,19 @@ async function setAsGlobalDefault() {
         uiStore.addNotification('Global default model for new users has been updated.', 'success');
     } finally {
         isSettingGlobalDefault.value = false;
+    }
+}
+
+async function setAsBeginnerDefault() {
+    if (!selectedModel.value || !props.binding || props.bindingType !== 'llm') return;
+    isSettingBeginnerDefault.value = true;
+    try {
+        const fullModelName = `${props.binding.alias}/${selectedModel.value.original_model_name}`;
+        const response = await adminStore.setAsBeginnerDefault(fullModelName);
+        await adminStore.fetchGlobalSettings(true);
+        uiStore.addNotification(response.message || 'Default model for beginners updated successfully.', 'success');
+    } finally {
+        isSettingBeginnerDefault.value = false;
     }
 }
 
@@ -595,6 +615,12 @@ watch(() => props.binding, (newBinding) => {
                                 <span class="text-sm">Set as Global System Default</span>
                                 <button @click="setAsGlobalDefault" class="text-blue-600 hover:underline text-sm font-medium" :disabled="isCurrentGlobalDefault || isSettingGlobalDefault">
                                     {{ isCurrentGlobalDefault ? 'Current Global' : (isSettingGlobalDefault ? 'Setting...' : 'Set') }}
+                                </button>
+                             </div>
+                             <div v-if="bindingType === 'llm'" class="flex items-center justify-between">
+                                <span class="text-sm">Set as Default for Beginners</span>
+                                <button @click="setAsBeginnerDefault" class="text-blue-600 hover:underline text-sm font-medium" :disabled="isCurrentBeginnerDefault || isSettingBeginnerDefault">
+                                    {{ isCurrentBeginnerDefault ? 'Current Beginner Default' : (isSettingBeginnerDefault ? 'Setting...' : 'Set') }}
                                 </button>
                              </div>
                         </div>

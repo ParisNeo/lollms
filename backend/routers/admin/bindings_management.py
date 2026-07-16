@@ -1425,6 +1425,38 @@ async def force_settings_once(payload: ForceSettingsPayload, db: Session = Depen
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Database error while forcing settings: {e}")
 
+@bindings_management_router.post("/force-settings-beginners", response_model=Dict[str, str])
+async def force_settings_beginners(payload: ForceSettingsPayload, db: Session = Depends(get_db)):
+    if not payload.model_name:
+        raise HTTPException(status_code=400, detail="A model name must be provided in the payload.")
+    try:
+        # 1. Update the default beginner model in the GlobalConfig (settings)
+        db_config = db.query(GlobalConfig).filter(GlobalConfig.key == "default_lollms_model_name_beginner").first()
+        json_val = json.dumps({"value": payload.model_name, "type": "string"})
+        if db_config:
+            db_config.value = json_val
+        else:
+            db_config = GlobalConfig(key="default_lollms_model_name_beginner", value=json_val, category="System Settings", description="Default model for beginner UI level users")
+            db.add(db_config)
+
+        # 2. Update existing beginner users (user_ui_level == 0)
+        beginner_users = db.query(DBUser).filter(DBUser.user_ui_level == 0).all()
+        for user in beginner_users:
+            user.lollms_model_name = payload.model_name
+            if payload.context_size is not None:
+                user.llm_ctx_size = payload.context_size
+
+        db.commit()
+        from backend.settings import settings
+        settings.refresh(db)
+        user_sessions.clear()
+
+        return {"message": f"Successfully set '{payload.model_name}' as the default for {len(beginner_users)} existing beginner users."}
+    except Exception as e:
+        db.rollback()
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Database error while setting beginner defaults: {e}")
+
 @bindings_management_router.post("/bindings/generate_icon", response_model=TaskInfo, status_code=202)
 async def generate_model_icon(
     payload: GenerateIconRequest,
