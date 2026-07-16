@@ -98,7 +98,7 @@ onUnmounted(() => {
 // Context-aware logic for the Plus button in collapsed mode
 const currentContext = computed(() => {
     const path = route.path;
-    if (path.startsWith('/notebooks')) return 'notebooks';
+    if (path.startsWith('/notebooks') || path.startsWith('/notebook-studio')) return 'notebooks';
     if (path.startsWith('/datastores')) return 'data';
     if (path.startsWith('/flow-studio')) return 'flows';
     if (path.startsWith('/image-studio')) return 'images';

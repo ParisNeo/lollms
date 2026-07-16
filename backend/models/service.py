@@ -186,26 +186,32 @@ class ModelAlias(BaseModel):
 class ModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: ModelAlias
+    new_model_name: Optional[str] = None
 
 class TtiModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: Dict[str, Any]
+    new_model_name: Optional[str] = None
 
 class TtsModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: Dict[str, Any]
+    new_model_name: Optional[str] = None
 
 class SttModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: Dict[str, Any]
+    new_model_name: Optional[str] = None
 
 class TtvModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: Dict[str, Any]
+    new_model_name: Optional[str] = None
 
 class TtmModelAliasUpdate(BaseModel):
     original_model_name: str
     alias: Dict[str, Any]
+    new_model_name: Optional[str] = None
 
 class ModelAliasDelete(BaseModel):
     original_model_name: str

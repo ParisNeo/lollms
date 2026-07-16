@@ -43,7 +43,7 @@ const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 // Highlight Logic
 const isDiscussionActive = computed(() => route.path === '/' && uiStore.mainView === 'chat');
-const isNotebooksActive = computed(() => route.path.startsWith('/notebooks'));
+const isNotebooksActive = computed(() => route.path.startsWith('/notebooks') || route.path.startsWith('/notebook-studio'));
 const isImageStudioActive = computed(() => route.path.startsWith('/image-studio'));
 const isVoicesStudioActive = computed(() => route.path.startsWith('/voices-studio'));
 const isPersonalityStudioActive = computed(() => route.path.startsWith('/personality-studio'));

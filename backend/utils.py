@@ -130,9 +130,9 @@ def get_system_cache(db: Session, key: str, default=None):
 
 def set_system_cache(db: Session, key: str, value: Any):
     """Saves a value to GlobalConfig as a cache."""
+    json_val = json.dumps({"value": value, "type": "cache"})
     try:
         config = db.query(GlobalConfig).filter(GlobalConfig.key == key).first()
-        json_val = json.dumps({"value": value, "type": "cache"})
         if config:
             config.value = json_val
         else:
@@ -140,5 +140,12 @@ def set_system_cache(db: Session, key: str, value: Any):
             db.add(config)
         db.commit()
     except Exception as e:
-        print(f"Cache write error for {key}: {e}")
         db.rollback()
+        # Concurrency safety: if another thread/process inserted the key in the meantime, try updating it quietly
+        try:
+            config = db.query(GlobalConfig).filter(GlobalConfig.key == key).first()
+            if config:
+                config.value = json_val
+                db.commit()
+        except Exception:
+            db.rollback()

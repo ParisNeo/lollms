@@ -24,11 +24,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const authStore = useAuthStore();
     const dataStore = useDataStore();
 
-    // We resolve tasksStore here to ensure it's available for the watch and composables
-    const tasksStore = useTasksStore(); 
-
     const { user } = storeToRefs(authStore);
-    const { tasks } = storeToRefs(tasksStore);
     const { on, off, emit } = useEventBus();
 
     // --- STATE ---
@@ -98,7 +94,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
      */
 
     // --- WATCHER for task updates ---
-    watch(() => useTasksStore().tasks, async (newTasks) => {
+    watch(() => {
+        try {
+            return useTasksStore().tasks;
+        } catch (e) {
+            return [];
+        }
+    }, async (newTasks) => {
         if (!newTasks) return;
         // 1. Handle Artefact Audio Export (Auto-download)
         const artefactAudioTask = newTasks.find(t => t.name.startsWith('Audio Export:') && t.status === 'completed' && t.result?.download_url);
@@ -154,6 +156,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
         if (activeTrackedTaskIds.length === 0) return;
 
+        const tasksStore = useTasksStore();
         for (const discussionId in activeAiTasks.value) {
             const trackedTask = activeAiTasks.value[discussionId];
             if (trackedTask && trackedTask.taskId) {
@@ -168,8 +171,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                             // --- FIX: Explicitly refresh memories when memorization completes ---
                             if (trackedTask.type === 'memorize') {
                                 console.log("Memorization task completed. Refreshing memories...");
-                                await memoriesStore.fetchMemories();
-                                uiStore.addNotification('Memory bank updated.', 'success');
+                                try {
+                                    const { useMemoriesStore } = await import('./memories');
+                                    await useMemoriesStore().fetchMemories();
+                                    uiStore.addNotification('Memory bank updated.', 'success');
+                                } catch (memErr) {
+                                    console.warn("Failed to auto-refresh memories list:", memErr);
+                                }
                             }
                         }
                         _clearActiveAiTask(discussionId);
@@ -506,6 +514,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/trigger_tag`, formData);
             const task = response.data;
+            const tasksStore = useTasksStore();
             tasksStore.addTask(task);
             uiStore.addNotification(`Started ${tagType} regeneration task.`, 'info');
         } catch (error) {

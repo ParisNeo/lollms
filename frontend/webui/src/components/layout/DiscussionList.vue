@@ -195,7 +195,7 @@ onMounted(() => {
 watch(() => route.path, (path) => {
     if (path.startsWith('/flow-studio')) {
         activeTab.value = 'flows';
-    } else if (path.startsWith('/notebooks')) {
+    } else if (path.startsWith('/notebooks') || path.startsWith('/notebook-studio')) {
         activeTab.value = 'notebooks';
     } else if (path.startsWith('/datastores')) {
         activeTab.value = 'data';

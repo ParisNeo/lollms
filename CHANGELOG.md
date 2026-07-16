@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-07-16 13:35]
+
+- feat(bindings): improve TTI model alias management and update frontend assets
+
 ## [2026-07-16 10:56]
 
 - feat(llm): update openai generation and refresh frontend assets

@@ -94,20 +94,20 @@ async def get_lollms_tti_models(
     for binding in active_tti_bindings:
         try:
             models_from_binding = list_tti_binding_models(tti_binding_name=binding.name, tti_binding_config=binding.config)
-            
+
             raw_model_names = []
             if isinstance(models_from_binding, list):
                 for item in models_from_binding:
                     model_id = item if isinstance(item, str) else item.get("model_name")
                     if model_id: raw_model_names.append(model_id)
-            
+
             model_aliases = binding.model_aliases or {}
             if isinstance(model_aliases, str):
                 try:
                     model_aliases = json.loads(model_aliases)
                 except Exception:
                     model_aliases = {}
-            
+
             # Use new get_binding_desc from lollms_client
             try:
                 binding_desc = get_binding_desc(binding.name, "tti")
@@ -118,13 +118,21 @@ async def get_lollms_tti_models(
 
             for model_name in raw_model_names:
                 alias_data = model_aliases.get(model_name)
-                
+
                 if model_display_mode == 'aliased' and not alias_data:
                     continue
 
-                display_name = f"{binding.alias}/{model_name}"
-                if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                    display_name = alias_data.get('title', model_name)
+                display_name = model_name
+
+                if alias_data:
+                    if model_display_mode == 'aliased':
+                        display_name = alias_data.get('title', model_name)
+                    elif model_display_mode == 'mixed':
+                        title = alias_data.get('title', model_name)
+                        display_name = f"{title} ({model_name})"
+                else:
+                    if model_display_mode == 'aliased':
+                        continue
 
                 binding_params = {}
                 if binding_desc:
@@ -198,7 +206,7 @@ async def get_tts_models(
     all_models = []
     active_bindings = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).all()
     model_display_mode = settings.get("tts_model_display_mode", "mixed")
-    
+
     for binding in active_bindings:
         model_aliases = binding.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -208,7 +216,7 @@ async def get_tts_models(
                 model_aliases = {}
         try:
             models = list_tts_binding_models(tts_binding_name=binding.name, tts_binding_config=binding.config)
-            
+
             # Use new get_binding_desc from lollms_client
             try:
                 binding_desc = get_binding_desc(binding.name, "tts")
@@ -222,13 +230,20 @@ async def get_tts_models(
                     model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
                     if model_id:
                         alias_data = model_aliases.get(model_id)
-                        
+
                         if model_display_mode == 'aliased' and not alias_data:
                             continue
 
-                        display_name = f"{binding.alias}/{model_id}"
-                        if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                            display_name = alias_data.get('title', model_id)
+                        display_name = model_id
+                        if alias_data:
+                            if model_display_mode == 'aliased':
+                                display_name = alias_data.get('title', model_id)
+                            elif model_display_mode == 'mixed':
+                                title = alias_data.get('title', model_id)
+                                display_name = f"{title} ({model_id})"
+                        else:
+                            if model_display_mode == 'aliased':
+                                continue
 
                         binding_params = {}
                         if binding_desc:
@@ -247,7 +262,7 @@ async def get_tts_models(
             print(f"WARNING: Could not fetch TTS models from binding '{binding.alias}': {e}")
             trace_exception(e)
             continue
-            
+
     unique_models = {m["id"]: m for m in all_models}
     return sorted(list(unique_models.values()), key=lambda x: x['name'])
 
@@ -258,7 +273,7 @@ async def get_stt_models(
     all_models = []
     active_bindings = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).all()
     model_display_mode = settings.get("stt_model_display_mode", "mixed")
-    
+
     for binding in active_bindings:
         model_aliases = binding.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -268,7 +283,7 @@ async def get_stt_models(
                 model_aliases = {}
         try:
             models = list_stt_binding_models(stt_binding_name=binding.name, stt_binding_config=binding.config)
-            
+
             # Use new get_binding_desc from lollms_client
             try:
                 binding_desc = get_binding_desc(binding.name, "stt")
@@ -282,13 +297,20 @@ async def get_stt_models(
                     model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
                     if model_id:
                         alias_data = model_aliases.get(model_id)
-                        
+
                         if model_display_mode == 'aliased' and not alias_data:
                             continue
 
-                        display_name = f"{binding.alias}/{model_id}"
-                        if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                            display_name = alias_data.get('title', model_id)
+                        display_name = model_id
+                        if alias_data:
+                            if model_display_mode == 'aliased':
+                                display_name = alias_data.get('title', model_id)
+                            elif model_display_mode == 'mixed':
+                                title = alias_data.get('title', model_id)
+                                display_name = f"{title} ({model_id})"
+                        else:
+                            if model_display_mode == 'aliased':
+                                continue
 
                         binding_params = {}
                         if binding_desc:
@@ -307,6 +329,6 @@ async def get_stt_models(
             print(f"WARNING: Could not fetch STT models from binding '{binding.alias}': {e}")
             trace_exception(e)
             continue
-            
+
     unique_models = {m["id"]: m for m in all_models}
     return sorted(list(unique_models.values()), key=lambda x: x['name'])

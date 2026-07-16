@@ -649,7 +649,12 @@ async def update_tti_model_alias(binding_id: int, payload: TtiModelAliasUpdate, 
     binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTI Binding not found.")
     if binding.model_aliases is None: binding.model_aliases = {}
-    binding.model_aliases[payload.original_model_name] = payload.alias if isinstance(payload.alias,dict) else payload.alias.model_dump()
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
+        binding.model_aliases[payload.new_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
+    else:
+        binding.model_aliases[payload.original_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     db.commit()
     db.refresh(binding)
@@ -967,7 +972,12 @@ async def update_stt_model_alias(binding_id: int, payload: SttModelAliasUpdate, 
     binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="STT Binding not found.")
     if binding.model_aliases is None: binding.model_aliases = {}
-    binding.model_aliases[payload.original_model_name] = payload.alias
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
+        binding.model_aliases[payload.new_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
+    else:
+        binding.model_aliases[payload.original_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     db.commit()
     db.refresh(binding)
@@ -1126,7 +1136,12 @@ async def update_ttv_model_alias(binding_id: int, payload: TtvModelAliasUpdate, 
     binding = db.query(DBTTVBinding).filter(DBTTVBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTV Binding not found.")
     if binding.model_aliases is None: binding.model_aliases = {}
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
+        binding.model_aliases[payload.new_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
+    else:
+        binding.model_aliases[payload.original_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     db.commit()
     db.refresh(binding)
@@ -1285,7 +1300,12 @@ async def update_ttm_model_alias(binding_id: int, payload: TtmModelAliasUpdate, 
     binding = db.query(DBTTMBinding).filter(DBTTMBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTM Binding not found.")
     if binding.model_aliases is None: binding.model_aliases = {}
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
+        binding.model_aliases[payload.new_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
+    else:
+        binding.model_aliases[payload.original_model_name] = payload.alias if isinstance(payload.alias, dict) else payload.alias.model_dump()
     flag_modified(binding, "model_aliases")
     db.commit()
     db.refresh(binding)
@@ -1311,7 +1331,13 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
     if binding.model_aliases is None:
         binding.model_aliases = {}
 
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
+        binding.model_aliases[payload.new_model_name] = payload.alias.model_dump()
+    else:
+        binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+
     flag_modified(binding, "model_aliases")
 
     db.commit()

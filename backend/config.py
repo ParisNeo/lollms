@@ -181,9 +181,7 @@ APP_DB_URL = get_env_var("DATABASE_URL", f"sqlite:///{APP_DATA_DIR / 'app_main.d
 
 # Secret Key is now guaranteed to be secure by _ensure_secure_secret_key
 SECRET_KEY = get_env_var("SECRET_KEY", "")
-if SECRET_KEY:
-    ASCIIColors.cyan(f"INFO: SECRET_KEY loaded (Length: {len(SECRET_KEY)})")
-else:
+if not SECRET_KEY:
     ASCIIColors.error("CRITICAL: SECRET_KEY is empty after initialization!")
 
 APP_SETTINGS = {

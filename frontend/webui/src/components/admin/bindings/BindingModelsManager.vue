@@ -61,6 +61,7 @@ const getInitialFormState = () => ({
 });
 
 const form = ref(getInitialFormState());
+const associatedModel = ref('');
 
 const currentIconGenerationTask = computed(() => {
     if (!iconGenerationTaskId.value) return null;
@@ -91,15 +92,54 @@ watch(currentIconGenerationTask, (newTask) => {
     }
 });
 
+const configuredAliases = computed(() => {
+    const aliases = props.binding?.model_aliases || {};
+    return Object.entries(aliases).map(([model_name, alias_data]) => {
+        return {
+            original_model_name: model_name,
+            alias: alias_data
+        };
+    }).sort((a, b) => (a.alias.title || '').localeCompare(b.alias.title || ''));
+});
 
-const filteredModels = computed(() => {
-    if (!searchTerm.value) return models.value;
+const filteredConfiguredAliases = computed(() => {
+    if (!searchTerm.value) return configuredAliases.value;
     const lowerSearch = searchTerm.value.toLowerCase();
-    return models.value.filter(m => 
-        m.original_model_name.toLowerCase().includes(lowerSearch) || 
-        m.alias?.title?.toLowerCase().includes(lowerSearch)
+    return configuredAliases.value.filter(item => 
+        item.original_model_name.toLowerCase().includes(lowerSearch) || 
+        (item.alias?.title || '').toLowerCase().includes(lowerSearch)
     );
 });
+
+const filteredModels = computed(() => {
+    // Show only models that do NOT have aliases configured, to separate them
+    const aliasedKeys = new Set(configuredAliases.value.map(a => a.original_model_name));
+    const unaliased = models.value.filter(m => !aliasedKeys.has(m.original_model_name));
+
+    if (!searchTerm.value) return unaliased;
+    const lowerSearch = searchTerm.value.toLowerCase();
+    return unaliased.filter(m => 
+        m.original_model_name.toLowerCase().includes(lowerSearch)
+    );
+});
+
+const filteredModelParameters = computed(() => {
+    return modelParameters.value.filter(param => param.name !== 'model_name' && param.name !== 'model');
+});
+
+function selectModelByName(modelName) {
+    const model = models.value.find(m => m.original_model_name === modelName);
+    if (model) {
+        selectModel(model);
+    } else {
+        // Fallback synthetic model in case catalog is rebuilding
+        const synthesizedModel = {
+            original_model_name: modelName,
+            alias: props.binding.model_aliases[modelName]
+        };
+        selectModel(synthesizedModel);
+    }
+}
 
 const globalDefaultModel = computed(() => {
     const setting = globalSettings.value.find(s => s.key === 'default_lollms_model_name');
@@ -133,6 +173,7 @@ async function fetchModels() {
 
 function selectModel(model) {
     selectedModel.value = model;
+    associatedModel.value = model.original_model_name;
     const newForm = { ...getInitialFormState(), ...(model.alias || {}) };
     if (props.bindingType === 'llm' && !newForm.name) {
         newForm.name = newForm.title || model.original_model_name;
@@ -208,7 +249,11 @@ async function saveAlias() {
                     payload[param.name] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
                 }
             });
-            aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
+            aliasPayload = { 
+                original_model_name: selectedModel.value.original_model_name, 
+                new_model_name: associatedModel.value, 
+                alias: payload 
+            };
             await adminStore.saveModelAlias(props.binding.id, aliasPayload);
         } else {
             modelParameters.value.forEach(param => {
@@ -217,8 +262,12 @@ async function saveAlias() {
                     payload[param.name] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
                 }
             });
-            aliasPayload = { original_model_name: selectedModel.value.original_model_name, alias: payload };
-            
+            aliasPayload = { 
+                original_model_name: selectedModel.value.original_model_name, 
+                new_model_name: associatedModel.value, 
+                alias: payload 
+            };
+
             if (props.bindingType === 'tti') await adminStore.saveTtiModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'tts') await adminStore.saveTtsModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'stt') await adminStore.saveSttModelAlias(props.binding.id, aliasPayload);
@@ -227,7 +276,8 @@ async function saveAlias() {
             else if (props.bindingType === 'rag') await adminStore.saveRagModelAlias(props.binding.id, aliasPayload);
         }
         await fetchModels();
-        const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
+        const targetModelName = associatedModel.value;
+        const updatedModel = models.value.find(m => m.original_model_name === targetModelName);
         if (updatedModel) selectModel(updatedModel);
         uiStore.addNotification('Alias saved.', 'success');
     } finally {
@@ -348,24 +398,56 @@ watch(() => props.binding, (newBinding) => {
                          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                      </div>
                 </div>
-                <div class="overflow-y-auto grow">
-                    <ul v-if="filteredModels.length > 0" class="space-y-1">
-                        <li v-for="model in filteredModels" :key="model.original_model_name">
-                            <button @click="selectModel(model)"
-                                    class="w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between transition-colors"
-                                    :class="{'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-100': selectedModel && selectedModel.original_model_name === model.original_model_name}">
-                                <div class="grow min-w-0">
-                                    <p class="font-medium text-sm truncate">{{ model.alias?.title || model.original_model_name }}</p>
-                                    <p v-if="model.alias" class="text-xs opacity-70 truncate">{{ model.original_model_name }}</p>
-                                </div>
-                                <div class="shrink-0 flex items-center gap-1">
-                                    <span v-if="isBindingDefault(model.original_model_name)" class="w-2 h-2 rounded-full bg-blue-500" title="Binding Default"></span>
-                                    <span v-if="isGlobalDefault(model.original_model_name)" class="w-2 h-2 rounded-full bg-green-500" title="Global Default"></span>
-                                </div>
-                            </button>
-                        </li>
-                    </ul>
-                     <div v-else class="text-center text-sm text-gray-500 py-4">No models match your search.</div>
+                <div class="overflow-y-auto grow space-y-5 custom-scrollbar">
+
+                    <!-- Configured Aliases Section -->
+                    <div v-if="configuredAliases.length > 0" class="space-y-2">
+                        <h4 class="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest px-2">Active Aliases ({{ configuredAliases.length }})</h4>
+                        <ul class="space-y-1">
+                            <li v-for="item in filteredConfiguredAliases" :key="item.original_model_name">
+                                <button @click="selectModelByName(item.original_model_name)"
+                                        class="w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-600 shadow-sm"
+                                        :class="{'bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-100 border-blue-200 dark:border-blue-800': selectedModel && selectedModel.original_model_name === item.original_model_name}">
+                                    <div class="grow min-w-0 flex items-center gap-2">
+                                        <div class="w-6 h-6 rounded bg-blue-100/50 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+                                            <img v-if="item.alias?.icon" :src="item.alias.icon" class="w-full h-full object-cover rounded" />
+                                            <IconCpuChip v-else class="w-4 h-4 text-blue-500" />
+                                        </div>
+                                        <div class="min-w-0">
+                                            <p class="font-bold text-xs truncate text-gray-800 dark:text-gray-200">{{ item.alias?.title || item.original_model_name }}</p>
+                                            <p class="text-[9px] opacity-60 truncate font-mono text-gray-500">Bound: {{ item.original_model_name }}</p>
+                                        </div>
+                                    </div>
+                                    <div class="shrink-0 flex items-center gap-1 pl-2">
+                                        <span v-if="isBindingDefault(item.original_model_name)" class="w-2 h-2 rounded-full bg-blue-500" title="Binding Default"></span>
+                                        <span v-if="isGlobalDefault(item.original_model_name)" class="w-2 h-2 rounded-full bg-green-500" title="Global Default"></span>
+                                    </div>
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+
+                    <!-- Installed Models Section -->
+                    <div class="space-y-2">
+                        <h4 class="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest px-2">Installed Models ({{ models.length }})</h4>
+                        <ul v-if="filteredModels.length > 0" class="space-y-1">
+                            <li v-for="model in filteredModels" :key="model.original_model_name">
+                                <button @click="selectModel(model)"
+                                        class="w-full text-left p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-between transition-colors"
+                                        :class="{'bg-blue-100 dark:bg-blue-900/50 text-blue-800 dark:text-blue-100': selectedModel && selectedModel.original_model_name === model.original_model_name}">
+                                    <div class="grow min-w-0">
+                                        <p class="font-medium text-sm truncate">{{ model.original_model_name }}</p>
+                                    </div>
+                                    <div class="shrink-0 flex items-center gap-1">
+                                        <span v-if="isBindingDefault(model.original_model_name)" class="w-2 h-2 rounded-full bg-blue-500" title="Binding Default"></span>
+                                        <span v-if="isGlobalDefault(model.original_model_name)" class="w-2 h-2 rounded-full bg-green-500" title="Global Default"></span>
+                                    </div>
+                                </button>
+                            </li>
+                        </ul>
+                        <div v-else class="text-center text-sm text-gray-500 py-4">No models match your search.</div>
+                    </div>
+
                 </div>
             </div>
 
@@ -413,6 +495,14 @@ watch(() => props.binding, (newBinding) => {
                                     <label for="alias-description" class="label">Description</label>
                                     <input id="alias-description" v-model="form.description" type="text" class="input-field" placeholder="Short description">
                                 </div>
+                                <div>
+                                    <label for="associated-model" class="label">Associated Model (Binding)</label>
+                                    <select id="associated-model" v-model="associatedModel" class="input-field select-field">
+                                        <option v-for="m in models" :key="m.original_model_name" :value="m.original_model_name">
+                                            {{ m.original_model_name }}
+                                        </option>
+                                    </select>
+                                </div>
                             </div>
                         </div>
 
@@ -440,10 +530,10 @@ watch(() => props.binding, (newBinding) => {
                         </div>
                         
                         <!-- Dynamic Params for ALL Types -->
-                        <div v-if="modelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
+                        <div v-if="filteredModelParameters.length > 0" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
                              <h4 class="font-medium mb-3 text-sm">Model Parameters</h4>
                              <div class="grid grid-cols-2 gap-4">
-                                <div v-for="param in modelParameters" :key="param.name">
+                                <div v-for="param in filteredModelParameters" :key="param.name">
                                     <label :for="`p-${param.name}`" class="label text-xs">{{ param.title || param.name }}</label>
                                      <input 
                                         v-if="['str', 'int', 'float'].includes(param.type)"

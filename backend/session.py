@@ -553,7 +553,9 @@ def build_lollms_client_from_params(
         # Determine the model name from session or DB
         user_model_full = session.get("lollms_model_name") or user_db.lollms_model_name
 
-        if load_llm:
+        # Always resolve the LLM binding configurations to allow model listings 
+        # and metadata queries even when load_llm is set to False.
+        if True:
             # --- FORCE MODEL ENFORCEMENT ---
             force_model_mode = settings.get("force_model_mode", "disabled")
             forced_model = settings.get("force_model_name")
@@ -603,10 +605,7 @@ def build_lollms_client_from_params(
                     "temperature": user_db.llm_temperature,
                     "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
                     "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
-                    "put_thoughts_in_context": user_db.put_thoughts_in_context,
-                    "reasoning_activation": user_db.reasoning_activation,
-                    "reasoning_effort": user_db.reasoning_effort,
-                    "reasoning_summary": user_db.reasoning_summary
+                    "put_thoughts_in_context": user_db.put_thoughts_in_context
                 }
                 user_session_params = session.get("llm_params", {})
                 
@@ -836,14 +835,17 @@ def build_lollms_client_from_params(
                         callback("⚡ Engine cached - Instant access enabled.", 28, {}) # MSG_TYPE_INIT_PROGRESS = 28
                     return _global_client_registry[registry_key]
 
-                ASCIIColors.info(f"Worker {os.getpid()}: Building Engine [Hash: {registry_key[:8]}]")
-                
+                if load_llm:
+                    ASCIIColors.info(f"Worker {os.getpid()}: Building Engine [Hash: {registry_key[:8]}]")
+
                 try:
                     # Pass the callback directly to LollmsClient
-                    ASCIIColors.info(f"[Registry] Constructing LollmsClient for {username}...")
+                    if load_llm:
+                        ASCIIColors.info(f"[Registry] Constructing LollmsClient for {username}...")
                     lc = LollmsClient(**registry_payload, callback=callback)
                     _global_client_registry[registry_key] = lc
-                    ASCIIColors.success(f"[Registry] Engine built successfully [Hash: {registry_key[:8]}]")
+                    if load_llm:
+                        ASCIIColors.success(f"[Registry] Engine built successfully [Hash: {registry_key[:8]}]")
                     return lc
                 except (ValueError, Exception) as engine_err:
                     # [CRITICAL FIX] Catch binding initialization errors (like missing API keys)

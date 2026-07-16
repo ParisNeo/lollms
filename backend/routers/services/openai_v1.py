@@ -682,7 +682,6 @@ async def list_models(
 
         for binding in active_bindings:
             try:
-                ASCIIColors.rich_print(f">[bold green]{binding.alias}[\bold green]")
                 # CRITICAL: We pass load_llm=False here. 
                 # This queries model paths on disk or lightweight remote API lists without triggering heavy load allocations.
                 lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=False)
@@ -714,7 +713,7 @@ async def list_models(
                         elif model_display_mode == 'mixed':
                             if alias_data and alias_data.get('title'):
                                 id_to_send = alias_data.get('title')
-                                name_to_send = alias_data.get('title')
+                                name_to_send = f"{alias_data.get('title')} ({model_id})"
 
                         all_models.append({
                             "id": id_to_send,
@@ -730,15 +729,12 @@ async def list_models(
 
     all_models = await loop.run_in_executor(executor, _fetch_models)
 
-    if not all_models and not force_refresh:
-         raise HTTPException(status_code=404, detail="No models found from any active bindings.")
-    
     unique_models = {m["id"]: m for m in all_models}
     final_list = sorted(list(unique_models.values()), key=lambda x: x['id'])
-    
-    # Update Cache
-    await loop.run_in_executor(executor, lambda: set_system_cache(db, "cache_available_models", final_list))
-    ASCIIColors.info(f"------------ DONE (Cache Updated) --------------")
+
+    # Update Cache only if we actually found models to prevent caching empty lists
+    if final_list:
+        await loop.run_in_executor(executor, lambda: set_system_cache(db, "cache_available_models", final_list))
 
     return {"object": "list", "data": final_list}
 
