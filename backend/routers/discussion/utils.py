@@ -75,12 +75,8 @@ def build_utils_router(router: APIRouter):
                 f.write(request.code)
 
             try:
-                # Configure the environment variables to restrict file access
-                env = dict(os.environ)
-                env["openin_any"] = "p"
-                env["openout_any"] = "p"
-                env["shell_escape"] = "f"
-
+                # Enforce paranoid mode (no file reads/writes outside temp, no shell escape)
+                # We use -cnf to override texmf.cnf settings securely across all OS environments.
                 process = subprocess.run(
                     [
                         latex_executable, 
@@ -88,12 +84,12 @@ def build_utils_router(router: APIRouter):
                         "-no-shell-escape", 
                         "-output-directory", 
                         str(temp_dir), 
+                        "-cnf", "openin_any=p:openout_any=p:shell_escape=p",
                         str(tex_file_path)
                     ],
                     capture_output=True, 
                     text=True, 
                     timeout=30, # 30 second timeout
-                    env=env
                 )
                 
                 pdf_path = temp_dir / "document.pdf"
