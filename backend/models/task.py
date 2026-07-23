@@ -1,7 +1,6 @@
-# backend/models/task.py
 import datetime
 from typing import List, Optional, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from backend.db.base import TaskStatus
 
 class TaskLogMessage(BaseModel):
@@ -10,6 +9,7 @@ class TaskLogMessage(BaseModel):
     level: str
 
 class TaskInfo(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     name: str
     description: Optional[str] = None
@@ -25,6 +25,3 @@ class TaskInfo(BaseModel):
     file_name: Optional[str] = None
     total_files: Optional[int] = None
     owner_username: Optional[str] = None
-
-    class Config:
-        from_attributes = True
