@@ -1,15 +1,14 @@
 import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, constr, ConfigDict
 
 class DirectMessageBase(BaseModel):
     content: constr(min_length=1)
 
 class DirectMessageCreate(DirectMessageBase):
+    model_config = ConfigDict(populate_by_name=True)
     receiver_user_id: Optional[int] = Field(None, alias='receiverUserId')
     conversation_id: Optional[int] = Field(None, alias='conversationId')
-    class Config:
-        populate_by_name = True
 
 class CreateGroupRequest(BaseModel):
     name: str = Field(..., min_length=1)
@@ -19,11 +18,10 @@ class AddMemberRequest(BaseModel):
     user_id: int
 
 class ConversationMemberPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     user_id: int
     username: str
     icon: Optional[str] = None
-    class Config:
-        from_attributes = True
 
 class ConversationPublic(BaseModel):
     id: int
@@ -32,14 +30,13 @@ class ConversationPublic(BaseModel):
     last_message: Optional[str] = None
     last_message_at: Optional[datetime.datetime] = None
     unread_count: int = 0
-    # For 1-on-1
     partner_user_id: Optional[int] = None
     partner_username: Optional[str] = None
     partner_icon: Optional[str] = None
-    # For groups
     members: List[ConversationMemberPublic] = []
 
 class DirectMessagePublic(DirectMessageBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     sender_id: int
     receiver_id: Optional[int] = None
@@ -49,6 +46,3 @@ class DirectMessagePublic(DirectMessageBase):
     sender_username: str
     receiver_username: Optional[str] = None
     image_references: Optional[List[str]] = None
-
-    class Config:
-        from_attributes = True
