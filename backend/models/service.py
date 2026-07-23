@@ -1,7 +1,7 @@
 # backend/models/service.py
 import datetime
 from typing import List, Optional, Any, Dict
-from pydantic import BaseModel, Field, constr, field_validator, model_validator
+from pydantic import BaseModel, Field, constr, field_validator, model_validator, ConfigDict
 
 # --- LLM Binding Models ---
 class LLMBindingBase(BaseModel):
@@ -22,13 +22,11 @@ class LLMBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class LLMBindingPublicAdmin(LLMBindingBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 # --- TTI Binding Models ---
 class TTIBindingBase(BaseModel):
@@ -49,13 +47,11 @@ class TTIBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class TTIBindingPublicAdmin(TTIBindingBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 # --- TTS Binding Models ---
 class TTSBindingBase(BaseModel):
@@ -76,13 +72,11 @@ class TTSBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class TTSBindingPublicAdmin(TTSBindingBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 # --- STT Binding Models ---
 class STTBindingBase(BaseModel):
@@ -103,13 +97,11 @@ class STTBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class STTBindingPublicAdmin(STTBindingBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 # --- TTV Binding Models (New) ---
 class TTVBindingBase(BaseModel):
@@ -130,13 +122,11 @@ class TTVBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class TTVBindingPublicAdmin(TTVBindingBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 # --- TTM Binding Models (New) ---
 class TTMBindingBase(BaseModel):
@@ -157,13 +147,11 @@ class TTMBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class TTMBindingPublicAdmin(TTMBindingBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 # --- Model Alias Models ---
 class ModelAlias(BaseModel):
@@ -257,12 +245,11 @@ class MCPUpdate(BaseModel):
     sso_user_infos_to_share: Optional[List[str]] = None
 
 class MCPPublic(MCPBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     owner_username: Optional[str|None] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    class Config:
-        from_attributes = True
 
 class AppZooRepositoryCreate(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -277,6 +264,7 @@ class AppZooRepositoryCreate(BaseModel):
         return values
 
 class AppZooRepositoryPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     url: str
@@ -284,8 +272,6 @@ class AppZooRepositoryPublic(BaseModel):
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     is_deletable: bool = True
-    class Config:
-        from_attributes = True
 
 class MCPZooRepositoryCreate(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -300,6 +286,7 @@ class MCPZooRepositoryCreate(BaseModel):
         return values
 
 class MCPZooRepositoryPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     url: str
@@ -307,8 +294,6 @@ class MCPZooRepositoryPublic(BaseModel):
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     is_deletable: bool = True
-    class Config:
-        from_attributes = True
 
 class PromptZooRepositoryCreate(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -323,6 +308,7 @@ class PromptZooRepositoryCreate(BaseModel):
         return values
 
 class PromptZooRepositoryPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     url: str
@@ -330,8 +316,6 @@ class PromptZooRepositoryPublic(BaseModel):
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     is_deletable: bool = True
-    class Config:
-        from_attributes = True
 
 class PersonalityZooRepositoryCreate(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -346,6 +330,7 @@ class PersonalityZooRepositoryCreate(BaseModel):
         return values
 
 class PersonalityZooRepositoryPublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     name: str
     url: str
@@ -353,10 +338,9 @@ class PersonalityZooRepositoryPublic(BaseModel):
     last_pulled_at: Optional[datetime.datetime] = None
     created_at: datetime.datetime
     is_deletable: bool = True
-    class Config:
-        from_attributes = True
         
 class ZooAppInfo(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     id: Optional[str] = None
     name: str
     repository: str
@@ -391,9 +375,6 @@ class ZooAppInfo(BaseModel):
         if v is not None:
             return str(v)
         return v
-    
-    class Config:
-        populate_by_name = True
 
 class ZooAppInfoResponse(BaseModel):
     items: List[ZooAppInfo]
@@ -402,6 +383,7 @@ class ZooAppInfoResponse(BaseModel):
     pages: int
 
 class ZooMCPInfo(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     id: Optional[str] = None
     name: str
     repository: str
@@ -435,9 +417,6 @@ class ZooMCPInfo(BaseModel):
         if v is not None:
             return str(v)
         return v
-    
-    class Config:
-        populate_by_name = True
 
 class ZooMCPInfoResponse(BaseModel):
     items: List[ZooMCPInfo]
@@ -446,6 +425,7 @@ class ZooMCPInfoResponse(BaseModel):
     pages: int
 
 class ZooPromptInfo(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
     id: Optional[str] = None
     name: str
     repository: str
@@ -470,9 +450,6 @@ class ZooPromptInfo(BaseModel):
         if v is not None:
             return str(v)
         return v
-    
-    class Config:
-        populate_by_name = True
 
 class ZooPromptInfoResponse(BaseModel):
     items: List[ZooPromptInfo]
@@ -549,6 +526,7 @@ class AppUpdate(BaseModel):
     allow_openai_api_access: Optional[bool] = None
 
 class AppPublic(AppBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     owner_username: Optional[str] = None
     created_at: datetime.datetime
@@ -561,9 +539,6 @@ class AppPublic(AppBase):
     has_config_schema: bool = False
     has_dot_env_config: bool = False
     item_type: Optional[str] = 'app'
-
-    class Config:
-        from_attributes = True
 
 class ToolInfo(BaseModel):
     name: str
