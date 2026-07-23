@@ -1,10 +1,9 @@
 # backend/models/discussion.py
 import datetime
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field, constr, field_validator
+from pydantic import BaseModel, Field, constr, field_validator, ConfigDict
 from .shared import PaginatedResponse
 
-# --- NEW: Discussion Group Models ---
 class DiscussionGroupBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
 
@@ -15,26 +14,21 @@ class DiscussionGroupUpdate(DiscussionGroupBase):
     parent_id: Optional[str] = None
 
 class DiscussionGroupPublic(DiscussionGroupBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     parent_id: Optional[str] = None
     created_at: datetime.datetime
     updated_at: datetime.datetime
-
-    class Config:
-        from_attributes = True
-
-# --- END NEW ---
 
 class ArtefactInfo(BaseModel):
     title: str
     version: int
     is_loaded: bool = False
     author: Optional[str] = None
-    artefact_type: str = "document" # note, skill, code, document
+    artefact_type: str = "document"
     created_at: str
     updated_at: str
     discussion_id: Optional[str] = None
-    # Heavily modified: ensuring these are never required for list validation
     content: Optional[str] = Field(default=None, description="Only populated on direct fetch")
     images: Optional[List[str]] = Field(default=None, description="Only populated on direct fetch")
 
@@ -66,12 +60,11 @@ class DiscussionInfo(BaseModel):
     data_zone: Optional[str] = None
     discussion_images: List[dict|str] = Field(default_factory=list)
     active_discussion_images: List[bool] = Field(default_factory=list)
-    # New fields for shared discussions
     owner_username: Optional[str] = None
     permission_level: Optional[str] = None
     share_id: Optional[int] = None
-    group_id: Optional[str] = None # NEW
-    has_artefacts: Optional[bool] = False # NEW
+    group_id: Optional[str] = None
+    has_artefacts: Optional[bool] = False
 
 class DiscussionCreate(BaseModel):
     group_id: Optional[str] = None
@@ -116,7 +109,6 @@ class ContextStatusResponse(BaseModel):
     current_tokens: int
     max_tokens: Optional[int]
     zones: Dict[str, ContextZoneDetail]
-
 
 class MessageOutput(BaseModel):
     id: str
@@ -239,7 +231,6 @@ class ArtefactUpdate(BaseModel):
     version: Optional[int] = None
     update_in_place: bool = False
     artefact_type: Optional[str] = None
-    artefact_type: Optional[str] = None
 
 class MessageExportPayload(BaseModel):
     format: str
@@ -253,6 +244,5 @@ class ArtefactAndDataZoneUpdateResponse(BaseModel):
     artefacts: List[ArtefactInfo]
     discussion_images: List[str]
     active_discussion_images: List[bool]
-    # Made optional to support Pure Artefact architecture
     discussion_data_zone: Optional[str] = None
     discussion_data_zone_tokens: Optional[int] = None
