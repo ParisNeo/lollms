@@ -75,8 +75,6 @@ def build_utils_router(router: APIRouter):
                 f.write(request.code)
 
             try:
-                # Enforce paranoid mode (no file reads/writes outside temp, no shell escape)
-                # We use -cnf to override texmf.cnf settings securely across all OS environments.
                 process = subprocess.run(
                     [
                         latex_executable, 
@@ -89,7 +87,7 @@ def build_utils_router(router: APIRouter):
                     ],
                     capture_output=True, 
                     text=True, 
-                    timeout=30, # 30 second timeout
+                    timeout=30,
                 )
                 
                 pdf_path = temp_dir / "document.pdf"
@@ -277,6 +275,8 @@ def build_utils_router(router: APIRouter):
         headers = {'Content-Disposition': f'attachment; filename="{zip_filename}"'}
         return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
 
+    return router
+
 
     @router.post("/export-message-code", response_class=StreamingResponse)
     async def export_message_code(
@@ -354,3 +354,5 @@ def build_utils_router(router: APIRouter):
         
         headers = {'Content-Disposition': f'attachment; filename="{zip_filename}"'}
         return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
+
+    return router
