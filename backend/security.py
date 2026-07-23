@@ -23,6 +23,8 @@ from passlib.context import CryptContext
 from backend.config import SECRET_KEY, ALGORITHM
 import json
 
+import ast
+
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 api_key_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -51,12 +53,13 @@ def sanitize_content(content: str) -> str:
     """
     if not content:
         return content
+    
+    # Remove script blocks entirely including their content
+    content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
+    
     # bleach.clean will strip or escape tags not in ALLOWED_TAGS
     # and strip attributes not in ALLOWED_ATTRS.
     return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
-
-import ast
-import json
 
 def verify_custom_node_code(code: str, lollms_client: Optional[Any] = None) -> Tuple[bool, str]:
     """
@@ -102,7 +105,7 @@ def verify_custom_node_code(code: str, lollms_client: Optional[Any] = None) -> T
         # Check Attribute Access (prevent dunder escapes like __globals__, __subclasses__)
         elif isinstance(node, ast.Attribute):
             if node.attr.startswith('__') and node.attr.endswith('__'):
-                return False, f"Security Violation: Dunder attribute access is forbidden."
+                return False, f"Access to dangerous attribute '{node.attr}' is forbidden"            
 
         # Check Function Calls (blocked builtins)
         elif isinstance(node, ast.Call):
