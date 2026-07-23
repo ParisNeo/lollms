@@ -1,6 +1,6 @@
 import datetime
 from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from backend.db.base import PostVisibility
 from .user import AuthorPublic
 
@@ -23,13 +23,13 @@ class CommentCreate(CommentBase):
     content: str = Field(..., min_length=1, max_length=10000)
 
 class CommentPublic(CommentBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     author: AuthorPublic
     created_at: datetime.datetime
-    class Config:
-        from_attributes = True
 
 class PostPublic(PostBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     author: AuthorPublic
     media: Optional[List[Dict[str, Any]]] = None
@@ -37,9 +37,5 @@ class PostPublic(PostBase):
     created_at: datetime.datetime
     updated_at: datetime.datetime
     comments: List[CommentPublic] = []
-    
     like_count: int = 0
     has_liked: bool = False
-    
-    class Config:
-        from_attributes = True
