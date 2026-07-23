@@ -1,5 +1,5 @@
-# [UPDATE] backend/models/datastore.py
-from pydantic import BaseModel, Field
+# backend/models/datastore.py
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, Dict, Any
 from datetime import datetime
 
@@ -17,6 +17,7 @@ class DataStoreEdit(DataStoreBase):
     pass
 
 class DataStorePublic(DataStoreBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     owner_username: str
     permission_level: str
@@ -26,9 +27,6 @@ class DataStorePublic(DataStoreBase):
     chunk_overlap: int
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 class DataStoreShareRequest(BaseModel):
     target_username: str
