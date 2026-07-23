@@ -1,6 +1,6 @@
 import datetime
 from typing import Optional, List
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, constr, ConfigDict
 
 class PersonalityBase(BaseModel):
     name: constr(min_length=1, max_length=100)
@@ -12,30 +12,27 @@ class PersonalityBase(BaseModel):
     script_code: Optional[str] = None
     icon_base64: Optional[str] = None
     tools: Optional[List[str]] = Field(default_factory=list)
-    required_context_options: Optional[List[str]] = Field(default_factory=list) # NEW
+    required_context_options: Optional[List[str]] = Field(default_factory=list)
     data_source_type: Optional[str] = "none"
     data_source: Optional[str] = None
 
-
 class PersonalityCreate(PersonalityBase):
     is_public: Optional[bool] = False
-    owner_type: Optional[str] = 'user' # For admins to specify 'system' or 'user'
+    owner_type: Optional[str] = 'user'
 
 class PersonalityUpdate(PersonalityBase):
     name: Optional[constr(min_length=1, max_length=100)] = None
     prompt_text: Optional[str] = None
     is_public: Optional[bool] = None
-    # Explicitly redeclare icon_base64 to ensure it is picked up by Pydantic's exclude_unset mechanism correctly
     icon_base64: Optional[str] = None
 
 class PersonalityPublic(PersonalityBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     created_at: datetime.datetime
     updated_at: datetime.datetime
     is_public: bool
     owner_username: Optional[str] = None
-    class Config:
-        from_attributes = True
 
 class PersonalitySendRequest(BaseModel):
     target_username: constr(min_length=3, max_length=50)
