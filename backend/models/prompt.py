@@ -1,5 +1,5 @@
 # backend/models/prompt.py
-from pydantic import BaseModel, constr
+from pydantic import BaseModel, constr, ConfigDict
 from typing import Optional, List
 
 class PromptBase(BaseModel):
@@ -26,12 +26,10 @@ class PromptUpdate(BaseModel):
     version: Optional[str] = None
 
 class PromptPublic(PromptBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     update_available: bool = False
     repo_version: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 class PromptShareRequest(BaseModel):
     prompt_content: str
