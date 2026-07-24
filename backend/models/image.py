@@ -1,5 +1,4 @@
-# backend/models/image.py
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Dict, Any
 import datetime
 
@@ -13,15 +12,14 @@ class ImageAlbumUpdate(ImageAlbumBase):
     pass
 
 class ImageAlbumPublic(ImageAlbumBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     owner_user_id: int
     created_at: datetime.datetime
     updated_at: datetime.datetime
-    
-    class Config:
-        from_attributes = True
 
 class UserImagePublic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     filename: str
     prompt: Optional[str] = None
@@ -33,10 +31,7 @@ class UserImagePublic(BaseModel):
     discussion_id: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
-    album_id: Optional[str] = None  # New field
-
-    class Config:
-        from_attributes = True
+    album_id: Optional[str] = None
 
 class ImageGenerationRequest(BaseModel):
     prompt: str
