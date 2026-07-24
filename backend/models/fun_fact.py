@@ -1,8 +1,6 @@
-# backend/models/fun_fact.py
-from pydantic import BaseModel, Field, constr
+from pydantic import BaseModel, Field, constr, ConfigDict
 from typing import Optional, List
 
-# --- Welcome View Models ---
 class WelcomeInfo(BaseModel):
     welcome_text: Optional[str] = None
     welcome_slogan: Optional[str] = None
@@ -19,8 +17,6 @@ class WelcomeInfo(BaseModel):
     export_to_xlsx_enabled: bool = False
     export_to_pptx_enabled: bool = False
 
-
-# --- Fun Fact Management Models (For Admin) ---
 class FunFactCategoryBase(BaseModel):
     name: constr(min_length=1, max_length=100)
     is_active: bool = True
@@ -35,9 +31,8 @@ class FunFactCategoryUpdate(BaseModel):
     color: Optional[str] = Field(None, pattern=r"^#[0-9a-fA-F]{6}$")
 
 class FunFactCategoryPublic(FunFactCategoryBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
-    class Config:
-        from_attributes = True
 
 class FunFactBase(BaseModel):
     content: constr(min_length=1)
@@ -51,12 +46,10 @@ class FunFactUpdate(BaseModel):
     category_id: Optional[int] = None
 
 class FunFactPublic(FunFactBase):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     category: FunFactCategoryPublic
-    class Config:
-        from_attributes = True
 
-# For Bulk Import/Export
 class FunFactExport(BaseModel):
     category: str
     content: str
@@ -64,7 +57,6 @@ class FunFactExport(BaseModel):
 class FunFactsImportRequest(BaseModel):
     fun_facts: List[FunFactExport]
 
-# NEW: For single category Import/Export
 class FunFactCategoryExport(FunFactCategoryBase):
     facts: List[str]
 
