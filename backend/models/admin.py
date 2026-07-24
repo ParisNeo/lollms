@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, ConfigDict
 import datetime
 
 class ForceGlobalConfigPayload(BaseModel):
@@ -35,11 +35,9 @@ class RAGBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class RAGBindingPublicAdmin(RAGBindingCreate):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 class LLMBindingCreate(BaseModel):
     alias: str
@@ -56,11 +54,9 @@ class LLMBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class LLMBindingPublicAdmin(LLMBindingCreate):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 class TTIBindingCreate(BaseModel):
     alias: str
@@ -77,11 +73,9 @@ class TTIBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class TTIBindingPublicAdmin(TTIBindingCreate):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 class TTSBindingCreate(BaseModel):
     alias: str
@@ -98,11 +92,9 @@ class TTSBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class TTSBindingPublicAdmin(TTSBindingCreate):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     model_aliases: Optional[Dict[str, Any]] = None
-
-    class Config:
-        from_attributes = True
 
 class STTBindingCreate(BaseModel):
     alias: str
@@ -119,13 +111,12 @@ class STTBindingUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class STTBindingPublicAdmin(STTBindingCreate):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     model_aliases: Optional[Dict[str, Any]] = None
 
-    class Config:
-        from_attributes = True
-
 class ModelAlias(BaseModel):
+    model_config = ConfigDict(extra="allow")
     title: Optional[str] = None
     description: Optional[str] = None
     has_vision: bool = False
@@ -138,49 +129,37 @@ class ModelAlias(BaseModel):
     repeat_penalty: Optional[float] = None
     repeat_last_n: Optional[int] = None
     icon: Optional[str] = None
-    # NEW REASONING FIELDS
     reasoning_activation: Optional[bool] = False
-    reasoning_effort: Optional[str] = None # low, medium, high
+    reasoning_effort: Optional[str] = None
     reasoning_summary: Optional[bool] = False
 
-    class Config:
-        extra = "allow"
-
 class TtiModelAlias(BaseModel):
+    model_config = ConfigDict(extra="allow")
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
-    
-    class Config:
-        extra = "allow"
 
 class TtsModelAlias(BaseModel):
+    model_config = ConfigDict(extra="allow")
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
-
-    class Config:
-        extra = "allow"
 
 class SttModelAlias(BaseModel):
+    model_config = ConfigDict(extra="allow")
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
-
-    class Config:
-        extra = "allow"
     
 class RagModelAlias(BaseModel):
+    model_config = ConfigDict(extra="allow")
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
-
-    class Config:
-        extra = "allow"
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str
@@ -233,6 +212,7 @@ class GlobalGenerationStats(BaseModel):
     variance_per_weekday: Dict[str, float]
 
 class UserForAdminPanel(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
     id: int
     username: str
     email: Optional[EmailStr] = None
@@ -240,7 +220,7 @@ class UserForAdminPanel(BaseModel):
     is_admin: bool = False
     is_moderator: bool = False
     is_active: bool = True
-    status: str = "active" # NEW
+    status: str = "active"
     created_at: datetime.datetime
     last_activity_at: Optional[datetime.datetime] = None
     
@@ -250,15 +230,12 @@ class UserForAdminPanel(BaseModel):
     task_count: int = 0
     generation_count: int = 0
 
-    class Config:
-        from_attributes = True
-
 class RequirementInfo(BaseModel):
     name: str
     required_version: Optional[str]
     installed_version: Optional[str]
-    status: str # 'ok', 'newer', 'older', 'missing'
+    status: str
 
 class InstallReqPayload(BaseModel):
     name: str
-    version: Optional[str] = None # If None, install latest
+    version: Optional[str] = None
