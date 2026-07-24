@@ -626,6 +626,23 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
+            from urllib.parse import urlparse
+            from backend.routers.files import _validate_url
+
+            url = request.url.strip()
+            parsed_url = urlparse(url)
+            hostname = parsed_url.hostname
+
+            if not hostname:
+                raise HTTPException(status_code=400, detail="Invalid URL format.")
+
+            if hostname == "github.com":
+                _validate_url(url)
+            elif hostname == "raw.githubusercontent.com":
+                _validate_url(url)
+            else:
+                raise HTTPException(status_code=400, detail="Not a valid GitHub URL.")
+
             art = discussion.import_github(request.url, request.auto_load)
             if not art:
                 raise HTTPException(status_code=400, detail="Failed to import GitHub content.")
@@ -642,6 +659,8 @@ def build_artefacts_router(router: APIRouter):
                 "discussion_images": [img['data'] for img in all_images_info],
                 "active_discussion_images": [img['active'] for img in all_images_info]
             }
+        except HTTPException:
+            raise
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"GitHub import failed: {e}")
