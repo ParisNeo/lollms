@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 
@@ -14,12 +14,10 @@ class MemoryUpdate(BaseModel):
     content: Optional[str] = None
 
 class MemoryPublic(MemoryBase):
+    model_config = ConfigDict(from_attributes=True)
     id: str
     created_at: datetime
     updated_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True
 
 class MemoriesImport(BaseModel):
     memories: List[MemoryCreate]
