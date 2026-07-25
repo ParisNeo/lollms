@@ -133,6 +133,8 @@ def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str
     
     try:
         task.log(f"Scraping URL hierarchy...")
+        from backend.security import validate_url
+        validate_url(url)
         scraper = ScrapeMaster(url)
         # ScrapeMaster supports depth for crawling
         markdown_content = scraper.scrape_markdown(max_depth = depth) # TODO add depth when scrapemaster is updated 
