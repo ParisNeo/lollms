@@ -266,6 +266,9 @@ def _upload_rag_files_task(task: Task, username: str, datastore_id: str, file_pa
         db.close()
 
 def _scrape_url_task(task: Task, username: str, datastore_id: str, url: str, depth: int):
+    from backend.security import validate_url
+    validate_url(url)
+    
     if not ScrapeMaster:
         raise ImportError("ScrapeMaster is not installed.")
 
