@@ -345,41 +345,7 @@ def md2_to_html(md_text: str) -> str:
     ]
     return markdown2.markdown(md_text, extras=extras)
 
-def _validate_url(url: str):
-    """
-    Validates a URL to prevent SSRF attacks.
-    Ensures the scheme is http/https and the host is not a private/local IP.
-    """
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ('http', 'https'):
-            raise ValueError(f"Invalid scheme: {parsed.scheme}")
-            
-        hostname = parsed.hostname
-        if not hostname:
-             raise ValueError("Invalid hostname")
-
-        # 1. Check if hostname is an IP address
-        try:
-            ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
-                raise ValueError(f"Access to local/private IP {hostname} is forbidden.")
-            if ip.is_multicast or ip.is_reserved:
-                 raise ValueError(f"Access to restricted IP {hostname} is forbidden.")
-        except ValueError:
-            # 2. Not an IP, resolve domain to check IP
-            try:
-                addr_info = socket.getaddrinfo(hostname, None)
-                for family, _, _, _, sockaddr in addr_info:
-                    ip_str = sockaddr[0]
-                    ip = ipaddress.ip_address(ip_str)
-                    if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
-                         raise ValueError(f"Domain {hostname} resolves to private IP {ip_str}.")
-            except socket.gaierror:
-                pass # DNS resolution failed, requests will likely fail too
-                
-    except Exception as e:
-        raise ValueError(f"URL validation failed: {str(e)}")
+from backend.security import validate_url as _validate_url
 
 def _download_image_to_temp(src: str) -> str:
     if src.startswith("data:"):
