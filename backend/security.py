@@ -11,6 +11,9 @@ import html
 import platform
 import tempfile
 import os
+import socket
+import ipaddress
+from urllib.parse import urlparse
 import pipmaster as pm
 pm.ensure_packages("bleach")
 import bleach
@@ -45,6 +48,41 @@ ALLOWED_ATTRS = {
     'code': ['class'],
     'pre': ['class']
 }
+
+def validate_url(url: str):
+    """
+    Validates a URL to prevent SSRF attacks.
+    Ensures the scheme is http/https and the host is not a private/local IP.
+    Raises ValueError on violation.
+    """
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            raise ValueError(f"Invalid scheme: {parsed.scheme}")
+
+        hostname = parsed.hostname
+        if not hostname:
+             raise ValueError("Invalid hostname")
+
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
+                raise ValueError(f"Access to local/private IP {hostname} is forbidden.")
+            if ip.is_multicast or ip.is_reserved:
+                 raise ValueError(f"Access to restricted IP {hostname} is forbidden.")
+        except ValueError:
+            try:
+                addr_info = socket.getaddrinfo(hostname, None)
+                for family, _, _, _, sockaddr in addr_info:
+                    ip_str = sockaddr[0]
+                    ip = ipaddress.ip_address(ip_str)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
+                         raise ValueError(f"Domain {hostname} resolves to private IP {ip_str}.")
+            except socket.gaierror:
+                pass 
+
+    except Exception as e:
+        raise ValueError(f"URL validation failed: {str(e)}")
 
 def sanitize_content(content: str) -> str:
     """
