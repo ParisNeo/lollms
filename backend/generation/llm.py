@@ -1843,6 +1843,7 @@ def build_llm_generation_router(router: APIRouter):
                             enable_deep_memory_pulling=owner_db_user.memory_enabled,
                             enable_in_message_status=True,
                             enable_specialized_events_stream=True,
+                            forward_artefact_chunks=True,
                             suppress_images=not model_supports_vision # 🛡️ Set to True for non-vision LLMs to prevent parsing crashes
                             )
                     finally:
