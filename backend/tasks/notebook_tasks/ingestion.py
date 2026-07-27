@@ -124,6 +124,11 @@ def _ingest_notebook_sources_task(
                 for query in wiki_list:
                     if task.cancellation_event.is_set():
                         break
+                    try:
+                        validate_url(query)
+                    except ValueError as e:
+                        task.log(f"SSRF protection blocked wikipedia url {query}: {e}", "WARNING")
+                        continue
                     task.log(f"Fetching Wikipedia: {query}")
                     try:
                         page_title = query.split('/')[-1].replace('_', ' ') if 'wikipedia.org' in query else query
@@ -152,6 +157,11 @@ def _ingest_notebook_sources_task(
                 for url in urls:
                     if task.cancellation_event.is_set():
                         break
+                    try:
+                        validate_url(url)
+                    except ValueError as e:
+                        task.log(f"SSRF protection blocked url {url}: {e}", "WARNING")
+                        continue
                     task.log(f"Scraping Web: {url}")
                     try:
                         scraper = ScrapeMaster(url)
