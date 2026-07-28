@@ -540,19 +540,12 @@ def build_lollms_client_from_params(
             is_active = db.query(DBSTTBinding.id).filter(DBSTTBinding.alias == binding_alias_check, DBSTTBinding.is_active == True).first()
             if not is_active:
                 user_db.stt_binding_model_name = None
-        
-        # Auto-load peripheral services (TTI, TTS, STT) if the user has actually
-        # configured active models for them in their database profile. This ensures
-        # out-of-the-box capability for task execution (e.g. audio imports) and chat events.
-        has_tti_config = bool(user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name)
-        has_tts_config = bool(user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name)
-        has_stt_config = bool(user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name)
 
         client_init_params = {
             "load_llm": load_llm,
-            "load_tti": load_tti or has_tti_config,
-            "load_tts": load_tts or has_tts_config,
-            "load_stt": load_stt or has_stt_config,
+            "load_tti": load_tti,
+            "load_tts": load_tts,
+            "load_stt": load_stt,
         }
 
         binding_to_use = None
@@ -818,17 +811,13 @@ def build_lollms_client_from_params(
                 client_init_params["stt_binding_config"] = stt_binding_config
         
         # --- MCP Integration ---
-        # If we have servers_infos in cache (from load_mcps), pass them.
-        # We assume load_mcps has run if needed.
-        if 'servers_infos' not in session:
-            session['servers_infos'] = load_mcps(username)
-        servers_infos = session['servers_infos']
-        
-        # Always inject MCP if we are loading LLM, as tools might be needed.
-        # Even if empty, it initializes the manager in lollms_client.
+        # Do not block the initial client build with MCP network fetching.
+        # MCPs will be lazily loaded when the client is first used for generation.
         if load_llm and load_mcp:
-            client_init_params["tools_binding_name"] = "remote_mcp"
-            client_init_params["tools_binding_config"] = {"servers_infos": servers_infos}
+            servers_infos = session.get('servers_infos')
+            if servers_infos is not None:
+                client_init_params["tools_binding_name"] = "remote_mcp"
+                client_init_params["tools_binding_config"] = {"servers_infos": servers_infos}
 
         try:
             # --- GLOBAL REGISTRY LOGIC ---
@@ -893,7 +882,7 @@ def build_lollms_client_from_params(
             raise HTTPException(status_code=500, detail=f"System error during engine registry: {str(e)}")
     finally:
         db.close()
-
+        
 
 def get_safe_store_instance(
     requesting_user_username: str,
