@@ -1414,43 +1414,6 @@ def build_llm_generation_router(router: APIRouter):
                 "output":[{"name": "success", "type": "bool"}, {"name": "message", "type": "str"}],
                 "callable": tool_schedule_task
             }
-        # 4. Construct Context (Memory + Dynamic Preamble)
-        memory_content = ""
-        memory_instructions = ""
-        if owner_db_user.memory_enabled:
-            # Count total memories first to decide between Full vs Deep search
-            total_mems = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).count()
-
-            if total_mems <= 12:
-                # Load everything if memory bank is light (Tier 1)
-                memories = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.created_at.asc()).all()
-            else:
-                # Deep Memory Search (Tier 2): Perform high-speed keyword routing based on current prompt
-                from backend.routers.memories import search_deep_memory_internal
-                memories = search_deep_memory_internal(db, owner_db_user.id, prompt, limit=6)
-
-                # If no direct hits, pull the 3 most recently updated memories as default ambient context
-                if not memories:
-                    memories = db.query(UserMemory).filter(UserMemory.owner_user_id == owner_db_user.id).order_by(UserMemory.updated_at.desc()).limit(3).all()
-                    memories.reverse()
-
-            if memories:
-                memory_text = "\n".join([f"[Memory #{idx+1}] {m.title}: {m.content}" for idx, m in enumerate(memories)])
-                memory_content = f"\n## Long-Term Memory Bank\nYou have access to the following memories:\n{memory_text}\n"
-            else:
-                memory_content = "\n## Long-Term Memory Bank\nThe memory bank is currently empty.\n"
-            
-            memory_instructions = (
-                "\n## Memory Management\n"
-                "Manage memories using these tags (refer to Index #):\n"
-                "- Add: `<new_memory>info</new_memory>`\n"
-                "- Update: `<update_memory:INDEX>content</update_memory:INDEX>`\n"
-                "- Delete: `<delete_memory:INDEX></delete_memory:INDEX>`\n"
-            )
-            if owner_db_user.auto_memory_enabled:
-                memory_instructions += "Save important user details automatically using `<new_memory>` tags.\n"
-
-        discussion_obj.memory = memory_content
         
         # Get personality if active
         db_pers = db.query(DBPersonality).filter(DBPersonality.id == owner_db_user.active_personality_id).first() if owner_db_user.active_personality_id else None
