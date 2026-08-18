@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-18 23:56]
+
+- build(deps): upgrade ascii_colors from 0.11.26 to 0.12.1
+
 ## [2026-08-18 23:38]
 
 - build(frontend): generate production assets
