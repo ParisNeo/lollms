@@ -8,6 +8,23 @@ export default defineConfig({
     vue(),
     tailwindcss()
   ],
+  server: {
+    port: 5173,
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:9642',
+        changeOrigin: true,
+      },
+      '/ws': {
+        target: 'ws://127.0.0.1:9642',
+        ws: true,
+      },
+      '/user_assets': {
+        target: 'http://127.0.0.1:9642',
+        changeOrigin: true,
+      },
+    },
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -25,7 +42,7 @@ export default defineConfig({
             if (id.includes('highlight.js')) return 'vendor-highlight';
             if (id.includes('pyodide')) return 'vendor-python';
             if (id.includes('canvg') || id.includes('pdfjs-dist')) return 'vendor-viz';
-            
+
             // Standard vendor chunk for smaller libs
             return 'vendor';
           }

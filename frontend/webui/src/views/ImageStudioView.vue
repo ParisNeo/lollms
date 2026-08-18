@@ -198,30 +198,52 @@
                             </div>
                         </div>
 
-                        <!-- Categorized Style Library -->
+                        <!-- Categorized Style Library with Quick Search -->
                         <div class="space-y-3 pt-2">
-                            <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Style Presets</span>
+                            <div class="flex items-center justify-between">
+                                <span class="text-[10px] font-black text-gray-400 uppercase tracking-widest block">Style Preset Library (50+)</span>
+                                <span v-if="selectedStyle !== 'None'" class="text-[9px] font-bold text-blue-500 uppercase bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 rounded-full border border-blue-200 dark:border-blue-800">
+                                    Active: {{ selectedStyle }}
+                                </span>
+                            </div>
 
-                            <div v-for="(group, category) in styleLibrary" :key="category" class="rounded-xl border dark:border-gray-800 overflow-hidden bg-gray-50/50 dark:bg-gray-900/30">
+                            <!-- Style Search Filter Input -->
+                            <div class="relative">
+                                <input 
+                                    v-model="styleSearchTerm" 
+                                    type="text" 
+                                    placeholder="Search 50+ presets (e.g. Ghibli, 35mm, Neon, Cyberpunk)..." 
+                                    class="input-field !py-1 !pl-7 !text-[10px] w-full"
+                                />
+                                <IconMagnifyingGlass class="w-3 h-3 absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                <button v-if="styleSearchTerm" @click="styleSearchTerm = ''" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-red-500">
+                                    <IconXMark class="w-3 h-3" />
+                                </button>
+                            </div>
+
+                            <div v-for="(group, category) in filteredStyleLibrary" :key="category" class="rounded-xl border dark:border-gray-800 overflow-hidden bg-gray-50/50 dark:bg-gray-900/30">
                                 <button 
-                                    @click="collapsedStyles[category] = !collapsedStyles[category]" 
+                                    @click="toggleStyleCategory(category)" 
                                     class="w-full flex items-center justify-between p-2.5 hover:bg-gray-100/50 dark:hover:bg-gray-800/50 transition-colors select-none"
                                 >
-                                    <span class="text-[10px] font-black text-gray-600 dark:text-gray-300 uppercase tracking-widest">{{ category }}</span>
-                                    <IconChevronUp class="w-3.5 h-3.5 text-gray-400 transition-transform" :class="{'rotate-180': collapsedStyles[category]}" />
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[10px] font-black text-gray-700 dark:text-gray-200 uppercase tracking-widest">{{ category }}</span>
+                                        <span class="text-[9px] font-mono font-bold text-gray-400 bg-gray-200 dark:bg-gray-800 px-1.5 py-0.2 rounded">{{ group.length }}</span>
+                                    </div>
+                                    <IconChevronUp class="w-3.5 h-3.5 text-gray-400 transition-transform" :class="{'rotate-180': isCategoryCollapsed(category)}" />
                                 </button>
 
-                                <div v-show="!collapsedStyles[category]" class="p-2 grid grid-cols-3 gap-1.5 border-t dark:border-gray-800 animate-in fade-in">
+                                <div v-show="!isCategoryCollapsed(category)" class="p-2 grid grid-cols-2 sm:grid-cols-3 gap-1.5 border-t dark:border-gray-800 animate-in fade-in">
                                     <button 
                                         v-for="style in group" 
                                         :key="style.name" 
                                         @click="applyStyle(style)"
-                                        class="flex flex-col items-center p-2 rounded-xl border transition-all hover:scale-102"
-                                        :class="selectedStyle === style.name ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 ring-1 ring-blue-500' : 'border-gray-200 dark:border-gray-700/50 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300'"
+                                        class="flex flex-col items-center p-2 rounded-xl border transition-all hover:scale-102 text-center"
+                                        :class="selectedStyle === style.name ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 ring-1 ring-blue-500 shadow-sm' : 'border-gray-200 dark:border-gray-700/50 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-600 shadow-xs'"
                                         :title="style.prompt"
                                     >
-                                        <span class="text-xl mb-1">{{ style.emoji }}</span>
-                                        <span class="text-[9px] font-bold truncate w-full text-center uppercase tracking-tight">{{ style.name }}</span>
+                                        <span class="text-xl mb-1 select-none">{{ style.emoji }}</span>
+                                        <span class="text-[9px] font-black truncate w-full uppercase tracking-tight">{{ style.name }}</span>
                                     </button>
                                 </div>
                             </div>
@@ -668,13 +690,6 @@ const isEnhancingNegative = ref(false);
 const isAnyEnhancing = computed(() => isEnhancingPrompt.value || isEnhancingNegative.value);
 let searchDebounceTimer = null;
 
-const collapsedStyles = ref({ 
-    'Art Style': false, 
-    'Artist Signature': true, 
-    'Enhancements & Lighting': false, 
-    'Camera & Framing': true 
-});
-
 const sidebarStyle = computed(() => ({
     width: window.innerWidth >= 1024 ? `${sidebarWidth.value}px` : undefined,
     minWidth: window.innerWidth >= 1024 ? '340px' : undefined
@@ -788,33 +803,124 @@ function startResizing(event) {
 }
 
 // Preset Library
+const styleSearchTerm = ref('');
+const collapsedStyles = ref({
+    '📸 Photographic & Realism': false,
+    '🎮 3D, CGI & Sci-Fi': false,
+    '🎨 Traditional Mediums': true,
+    '🎌 Anime, Manga & Comics': false,
+    '🏛️ Art Movements & Masters': true,
+    '✨ Lighting & Atmosphere': false,
+    '🔭 Camera Angles & Lenses': true
+});
+
+function toggleStyleCategory(cat) {
+    collapsedStyles.value[cat] = !collapsedStyles.value[cat];
+}
+
+function isCategoryCollapsed(cat) {
+    if (styleSearchTerm.value.trim()) return false; // Auto-expand all when searching
+    return !!collapsedStyles.value[cat];
+}
+
+// 50+ Curated State-of-the-Art Style Presets for Diffusion Models
 const styleLibrary = {
-    'Art Style': [
-        { name: 'Photo RAW', emoji: '📸', prompt: 'photorealistic, RAW photo, 8k uhd, dslr, high detailed, professional photography', negative: 'drawing, cartoon, 3d render, plastic' },
-        { name: 'Cinematic', emoji: '🎬', prompt: 'cinematic lighting, 35mm film, dramatic atmosphere, color graded, epic composition', negative: 'amateur, grainy, low quality' },
-        { name: 'Anime Pro', emoji: '🎌', prompt: 'high quality anime key visual, Makoto Shinkai style, vibrant colors, detailed line art', negative: 'photorealistic, 3d, western comic' },
-        { name: 'Concept Art', emoji: '🎨', prompt: 'digital concept art, trending on ArtStation, dynamic lighting, octane render', negative: 'photo, realistic' },
-        { name: 'Cyberpunk', emoji: '🌃', prompt: 'cyberpunk aesthetic, volumetric neon light, rain soaked streets, futuristic high tech', negative: 'vintage, medieval' },
-        { name: 'Fantasy', emoji: '🧙‍♂️', prompt: 'high fantasy illustration, magical ethereal atmosphere, intricate ornate detailing', negative: 'modern, industrial' }
+    '📸 Photographic & Realism': [
+        { name: 'Photo RAW', emoji: '📸', prompt: 'photorealistic, RAW photo, 8k uhd, dslr, soft lighting, high detailed skin texture, sharp focus, professional award-winning photography', negative: 'drawing, cartoon, 3d render, plastic, airbrushed, oversaturated' },
+        { name: 'Cinematic 35mm', emoji: '🎬', prompt: 'cinematic still, 35mm anamorphic lens, dramatic atmosphere, color graded, subtle lens flare, teal and orange film aesthetic, Panavision', negative: 'amateur, grainy, low quality, overexposed, flat lighting' },
+        { name: 'Vintage Kodak', emoji: '🎞️', prompt: 'vintage 35mm photograph, Kodak Portra 400, authentic analog film grain, nostalgic warm hues, organic light leaks, 1990s aesthetic', negative: 'digital, pristine, 3d CGI, artificial, modern HDR' },
+        { name: 'Polaroid Instant', emoji: '📷', prompt: 'authentic vintage Polaroid instant photo, flash photography, soft edges, square white border, slight vignette, authentic film artifacts', negative: 'sharp digital rendering, high definition 3d' },
+        { name: 'Street Candid', emoji: '🚶', prompt: 'candid street photography, Leica M11, natural daylight, authentic human emotion, urban documentary composition, 35mm f/2', negative: 'posed, studio lighting, plastic, CGI' },
+        { name: 'Macro Detail', emoji: '🔬', prompt: 'extreme macro photography, 100mm f/2.8 lens, hyper-detailed texture, shallow depth of field, natural soft bokeh, crisp focal point', negative: 'wide shot, blurry center, cartoon' },
+        { name: 'National Geographic', emoji: '🌍', prompt: 'National Geographic award-winning wildlife and landscape photography, dramatic natural light, authentic documentary realism, telephoto lens', negative: 'staged, studio, amateur, low resolution, fake' },
+        { name: 'Film Noir B&W', emoji: '🕵️', prompt: 'classic film noir black and white photography, high contrast chiaroscuro, dramatic Venetian blind shadows, atmospheric grain, 1940s moody', negative: 'color, flat lighting, daylight' },
+        { name: 'Drone Aerial', emoji: '🛰️', prompt: 'breathtaking drone aerial landscape photography, top-down bird eye view, expansive golden hour light, high altitude perspective, 4k ultra-detailed', negative: 'ground level, close up, fisheye' },
+        { name: 'Fashion Editorial', emoji: '👗', prompt: 'high-fashion editorial photography, Vogue magazine style, dramatic studio lighting, avant-garde styling, ultra sharp, clean solid backdrop', negative: 'amateur, passport photo, flat lighting' }
     ],
-    'Artist Signature': [
-        { name: 'Van Gogh', emoji: '🌻', prompt: 'post-impressionism, vibrant swirling brushstrokes in the style of Vincent van Gogh', negative: '' },
-        { name: 'Studio Ghibli', emoji: '🌳', prompt: 'Studio Ghibli aesthetic, Hayao Miyazaki, lush hand-painted background, serene', negative: '' },
-        { name: 'Greg Rutkowski', emoji: '⚔️', prompt: 'style of Greg Rutkowski, dramatic fantasy concept art, oil on canvas feel', negative: '' },
-        { name: 'Moebius', emoji: '🏜️', prompt: 'Jean Giraud Moebius style, clean linework, flat pastel palette, sci-fi surrealism', negative: '' }
+
+    '🎮 3D, CGI & Sci-Fi': [
+        { name: 'Unreal Engine 5', emoji: '🎮', prompt: 'rendered in Unreal Engine 5, Octane Render, 8k, Ray Tracing, Lumen Global Illumination, volumetric fog, hyper-detailed textures, cinematic composition', negative: 'flat 2d, sketch, low poly, noisy' },
+        { name: 'Pixar / Disney 3D', emoji: '🧸', prompt: '3D animated movie style, Pixar Disney aesthetic, cute expressive stylized character, soft subsurface scattering, vibrant warm lighting, 4k render', negative: 'gritty, photorealistic, creepy, flat 2d' },
+        { name: 'Cyberpunk 2077', emoji: '🌃', prompt: 'cyberpunk aesthetic, high-tech low-life, neon volumetric light, rain-soaked reflective asphalt, holographic interfaces, futuristic megalopolis', negative: 'medieval, rustic, pastoral, daylight' },
+        { name: 'Steampunk', emoji: '⚙️', prompt: 'intricate steampunk aesthetic, polished brass gears, copper pressure gauges, Victorian industrial craftsmanship, steam vapors, warm amber atmosphere', negative: 'cyberpunk, sleek modern plastic, neon' },
+        { name: 'Synthwave 80s', emoji: '🌴', prompt: '1980s synthwave retrowave aesthetic, glowing neon grid horizon, magenta and cyan gradient sunset, chrome reflections, VHS glitch aesthetic', negative: 'monochrome, gritty photorealism' },
+        { name: 'Solarpunk', emoji: '🌿', prompt: 'solarpunk architecture, lush vertical gardens, gleaming eco-futuristic curved glass towers, clean renewable energy, golden morning sunlight, utopian', negative: 'dystopian, smog, grim cyberpunk grime' },
+        { name: 'Low Poly 3D', emoji: '🔷', prompt: 'isometric low poly 3D render, minimalist geometric aesthetic, soft pastel studio lighting, clean blender modeling, charming diorama', negative: 'hyperrealistic, high detail noisy textures' },
+        { name: 'Claymation', emoji: '🗿', prompt: 'stop-motion claymation, sculpted plasticine clay textures, visible fingerprint details, Aardman style studio miniature lighting, charming handcrafted', negative: 'smooth digital 3d, glossy vector, CGI' },
+        { name: 'Papercraft Cutout', emoji: '📜', prompt: 'layered papercraft cutout art, multi-depth shadow box, textured craft paper, delicate folded origami, soft warm ambient lighting', negative: 'metallic, glossy plastic, photographic' },
+        { name: 'Voxel Art', emoji: '🧊', prompt: 'detailed 3D voxel art, isometric blocky miniature diorama, colorful pixel-cubes, MagicaVoxel aesthetic, soft ambient occlusion shadows', negative: 'smooth, organic realistic' }
     ],
-    'Enhancements & Lighting': [
-        { name: 'Golden Hour', emoji: '🌅', prompt: 'warm sunset lighting, soft golden hour glow, lens flare', negative: 'harsh shadows, studio light' },
-        { name: 'Studio Lights', emoji: '💡', prompt: 'three-point studio lighting, softbox, rim light, clean studio backdrop', negative: 'dark, noisy' },
-        { name: 'Moody Dark', emoji: '🕯️', prompt: 'chiaroscuro, deep shadows, moody candlelight, atmospheric haze', negative: 'overexposed, washed out' },
-        { name: 'Volumetric', emoji: '✨', prompt: 'volumetric god rays, atmospheric fog, ethereal backlighting', negative: 'flat lighting' }
+
+    '🎨 Traditional Mediums': [
+        { name: 'Watercolor Splash', emoji: '🎨', prompt: 'fluid watercolor painting, wet-on-wet technique, delicate translucent color bleeds, expressive paint splatters, cold press cotton paper texture', negative: 'digital vector, harsh lines, 3d render' },
+        { name: 'Impasto Oil Painting', emoji: '🖼️', prompt: 'textured impasto oil painting, thick visible palette knife strokes, rich layered oil pigments, museum masterpiece, heavy canvas texture', negative: 'smooth digital airbrush, photo, 3d CGI' },
+        { name: 'Sumi-e Ink Wash', emoji: '🖌️', prompt: 'traditional Japanese Sumi-e ink wash painting, minimalist black ink brush calligraphy strokes, atmospheric rice paper bleeding, zen aesthetic', negative: 'vibrant neon colors, digital 3d, photorealistic' },
+        { name: 'Charcoal Sketch', emoji: '✏️', prompt: 'expressive charcoal and chalk pastel drawing on textured vintage paper, smudged shadows, dramatic tonal contrast, raw hand-drawn hatching', negative: 'clean vector, digital gradient, saturated color' },
+        { name: 'Ukiyo-e Woodblock', emoji: '🌊', prompt: 'traditional Japanese Ukiyo-e woodblock print, Hokusai and Hiroshige style, bold outlines, flat decorative color blocks, aged washi paper texture', negative: 'photorealistic, modern 3d, smooth shading' },
+        { name: 'Opaque Gouache', emoji: '🌄', prompt: 'matte opaque gouache painting, mid-century modern aesthetic, rich flat colors, stylized hand-painted textures, clean folk art aesthetic', negative: 'glossy, 3d CGI, photorealistic' },
+        { name: 'Stained Glass', emoji: '🕯️', prompt: 'intricate stained glass window art, luminous colorful translucent glass panels, leaded black contours, radiant glowing backlighting, cathedral cathedral aesthetic', negative: 'opaque, paper sketch, photo' }
     ],
-    'Camera & Framing': [
-        { name: 'Wide Angle', emoji: '🔭', prompt: 'wide angle lens, 24mm, expansive view, grand scale', negative: 'telephoto, cropped' },
-        { name: 'Macro Close', emoji: '🔍', prompt: 'macro lens photography, extreme shallow depth of field, sharp focal subject', negative: 'wide shot' },
-        { name: 'Isometric', emoji: '📐', prompt: 'isometric perspective, clean 3D diorama view, orthographic projection', negative: 'first person' }
+
+    '🎌 Anime, Manga & Comics': [
+        { name: 'Studio Ghibli', emoji: '🍃', prompt: 'Studio Ghibli animation still, Hayao Miyazaki aesthetic, lush hand-painted watercolor background, nostalgic heartwarming mood, whimsical hand-drawn', negative: '3d render, gritty dark, realistic photo' },
+        { name: 'Shinkai Anime Visual', emoji: '🎌', prompt: 'high-production anime key visual, Makoto Shinkai style, crisp cel shading, dazzling celestial light particles, hyper-vibrant blue sky and clouds', negative: 'western comic, 3d CGI, photorealism' },
+        { name: 'Retro 80s Cel Anime', emoji: '📺', prompt: 'retro 1980s cel anime screen grab, classic vintage aesthetic, hand-drawn animation grain, nostalgic warm palette, VHS tape scanlines', negative: 'modern digital gradient, 3d CGI' },
+        { name: 'Western Action Comic', emoji: '💥', prompt: 'dynamic comic book illustration, bold ink lineart, halftone Ben-Day dots, vibrant dramatic action hero coloring, Marvel DC style', negative: 'photograph, soft watercolor, smooth 3d' },
+        { name: 'Graphic Novel Noir', emoji: '🕶️', prompt: 'Sin City graphic novel style, high-contrast stark black and white ink, selective vibrant splash of red, gritty urban shadows, Frank Miller', negative: 'colorful, soft pastel, realistic photograph' },
+        { name: 'Manga Screentone', emoji: '📖', prompt: 'authentic Japanese manga page, sharp black ink line art, professional screentone dot patterns, expressive cross-hatching, dramatic speedlines', negative: 'color, watercolor, photorealistic, 3d' },
+        { name: 'Chibi Kawaii', emoji: '🐱', prompt: 'super deformed chibi character art, oversized expressive head, kawaii aesthetic, cute bright pastels, charming sticker look, clean vector outlines', negative: 'realistic proportions, dark scary' },
+        { name: 'Pop Art Silkscreen', emoji: '🥫', prompt: 'Andy Warhol and Roy Lichtenstein pop art, bold primary silkscreen colors, commercial graphic advertising aesthetic, high contrast print', negative: 'subtle, dark, realistic photograph' }
+    ],
+
+    '🏛️ Art Movements & Masters': [
+        { name: 'Art Nouveau (Mucha)', emoji: '🌸', prompt: 'Alphonse Mucha Art Nouveau masterpiece, elegant organic flowing curves, intricate floral motifs, gold leaf foil embellishments, stained glass palette', negative: 'modern geometry, sharp industrial, photorealism' },
+        { name: 'Art Deco Luxury', emoji: '🏛️', prompt: '1920s Art Deco grandeur, Great Gatsby geometric elegance, gleaming gold and black lacquer, streamlined luxury, symmetrical ornate architectural lines', negative: 'rustic, organic messy, watercolor' },
+        { name: 'Surrealism (Dalí)', emoji: '⏳', prompt: 'dreamlike surrealist painting in the style of Salvador Dalí and René Magritte, impossible juxtaposed architecture, melting forms, enigmatic desert landscape', negative: 'ordinary, mundane realistic photo' },
+        { name: 'Post-Impressionism', emoji: '🌻', prompt: 'post-impressionism in the style of Vincent van Gogh, thick expressive swirling brushstrokes, intense vivid color emotion, starry night aesthetic', negative: 'smooth photo, flat vector' },
+        { name: 'Baroque Chiaroscuro', emoji: '👑', prompt: 'Baroque oil masterpiece, Rembrandt and Caravaggio lighting, deep mysterious darks, dramatic illuminated golden highlights, emotional intensity', negative: 'flat high-key, modern bright neon' },
+        { name: 'Bauhaus Minimalist', emoji: '🟥', prompt: 'Bauhaus modernism design, clean geometric forms, primary colors red blue yellow, asymmetric balance, functional graphic poster style', negative: 'ornate decorative clutter, realistic photo' },
+        { name: 'Gothic Dark Fantasy', emoji: '🏰', prompt: 'dark gothic fantasy illustration, Soulsborne aesthetic, crumbling cathedral ruins, grim atmospheric mist, Eldritch horror, oil on canvas feel', negative: 'cheerful, bright pastel, modern' }
+    ],
+
+    '✨ Lighting & Atmosphere': [
+        { name: 'Golden Hour Sunset', emoji: '🌅', prompt: 'warm setting sun, long golden hour shadows, rich honey-amber atmospheric glow, gentle cinematic lens flare, natural warmth', negative: 'overcast, harsh blue midday flash' },
+        { name: 'Blue Hour Twilight', emoji: '🌌', prompt: 'peaceful blue hour dusk, soft ambient evening glow, deep indigo skies, warm interior window accents, serene cinematic stillness', negative: 'harsh noon sun, high contrast shadows' },
+        { name: 'Volumetric God Rays', emoji: '✨', prompt: 'spectacular volumetric god rays streaming through dust motes, dramatic cinematic crepuscular beams, atmospheric forest cathedral haze', negative: 'flat ambient light, overcast' },
+        { name: 'Bioluminescence', emoji: '🪼', prompt: 'luminous bioluminescent neon glow, Avatar Pandora jungle aesthetic, glowing flora and fauna in deep mystical darkness, radiant cyan and violet', negative: 'harsh daylight, washed out' },
+        { name: 'Cyber Neon Dual-Tone', emoji: '💡', prompt: 'vibrant dual-tone magenta and cyan neon backlight, sleek reflective edge lighting, dark atmospheric studio environment', negative: 'natural warm sunlight, flat' },
+        { name: 'Ethereal Dreamlight', emoji: '🧚', prompt: 'soft diffused dreamlike glow, gentle bloom, sparkling ambient bokeh particles, fairy tale pastel illumination, soft focus highlights', negative: 'harsh dark shadows, gritty' },
+        { name: 'Dramatic Silhouette', emoji: '👤', prompt: 'stark back-lit silhouette against an immense radiant sky, high contrast, dramatic minimalist composition, edge contour glow', negative: 'front lit, washed out details' }
+    ],
+
+    '🔭 Camera Angles & Lenses': [
+        { name: 'Anamorphic 2.39:1', emoji: '🎥', prompt: 'anamorphic widescreen cinema lens, horizontal blue streak flare, 2.39:1 aspect ratio framing, shallow depth of field, oval bokeh highlights', negative: 'spherical lens, vertical video' },
+        { name: 'Ultra-Wide 14mm', emoji: '🔭', prompt: 'ultra-wide angle 14mm lens perspective, expansive grand scale, dramatic foreground depth, towering architectural grandeur', negative: 'cropped close-up, telephoto compression' },
+        { name: 'Tilt-Shift Miniature', emoji: '🏙️', prompt: 'tilt-shift miniature effect, selective narrow horizontal focus band, toy-like diorama scale perspective, vibrant saturation, high angle', negative: 'normal perspective, full focus plane' },
+        { name: 'Fish-Eye Dynamic', emoji: '🌐', prompt: 'dramatic 180-degree fish-eye lens curvature, warped hemispherical perspective, dynamic extreme action framing, rounded edges', negative: 'flat rectilinear, telephoto' },
+        { name: 'Isometric Cutaway', emoji: '📐', prompt: 'isometric 3D cutaway diorama, orthographic view, cross-section detail, clean miniature room modeling, architectural showcase', negative: 'perspective view, ground level camera' },
+        { name: 'Low-Angle Hero Shot', emoji: '⚡', prompt: 'extreme low-angle hero perspective looking up, towering monumental stature, imposing powerful presence, epic sky background', negative: 'bird eye view, high angle looking down' },
+        { name: 'First-Person POV', emoji: '👁️', prompt: 'first-person point of view (POV), hands visible interacting in the scene, immersive foreground perspective', negative: 'third person, portrait, wide exterior' }
     ]
 };
+
+// Reactive filtered style library based on user search
+const filteredStyleLibrary = computed(() => {
+    if (!styleSearchTerm.value.trim()) return styleLibrary;
+    const term = styleSearchTerm.value.toLowerCase().trim();
+    const result = {};
+
+    for (const [category, styles] of Object.entries(styleLibrary)) {
+        const matching = styles.filter(s => 
+            s.name.toLowerCase().includes(term) || 
+            s.prompt.toLowerCase().includes(term) ||
+            category.toLowerCase().includes(term)
+        );
+        if (matching.length > 0) {
+            result[category] = matching;
+        }
+    }
+    return result;
+});
 
 const quickNegativePresets = [
     { label: 'Standard Clean', value: 'ugly, deformed, disfigured, low quality, blurry, watermark' },

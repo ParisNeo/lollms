@@ -18,7 +18,7 @@ import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import TaskProgressIndicator from '../TaskProgressIndicator.vue'; 
 import IconMap from '../../../assets/icons/IconMap.vue';
-import IconClock  from '../../../assets/icons/IconClock.vue';
+import IconClock from '../../../assets/icons/IconClock.vue';
 import InteractiveDataGrid from '../DataGrid/InteractiveDataGrid.vue';
 import IconSave from '../../../assets/icons/IconSave.vue';
 import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
@@ -30,6 +30,10 @@ import IconInfo from '../../../assets/icons/IconInfo.vue';
 import IconError from '../../../assets/icons/IconError.vue';
 import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
 import IconGlobeAlt from '../../../assets/icons/IconGlobeAlt.vue';
+import IconMaximize from '../../../assets/icons/IconMaximize.vue';
+import IconCopy from '../../../assets/icons/IconCopy.vue';
+import IconTrash from '../../../assets/icons/IconTrash.vue';
+import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 
 import { useTasksStore } from '../../../stores/tasks';
 import { useDiscussionsStore } from '../../../stores/discussions';
@@ -44,7 +48,7 @@ const props = defineProps({
   events: { type: Array, default: () => [] },
   inlineWidgets: { type: Array, default: () => [] },
   isStreaming: { type: Boolean, default: false },
-  isUser: { type: String, default: false },
+  isUser: { type: Boolean, default: false },
   hasImages: { type: Boolean, default: false },
   lastUserImage: { type: String, default: null },
   messageId: { type: String, default: null },
@@ -55,13 +59,16 @@ const emit = defineEmits(['regenerate', 'citation-click']);
 
 const messageContentRef = ref(null);
 
-// Lazy store computed getters to prevent eager initialization and circular dependencies on startup/welcome pages
-const tasks = computed(() => useTasksStore().tasks);
-const activeAiTasks = computed(() => useDiscussionsStore().activeAiTasks);
-const liveArtefactBuffers = computed(() => useDiscussionsStore().liveArtefactBuffers);
-const currentDiscussionId = computed(() => useDiscussionsStore().currentDiscussionId);
-const messages = computed(() => useDiscussionsStore().messages);
-const activeDiscussionArtefacts = computed(() => useDiscussionsStore().activeDiscussionArtefacts);
+const uiStore = useUiStore();
+const discussionsStore = useDiscussionsStore();
+const tasksStore = useTasksStore();
+
+const tasks = computed(() => tasksStore.tasks);
+const activeAiTasks = computed(() => discussionsStore.activeAiTasks);
+const liveArtefactBuffers = computed(() => discussionsStore.liveArtefactBuffers);
+const currentDiscussionId = computed(() => discussionsStore.currentDiscussionId);
+const messages = computed(() => discussionsStore.messages);
+const activeDiscussionArtefacts = computed(() => discussionsStore.activeDiscussionArtefacts);
 
 const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
@@ -80,52 +87,6 @@ const formatThinkingTime = (seconds) => {
     return `${mins}m ${secs}s`;
 };
 
-// Watch the messageParts to start/stop timers for each thinking block
-// Watch the messageParts to start/stop timers for each thinking block
-watch(() => messageParts.value, (newParts) => {
-    if (!newParts || !Array.isArray(newParts)) return;
-    newParts.forEach(part => {
-        if (part.type === 'think') {
-            const isClosed = part.isClosed;
-            
-            // If the timer doesn't exist yet, initialize it
-            if (!thinkingTimers.value[part.id]) {
-                const startTime = Date.now();
-                thinkingTimers.value[part.id] = {
-                    elapsed: 0,
-                    done: false,
-                    intervalId: null
-                };
-                
-                if (!isClosed && props.isStreaming) {
-                    thinkingTimers.value[part.id].intervalId = setInterval(() => {
-                        if (thinkingTimers.value[part.id] && !thinkingTimers.value[part.id].done) {
-                            thinkingTimers.value[part.id].elapsed = Math.floor((Date.now() - startTime) / 1000);
-                        }
-                    }, 1000);
-                } else {
-                    thinkingTimers.value[part.id].done = true;
-                }
-            } else {
-                // If it exists but is now closed or streaming stopped, freeze it
-                const timer = thinkingTimers.value[part.id];
-                if ((isClosed || !props.isStreaming) && !timer.done) {
-                    timer.done = true;
-                    if (timer.intervalId) {
-                        clearInterval(timer.intervalId);
-                        timer.intervalId = null;
-                    }
-                }
-            }
-        }
-    });
-}, { deep: true, immediate: true });
-
-
-/**
- * Wraps the raw widget source in a sandboxed HTML environment.
- * Includes a resize script that talks to the parent component.
- */
 function wrapInIsolatedShell(source, partId) {
     if (!source) return '';
     
@@ -146,15 +107,13 @@ function wrapInIsolatedShell(source, partId) {
             background: ${isDarkMode ? 'transparent' : '#ffffff'};
             color: ${isDarkMode ? '#f3f4f6' : '#111827'};
         }
-        /* Scoped Reset to prevent leaks */
         * { box-sizing: border-box; }
     </style>
-<\/head>
+</head>
 <body>
     <div id="lollms-widget-root">${source}</div>
     
     <script>
-        // Auto-resizer
         const sendHeight = () => {
             const height = document.documentElement.scrollHeight;
             window.parent.postMessage({ 
@@ -164,14 +123,10 @@ function wrapInIsolatedShell(source, partId) {
             }, '*');
         };
         
-        // Watch for content changes
         const observer = new ResizeObserver(sendHeight);
         observer.observe(document.body);
-        
-        // Initial call
         window.onload = sendHeight;
         
-        // Security: intercept link clicks to open in new tab
         document.addEventListener('click', (e) => {
             const link = e.target.closest('a');
             if (link && link.href && !link.href.startsWith('javascript:')) {
@@ -180,8 +135,8 @@ function wrapInIsolatedShell(source, partId) {
             }
         });
     <\/script>
-<\/body>
-<\/html>`;
+</body>
+</html>`;
 }
 
 function handleWidgetMessage(event) {
@@ -192,13 +147,11 @@ function handleWidgetMessage(event) {
         }
     }
 }
+
 function renderMath() {
-  // Critical Fix: Do not mutate DOM with KaTeX while Vue is actively streaming tokens, 
-  // otherwise Vue loses track of its virtual nodes and crashes.
   if (props.isStreaming) return; 
 
   if (messageContentRef.value && messageContentRef.value.isConnected && window.renderMathInElement) {
-    // Only target specific text blocks to prevent breaking Vue child components (like CodeBlocks or StepDetails)
     const targets = messageContentRef.value.querySelectorAll('.markdown-text');
     targets.forEach(target => {
         try {
@@ -231,7 +184,6 @@ onMounted(async () => {
 
 onUnmounted(() => {
   window.removeEventListener('message', handleWidgetMessage);
-  // Clean up all active intervals to avoid memory leaks
   Object.values(thinkingTimers.value).forEach(timer => {
       if (timer.intervalId) {
           clearInterval(timer.intervalId);
@@ -273,48 +225,9 @@ const parsedMarkdown = (content) => {
   return html;
 };
 
-const parsedStreamingContent = computed(() => {
-    if (!props.content) return '';
-    let content = props.content;
-
-    // Detect technical unclosed blocks
-    const blockTags = ['lollms_inline', 'lollms_widget', 'annotate', 'generate_image', 'edit_image', 'generate_slides', 'artefact'];
-    let latestOpenIndex = -1;
-    let detectedTag = '';
-
-    for (const tag of blockTags) {
-        const lastOpen = content.lastIndexOf(`<${tag}`);
-        const lastClose = content.lastIndexOf(`</${tag}>`);
-        if (lastOpen > lastClose && lastOpen > latestOpenIndex) {
-            latestOpenIndex = lastOpen;
-            detectedTag = tag;
-        }
-    }
-
-    // 1. Technical Tag Cleanup for passive tags - keep inline for clean stream
-    content = content.replace(/<(?:tol|tool_call|tool_result|thought|think)[^>]*>|<\/(?:tol|tool_call|tool_result|thought|think)>/gi, '');
-
-    if (latestOpenIndex > -1) {
-        const before = content.substring(0, latestOpenIndex);
-        let statusMsg = 'Constructing...';
-        
-        if (detectedTag.includes('lollms')) statusMsg = 'Building Widget...';
-        else if (detectedTag === 'generate_image') statusMsg = 'Generating Image...';
-        else if (detectedTag === 'edit_image') statusMsg = 'Editing Image...';
-
-        // Simple inline indicator that doesn't break text flow
-        const indicator = `\n\n> ⏳ **${statusMsg}**\n\n`;
-        
-        return parsedMarkdown(before) + indicator;
-    }
-
-    return parsedMarkdown(content);
-});
-
 const parseSpecialBlock = (rawBlock, match = null) => {
     if (!match) {
-        // [FIX] Standardized capture groups for the monolithic parser (Robust Attribute Order)
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\b([^>]*?)>()()([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/;
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\b([^>]*?)>()()([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)|(<owl>[\s\S]*?(?:<\/owl>|$))/;
         match = regex.exec(rawBlock);
     }
     
@@ -395,13 +308,9 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
     }
     else if (match[10]) {
-        // --- Render standard widget anchor (id="UUID") ---
         const raw = match[10];
         const widgetId = match[11];
-        
-        // Look up the full source code from message metadata
         const widgetData = props.inlineWidgets?.find(w => w.id === widgetId);
-        
         return { 
             type: 'interactive_widget', 
             widget: widgetData || { id: widgetId, title: 'Widget (Loading...)', is_loading: true }, 
@@ -409,32 +318,24 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         };
     }
     else if (match[12]) {
-        // --- Raw Inline Widget (Direct Source Mode) ---
         const fullTag = match[12];
         const matchInline = typeof fullTag === 'string' ? fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/) : null;
         const innerContent = (matchInline && matchInline[1]) ? matchInline[1].trim() : '';
-        
         const titleMatch = typeof fullTag === 'string' ? fullTag.match(/title=["']([^"']+)["']/i) : null;
         const title = titleMatch ? titleMatch[1] : 'Interactive Widget';
-        
-        // If it doesn't have a closing tag, it's still streaming
         const isLoading = !fullTag.includes('</lollms_inline>');
-        
         const widgetData = { id: title, title: title, source: innerContent, is_loading: isLoading };
         return { type: 'interactive_widget', widget: widgetData, raw: fullTag };
     }
     else if (match[13] || match[16]) {
-        // --- Building / Working Indicator (Merged Logic) ---
         const raw = match[13] || match[16];
         const msgMatch = typeof raw === 'string' ? raw.match(/message=["']([^"']+)["']/) : null;
         const lblMatch = typeof raw === 'string' ? raw.match(/label=["']([^"']+)["']/) : null;
         const label = (msgMatch && msgMatch[1]) || (lblMatch && lblMatch[1]) || 'Processing';
-
         const title = typeof raw === 'string' ? raw.match(/title=["']([^"']+)["']/)?.[1] || '' : '';
         const sub_content = typeof raw === 'string' ? raw.match(/sub_content=["']([^"']+)["']/)?.[1] || '' : '';
         const id = typeof raw === 'string' ? raw.match(/id=["']([^"']+)["']/)?.[1] : undefined;
 
-        // Determine if still active (isDone check)
         const isDone = (props.forms?.some(f => f.id === id || f.form_id === id)) || 
                        (props.inlineWidgets?.some(w => w.id === id && !w.is_loading)) ||
                        (title && activeDiscussionArtefacts.value?.some(a => a.title === title));
@@ -442,7 +343,6 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         return { type: 'building_indicator', label, title, sub_content, isDone, id, raw };
     }
     else if (match[14]) {
-        // --- Form Anchor (Permanent mount point) ---
         const raw = match[14];
         const id = match[15];
         let formData = props.forms?.find(f => f.id === id);
@@ -465,25 +365,20 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         return { type: 'form_ready', form: formData, id, raw };
     }
     else if (match[17]) {
-        // --- Artefact Image Anchor ---
         const raw = match[17];
         const fullId = match[18];
         const parts = fullId.split('::');
         return { type: 'artefact_image', title: parts[0], index: parseInt(parts[parts.length - 1]), raw };
     }
     else if (match[19]) {
-        // --- NEW: Unified Processing UI Logic (Robust Attribute Order) ---
         const raw = match[19];
         const attrsStr = match[20] || '';
         const inner = match[23] || '';
 
-        // Dynamically extract type and title from the attributes string
         const typeMatch = attrsStr.match(/type=["']([^"']*)["']/i);
         const titleMatch = attrsStr.match(/title=["']([^"']*)["']/i);
-
         const pType = typeMatch ? typeMatch[1] : 'process';
         const title = titleMatch ? titleMatch[1] : 'Processing';
-
         const isClosed = raw.trim().endsWith('</processing>');
 
         return { 
@@ -495,9 +390,25 @@ const parseSpecialBlock = (rawBlock, match = null) => {
             raw 
         };
     }
+    else if (match[24]) {
+        const raw = match[24];
+        const attrs = match[25];
+        const body = match[26];
+        const parsedForm = _parse_form_xml(attrs, body);
+        return { 
+            type: 'form_ready', 
+            form: parsedForm, 
+            id: parsedForm.id, 
+            raw 
+        };
+    }
+    else if (match[27]) {
+        const raw = match[27];
+        const content = raw.replace(/<owl>|<\/owl>/g, '').trim();
+        return { type: 'owl', content, raw };
+    }
     else if (rawBlock.includes('<tool_call')) {
         const raw = rawBlock;
-        // Strip the tags manually to extract inner content
         const innerContent = rawBlock.replace(/<tool_call[^>]*>/i, '').replace(/<\/tool_call>/i, '').trim();
         let parsedJson = null;
         try {
@@ -516,59 +427,11 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         const id = idMatch ? idMatch[1] : '';
         return { type: 'mem_load', memoryId: id, raw };
     }
-    else if (match[27]) {
-        // --- NEW: OWL/RDF Semantic Block ---
-        const raw = match[27];
-        const content = raw.replace(/<owl>|<\/owl>/g, '').trim();
-        return { type: 'owl', content, raw };
-    }
-    else if (match[24]) {
-        const raw = match[24];
-        const attrs = match[25];
-        const body = match[26];
-        
-        // We import the same parser logic used by the backend or a local implementation
-        const parsedForm = _parse_form_xml(attrs, body);
-        
-        return { 
-            type: 'form_ready', 
-            form: parsedForm, 
-            id: parsedForm.id, 
-            raw 
-        };
-    }
-    else if (match[12] || match[27]) { // <lollms_inline>
-        const fullTag = match[12] || match[27];
-        // Regex to extract inner content without any markdown escaping
-        const innerContentMatch = typeof fullTag === 'string' ? fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/i) : null;
-        const innerContent = innerContentMatch ? innerContentMatch[1] : '';
-        
-        const titleMatch = typeof fullTag === 'string' ? fullTag.match(/title=["']([^"']+)["']/i) : null;
-        const title = titleMatch ? titleMatch[1] : 'Interactive Widget';
-        
-        // If it doesn't have a closing tag, it's still streaming
-        const isLoading = typeof fullTag === 'string' ? !fullTag.includes('</lollms_inline>') : false;
-        
-        const widgetData = { id: title, title: title, source: innerContent, is_loading: isLoading };
-        return { type: 'interactive_widget', widget: widgetData, raw: fullTag };
-    }
 
     return { type: 'content', content: rawBlock };
 };
 
-// Helper to create a stable hash
-const hashString = (str) => {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-        hash = (hash << 5) - hash + str.charCodeAt(i);
-        hash |= 0;
-    }
-    return hash.toString(36);
-};
-
-// Form Parser for InteractiveForm
 function _parse_form_xml(attrs_str, body) {
-    // Robustly extract attributes using a non-greedy, whitespace-insensitive regex
     const attrs = {};
     if (typeof attrs_str === 'string') {
         const attrMatch = attrs_str.matchAll(/(\w+)\s*=\s*["']([^"']+)["']/g);
@@ -577,7 +440,6 @@ function _parse_form_xml(attrs_str, body) {
         }
     }
 
-    // Extract fields supporting self-closing, unclosed, and block tags (with children like <option>)
     const fields = [];
     if (typeof body === 'string') {
         const fieldRegex = /<field\s+([^>]*?)(?:\/?>|>([\s\S]*?)<\/field>)/gi;
@@ -602,7 +464,6 @@ function _parse_form_xml(attrs_str, body) {
         }
     }
 
-    console.log("[Form Debug] Parsed fields:", fields);
     return { 
         id: (attrs.title || 'form') + Date.now(), 
         title: attrs.title || 'Form', 
@@ -611,7 +472,6 @@ function _parse_form_xml(attrs_str, body) {
     };
 }
 
-// Event icon resolver for system events
 const getEventIcon = (eventType) => {
     const iconMap = {
         'tool_call': IconWrenchScrewdriver,
@@ -619,7 +479,7 @@ const getEventIcon = (eventType) => {
         'step_end': IconStepEnd,
         'thinking': IconThinking,
         'info': IconInfo,
-        'warning': IconCog, // fallback
+        'warning': IconCog,
     };
     return iconMap[eventType] || IconCog;
 };
@@ -629,21 +489,15 @@ const messageParts = computed(() => {
     
     let content = props.content;
     
-    // --- STREAMING SAFETY ---
-    // Prevent unclosed raw HTML/SVG tags from bleeding into the parent DOM and breaking CSS.
-    // We explicitly DO NOT truncate lollms_* tags here because they are handled
-    // by the specialized regex and safely isolated in iframes/components.
     if (props.isStreaming) {
         const unsafeTags = ['svg', 'html', 'style', 'div', 'table'];
         let latestOpenIndex = -1;
 
         for (const tag of unsafeTags) {
-            // Look for an opening tag
             const lastOpen = content.lastIndexOf(`<${tag}`);
             const lastClose = content.lastIndexOf(`</${tag}>`);
             
             if (lastOpen > lastClose && lastOpen > latestOpenIndex) {
-                // Make sure this isn't just text inside a safe markdown code block
                 const codeBlockCount = (content.substring(0, lastOpen).match(/```/g) || []).length;
                 if (codeBlockCount % 2 === 0) { 
                     latestOpenIndex = lastOpen;
@@ -652,12 +506,10 @@ const messageParts = computed(() => {
         }
 
         if (latestOpenIndex > -1) {
-            // Truncate the content right before the unclosed tag to prevent DOM corruption
             content = content.substring(0, latestOpenIndex) + '\n\n> ⏳ *(Rendering markup...)*';
         }
     }
 
-    // Partition the content into think and normal blocks
     const segments = [];
     let idx = 0;
     let inThink = false;
@@ -669,26 +521,22 @@ const messageParts = computed(() => {
 
             if (nextOpen > -1 && nextClose > -1) {
                 if (nextOpen < nextClose) {
-                    // Standard opening tag is closer
                     if (nextOpen > idx) {
                         segments.push({ type: 'normal', content: content.substring(idx, nextOpen) });
                     }
                     inThink = true;
                     idx = nextOpen + 7;
                 } else {
-                    // Stray closing tag is closer (Case B)
                     segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
                     idx = nextClose + 8;
                 }
             } else if (nextOpen > -1) {
-                // Only opening tag found (Case A)
                 if (nextOpen > idx) {
                     segments.push({ type: 'normal', content: content.substring(idx, nextOpen) });
                 }
                 segments.push({ type: 'think', content: content.substring(nextOpen + 7), isClosed: false });
                 idx = content.length;
             } else if (nextClose > -1) {
-                // Only closing tag found (Case B)
                 segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
                 idx = nextClose + 8;
                 if (idx < content.length) {
@@ -696,19 +544,16 @@ const messageParts = computed(() => {
                 }
                 idx = content.length;
             } else {
-                // Neither found
                 segments.push({ type: 'normal', content: content.substring(idx) });
                 idx = content.length;
             }
         } else {
-            // We are inside a thinking block, looking for the closing tag
             const nextClose = content.indexOf('</think>', idx);
             if (nextClose > -1) {
                 segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
                 inThink = false;
                 idx = nextClose + 8;
             } else {
-                // No closing tag found till the end of content (Case A)
                 segments.push({ type: 'think', content: content.substring(idx), isClosed: false });
                 idx = content.length;
             }
@@ -726,13 +571,10 @@ const messageParts = computed(() => {
                 id: `think-${parts.length}`
             });
         } else {
-            // For normal segments, run the existing patterns extraction
             const segContent = segment.content;
             const patterns = [
                 { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
                 { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g },
-
-                // Block-level XML tags (except think, which we already parsed!)
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<annotate>([\s\S]*?)(?:<\/annotate>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_image[^>]*>([\s\S]*?)(?:<\/generate_image>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<edit_image[^>]*>([\s\S]*?)(?:<\/edit_image>|$))/gi },
@@ -756,7 +598,6 @@ const messageParts = computed(() => {
 
             const allElements = [];
 
-            // Extract all elements from text patterns
             patterns.forEach(p => {
                 let m;
                 p.regex.lastIndex = 0;
@@ -813,7 +654,6 @@ const messageParts = computed(() => {
             });
 
             activeElements.forEach((el, index) => {
-                // Add preceding text
                 if (el.start > cursor) {
                     const text = segContent.substring(cursor, el.start);
                     parts.push({ type: 'content', content: text, id: `text-${parts.length}-${cursor}` });
@@ -866,14 +706,12 @@ const messageParts = computed(() => {
                 cursor = Math.max(cursor, el.end);
             });
 
-            // Add remaining text
             if (cursor < segContent.length) {
                 parts.push({ type: 'content', content: segContent.substring(cursor), id: `text-${parts.length}-${cursor}` });
             }
         }
     });
 
-    // Append embedded spreadsheets to the end of the message parts
     embeddedViews.value.forEach((view, idx) => {
         parts.push({
             type: 'data_grid_view',
@@ -885,54 +723,14 @@ const messageParts = computed(() => {
 
     return parts;
 });
-// Watch the messageParts to start/stop timers for each thinking block
-watch(() => messageParts.value, (newParts) => {
-    if (!newParts || !Array.isArray(newParts)) return;
-    newParts.forEach(part => {
-        if (part.type === 'think') {
-            const isClosed = part.isClosed;
-            
-            // If the timer doesn't exist yet, initialize it
-            if (!thinkingTimers.value[part.id]) {
-                const startTime = Date.now();
-                thinkingTimers.value[part.id] = {
-                    elapsed: 0,
-                    done: false,
-                    intervalId: null
-                };
-                
-                if (!isClosed && props.isStreaming) {
-                    thinkingTimers.value[part.id].intervalId = setInterval(() => {
-                        if (thinkingTimers.value[part.id] && !thinkingTimers.value[part.id].done) {
-                            thinkingTimers.value[part.id].elapsed = Math.floor((Date.now() - startTime) / 1000);
-                        }
-                    }, 1000);
-                } else {
-                    thinkingTimers.value[part.id].done = true;
-                }
-            } else {
-                // If it exists but is now closed or streaming stopped, freeze it
-                const timer = thinkingTimers.value[part.id];
-                if ((isClosed || !props.isStreaming) && !timer.done) {
-                    timer.done = true;
-                    if (timer.intervalId) {
-                        clearInterval(timer.intervalId);
-                        timer.intervalId = null;
-                    }
-                }
-            }
-        }
-    });
-}, { deep: true, immediate: true });
 
-// Watch the messageParts to start/stop timers for each thinking block
+// Single watcher registered AFTER messageParts is initialized
 watch(() => messageParts.value, (newParts) => {
     if (!newParts || !Array.isArray(newParts)) return;
     newParts.forEach(part => {
         if (part.type === 'think') {
             const isClosed = part.isClosed;
 
-            // If the timer doesn't exist yet, initialize it
             if (!thinkingTimers.value[part.id]) {
                 const startTime = Date.now();
                 thinkingTimers.value[part.id] = {
@@ -951,7 +749,6 @@ watch(() => messageParts.value, (newParts) => {
                     thinkingTimers.value[part.id].done = true;
                 }
             } else {
-                // If it exists but is now closed or streaming stopped, freeze it
                 const timer = thinkingTimers.value[part.id];
                 if ((isClosed || !props.isStreaming) && !timer.done) {
                     timer.done = true;
@@ -964,24 +761,16 @@ watch(() => messageParts.value, (newParts) => {
         }
     });
 }, { deep: true, immediate: true });
-
-// Module-level cache to prevent duplicate requests across unmounts/remounts or multiple instances
-const globalResolvedArtefactImages = {};
-
-const resolvedArtefactImages = ref({}); // 'title::index' -> 'base64'
 
 const getTokens = (text) => {
     if (!text) return [];
     const allTokens = [];
-    
-    // Use \s* for more robust newline/whitespace handling
     const combinedRegex = /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g;
     
     let lastIndex = 0;
     let match;
 
     while ((match = combinedRegex.exec(text)) !== null) {
-        // Add preceding segment
         if (match.index > lastIndex) {
             const markdownPart = text.substring(lastIndex, match.index);
             const tokens = getContentTokensWithMathProtection(markdownPart);
@@ -998,7 +787,6 @@ const getTokens = (text) => {
         if (blockType === 'skill') finalType = 'skill_block';
         if (blockType === 'note') finalType = 'note_block';
 
-        // Stable key: Use hash of content + title instead of unstable match.index
         const contentHash = simpleHash(match[0]);
 
         allTokens.push({ 
@@ -1012,7 +800,6 @@ const getTokens = (text) => {
         lastIndex = combinedRegex.lastIndex;
     }
 
-    // Add remaining segment
     if (lastIndex < text.length) {
         const remaining = text.substring(lastIndex);
         const tokens = getContentTokensWithMathProtection(remaining);
@@ -1182,23 +969,16 @@ function saveSkillFromRenderer(part) {
     });
 }
 
-/**
- * Safely retrieves content for a widget.
- * Implements an aggressive lookup strategy directly from the inline tag.
- * Removed external buffering to ensure WYSIWYG consistency.
- */
 function getWidgetContent(widgetOrPart) {
     try {
         if (!widgetOrPart) return '';
         
         const w = widgetOrPart.widget || widgetOrPart;
 
-        // 1. Direct Content Check (From the raw string parsed in MessageContentRenderer)
         if (w.source || w.content || w.html || w.code) {
              return w.source || w.content || w.html || w.code;
         }
 
-        // 2. Metadata/Event Log Cross-reference (Fallback for older backwards-compatible messages with UUIDs)
         const requestedId = widgetOrPart.id || w.id;
         const requestedTitle = w.title;
 
@@ -1207,7 +987,6 @@ function getWidgetContent(widgetOrPart) {
             if (match) return match.source || match.content || match.html || match.code || '';
         }
 
-        // 3. Manual Event scan
         if (props.events) {
             const event = props.events.find(e => e.type === 'widget_done' && e.content);
             if (event) return event.content.content || event.content.chunk || '';
@@ -1236,14 +1015,12 @@ function openWidgetFullscreen(widget) {
     });
 }
 
-
-
 function openWidgetInNewTab(widget) {
     if (!widget) return;
     const source = getWidgetContent(widget);
     if (!source) return;
 
-    const fullHtml = wrapInIsolatedShell(source);
+    const fullHtml = wrapInIsolatedShell(source, widget.id || 'widget');
     const blob = new Blob([fullHtml], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
@@ -1282,18 +1059,6 @@ function onImageLoad(event, annotations) {
     requestAnimationFrame(tryDrawing);
 }
 
-function handleSourceClick(source, idx) {
-    // Open modal directly when clicking items in the bottom list
-    uiStore.openModal('sourceViewer', {
-        title: source.title || source.name || `Source [${source.index || idx + 1}]`,
-        content: source.content || source.chunk_text || source.text || '',
-        source: source.source || source.url || '',
-        score: source.relevance_score || source.score || 0,
-        metadata: source.metadata || {}
-    });
-}
-
-// Auto-size mermaid containers based on rendered SVG natural height
 function onMermaidReady({ svg }, partIndex) {
     nextTick(() => {
         try {
@@ -1301,8 +1066,6 @@ function onMermaidReady({ svg }, partIndex) {
             if (!viewBox) return;
             const [, , , vbHeight] = viewBox.split(' ').map(Number);
             if (!vbHeight || vbHeight <= 0) return;
-            // Find the wrapper div for this part and set its height
-            // Add padding for toolbar (48px) + some breathing room
             const minH = 300, maxH = 1200;
             const targetH = Math.min(maxH, Math.max(minH, vbHeight + 80));
             const wrappers = messageContentRef.value?.querySelectorAll('.mermaid-wrapper');
@@ -1318,15 +1081,14 @@ function onMermaidReady({ svg }, partIndex) {
   <div ref="messageContentRef">
     <div v-if="content || isUser || isStreaming || activeTask || (events && events.length > 0)" class="message-prose">
 
-      <!-- Live Typing Indicator during active connection before first token -->
       <div v-if="isStreaming && !content" class="typing-indicator my-2 text-blue-500/60 flex items-center gap-1">
           <span class="dot"></span><span class="dot"></span><span class="dot"></span>
           <span class="text-[10px] font-black uppercase tracking-widest ml-2">Awaiting first token...</span>
       </div>
 
       <template v-if="messageParts.length > 0">
-        <template v-for="part in messageParts" :key="part.id">
-          <!-- ── Mermaid diagram ─────────────────────────────────────────── -->
+        <template v-for="(part, index) in messageParts" :key="part.id">
+          <!-- Mermaid diagram -->
           <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm mermaid-wrapper">
             <MermaidViewer 
               :mermaid-code="part.code" 
@@ -1334,18 +1096,21 @@ function onMermaidReady({ svg }, partIndex) {
               @ready="onMermaidReady($event, index)" 
             />
           </div>
-        <!-- Book Artefact Rendering -->
-        <div v-else-if="part.type === 'artefact' && part.meta.type === 'book'" class="book-artefact-container my-6">
-            <div class="book-frame bg-white dark:bg-slate-50 text-slate-900 p-8 sm:p-12 shadow-2xl rounded-sm border-l-8 border-slate-300 dark:border-slate-400 mx-auto max-w-3xl overflow-hidden relative">
-                <div class="book-content prose prose-slate max-w-none" v-html="part.content"></div>
-                <div class="absolute bottom-4 right-8 text-[10px] font-serif italic text-slate-400">LoLLMs Digital Edition</div>
-            </div>
-            <div class="flex justify-center mt-4">
-                <button @click="$emit('export', { format: 'pdf', content: part.content, title: part.meta.title })" class="btn btn-secondary btn-xs gap-2">
-                    <IconArrowDownTray class="w-3 h-3" /> Download as PDF
-                </button>
-            </div>
-        </div>
+
+          <!-- Book Artefact Rendering -->
+          <div v-else-if="part.type === 'artefact' && part.meta?.type === 'book'" class="book-artefact-container my-6">
+              <div class="book-frame bg-white dark:bg-slate-50 text-slate-900 p-8 sm:p-12 shadow-2xl rounded-sm border-l-8 border-slate-300 dark:border-slate-400 mx-auto max-w-3xl overflow-hidden relative">
+                  <div class="book-content prose prose-slate max-w-none" v-html="part.content"></div>
+                  <div class="absolute bottom-4 right-8 text-[10px] font-serif italic text-slate-400">LoLLMs Digital Edition</div>
+              </div>
+              <div class="flex justify-center mt-4">
+                  <button @click="$emit('export', { format: 'pdf', content: part.content, title: part.meta.title })" class="btn btn-secondary btn-xs gap-2">
+                      <IconArrowDownTray class="w-3 h-3" /> Download as PDF
+                  </button>
+              </div>
+          </div>
+
+          <!-- Normal Content Stream -->
           <div v-else-if="part.type === 'content'" class="content-token-container">
             <template v-for="(token, tokenIndex) in (getTokens(part.content) || [])" :key="token.uid || `token-${tokenIndex}`">
               <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
@@ -1371,23 +1136,16 @@ function onMermaidReady({ svg }, partIndex) {
                   </div>
               </details>
               
-              <details v-else-if="token.type === 'skill_block'" class="skill-block my-4 group/block">
-                  <!-- ... -->
-              </details>
-              
-              <details v-else-if="token.type === 'note_block'" class="note-block-collapsible my-4 group/block">
-                  <!-- ... -->
-              </details>
-              
               <div v-else-if="token.raw" class="markdown-text" v-html="parsedMarkdown(token.raw)"></div>
             </template>
           </div>
 
-          <!-- ── Explicit code block (non-mermaid) ──────────────────────── -->
+          <!-- Explicit code block -->
           <template v-else-if="part.type === 'code'">
             <CodeBlock :language="part.lang" :code="part.code" :message-id="messageId" />
           </template>
 
+          <!-- Thinking block -->
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>
             <summary class="think-summary">
               <IconAnimateSpin v-if="!part.isClosed" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
@@ -1395,14 +1153,12 @@ function onMermaidReady({ svg }, partIndex) {
               <div class="flex items-center justify-between w-full pr-2">
                   <div class="flex items-center gap-2">
                       <span>Thinking</span>
-                      <!-- Bouncing dots indicator when active -->
                       <span v-if="!part.isClosed" class="flex gap-1 items-center mt-1.5">
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.3s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.15s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce"></span>
                       </span>
                   </div>
-                  <!-- Inline duration timer -->
                   <span class="text-[10px] font-mono opacity-60 tracking-wider">
                       {{ part.isClosed ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` }}
                   </span>
@@ -1411,6 +1167,7 @@ function onMermaidReady({ svg }, partIndex) {
             <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
           </details>
 
+          <!-- Image tool block -->
           <div v-else-if="part.type === 'image_tool'" class="my-4 p-4 rounded-xl border-2 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 shadow-sm">
              <div class="flex items-center justify-between mb-4">
                  <div class="flex items-center gap-2">
@@ -1472,6 +1229,7 @@ function onMermaidReady({ svg }, partIndex) {
              </div>
           </div>
 
+          <!-- Scheduler block -->
           <div v-else-if="part.type === 'scheduler'" class="my-4 p-4 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/20 shadow-sm">
              <div class="flex items-center gap-3">
                  <div class="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
@@ -1485,20 +1243,17 @@ function onMermaidReady({ svg }, partIndex) {
              </div>
           </div>
 
-          <!-- ── Note block ──────────────────────────────────────────────── -->
+          <!-- Note block -->
           <details v-else-if="part.type === 'note'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60" open>
-            <!-- [NEW] Live Status Pulse for secondary stream -->
             <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
                 <span class="flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                     <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
                 </span>
             </div>
-            <!-- Header bar as Summary -->
             <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800/60 cursor-pointer list-none select-none">
               <div class="flex items-center gap-2.5">
                 <IconChevronRight class="w-3 h-3 text-amber-500 transition-transform duration-200 summary-arrow" />
-                <!-- Notepad icon -->
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
@@ -1507,7 +1262,6 @@ function onMermaidReady({ svg }, partIndex) {
                   <span class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ part.title }}</span>
                 </div>
               </div>
-              <!-- Save button (stop propagation to prevent toggle on button click) -->
               <button
                 @click.stop="saveNoteFromRenderer(part.title, part.content)"
                 class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-colors"
@@ -1517,7 +1271,6 @@ function onMermaidReady({ svg }, partIndex) {
                 Save Note
               </button>
             </summary>
-            <!-- Note content — token-aware so code blocks get syntax highlighting -->
             <div class="note-body px-5 py-4 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-200 dark:border-amber-800/60">
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
                 <template v-for="(token, ti) in getTokens(liveArtefactBuffers[part.title] || part.content)" :key="`note-token-${ti}`">
@@ -1528,9 +1281,8 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </details>
 
-          <!-- ── Skill block ──────────────────────────────────────────────── -->
+          <!-- Skill block -->
           <details v-else-if="part.type === 'skill'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60" open>
-            <!-- [NEW] Live Status Pulse -->
             <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
                 <span class="flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
@@ -1565,6 +1317,7 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </details>
 
+          <!-- Annotation block -->
           <template v-else-if="part.type === 'annotate'">
             <div class="annotated-image-container relative my-4 group">
                 <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" @load="onImageLoad($event, part.annotations)"/>
@@ -1578,7 +1331,7 @@ function onMermaidReady({ svg }, partIndex) {
             </div>
           </template>
 
-          <!-- ── New Unified Processing Component ───────────────────────────── -->
+          <!-- Unified Processing Component -->
           <ProcessingBlock 
                v-else-if="part.type === 'processing'"
                :p-type="part.pType"
@@ -1587,7 +1340,7 @@ function onMermaidReady({ svg }, partIndex) {
                :is-closed="part.isClosed"
           />
 
-          <!-- ── Active Tool Execution ──────────────────────────────────────── -->
+          <!-- Active Tool Execution -->
           <div v-else-if="part.type === 'tool_call'" class="my-4 p-4 rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/30 dark:bg-purple-950/10 shadow-sm flex items-start gap-3 animate-in fade-in">
               <div class="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
                   <IconWrenchScrewdriver class="w-5 h-5" />
@@ -1601,7 +1354,7 @@ function onMermaidReady({ svg }, partIndex) {
               </div>
           </div>
 
-          <!-- ── Deep Memory Retrieval ──────────────────────────────────────── -->
+          <!-- Deep Memory Retrieval -->
           <div v-else-if="part.type === 'mem_load'" class="my-4 p-4 rounded-xl border border-teal-200 dark:border-teal-800/40 bg-teal-50/30 dark:bg-teal-950/10 shadow-sm flex items-start gap-3 animate-in fade-in">
               <div class="p-2 rounded-lg bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 shrink-0">
                   <IconThinking class="w-5 h-5 animate-pulse" />
@@ -1612,41 +1365,18 @@ function onMermaidReady({ svg }, partIndex) {
               </div>
           </div>
 
-          <!-- Forms no longer rendered here as they must be embedded in content -->
-
-          <!-- ── OWL Visualization ───────────────────────────────────────── -->
+          <!-- OWL Visualization -->
           <div v-else-if="part.type === 'owl'" class="my-6 border-2 border-indigo-500 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 shadow-xl">
               <div class="px-4 py-2 bg-indigo-600 text-white flex justify-between items-center">
-                  <span class="text-[10px] font-black uppercase tracking-widest">Semantic OWL Visualizer</span>
+                  <span class="text-[10px] font-black uppercase tracking-widest">Semantic OWL / RDF</span>
                   <button @click="uiStore.copyToClipboard(part.content)" class="hover:text-indigo-200"><IconCopy class="w-4 h-4"/></button>
               </div>
-              <div class="h-[400px] relative">
-                  <InteractiveGraphViewer 
-                      :nodes="[]" 
-                      :edges="[]" 
-                      :is-loading="false"
-                      :owl-source="part.content" 
-                  />
+              <div class="p-4 bg-gray-900 text-gray-100 overflow-x-auto text-xs font-mono">
+                  <pre>{{ part.content }}</pre>
               </div>
           </div>
 
-          <!-- ── OWL Visualization ───────────────────────────────────────── -->
-          <div v-else-if="part.type === 'owl'" class="my-6 border-2 border-indigo-500 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 shadow-xl">
-              <div class="px-4 py-2 bg-indigo-600 text-white flex justify-between items-center">
-                  <span class="text-[10px] font-black uppercase tracking-widest">Semantic OWL Visualizer</span>
-                  <button @click="uiStore.copyToClipboard(part.content)" class="hover:text-indigo-200"><IconCopy class="w-4 h-4"/></button>
-              </div>
-              <div class="h-[400px] relative">
-                  <InteractiveGraphViewer 
-                      :nodes="[]" 
-                      :edges="[]" 
-                      :is-loading="false"
-                      :owl-source="part.content" 
-                  />
-              </div>
-          </div>
-
-          <!-- ── Interactive Form ────────────────────────────────────────── -->
+          <!-- Interactive Form -->
           <template v-else-if="part.type === 'form_ready'">
                <div class="my-4 p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
                   <InteractiveForm 
@@ -1654,29 +1384,21 @@ function onMermaidReady({ svg }, partIndex) {
                       :discussion-id="currentDiscussionId"
                   />
                </div>
-            </template>
+          </template>
 
-            <!-- ── Dynamic Multi-Sheet Spreadsheet Data Views ──────────────── -->
-            <template v-else-if="part.type === 'data_grid_view'">
-               <div class="my-6 border dark:border-gray-700 rounded-2xl overflow-hidden shadow-xl bg-white dark:bg-gray-950 h-96">
-                  <InteractiveDataGrid 
-                      :discussionId="currentDiscussionId"
-                      :title="part.title"
-                      :version="part.version"
-                      class="w-full h-full"
-                  />
-               </div>
-            </template>
-
-          <!-- ── Interactive Widget ──────────────────────────────────────── -->
-          <template v-else-if="part.type === 'interactive_widget'">
-             <div class="my-4 border rounded-lg p-4 bg-gray-50 dark:bg-gray-800">
-                <h4 class="font-bold text-sm mb-2">{{ part.widget.title }}</h4>
-                <div v-html="part.widget.source"></div>
+          <!-- Dynamic Spreadsheet View -->
+          <template v-else-if="part.type === 'data_grid_view'">
+             <div class="my-6 border dark:border-gray-700 rounded-2xl overflow-hidden shadow-xl bg-white dark:bg-gray-950 h-96">
+                <InteractiveDataGrid 
+                    :discussionId="currentDiscussionId"
+                    :title="part.title"
+                    :version="part.version"
+                    class="w-full h-full"
+                />
              </div>
           </template>
 
-          <!-- ── Artefact Image Resolution ───────────────────────────────── -->
+          <!-- Artefact Image Anchor -->
           <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount">
              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
                   <div class="relative">
@@ -1684,13 +1406,11 @@ function onMermaidReady({ svg }, partIndex) {
                           :src="`/api/discussions/${currentDiscussionId}/artefacts/${encodeURIComponent(part.title)}/images/${part.index}`" 
                           class="w-full h-auto max-h-[600px] object-contain mx-auto"
                       />
-                      <!-- Actions Overlay / Delete Button -->
                       <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 z-10">
                           <button @click="deleteArtefactImage(part.title, part.index)" class="p-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-lg transition-all active:scale-95 cursor-pointer" title="Delete this page/image">
                               <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                           </button>
                       </div>
-                      <!-- Overlay Title -->
                       <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
                            <span class="text-[10px] font-black uppercase tracking-widest text-white">{{ part.title }} — Page {{ part.index + 1 }}</span>
                       </div>
@@ -1698,12 +1418,11 @@ function onMermaidReady({ svg }, partIndex) {
              </div>
           </div>
 
-          <!-- ── Interactive Teaching Widget (Inline Preview Mode) ─────────── -->
+          <!-- Interactive Widget -->
           <div v-else-if="part.type === 'interactive_widget' && part.widget" 
                class="my-4 group/widget-container clear-both isolation-auto">
               <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-xl transition-all hover:border-blue-500/20">
                   
-                  <!-- Preview Header -->
                   <div class="px-4 py-2.5 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
                       <div class="flex items-center gap-3 min-w-0">
                           <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600">
@@ -1734,7 +1453,6 @@ function onMermaidReady({ svg }, partIndex) {
                       </div>
                   </div>
                   
-                  <!-- Inline Iframe Viewport -->
                   <div class="relative w-full bg-white transition-all overflow-hidden border-b dark:border-gray-800" style="min-height: 100px;">
                       <iframe 
                         v-if="getWidgetContent(part.widget)"
@@ -1747,14 +1465,12 @@ function onMermaidReady({ svg }, partIndex) {
                         referrerpolicy="no-referrer"
                       ></iframe>
                       
-                      <!-- Loading Placeholder: Show only if both static content and live buffer are empty -->
                       <div v-else class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/50 dark:bg-gray-900/50">
                          <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin mb-3 opacity-30" />
                          <p class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Awaiting source data...</p>
                       </div>
                   </div>
 
-                  <!-- Footer / Status -->
                   <div class="px-4 py-2 bg-gray-50/30 dark:bg-gray-900/20 flex items-center justify-between border-t dark:border-gray-800">
                        <div class="flex items-center gap-2">
                           <div class="w-1.5 h-1.5 rounded-full" :class="part.widget.is_loading ? 'bg-gray-400' : 'bg-green-500 animate-pulse'"></div>
@@ -1769,7 +1485,7 @@ function onMermaidReady({ svg }, partIndex) {
 
         </template>
 
-        <!-- ── [NEW] Live Active Event Indicator ──────────────────────── -->
+        <!-- Live Active Event Indicator -->
         <div v-if="isStreaming && $attrs.message?.lastEvent" class="mt-4 animate-in fade-in slide-in-from-bottom-1">
              <div class="flex items-center gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100/50 dark:border-blue-800/30">
                   <div class="relative shrink-0">

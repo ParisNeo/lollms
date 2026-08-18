@@ -7,6 +7,7 @@ import { useDataStore } from '../../stores/data';
 import GenericModal from './GenericModal.vue';
 import { useRouter } from 'vue-router';
 import { parsedMarkdown } from '../../services/markdownParser';
+import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 
 // Icons
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
@@ -30,6 +31,9 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
 import IconMicrophone from '../../assets/icons/IconMicrophone.vue';
+import IconTerminal from '../../assets/icons/ui/IconTerminal.vue';
+import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
 
 const uiStore = useUiStore();
 const authStore = useAuthStore();

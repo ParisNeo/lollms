@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/components/ui/ImageViewerModal.vue -->
 <template>
   <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md select-none" @click.self="close">
     <div class="relative w-full h-full max-h-screen flex flex-col justify-between p-4 sm:p-6">
@@ -42,9 +41,10 @@
 
       <!-- Main Central Viewport -->
       <div class="grow relative overflow-hidden flex items-center justify-center my-2 max-h-[70vh] sm:max-h-[75vh]">
-        <img 
-          :src="currentImage?.src" 
-          :alt="currentImage?.prompt || 'Full view'" 
+        <AuthenticatedImage 
+          v-if="currentImage?.src"
+          :src="currentImage.src" 
+          :alt="currentImage.prompt || 'Full view'" 
           class="max-h-full max-w-full object-contain transition-transform duration-100 ease-out shadow-2xl rounded-2xl cursor-grab active:cursor-grabbing"
           :style="{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)` }"
           @wheel.prevent="handleWheel"
@@ -93,7 +93,7 @@
                 class="relative w-12 h-12 shrink-0 rounded-xl overflow-hidden border-2 transition-all"
                 :class="currentIndex === idx ? 'border-blue-500 scale-105 shadow-lg shadow-blue-500/30' : 'border-transparent opacity-50 hover:opacity-100'"
             >
-                <img :src="img.thumbnail || img.src" class="w-full h-full object-cover" />
+                <AuthenticatedImage :src="img.thumbnail || img.src" class="w-full h-full object-cover pointer-events-none" />
             </button>
         </div>
       </div>
@@ -104,6 +104,7 @@
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import AuthenticatedImage from './AuthenticatedImage.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';

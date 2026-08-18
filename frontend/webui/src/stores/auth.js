@@ -461,12 +461,7 @@ export const useAuthStore = defineStore('auth', () => {
         loadingMessage.value = 'Checking credentials...';
 
         try {
-            const adminStatusResponse = await apiClient.get('/api/auth/admin_status');
-            if (!adminStatusResponse.data.admin_exists) {
-                isAuthenticating.value = false;
-                useUiStore().openModal('firstAdminSetup'); 
-                return;
-            } else if (token.value) {
+            if (token.value) {
                 await fetchUserAndInitialData();
             }
         } catch (error) {

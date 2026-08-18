@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-18 23:01]
+
+- build(frontend): rebuild production assets and update auth logic
+
 ## [2026-08-18 21:28]
 
 - feat(image-studio): implement image generation and studio enhancements

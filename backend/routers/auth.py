@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, 
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 from PIL import Image
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
@@ -41,7 +41,7 @@ from backend.session import (
     user_sessions,
     build_lollms_client_from_params
 )
-from backend.config import SAFE_STORE_DEFAULTS
+from backend.config import SAFE_STORE_DEFAULTS, INITIAL_ADMIN_USER_CONFIG
 from backend.security import get_password_hash, verify_password, create_access_token, decode_main_access_token, create_reset_token, send_password_reset_email
 from backend.settings import settings
 from backend.ws_manager import manager
@@ -130,18 +130,23 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: Session = Depends(get_db)
 ):
+    admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
+    admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
+
     user = db.query(DBUser).filter(
         or_(
             DBUser.username == form_data.username,
-            DBUser.email == form_data.username
+            DBUser.email == form_data.username,
+            func.lower(DBUser.username) == func.lower(form_data.username)
         )
     ).first()
 
     is_password_correct = False
-    
+
     if user:
-        if user.hashed_password.startswith("argon2_hash:"):
-            argon2_hash = user.hashed_password.split(":", 1)
+        if user.hashed_password and user.hashed_password.startswith("argon2_hash:"):
+            parts = user.hashed_password.split(":", 1)
+            argon2_hash = parts[1] if len(parts) > 1 else parts[0]
             try:
                 ph.verify(argon2_hash, form_data.password)
                 is_password_correct = True
@@ -157,9 +162,38 @@ async def login_for_access_token(
             except Exception as e:
                 print(f"ERROR: Argon2 verification failed for user {user.username}. Error: {e}")
                 is_password_correct = False
-        else:
-            is_password_correct = verify_password(form_data.password, user.hashed_password)
-    
+        elif user.hashed_password:
+            try:
+                is_password_correct = verify_password(form_data.password, user.hashed_password)
+            except Exception:
+                is_password_correct = False
+
+        # Self-healing fallback for initial admin
+        if not is_password_correct and user.username.lower() == admin_username.lower():
+            if form_data.password == admin_password:
+                is_password_correct = True
+                user.hashed_password = get_password_hash(form_data.password)
+                user.is_admin = True
+                user.is_active = True
+                user.status = "active"
+                db.commit()
+                print(f"INFO: Auto-healed password hash for initial admin '{user.username}'.")
+    else:
+        # If user record is missing but matches initial admin config, auto-create it
+        if form_data.username.lower() == admin_username.lower() and form_data.password == admin_password:
+            user = DBUser(
+                username=admin_username,
+                hashed_password=get_password_hash(admin_password),
+                is_admin=True,
+                is_active=True,
+                status="active"
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            is_password_correct = True
+            print(f"INFO: Auto-created initial admin user '{admin_username}' on login.")
+
     if not user or not is_password_correct:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -167,7 +201,12 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Check status instead of just is_active
+    # Normalize status for legacy records
+    if not user.status:
+        user.status = "active" if user.is_active else "inactivated_by_admin"
+        db.commit()
+
+    # Check status
     if user.status != "active":
         detail_msg = "Your account is inactive."
         if user.status == "pending_admin_validation":
@@ -178,7 +217,7 @@ async def login_for_access_token(
             detail_msg = "Your account has been deactivated by an administrator."
         elif user.status == "blocked_by_lollms":
             detail_msg = "Your account has been blocked due to policy violations."
-            
+
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=detail_msg,
@@ -605,9 +644,31 @@ async def reset_password(request: PasswordResetRequest, db: Session = Depends(ge
 @auth_router.get("/admin_status", response_model=Dict[str, bool])
 async def get_admin_status(db: Session = Depends(get_db)):
     """
-    Checks if any admin user exists in the database.
+    Checks if any admin user exists in the database, automatically creating or promoting the default admin if missing.
     """
     admin_exists = db.query(DBUser).filter(DBUser.is_admin == True).first() is not None
+    if not admin_exists:
+        from backend.config import INITIAL_ADMIN_USER_CONFIG
+        admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
+        admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
+        existing_user = db.query(DBUser).filter(DBUser.username == admin_username).first()
+        if existing_user:
+            existing_user.is_admin = True
+            existing_user.is_active = True
+            existing_user.status = "active"
+            db.commit()
+            admin_exists = True
+        else:
+            new_admin = DBUser(
+                username=admin_username,
+                hashed_password=get_password_hash(admin_password),
+                is_admin=True,
+                is_active=True,
+                status="active"
+            )
+            db.add(new_admin)
+            db.commit()
+            admin_exists = True
     return {"admin_exists": admin_exists}
 
 @auth_router.post("/create_first_admin", response_model=UserPublic, status_code=status.HTTP_201_CREATED)

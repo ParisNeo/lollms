@@ -367,11 +367,26 @@ def run_one_time_startup_tasks(lock: Lock):
         db_for_defaults = next(get_db())
         admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
         admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
-        if admin_username and admin_password and not db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first():
-            new_admin = DBUser(username=admin_username, hashed_password=hash_password(admin_password), is_admin=True)
-            db_for_defaults.add(new_admin)
-            db_for_defaults.commit()
-            ASCIIColors.green(f"Initial admin user '{admin_username}' created.")
+        admin_exists = db_for_defaults.query(DBUser).filter(DBUser.is_admin == True).first() is not None
+        if not admin_exists:
+            existing_user = db_for_defaults.query(DBUser).filter(DBUser.username == admin_username).first()
+            if existing_user:
+                existing_user.is_admin = True
+                existing_user.is_active = True
+                existing_user.status = "active"
+                db_for_defaults.commit()
+                ASCIIColors.green(f"Promoted existing user '{admin_username}' to admin.")
+            else:
+                new_admin = DBUser(
+                    username=admin_username, 
+                    hashed_password=hash_password(admin_password), 
+                    is_admin=True,
+                    is_active=True,
+                    status="active"
+                )
+                db_for_defaults.add(new_admin)
+                db_for_defaults.commit()
+                ASCIIColors.green(f"Initial admin user '{admin_username}' created.")
         if not db_for_defaults.query(DBLLMBinding).first():
             ASCIIColors.yellow("No LLM bindings found – you will need to add one via Settings.")
         steps[3] = (steps[3][0], True)
@@ -598,6 +613,7 @@ async def startup_event():
     global broadcast_listener_task, rss_scheduler, startup_lock
 
     init_database(APP_DB_URL)
+    run_one_time_startup_tasks(startup_lock)
 
     db = db_session_module.SessionLocal()
     try:
