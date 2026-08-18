@@ -38,14 +38,14 @@
     <div class="h-full flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden relative select-none font-sans">
         
         <!-- Top Tool Options HUD (Floating Pill) -->
-        <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 animate-in fade-in slide-in-from-top-3 max-w-[95vw] overflow-x-auto no-scrollbar">
+        <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 animate-in fade-in slide-from-top-3 max-w-[95vw] overflow-x-auto no-scrollbar">
             <!-- Active Tool Indicator -->
             <div class="flex items-center gap-1.5 pr-2 border-r dark:border-gray-800 shrink-0">
                 <span class="text-[9px] font-black uppercase tracking-widest text-primary">{{ currentToolName }}</span>
             </div>
 
             <!-- Primary Color & Swatches -->
-            <div class="flex items-center gap-1.5 shrink-0" v-if="['brush', 'line', 'rect', 'circle', 'text', 'fill', 'gradient'].includes(tool)">
+            <div class="flex items-center gap-1.5 shrink-0" v-if="['brush', 'line', 'rect', 'circle', 'text', 'gradient'].includes(tool)">
                 <div class="relative w-6 h-6 rounded-lg overflow-hidden border dark:border-gray-700 shadow-sm cursor-pointer" :style="{ backgroundColor: color }">
                     <input type="color" v-model="color" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
                 </div>
@@ -70,7 +70,7 @@
             </div>
 
             <!-- Size / Thickness Slider -->
-            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand', 'blur'].includes(tool)">
+            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand'].includes(tool)">
                 <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">
                     {{ tool === 'text' ? 'Font' : (tool === 'wand' ? 'Tolerance' : 'Size') }}
                 </span>
@@ -82,19 +82,6 @@
                     class="w-20 sm:w-28 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 >
                 <span class="text-[9px] font-mono font-bold w-7 text-center bg-gray-100 dark:bg-gray-800 py-0.5 rounded">{{ brushSize }}</span>
-            </div>
-
-            <!-- Brush Hardness / Smoothness -->
-            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser'].includes(tool)">
-                <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Hardness</span>
-                <input 
-                    type="range" 
-                    v-model.number="brushHardness" 
-                    min="0" 
-                    max="1" 
-                    step="0.05"
-                    class="w-16 sm:w-20 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                >
             </div>
 
             <!-- Clone Tool Anchor State -->
@@ -144,10 +131,14 @@
 
                 <!-- Layer Composition Container -->
                 <div :style="combinedCanvasStyle" class="relative shadow-2xl origin-center canvas-stack">
-                    <canvas ref="imageCanvasRef" class="block bg-white layer-canvas"></canvas>
-                    <div v-for="layer in layers" :key="layer.id" v-show="layer.visible">
-                         <canvas 
-                            :ref="el => layer.el = el" 
+                    <!-- Base Sizing Anchor Canvas -->
+                    <canvas ref="imageCanvasRef" class="block bg-transparent layer-canvas"></canvas>
+
+                    <!-- Render All Stacked Layers -->
+                    <template v-for="layer in layers" :key="layer.id">
+                        <canvas 
+                            :ref="el => setLayerCanvasRef(layer, el)" 
+                            v-show="layer.visible"
                             class="absolute inset-0 layer-canvas" 
                             :style="{ 
                                 zIndex: layer.order, 
@@ -155,10 +146,23 @@
                                 mixBlendMode: layer.blendMode || 'normal',
                                 filter: getLayerFilterCss(layer)
                             }"
-                         ></canvas>
-                    </div>
-                    <canvas ref="maskCanvasRef" class="absolute inset-0 opacity-50 layer-canvas pointer-events-none" style="z-index: 999"></canvas>
-                    <canvas ref="previewCanvasRef" class="absolute inset-0 pointer-events-none layer-canvas" style="z-index: 1000"></canvas>
+                        ></canvas>
+                    </template>
+
+                    <!-- Inpainting Mask Canvas Layer -->
+                    <canvas 
+                        ref="maskCanvasRef" 
+                        v-show="activeLayerId === 'mask' || showMaskOverlay"
+                        class="absolute inset-0 opacity-50 layer-canvas pointer-events-none" 
+                        style="z-index: 998"
+                    ></canvas>
+
+                    <!-- Shape & Interactive Drawing Preview Layer -->
+                    <canvas 
+                        ref="previewCanvasRef" 
+                        class="absolute inset-0 pointer-events-none layer-canvas" 
+                        style="z-index: 1000"
+                    ></canvas>
                     
                     <!-- Interactive Cursor Reticle -->
                     <div 
@@ -212,7 +216,7 @@
                             class="flex-1 py-1 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all"
                             :class="activeInspectorTab === 'ai' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                         >
-                            AI Tools
+                            AI Studio
                         </button>
                     </div>
                 </div>
@@ -253,9 +257,9 @@
                                 class="layer-item group" 
                                 :class="{'active': activeLayerId === layer.id}"
                             >
-                                <button @click.stop="layer.visible = !layer.visible" class="p-1 text-gray-400 hover:text-blue-500">
+                                <button @click.stop="toggleLayerVisibility(layer)" class="p-1 text-gray-400 hover:text-blue-500">
                                     <IconEye v-if="layer.visible" class="w-3.5 h-3.5 text-blue-500"/>
-                                    <IconEyeOff v-else class="w-3.5 h-3.5"/>
+                                    <IconEyeOff v-else class="w-3.5 h-3.5 text-gray-400"/>
                                 </button>
                                 
                                 <span class="text-xs font-bold truncate grow" :class="layer.id === 'base' ? 'font-black' : ''">{{ layer.name }}</span>
@@ -266,7 +270,7 @@
 
                         <!-- Active Layer Properties -->
                         <div v-if="activeLayerId !== 'mask'" class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-700/60 space-y-3">
-                            <span class="text-[9px] font-black uppercase text-gray-400 tracking-widest block">Layer Properties</span>
+                            <span class="text-[9px] font-black uppercase text-gray-400 tracking-widest block">Layer Properties ({{ activeLayer.name }})</span>
                             
                             <!-- Opacity Slider -->
                             <div class="space-y-1">
@@ -346,60 +350,103 @@
                         </div>
                     </div>
 
-                    <!-- ── TAB 3: AI POWER INPAINT & OUTPAINT ── -->
+                    <!-- ── TAB 3: TARGETED AI LAYER EDITING & INPAINTING ── -->
                     <div v-show="activeInspectorTab === 'ai'" class="space-y-4">
                         <div class="flex items-center justify-between">
-                            <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">AI Composition</span>
+                            <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">AI Layer Studio</span>
                             <button @click="enhancePrompt" class="text-blue-500 hover:scale-110 transition-transform text-xs flex items-center gap-1 font-bold">
                                 <IconSparkles class="w-3.5 h-3.5"/> Enhance
                             </button>
                         </div>
 
-                        <div class="space-y-2">
-                            <label class="text-[10px] font-bold text-gray-500">Inpainting & Edit Prompt</label>
+                        <!-- 1. Layer Target Selector -->
+                        <div class="space-y-1.5 p-3 bg-blue-50/50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-800/40">
+                            <label class="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300 tracking-wider block">AI Target Layer</label>
+                            <select v-model="aiEditTarget" class="input-field !text-xs !py-1.5 w-full bg-white dark:bg-gray-900">
+                                <option value="active">Active Layer ({{ activeLayer.name }})</option>
+                                <option value="flattened">All Visible Layers (Full Canvas Composite)</option>
+                            </select>
+                            <p class="text-[9px] text-gray-500 dark:text-gray-400">
+                                {{ aiEditTarget === 'active' ? `AI will analyze and edit only "${activeLayer.name}".` : 'AI will flatten all visible layers into a unified image.' }}
+                            </p>
+                        </div>
+
+                        <!-- 2. Prompts -->
+                        <div class="space-y-1.5">
+                            <label class="text-[10px] font-bold text-gray-500">Edit / Inpaint Prompt</label>
                             <textarea 
                                 v-model="prompt" 
                                 rows="3" 
                                 class="input-field w-full text-xs resize-none leading-relaxed" 
-                                placeholder="Describe additions, replacements, or stylistic modifications..."
+                                placeholder="Describe changes, additions, texture replacement, or inpainting details..."
                             ></textarea>
                         </div>
 
-                        <div class="space-y-2">
+                        <div class="space-y-1.5">
+                            <label class="text-[10px] font-bold text-gray-500">Negative Prompt (Optional)</label>
+                            <input 
+                                v-model="negativePrompt" 
+                                type="text"
+                                class="input-field w-full text-xs" 
+                                placeholder="ugly, blurry, deformed, low resolution..."
+                            />
+                        </div>
+
+                        <!-- 3. Edit Strength Slider -->
+                        <div class="space-y-1 p-2.5 bg-gray-50 dark:bg-gray-800/60 rounded-xl border dark:border-gray-700/60">
+                            <div class="flex justify-between items-center text-xs">
+                                <span class="text-[10px] font-bold text-gray-500">Edit Strength (Denoising)</span>
+                                <span class="font-mono text-[10px] font-bold text-blue-600 dark:text-blue-400">{{ editStrength.toFixed(2) }}</span>
+                            </div>
+                            <input 
+                                type="range" 
+                                v-model.number="editStrength" 
+                                min="0.1" 
+                                max="1.0" 
+                                step="0.05" 
+                                class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                            >
+                            <div class="flex justify-between text-[8px] font-mono text-gray-400">
+                                <span>0.10 (Subtle Tweaks)</span>
+                                <span>1.00 (Total Redraw)</span>
+                            </div>
+                        </div>
+
+                        <!-- 4. Output Mode & Inpaint Options -->
+                        <div class="space-y-2 pt-1">
+                            <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2.5 rounded-xl border dark:border-gray-700">
+                                <span class="text-[10px] font-bold text-gray-600 dark:text-gray-300">Apply Mask (Inpainting)</span>
+                                <button @click="useInpaintMask = !useInpaintMask" :class="useInpaintMask ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'" class="w-8 h-4 rounded-full relative transition-colors">
+                                    <div class="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all" :style="{ left: useInpaintMask ? '16px' : '2px' }"></div>
+                                </button>
+                            </div>
+
+                            <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2.5 rounded-xl border dark:border-gray-700">
+                                <span class="text-[10px] font-bold text-gray-600 dark:text-gray-300">Output as New Layer</span>
+                                <button @click="outputAsNewLayer = !outputAsNewLayer" :class="outputAsNewLayer ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'" class="w-8 h-4 rounded-full relative transition-colors">
+                                    <div class="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all" :style="{ left: outputAsNewLayer ? '16px' : '2px' }"></div>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="space-y-1.5">
                             <label class="text-[10px] font-bold text-gray-500">Active Model</label>
                             <select v-model="selectedModel" class="input-field w-full text-xs">
                                 <option v-for="m in compatibleModels" :key="m.id" :value="m.id">{{ m.name }}</option>
                             </select>
                         </div>
-
-                        <!-- Magic Transparency Toggle -->
-                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-800 p-2.5 rounded-xl border dark:border-gray-700">
-                             <span class="text-[10px] font-bold text-gray-600 dark:text-gray-300">Auto Key Transparency</span>
-                             <button @click="aiRemoveBg = !aiRemoveBg" :class="aiRemoveBg ? 'bg-emerald-500' : 'bg-gray-300 dark:bg-gray-600'" class="w-8 h-4 rounded-full relative transition-colors">
-                                 <div class="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all" :style="{ left: aiRemoveBg ? '16px' : '2px' }"></div>
-                             </button>
-                        </div>
-                        
-                        <button 
-                            @click="generateNewLayerElement" 
-                            class="btn btn-secondary w-full py-2.5 text-xs font-bold flex items-center justify-center gap-2" 
-                            :disabled="isProcessingTask || !prompt.trim()"
-                        >
-                            <IconPlus class="w-4 h-4 text-blue-500"/> 
-                            <span>Synthesize Asset Layer</span>
-                        </button>
                     </div>
                 </div>
 
-                <!-- Footer Primary Action -->
-                <div class="p-4 border-t dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/80">
+                <!-- Footer Primary Action (Scoped strictly to AI Studio Tab) -->
+                <div v-if="activeInspectorTab === 'ai'" class="p-4 border-t dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/80 animate-in fade-in">
                     <button 
-                        @click="generateFlattenedEdit" 
+                        @click="executeTargetedAiEdit" 
                         class="btn btn-primary w-full py-3 text-xs font-black uppercase tracking-widest shadow-xl shadow-blue-500/20 flex items-center justify-center gap-2" 
-                        :disabled="isProcessingTask"
+                        :disabled="isProcessingTask || !prompt.trim()"
                     >
                         <IconSparkles class="w-4 h-4" /> 
-                        <span>{{ activeLayerId === 'mask' ? 'Render Inpainted Fill' : 'Full Composition AI' }}</span>
+                        <span>{{ useInpaintMask ? 'Render Inpaint on Target' : 'Apply AI Edit to Target' }}</span>
                     </button>
                 </div>
             </aside>
@@ -475,15 +522,20 @@ const tool = ref('brush');
 const color = ref('#3B82F6');
 const secondaryColor = ref('#EC4899');
 const brushSize = ref(35);
-const brushHardness = ref(0.85);
 const zoom = ref(1);
 const panX = ref(0);
 const panY = ref(0);
+
+// AI Studio Specific State
 const prompt = ref('');
+const negativePrompt = ref('');
+const editStrength = ref(0.70);
+const aiEditTarget = ref('active'); // 'active' | 'flattened'
+const useInpaintMask = ref(false);
+const outputAsNewLayer = ref(true);
 const selectedModel = ref('');
 const isProcessingTask = ref(false);
 const activeTaskId = ref(null);
-const aiRemoveBg = ref(true);
 
 const recentColors = ref(['#000000', '#FFFFFF', '#EF4444', '#10B981', '#3B82F6', '#F59E0B', '#8B5CF6']);
 
@@ -579,18 +631,25 @@ function initNewBlankCanvas() {
     imageCanvasRef.value.width = defaultW;
     imageCanvasRef.value.height = defaultH;
     
-    const base = layers.value.find(l => l.id === 'base');
-    base.ctx = imageCanvasRef.value.getContext('2d');
-    base.ctx.fillStyle = '#FFFFFF';
-    base.ctx.fillRect(0, 0, defaultW, defaultH);
-    
     [maskCanvasRef, previewCanvasRef].forEach(c => { 
-        c.value.width = defaultW; 
-        c.value.height = defaultH; 
+        if (c.value) {
+            c.value.width = defaultW; 
+            c.value.height = defaultH; 
+        }
     });
-    
-    saveState();
-    fitToScreen();
+
+    nextTick(() => {
+        const base = layers.value.find(l => l.id === 'base') || layers.value[0];
+        if (base?.el) {
+            base.el.width = defaultW;
+            base.el.height = defaultH;
+            base.ctx = base.el.getContext('2d');
+            base.ctx.fillStyle = '#FFFFFF';
+            base.ctx.fillRect(0, 0, defaultW, defaultH);
+        }
+        saveState();
+        fitToScreen();
+    });
 }
 
 async function loadImage(id) {
@@ -603,26 +662,53 @@ async function loadImage(id) {
             img.src = URL.createObjectURL(res.data); 
         });
         
-        imageCanvasRef.value.width = img.naturalWidth; 
-        imageCanvasRef.value.height = img.naturalHeight;
-        
-        const base = layers.value.find(l => l.id === 'base');
-        base.ctx = imageCanvasRef.value.getContext('2d'); 
-        base.ctx.drawImage(img, 0, 0);
+        const w = img.naturalWidth;
+        const h = img.naturalHeight;
+
+        imageCanvasRef.value.width = w; 
+        imageCanvasRef.value.height = h;
         
         [maskCanvasRef, previewCanvasRef].forEach(c => { 
-            c.value.width = img.naturalWidth; 
-            c.value.height = img.naturalHeight; 
+            if (c.value) {
+                c.value.width = w; 
+                c.value.height = h; 
+            }
         });
+
+        await nextTick();
+        const base = layers.value.find(l => l.id === 'base') || layers.value[0];
+        if (base?.el) {
+            base.el.width = w;
+            base.el.height = h;
+            base.ctx = base.el.getContext('2d');
+            base.ctx.drawImage(img, 0, 0);
+        }
         
         saveState(); 
         fitToScreen();
     } catch (e) { 
+        console.error("Failed to load image:", e);
         router.push('/image-studio'); 
     }
 }
 
 function setTool(t) { tool.value = t; }
+
+function setLayerCanvasRef(layer, el) {
+    if (el) {
+        layer.el = el;
+        layer.ctx = el.getContext('2d');
+        if (imageCanvasRef.value && (el.width !== imageCanvasRef.value.width || el.height !== imageCanvasRef.value.height)) {
+            el.width = imageCanvasRef.value.width;
+            el.height = imageCanvasRef.value.height;
+        }
+    }
+}
+
+function toggleLayerVisibility(layer) {
+    layer.visible = !layer.visible;
+    saveState();
+}
 
 function addNewLayer(name = null) {
     const id = `layer_${Date.now()}`;
@@ -644,6 +730,7 @@ function addNewLayer(name = null) {
             l.el.height = imageCanvasRef.value.height;
             l.ctx = l.el.getContext('2d');
         }
+        saveState();
     });
 }
 
@@ -688,6 +775,7 @@ function mergeLayerDown() {
     if (targetLayer.ctx && currentLayer.ctx) {
         targetLayer.ctx.save();
         targetLayer.ctx.globalAlpha = currentLayer.opacity;
+        targetLayer.ctx.globalCompositeOperation = currentLayer.blendMode || 'source-over';
         targetLayer.ctx.drawImage(currentLayer.ctx.canvas, 0, 0);
         targetLayer.ctx.restore();
     }
@@ -706,19 +794,19 @@ function deleteLayer(id) {
 }
 
 function clearMask() {
-    if (ctxMask.value) {
+    if (ctxMask.value && maskCanvasRef.value) {
         ctxMask.value.clearRect(0, 0, maskCanvasRef.value.width, maskCanvasRef.value.height);
         saveState();
     }
 }
 
 function invertMask() {
-    if (!ctxMask.value) return;
+    if (!ctxMask.value || !maskCanvasRef.value) return;
     const w = maskCanvasRef.value.width, h = maskCanvasRef.value.height;
     const imgData = ctxMask.value.getImageData(0, 0, w, h);
     const d = imgData.data;
     for (let i = 0; i < d.length; i += 4) {
-        d[i+3] = 255 - d[i+3]; // Invert Alpha
+        d[i+3] = 255 - d[i+3];
         d[i] = 255; d[i+1] = 255; d[i+2] = 255;
     }
     ctxMask.value.putImageData(imgData, 0, 0);
@@ -740,6 +828,7 @@ function sampleColorAtPoint(x, y) {
     layers.value.filter(l => l.visible).forEach(l => {
         if (l.ctx) {
             cc.globalAlpha = l.opacity;
+            cc.globalCompositeOperation = l.blendMode || 'source-over';
             cc.drawImage(l.ctx.canvas, 0, 0);
         }
     });
@@ -751,7 +840,7 @@ function sampleColorAtPoint(x, y) {
         recentColors.value.unshift(hex);
         if (recentColors.value.length > 7) recentColors.value.pop();
     }
-    uiStore.addNotification(`Color Sampled: ${hex}`, 'info', 1000);
+    uiStore.addNotification(`Sampled Color: ${hex}`, 'info', 1000);
 }
 
 function startAction(e) {
@@ -766,7 +855,7 @@ function startAction(e) {
     if (tool.value === 'clone' && settingCloneAnchor.value) { 
         cloneAnchor.value = { x, y }; 
         settingCloneAnchor.value = false; 
-        uiStore.addNotification('Clone anchor calibrated.', 'success', 1000);
+        uiStore.addNotification('Clone anchor set.', 'success', 1000);
         return; 
     }
     
@@ -805,7 +894,6 @@ function handleMove(e) {
     if (!isDragging) return;
     
     if (tool.value === 'pan' && e.shiftKey) {
-        // Move active layer content
         const c = getActiveContext(); 
         const t = document.createElement('canvas');
         t.width = c.canvas.width; 
@@ -840,6 +928,7 @@ function getActiveContext() {
 
 function draw(x, y) {
     const c = getActiveContext(); 
+    if (!c) return;
     c.lineCap = 'round'; 
     c.lineJoin = 'round'; 
     c.lineWidth = brushSize.value;
@@ -854,6 +943,7 @@ function draw(x, y) {
 function drawClone(x, y) {
     if (!cloneAnchor.value) return;
     const c = getActiveContext(); 
+    if (!c) return;
     c.save(); 
     c.beginPath(); 
     c.arc(x, y, brushSize.value/2, 0, Math.PI*2); 
@@ -871,6 +961,7 @@ function drawClone(x, y) {
 
 function drawPreviewShape(x, y) {
     const c = ctxPreview.value; 
+    if (!c) return;
     c.clearRect(0,0,c.canvas.width,c.canvas.height);
     c.strokeStyle = color.value; 
     c.lineWidth = 2; 
@@ -893,8 +984,11 @@ function drawPreviewShape(x, y) {
 }
 
 function commitShape(pos) {
-    ctxPreview.value.clearRect(0,0,previewCanvasRef.value.width,previewCanvasRef.value.height);
+    if (ctxPreview.value) {
+        ctxPreview.value.clearRect(0,0,previewCanvasRef.value.width,previewCanvasRef.value.height);
+    }
     const c = getActiveContext(); 
+    if (!c) return;
     c.strokeStyle = color.value; 
     c.fillStyle = color.value; 
     c.lineWidth = brushSize.value; 
@@ -952,7 +1046,7 @@ function resetAdjustments() {
 
 function bakeAdjustmentsToActiveLayer() {
     const l = activeLayer.value;
-    if (!l.ctx) return;
+    if (!l?.ctx) return;
     const c = document.createElement('canvas');
     c.width = l.ctx.canvas.width;
     c.height = l.ctx.canvas.height;
@@ -988,73 +1082,100 @@ async function enhancePrompt() {
     });
 }
 
-async function generateNewLayerElement() {
-    isProcessingTask.value = true;
-    const fullPrompt = aiRemoveBg.value ? `${prompt.value} on a solid bright magenta background, isolated subject, studio lighting` : prompt.value;
-    try {
-        const tsk = await imageStore.generateImage({
-            prompt: fullPrompt, 
-            model: selectedModel.value, 
-            width: imageCanvasRef.value.width, 
-            height: imageCanvasRef.value.height, 
-            n: 1
-        });
-        if (tsk?.id) {
-            activeTaskId.value = tsk.id;
-            const unwatch = watch(() => tasksStore.tasks.find(t => t.id === tsk.id), (t) => {
-                if (t?.status === 'completed' && t.result) {
-                    const res = Array.isArray(t.result) ? t.result[0] : t.result;
-                    loadGeneratedAssetToLayer(res.id);
-                    unwatch();
-                }
-            }, { deep: true });
-        }
-    } catch (e) { 
-        isProcessingTask.value = false; 
+// ── TARGETED AI EDITING METHOD ──
+async function executeTargetedAiEdit() {
+    if (!prompt.value.trim()) {
+        uiStore.addNotification('Please enter an edit prompt.', 'warning');
+        return;
     }
-}
 
-async function loadGeneratedAssetToLayer(id) {
-    const res = await apiClient.get(`/api/image-studio/${id}/file`, { responseType: 'blob' });
-    const img = new Image();
-    img.onload = () => {
-        addNewLayer("AI Asset Layer");
-        nextTick(() => {
-            const l = activeLayer.value;
-            l.ctx.drawImage(img, 0, 0);
-            if (aiRemoveBg.value) magicWandTransparency(0, 0); 
-            saveState(); 
-            isProcessingTask.value = false;
-        });
-    };
-    img.src = URL.createObjectURL(res.data);
-}
-
-async function generateFlattenedEdit() {
     isProcessingTask.value = true;
+    
+    // 1. Render target source (Active layer OR Full composite)
     const comp = document.createElement('canvas'); 
     comp.width = imageCanvasRef.value.width; 
     comp.height = imageCanvasRef.value.height;
     const cc = comp.getContext('2d');
-    
-    layers.value.filter(l => l.visible).forEach(l => { 
-        cc.globalAlpha = l.opacity; 
-        cc.globalCompositeOperation = l.blendMode || 'source-over';
-        if(l.el) cc.drawImage(l.el, 0, 0); 
-    });
-    
+
+    if (aiEditTarget.value === 'active' && activeLayer.value?.ctx) {
+        cc.globalAlpha = activeLayer.value.opacity;
+        cc.drawImage(activeLayer.value.ctx.canvas, 0, 0);
+    } else {
+        // Flatten all visible layers
+        layers.value.filter(l => l.visible).forEach(l => { 
+            if (l.ctx) {
+                cc.globalAlpha = l.opacity; 
+                cc.globalCompositeOperation = l.blendMode || 'source-over';
+                cc.drawImage(l.ctx.canvas, 0, 0); 
+            }
+        });
+    }
+
     const b64 = comp.toDataURL('image/png').split(',')[1];
-    const m64 = maskCanvasRef.value.toDataURL('image/png').split(',')[1];
-    
-    const tsk = await imageStore.editImage({ 
-        base_image_b64: b64, 
-        mask: m64, 
-        prompt: prompt.value, 
-        model: selectedModel.value, 
-        width: comp.width, 
-        height: comp.height 
-    });
-    if (tsk?.id) activeTaskId.value = tsk.id;
+    const mask64 = (useInpaintMask.value && maskCanvasRef.value) ? maskCanvasRef.value.toDataURL('image/png').split(',')[1] : null;
+
+    try {
+        const tsk = await imageStore.editImage({ 
+            base_image_b64: b64, 
+            mask: mask64, 
+            prompt: prompt.value, 
+            negative_prompt: negativePrompt.value,
+            model: selectedModel.value, 
+            width: comp.width, 
+            height: comp.height,
+            strength: editStrength.value
+        });
+        if (tsk?.id) {
+            activeTaskId.value = tsk.id;
+        }
+    } catch (e) {
+        console.error("AI Edit failed:", e);
+        isProcessingTask.value = false;
+    }
+}
+
+async function onTaskCompleted(t) { 
+    if (t.id === activeTaskId.value) { 
+        isProcessingTask.value = false; 
+        if (t.status === 'completed' && t.result) {
+            const res = Array.isArray(t.result) ? t.result[0] : t.result;
+            if (res?.id) {
+                await loadAiResultOntoCanvas(res.id);
+            }
+        }
+    } 
+}
+
+async function loadAiResultOntoCanvas(imageId) {
+    try {
+        const res = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
+        const img = new Image();
+        img.onload = () => {
+            if (outputAsNewLayer.value) {
+                addNewLayer(`AI Edit (${prompt.value.slice(0, 15)})`);
+                nextTick(() => {
+                    const l = activeLayer.value;
+                    if (l?.ctx) {
+                        l.ctx.drawImage(img, 0, 0);
+                        saveState();
+                        uiStore.addNotification('AI Edit added as new layer.', 'success');
+                    }
+                });
+            } else {
+                // Replace active layer content
+                const l = activeLayer.value;
+                if (l?.ctx) {
+                    l.ctx.clearRect(0, 0, l.ctx.canvas.width, l.ctx.canvas.height);
+                    l.ctx.drawImage(img, 0, 0);
+                    saveState();
+                    uiStore.addNotification(`Layer '${l.name}' updated with AI result.`, 'success');
+                }
+            }
+        };
+        img.src = URL.createObjectURL(res.data);
+    } catch (e) {
+        console.error("Failed to load AI result:", e);
+    }
 }
 
 function saveProject() {
@@ -1063,7 +1184,7 @@ function saveProject() {
             prompt: prompt.value, 
             width: imageCanvasRef.value.width, 
             height: imageCanvasRef.value.height,
-            version: '2.0'
+            version: '2.5'
         },
         layers: layers.value.map(l => ({ 
             id: l.id, 
@@ -1071,7 +1192,7 @@ function saveProject() {
             opacity: l.opacity, 
             blendMode: l.blendMode || 'normal',
             visible: l.visible, 
-            data: l.el?.toDataURL() 
+            data: l.el ? l.el.toDataURL('image/png') : null 
         }))
     };
     const blob = new Blob([JSON.stringify(projectData, null, 2)], { type: 'application/json' });
@@ -1092,9 +1213,11 @@ function saveCanvas() {
     const cc = comp.getContext('2d');
     
     layers.value.filter(l => l.visible).forEach(l => { 
-        cc.globalAlpha = l.opacity; 
-        cc.globalCompositeOperation = l.blendMode || 'source-over';
-        if (l.el) cc.drawImage(l.el, 0, 0); 
+        if (l.ctx) {
+            cc.globalAlpha = l.opacity; 
+            cc.globalCompositeOperation = l.blendMode || 'source-over';
+            cc.drawImage(l.ctx.canvas, 0, 0); 
+        }
     });
     
     imageStore.saveCanvasAsNewImage({ 
@@ -1107,18 +1230,36 @@ function saveCanvas() {
 }
 
 function saveState() {
-    const s = layers.value.map(l => ({ 
+    if (!imageCanvasRef.value) return;
+
+    const layerSnapshots = layers.value.map(l => ({ 
         id: l.id, 
-        data: l.el?.toDataURL(), 
+        name: l.name,
+        order: l.order,
         v: l.visible, 
         o: l.opacity,
-        b: l.blendMode 
+        b: l.blendMode || 'normal',
+        data: l.el ? l.el.toDataURL('image/png') : null
     }));
+
+    const maskData = maskCanvasRef.value ? maskCanvasRef.value.toDataURL('image/png') : null;
+
+    const snapshot = {
+        width: imageCanvasRef.value.width,
+        height: imageCanvasRef.value.height,
+        activeLayerId: activeLayerId.value,
+        layers: layerSnapshots,
+        maskData: maskData
+    };
+
     if (historyIndex.value < history.value.length - 1) {
         history.value = history.value.slice(0, historyIndex.value + 1);
     }
-    history.value.push(s); 
-    historyIndex.value++;
+    history.value.push(snapshot);
+    if (history.value.length > 30) {
+        history.value.shift();
+    }
+    historyIndex.value = history.value.length - 1;
 }
 
 function undo() { 
@@ -1135,21 +1276,56 @@ function redo() {
     } 
 }
 
-function applyHistory(state) {
-    state.forEach(s => {
+async function applyHistory(snapshot) {
+    if (!snapshot) return;
+    
+    const restoredLayers = snapshot.layers.map(s => {
+        const existing = layers.value.find(l => l.id === s.id);
+        return {
+            id: s.id,
+            name: s.name,
+            order: s.order,
+            visible: s.v,
+            opacity: s.o,
+            blendMode: s.b || 'normal',
+            el: existing?.el || null,
+            ctx: existing?.ctx || null
+        };
+    });
+
+    layers.value = restoredLayers;
+    activeLayerId.value = snapshot.activeLayerId || 'base';
+
+    await nextTick();
+
+    const w = snapshot.width || imageCanvasRef.value.width;
+    const h = snapshot.height || imageCanvasRef.value.height;
+
+    snapshot.layers.forEach(s => {
         const l = layers.value.find(x => x.id === s.id);
-        if (l && l.ctx && s.data) { 
-            const i = new Image(); 
-            i.onload = () => { 
-                l.ctx.clearRect(0, 0, l.el.width, l.el.height); 
-                l.ctx.drawImage(i, 0, 0); 
-            }; 
-            i.src = s.data; 
-            l.visible = s.v; 
-            l.opacity = s.o; 
-            l.blendMode = s.b || 'normal';
+        if (l && l.el && s.data) {
+            l.el.width = w;
+            l.el.height = h;
+            l.ctx = l.el.getContext('2d');
+            const img = new Image();
+            img.onload = () => {
+                l.ctx.clearRect(0, 0, w, h);
+                l.ctx.drawImage(img, 0, 0);
+            };
+            img.src = s.data;
         }
     });
+
+    if (maskCanvasRef.value && ctxMask.value) {
+        ctxMask.value.clearRect(0, 0, w, h);
+        if (snapshot.maskData) {
+            const mImg = new Image();
+            mImg.onload = () => {
+                ctxMask.value.drawImage(mImg, 0, 0);
+            };
+            mImg.src = snapshot.maskData;
+        }
+    }
 }
 
 function fitToScreen() {
@@ -1176,16 +1352,9 @@ function handleWheel(e) {
     } 
 }
 
-function onTaskCompleted(t) { 
-    if (t.id === activeTaskId.value) { 
-        isProcessingTask.value = false; 
-    } 
-}
-
 function handleKeydown(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
     
-    // Shortcuts
     if (e.key === 'b' || e.key === 'B') setTool('brush');
     if (e.key === 'e' || e.key === 'E') setTool('eraser');
     if (e.key === 'i' || e.key === 'I') setTool('eyedropper');
