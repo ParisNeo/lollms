@@ -100,21 +100,6 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         await fetchArtefacts(discussionId);
     }
 
-    async function renameArtefact({ discussionId, oldTitle, newTitle, newType }) {
-        try {
-            await apiClient.put(`/api/discussions/${discussionId}/artefacts/rename`, {
-                old_title: oldTitle,
-                new_title: newTitle,
-                new_type: newType
-            });
-            await fetchArtefacts(discussionId);
-            uiStore.addNotification(`Artefact renamed successfully.`, 'success');
-        } catch (e) {
-            console.error("Rename failed:", e);
-            uiStore.addNotification('Failed to rename artefact.', 'error');
-        }
-    }
-
     async function updateArtefact({ discussionId, artefactTitle, newContent, newImagesB64, keptImagesB64, version, updateInPlace, artefactType }) {
         const payload = { 
             new_content: newContent, 
@@ -132,24 +117,25 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function renameArtefact({ discussionId, artefactTitle, newTitle }) {
+    async function renameArtefact({ discussionId, artefactTitle, newTitle, newType }) {
         // Double-encode to ensure title characters like dots don't trigger static file handlers
         const encodedTitle = encodeURIComponent(artefactTitle)
             .replace(/\./g, '%2E')
             .replace(/%/g, '%25');
 
         await apiClient.put(`/api/discussions/${discussionId}/artefacts/${encodedTitle}/rename`, {
-            new_title: newTitle
+            new_title: newTitle,
+            new_type: newType
         });
-        
+
         // Refresh local list
         await fetchArtefacts(discussionId);
-        
+
         // If this file was open in the workspace, update the UI title ref
         if (uiStore.activeSplitArtefactTitle === artefactTitle) {
             uiStore.activeSplitArtefactTitle = newTitle;
         }
-        
+
         uiStore.addNotification(`Renamed to '${newTitle}'`, 'success');
     }
     

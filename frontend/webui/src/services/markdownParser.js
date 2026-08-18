@@ -82,17 +82,17 @@ function wrapNakedCode(text) {
  */
 function normalizeTables(text) {
     if (!text || typeof text !== 'string') return text;
-    const tableSeparatorRegex = /^(\|?\s*:?-+:?\s*\|?)+$/gm;
+    const tableSeparatorRegex = /^(\|?\s*:?-+:?\s*\|?)+$/m;
     if (!tableSeparatorRegex.test(text)) return text;
 
     const lines = text.split('\n');
     const result = [];
-    
+
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        if (line.match(tableSeparatorRegex)) {
-            if (i > 0 && lines[i-1].includes('|')) {
-                if (i > 1 && lines[i-2].trim() !== '' && !lines[i-2].includes('|')) {
+        if (typeof line === 'string' && /^(\|?\s*:?-+:?\s*\|?)+$/.test(line.trim())) {
+            if (i > 0 && typeof lines[i-1] === 'string' && lines[i-1].includes('|')) {
+                if (i > 1 && typeof lines[i-2] === 'string' && lines[i-2].trim() !== '' && !lines[i-2].includes('|')) {
                     result.splice(result.length - 1, 0, '');
                 }
             }

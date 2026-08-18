@@ -1,14 +1,13 @@
 import { defineStore, storeToRefs } from 'pinia';
-import { ref, computed, onMounted, onUnmounted, watch } from 'vue';
+import { ref, computed, watch } from 'vue';
 import apiClient from '../services/api'; 
 import { useUiStore } from './ui';
 import { useAuthStore } from './auth';
 import { useDataStore } from './data';
-
-import { useTasksStore } from './tasks'; // [FIX] Added missing import
+import { useTasksStore } from './tasks';
 import useEventBus from '../services/eventBus';
 
-// Import ALL composables
+// Import Composables
 import { useDiscussionCore } from './composables/useDiscussionCore';
 import { useDiscussionArtefacts } from './composables/useDiscussionArtefacts';
 import { useDiscussionDataZones } from './composables/useDiscussionDataZones';
@@ -23,11 +22,12 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const uiStore = useUiStore();
     const authStore = useAuthStore();
     const dataStore = useDataStore();
+    const tasksStore = useTasksStore();
 
     const { user } = storeToRefs(authStore);
     const { on, off, emit } = useEventBus();
 
-    // --- STATE ---
+    // --- STATE REFS ---
     const discussions = ref({});
     const discussionGroups = ref([]);
     const starredArtefacts = ref([]);
@@ -44,17 +44,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         console.error("Failed to parse starredArtefacts:", e);
     }
 
-    function toggleStarArtefact(title) {
-        const current = [...starredArtefacts.value];
-        const idx = current.indexOf(title);
-        if (idx > -1) {
-            current.splice(idx, 1);
-        } else {
-            current.push(title);
-        }
-        starredArtefacts.value = current;
-        localStorage.setItem('starredArtefacts', JSON.stringify(starredArtefacts.value));
-    }
     const sharedWithMe = ref([]);
     const isLoadingDiscussions = ref(false);
     const currentDiscussionId = ref(null);
@@ -72,9 +61,9 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const liveDataZoneTokens = ref({ discussion: 0, user: 0, personality: 0, memory: 0 });
     const promptInsertionText = ref('');
     const promptLoadedArtefacts = ref(new Set());
-    const attachedSkills = ref([]); // Staged skills for the next message
-    const activeUpdatingArtefacts = ref(new Set()); // Files AI is currently writing to
-    const liveArtefactBuffers = ref({}); // Temporary storage for streaming content (reactive object)
+    const attachedSkills = ref([]);
+    const activeUpdatingArtefacts = ref(new Set());
+    const liveArtefactBuffers = ref({});
     const activeDiscussionParticipants = ref({});
     const ttsState = ref({});
     const currentPlayingAudio = ref({ messageId: null, audio: null });
@@ -88,115 +77,23 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    /**
-     * Discussion Zone is now strictly for User Instructions. 
-     * Mirroring of artefacts is handled natively by the library's layered context model.
-     */
-
-    // --- WATCHER for task updates ---
-    watch(() => {
-        try {
-            return useTasksStore().tasks;
-        } catch (e) {
-            return [];
+    function toggleStarArtefact(title) {
+        const current = [...starredArtefacts.value];
+        const idx = current.indexOf(title);
+        if (idx > -1) {
+            current.splice(idx, 1);
+        } else {
+            current.push(title);
         }
-    }, async (newTasks) => {
-        if (!newTasks) return;
-        // 1. Handle Artefact Audio Export (Auto-download)
-        const artefactAudioTask = newTasks.find(t => t.name.startsWith('Audio Export:') && t.status === 'completed' && t.result?.download_url);
-        if (artefactAudioTask && !artefactAudioTask._processed_for_download) {
-            artefactAudioTask._processed_for_download = true; 
-            const downloadUrl = `${apiClient.defaults.baseURL}${artefactAudioTask.result.download_url}`;
-            const link = document.createElement('a');
-            link.href = downloadUrl;
-            link.download = artefactAudioTask.result.filename;
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-            uiStore.addNotification(`Audio file ready: ${artefactAudioTask.result.filename}`, 'success');
-        }
+        starredArtefacts.value = current;
+        localStorage.setItem('starredArtefacts', JSON.stringify(starredArtefacts.value));
+    }
 
-        // 2. Handle Message Audio Task (Metadata Sync)
-        const msgAudioTask = newTasks.find(t => t.name === 'Generating Audio for Message' && (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'));
-        if (msgAudioTask && !msgAudioTask._processed_for_ui) {
-            msgAudioTask._processed_for_ui = true;
+    // --- ACTIONS INITIALIZATION (CRITICAL: Defined BEFORE computeds and watchers) ---
+    const _actions = {};
+    const getActions = () => _actions;
 
-            // Look up message ID from task result or log parse
-            const messageId = msgAudioTask.result?.message_id;
-            if (messageId) {
-                const msg = messages.value.find(m => m.id === messageId);
-                if (msg) {
-                    msg.isGeneratingAudio = false;
-                    if (msgAudioTask.status === 'completed' && msgAudioTask.result?.audio_url) {
-                        if (!msg.metadata) msg.metadata = {};
-                        msg.metadata.audio_url = `${apiClient.defaults.baseURL}${msgAudioTask.result.audio_url}`;
-                        uiStore.addNotification('Voice synthesis complete.', 'success');
-                    }
-                    // Force reactivity
-                    const idx = messages.value.indexOf(msg);
-                    messages.value.splice(idx, 1, { ...msg });
-                }
-            }
-        }
-
-        // 3. Handle Pruning Discussions Task Completion (Auto-refresh List)
-        const pruneTask = newTasks.find(t => t.name.startsWith('Prune empty discussions') && t.status === 'completed');
-        if (pruneTask && !pruneTask._processed_for_ui) {
-            pruneTask._processed_for_ui = true;
-            await getActions().loadDiscussions();
-
-            // Defensive Check: If currently active discussion was deleted, switch back to Feed
-            if (currentDiscussionId.value && !discussions.value[currentDiscussionId.value]) {
-                await getActions().selectDiscussion(null);
-                uiStore.setMainView('feed');
-            }
-            uiStore.addNotification('Empty discussions pruned successfully.', 'success');
-        }
-
-        const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
-        if (activeTrackedTaskIds.length === 0) return;
-
-        const tasksStore = useTasksStore();
-        for (const discussionId in activeAiTasks.value) {
-            const trackedTask = activeAiTasks.value[discussionId];
-            if (trackedTask && trackedTask.taskId) {
-                const correspondingTaskInStore = newTasks.find(t => t.id === trackedTask.taskId);
-                if (correspondingTaskInStore) {
-                    const isFinished = ['completed', 'failed', 'cancelled'].includes(correspondingTaskInStore.status);
-                    if (isFinished) {
-                        if (correspondingTaskInStore.status === 'completed') {
-                            if (trackedTask.type === 'import_url' || trackedTask.type === 'import_file') {
-                                getActions().fetchArtefacts(discussionId);
-                            }
-                            // --- FIX: Explicitly refresh memories when memorization completes ---
-                            if (trackedTask.type === 'memorize') {
-                                console.log("Memorization task completed. Refreshing memories...");
-                                try {
-                                    const { useMemoriesStore } = await import('./memories');
-                                    await useMemoriesStore().fetchMemories();
-                                    uiStore.addNotification('Memory bank updated.', 'success');
-                                } catch (memErr) {
-                                    console.warn("Failed to auto-refresh memories list:", memErr);
-                                }
-                            }
-                        }
-                        _clearActiveAiTask(discussionId);
-                    }
-                } else {
-                    // Task ID exists in our tracker but not in the store list. 
-                }
-            }
-        }
-    });
-
-    // NEW WATCHER: Watch for model changes to refresh context status
-    watch(() => user.value?.lollms_model_name, (newModel, oldModel) => {
-        if (newModel && newModel !== oldModel && currentDiscussionId.value) {
-            getActions().fetchContextStatus(currentDiscussionId.value);
-        }
-    });
-
-    // --- COMPUTED ---
+    // --- COMPUTEDS ---
     const activeDiscussion = computed(() => {
         if (!currentDiscussionId.value) return null;
         if (discussions.value[currentDiscussionId.value]) {
@@ -206,16 +103,11 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     });
 
     const activePersonality = computed(() => {
-        const authStore = useAuthStore();
-        const dataStore = useDataStore();
         const personalityId = authStore.user?.active_personality_id;
         if (!personalityId) return null;
         return dataStore.getPersonalityById(personalityId);
     });
 
-    /**
-     * Identifies notes and skills that are currently active in the context.
-     */
     const loadedContextItems = computed(() => {
         if (!Array.isArray(activeDiscussionArtefacts.value)) return [];
         return activeDiscussionArtefacts.value.filter(art => 
@@ -228,7 +120,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const dataZonesTokensFromContext = computed(() => activeDiscussionContextStatus.value?.zones?.system_context?.breakdown?.discussion_data_zone?.tokens || 0);
     const activeDiscussionContainsCode = computed(() => activeMessages.value.some(msg => msg.content && msg.content.includes('```')));
     
-    // Group artefacts by title, showing only the latest version but preserving 'is_loaded' status
     const uniqueAttachedArtefacts = computed(() => {
         const list = activeDiscussionArtefacts.value;
         if (!list || !Array.isArray(list)) return [];
@@ -246,34 +137,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     const currentModelVisionSupport = computed(() => {
         const modelId = authStore.user?.lollms_model_name;
         if (!modelId) return true;
-        const modelInfo = dataStore.availableLollmsModels.find(m => m.id === modelId);
+        const modelInfo = Array.isArray(dataStore.availableLollmsModels) ? dataStore.availableLollmsModels.find(m => m.id === modelId) : null;
         return modelInfo?.alias?.has_vision ?? true;
     });
 
     async function removeContextItem(itemTitle, itemType) {
-        // This is now handled by unloading the artefact in the library
         if (!activeDiscussion.value) return;
-        await getActions().unloadArtefactFromContext({
-            discussionId: activeDiscussion.value.id,
-            artefactTitle: itemTitle
-        });
+        if (typeof getActions().unloadArtefactFromContext === 'function') {
+            await getActions().unloadArtefactFromContext({
+                discussionId: activeDiscussion.value.id,
+                artefactTitle: itemTitle
+            });
+        }
     }
 
     const discussionGroupsTree = computed(() => {
-        const authStore = useAuthStore();
-        // 1. Get Sort Preference (Default to 'date')
         const sortMode = authStore.user?.discussion_sorting_mode || 'date';
         const sortOrder = authStore.user?.discussion_sorting_order || 'desc';
         const isAsc = sortOrder === 'asc';
 
-        // 2. Prepare Data
         const groups = JSON.parse(JSON.stringify(discussionGroups.value));
         const allDiscussions = Object.values(discussions.value);
 
         const starred = allDiscussions.filter(d => d.is_starred);
         const nonStarredDiscussions = allDiscussions.filter(d => !d.is_starred);
 
-        // 3. Define Sorting Functions
         const sortDiscussionsFn = (a, b) => {
             let res = 0;
             if (sortMode === 'alpha') res = a.title.localeCompare(b.title);
@@ -282,7 +170,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 const timeB = new Date(b.last_activity_at || b.created_at).getTime();
                 res = timeA - timeB;
             } else {
-                // 'date' (Created At)
                 res = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
             }
             return isAsc ? res : -res;
@@ -313,7 +200,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             return isAsc ? res : -res;
         };
 
-        // 4. Build Tree
         const groupsMap = new Map(groups.map(g => [g.id, { ...g, children: [], discussions: [] }]));
 
         nonStarredDiscussions.forEach(d => {
@@ -332,7 +218,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
             }
         }
 
-        // 5. Finalize Sorting
         for (const group of groupsMap.values()) {
             group.children.sort(sortGroupsFn);
         }
@@ -348,16 +233,13 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         };
     });
 
-    // --- ACTIONS ORCHESTRATION ---
-    const _actions = {};
-    const getActions = () => _actions;
-
+    // --- COMPOSE ACTIONS ---
     const composableState = {
         discussions, discussionGroups, sharedWithMe, isLoadingDiscussions, currentDiscussionId, currentGroupId, messages,
         isLoadingMessages, 
         generationInProgress, titleGenerationInProgressId, activeDiscussionContextStatus, activeAiTasks,
         activeDiscussionArtefacts, allUserArtefacts, isLoadingArtefacts, liveDataZoneTokens, promptInsertionText,
-        promptLoadedArtefacts, attachedSkills, activeUpdatingArtefacts, liveArtefactBuffers, // Added missing refs
+        promptLoadedArtefacts, attachedSkills, activeUpdatingArtefacts, liveArtefactBuffers,
         _clearActiveAiTask, activeDiscussion, activePersonality, emit,
         activeDiscussionParticipants, generationState, imageGenerationSystemPrompt,
         currentModelVisionSupport
@@ -378,26 +260,19 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     Object.assign(_actions, useDiscussionMessages(composableState, composableStores, getActions));
     Object.assign(_actions, useDiscussionSharing(composableState, composableStores, getActions));
     
-    // Register the missing function in the actions registry
     _actions.removeContextItem = removeContextItem;
 
-    // Wrap createNewDiscussion to hide data zone when starting a new discussion
     const originalCreateNewDiscussion = _actions.createNewDiscussion;
     if (originalCreateNewDiscussion) {
         _actions.createNewDiscussion = async function(...args) {
-            // Hide the data zone and workspace when starting a new discussion
             uiStore.isDataZoneVisible = false;
             uiStore.activeSplitArtefactTitle = null;
             uiStore.dataZoneTab = 'context';
-            
             return await originalCreateNewDiscussion.apply(this, args);
         };
     }
 
-    /**
-     * Generic TTS generation that returns a raw blob.
-     * Useful for exports or on-demand playback outside of message bubbles.
-     */
+    // --- HELPER METHODS ---
     async function generateTTSRaw(text) {
         const response = await apiClient.post('/api/discussions/generate_tts', 
             { text },
@@ -408,19 +283,16 @@ export const useDiscussionsStore = defineStore('discussions', () => {
 
     async function generateTTSForMessage(messageId) {
         if (!currentDiscussionId.value) return;
-
         try {
             const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/generate_audio`);
             const task = response.data;
-            useTasksStore().addTask(task);
+            tasksStore.addTask(task);
 
-            // Mark message as generating audio locally for UI feedback
             const msg = messages.value.find(m => m.id === messageId);
             if (msg) {
                 msg.isGeneratingAudio = true;
                 msg.audioTaskId = task.id;
             }
-
             uiStore.addNotification('Voice synthesis started in background...', 'info');
         } catch (error) {
             uiStore.addNotification('Failed to start speech generation.', 'error');
@@ -428,10 +300,8 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     }
 
     async function transcribeAudio(audioBlob) {
-        const uiStore = useUiStore();
         const formData = new FormData();
         formData.append('file', audioBlob, 'recording.wav');
-    
         try {
             const response = await apiClient.post('/api/discussions/stt', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' },
@@ -480,22 +350,22 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                 activeDiscussion.value.discussion_images = response.data.discussion_images;
                 activeDiscussion.value.active_discussion_images = response.data.active_discussion_images;
             }
-            await getActions().fetchContextStatus(currentDiscussionId.value);
+            if (typeof getActions().fetchContextStatus === 'function') {
+                await getActions().fetchContextStatus(currentDiscussionId.value);
+            }
         } catch (error) {
             uiStore.addNotification('Failed to toggle image status.', 'error');
         }
     }
 
-    // NEW ACTION
     async function triggerTagGeneration({ messageId, tagContent, tagType, rawTag }) {
         if (!currentDiscussionId.value) return;
 
-        // Simple parsing for width/height/n from rawTag if needed
         let width = 1024;
         let height = 1024;
         let num_images = 1;
         
-        if (rawTag) {
+        if (rawTag && typeof rawTag === 'string') {
             const wMatch = rawTag.match(/width="(\d+)"/);
             const hMatch = rawTag.match(/height="(\d+)"/);
             const nMatch = rawTag.match(/n="(\d+)"/);
@@ -514,7 +384,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         try {
             const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}/trigger_tag`, formData);
             const task = response.data;
-            const tasksStore = useTasksStore();
             tasksStore.addTask(task);
             uiStore.addNotification(`Started ${tagType} regeneration task.`, 'info');
         } catch (error) {
@@ -523,44 +392,6 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
-    // Consolidation: Wikipedia, Github, StackOverflow, and Youtube imports are now handled in useDiscussionArtefacts.js
-
-    // Event Bus Listener: Handle artefact/note/skill/widget completion
-    on('artefact_done', (data) => {
-        const discussionId = data.discussion_id;
-        if (discussionId !== currentDiscussionId.value) return;
-
-        const { id, title } = data.content;
-        const key = id || title;
-        if (key) {
-            if (activeUpdatingArtefacts.value) {
-                activeUpdatingArtefacts.value.delete(key);
-            }
-            // Use object spread for reactive re-assignment
-            const nextBuffers = { ...liveArtefactBuffers.value };
-            delete nextBuffers[key];
-            liveArtefactBuffers.value = nextBuffers;
-        }
-        // Crucial: Fetch final content so it's ready for the fullscreen viewer
-        getActions().fetchArtefacts(currentDiscussionId.value);
-    });
-
-    // --- Unified Knowledge Base Listeners ---
-    // These trigger the sidebar refresh when AI finishes writing any document type
-    const KNOWLEDGE_DONE_EVENTS = ['artefact_done', 'note_done', 'skill_done', 'widget_done', 'artefact_update_done'];
-
-    KNOWLEDGE_DONE_EVENTS.forEach(eventName => {
-        on(eventName, (data) => {
-            // Fallback to active discussion if ID is missing in the raw payload
-            const discussionId = data.discussion_id || currentDiscussionId.value;
-
-            if (discussionId && discussionId === currentDiscussionId.value) {
-                getActions().fetchArtefacts(discussionId);
-                getActions().fetchContextStatus(discussionId);
-            }
-        });
-    });
-    
     function attachSkill(skill) {
         if (!attachedSkills.value.find(s => s.id === skill.id)) {
             attachedSkills.value.push(skill);
@@ -571,6 +402,140 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         attachedSkills.value = attachedSkills.value.filter(s => s.id !== skillId);
     }
 
+    // --- EVENT BUS LISTENERS ---
+    on('artefact_done', (data) => {
+        const discussionId = data.discussion_id;
+        if (discussionId !== currentDiscussionId.value) return;
+
+        const { id, title } = data.content || {};
+        const key = id || title;
+        if (key) {
+            if (activeUpdatingArtefacts.value) {
+                activeUpdatingArtefacts.value.delete(key);
+            }
+            const nextBuffers = { ...liveArtefactBuffers.value };
+            delete nextBuffers[key];
+            liveArtefactBuffers.value = nextBuffers;
+        }
+        if (typeof getActions().fetchArtefacts === 'function') {
+            getActions().fetchArtefacts(currentDiscussionId.value);
+        }
+    });
+
+    const KNOWLEDGE_DONE_EVENTS = ['artefact_done', 'note_done', 'skill_done', 'widget_done', 'artefact_update_done'];
+    KNOWLEDGE_DONE_EVENTS.forEach(eventName => {
+        on(eventName, (data) => {
+            const discussionId = data?.discussion_id || currentDiscussionId.value;
+            if (discussionId && discussionId === currentDiscussionId.value) {
+                if (typeof getActions().fetchArtefacts === 'function') {
+                    getActions().fetchArtefacts(discussionId);
+                }
+                if (typeof getActions().fetchContextStatus === 'function') {
+                    getActions().fetchContextStatus(discussionId);
+                }
+            }
+        });
+    });
+
+    // --- WATCHERS (Attached AFTER all functions/actions are defined) ---
+    watch(() => {
+        try {
+            return tasksStore.tasks;
+        } catch (e) {
+            return [];
+        }
+    }, async (newTasks) => {
+        if (!newTasks) return;
+        const artefactAudioTask = newTasks.find(t => t.name && t.name.startsWith('Audio Export:') && t.status === 'completed' && t.result?.download_url);
+        if (artefactAudioTask && !artefactAudioTask._processed_for_download) {
+            artefactAudioTask._processed_for_download = true; 
+            const downloadUrl = `${apiClient.defaults.baseURL}${artefactAudioTask.result.download_url}`;
+            const link = document.createElement('a');
+            link.href = downloadUrl;
+            link.download = artefactAudioTask.result.filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            uiStore.addNotification(`Audio file ready: ${artefactAudioTask.result.filename}`, 'success');
+        }
+
+        const msgAudioTask = newTasks.find(t => t.name === 'Generating Audio for Message' && (t.status === 'completed' || t.status === 'failed' || t.status === 'cancelled'));
+        if (msgAudioTask && !msgAudioTask._processed_for_ui) {
+            msgAudioTask._processed_for_ui = true;
+
+            const messageId = msgAudioTask.result?.message_id;
+            if (messageId) {
+                const msg = messages.value.find(m => m.id === messageId);
+                if (msg) {
+                    msg.isGeneratingAudio = false;
+                    if (msgAudioTask.status === 'completed' && msgAudioTask.result?.audio_url) {
+                        if (!msg.metadata) msg.metadata = {};
+                        msg.metadata.audio_url = `${apiClient.defaults.baseURL}${msgAudioTask.result.audio_url}`;
+                        uiStore.addNotification('Voice synthesis complete.', 'success');
+                    }
+                    const idx = messages.value.indexOf(msg);
+                    messages.value.splice(idx, 1, { ...msg });
+                }
+            }
+        }
+
+        const pruneTask = newTasks.find(t => t.name && t.name.startsWith('Prune empty discussions') && t.status === 'completed');
+        if (pruneTask && !pruneTask._processed_for_ui) {
+            pruneTask._processed_for_ui = true;
+            if (typeof getActions().loadDiscussions === 'function') {
+                await getActions().loadDiscussions();
+            }
+
+            if (currentDiscussionId.value && !discussions.value[currentDiscussionId.value]) {
+                if (typeof getActions().selectDiscussion === 'function') {
+                    await getActions().selectDiscussion(null);
+                }
+                uiStore.setMainView('feed');
+            }
+            uiStore.addNotification('Empty discussions pruned successfully.', 'success');
+        }
+
+        const activeTrackedTaskIds = Object.values(activeAiTasks.value).map(t => t.taskId).filter(Boolean);
+        if (activeTrackedTaskIds.length === 0) return;
+
+        for (const discussionId in activeAiTasks.value) {
+            const trackedTask = activeAiTasks.value[discussionId];
+            if (trackedTask && trackedTask.taskId) {
+                const correspondingTaskInStore = newTasks.find(t => t.id === trackedTask.taskId);
+                if (correspondingTaskInStore) {
+                    const isFinished = ['completed', 'failed', 'cancelled'].includes(correspondingTaskInStore.status);
+                    if (isFinished) {
+                        if (correspondingTaskInStore.status === 'completed') {
+                            if (trackedTask.type === 'import_url' || trackedTask.type === 'import_file') {
+                                if (typeof getActions().fetchArtefacts === 'function') {
+                                    getActions().fetchArtefacts(discussionId);
+                                }
+                            }
+                            if (trackedTask.type === 'memorize') {
+                                try {
+                                    const { useMemoriesStore } = await import('./memories');
+                                    await useMemoriesStore().fetchMemories();
+                                    uiStore.addNotification('Memory bank updated.', 'success');
+                                } catch (memErr) {
+                                    console.warn("Failed to auto-refresh memories list:", memErr);
+                                }
+                            }
+                        }
+                        _clearActiveAiTask(discussionId);
+                    }
+                }
+            }
+        }
+    });
+
+    watch(() => user.value?.lollms_model_name, (newModel, oldModel) => {
+        if (newModel && newModel !== oldModel && currentDiscussionId.value) {
+            if (typeof getActions().fetchContextStatus === 'function') {
+                getActions().fetchContextStatus(currentDiscussionId.value);
+            }
+        }
+    });
+
     function $reset() {
         discussions.value = {};
         discussionGroups.value = [];
@@ -579,30 +544,26 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         currentDiscussionId.value = null;
         currentGroupId.value = null;
         messages.value = [];
-        isLoadingMessages.value = []; // Strict array
         isLoadingMessages.value = false;
         generationInProgress.value = false;
         generationState.value = { status: 'idle', details: '' };
         titleGenerationInProgressId.value = null;
         activeDiscussionContextStatus.value = null;
         activeAiTasks.value = {};
-        activeDiscussionArtefacts.value = []; // Strict array
-        allUserArtefacts.value = []; // Strict array
+        activeDiscussionArtefacts.value = [];
+        allUserArtefacts.value = [];
         isLoadingArtefacts.value = false;
         liveDataZoneTokens.value = { discussion: 0, user: 0, personality: 0, memory: 0 };
         promptInsertionText.value = '';
         promptLoadedArtefacts.value = new Set();
         activeDiscussionParticipants.value = {};
-        
-        // Reset Workspace/Live Tracking
         activeUpdatingArtefacts.value = new Set();
         liveArtefactBuffers.value = {};
         
-        // Defensive check for audio reset
         if (currentPlayingAudio.value?.audio) {
             try {
                 currentPlayingAudio.value.audio.pause();
-            } catch (e) { /* ignore cleanup errors */ }
+            } catch (e) { /* ignore */ }
         }
         currentPlayingAudio.value = { messageId: null, audio: null };
         ttsState.value = {};
@@ -627,7 +588,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         dataZonesTokensFromContext, currentModelVisionSupport, activePersonality, discussionGroupsTree,
         loadedContextItems,
 
-        // Actions (Spread from composables)
+        // Actions
         ..._actions,
 
         // Store-level methods

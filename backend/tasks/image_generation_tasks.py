@@ -450,10 +450,21 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
         task.set_progress(30)
 
         task.log("Sending edit request to TTI binding...")
-        edited_image_bytes = lc.tti.edit_image(
-            images=source_images_b64,
-            **runtime_params
-        )
+        try:
+            edited_image_bytes = lc.tti.edit_image(
+                images=source_images_b64,
+                **runtime_params
+            )
+        except Exception as edit_err:
+            err_str = str(edit_err)
+            if "401" in err_str or "Unauthorized" in err_str:
+                task.log(f"Authentication Error (401): The active TTI provider rejected the request. Please verify your API key in Admin > TTI Bindings.", "ERROR")
+                raise Exception("TTI Provider 401 Unauthorized: Invalid or missing API key.")
+            elif "403" in err_str or "Forbidden" in err_str:
+                task.log(f"Permission Error (403): Access denied by the TTI provider.", "ERROR")
+                raise Exception("TTI Provider 403 Forbidden.")
+            raise edit_err
+
         task.set_progress(80)
 
         if not edited_image_bytes:

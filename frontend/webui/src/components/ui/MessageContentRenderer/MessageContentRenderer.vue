@@ -841,8 +841,8 @@ const messageParts = computed(() => {
                 }
 
                 if (el.type === 'code') {
-                    const lang = (el.match[2] || 'plaintext').trim();
-                    const inner = el.match[3];
+                    const lang = (el.match && el.match[2] ? el.match[2] : 'plaintext').trim();
+                    const inner = el.match && el.match[3] ? el.match[3] : '';
                     if (lang.toLowerCase() === 'mermaid') {
                         parts.push({ type: 'mermaid', code: inner.trim(), id: `mermaid-${parts.length}-${el.start}` });
                     } else {
@@ -852,48 +852,15 @@ const messageParts = computed(() => {
                     const parsed = parseSpecialBlock(el.raw);
                     if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
                     parts.push({ ...parsed, id: `${parsed.type}-${parts.length}-${el.start}` });
-                } else if (el.type === 'processing') {
-                    parts.push({ 
-                        type: 'processing', 
-                        pType: el.match[2], 
-                        title: el.match[3], 
-                        statusContent: el.match[5], 
-                        isClosed: el.raw.trim().endsWith('</processing>'), 
-                        id: `proc-${parts.length}-${el.start}` 
-                    });
                 } else if (el.type === 'block_doc') {
-                    const subType = el.match[1].toLowerCase();
+                    const subType = (el.match && el.match[1] ? el.match[1] : 'document').toLowerCase();
                     const finalType = subType === 'skill' ? 'skill_block' : (subType === 'note' ? 'note_block' : 'document');
                     parts.push({ 
                         type: finalType, 
-                        title: (el.match[2] || 'Untitled').trim(), 
-                        content: el.match[3]?.trim() || '', 
+                        title: (el.match && el.match[2] ? el.match[2] : 'Untitled').trim(), 
+                        content: el.match && el.match[3] ? el.match[3].trim() : '', 
                         raw: el.raw,
                         id: `block-${subType}-${parts.length}-${el.start}`
-                    });
-                } else if (el.type === 'lollms_form') {
-                    const parsed = _parse_form_xml(el.match[1], el.match[2]);
-                    parts.push({ type: 'form_ready', form: parsed, id: parsed.id });
-                } else if (el.type === 'lollms_inline') {
-                    parts.push({ type: 'interactive_widget', widget: { title: el.match[1], source: el.match[2] }, id: `widget-${parts.length}-${el.start}` });
-                } else if (el.type === 'processing') {
-                    parts.push({ 
-                        type: 'processing', 
-                        pType: el.match[2], 
-                        title: el.match[3], 
-                        statusContent: el.match[5], 
-                        isClosed: el.raw.trim().endsWith('</processing>'), 
-                        id: `proc-${parts.length}-${el.start}` 
-                    });
-                } else if (el.type === 'artefact_image') {
-                    const fullId = el.match[1];
-                    const parts_arr = fullId.split('::');
-                    parts.push({
-                        type: 'artefact_image',
-                        title: parts_arr[0],
-                        index: parseInt(parts_arr[parts_arr.length - 1]),
-                        raw: el.raw,
-                        id: `artimg-${parts.length}-${el.start}`
                     });
                 }
                 cursor = Math.max(cursor, el.end);

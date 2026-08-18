@@ -8,10 +8,17 @@ import useEventBus from '../services/eventBus';
 
 export const useImageStore = defineStore('images', () => {
     const images = ref([]);
-    const albums = ref([]); // New
-    const selectedAlbumId = ref(null); // New
+    const albums = ref([]);
+    const selectedAlbumId = ref(null);
     const isLoading = ref(false);
-    const isGenerating = ref(false); 
+    const isGenerating = ref(false);
+
+    // --- Pagination State ---
+    const currentPage = ref(1);
+    const pageSize = ref(30);
+    const totalImages = ref(0);
+    const totalPages = ref(1);
+    const searchQuery = ref('');
     
     const uiStore = useUiStore();
     const tasksStore = useTasksStore();
@@ -28,58 +35,7 @@ export const useImageStore = defineStore('images', () => {
     
     let saveDebounceTimer = null;
 
-    watch(() => authStore.user, (newUser) => {
-        if (newUser) {
-            prompt.value = newUser.image_studio_prompt || '';
-            negativePrompt.value = newUser.image_studio_negative_prompt || '';
-            imageSize.value = newUser.image_studio_image_size || '1024x1024';
-            nImages.value = newUser.image_studio_n_images || 1;
-            seed.value = newUser.image_studio_seed ?? -1;
-            generationParams.value = newUser.image_studio_generation_params || {};
-        }
-    }, { immediate: true });
-
-    watch([prompt, negativePrompt, imageSize, nImages, seed, generationParams], () => {
-        if (!authStore.isAuthenticated) return;
-        clearTimeout(saveDebounceTimer);
-        saveDebounceTimer = setTimeout(() => {
-            const payload = {
-                image_studio_prompt: prompt.value,
-                image_studio_negative_prompt: negativePrompt.value,
-                image_studio_image_size: imageSize.value,
-                image_studio_n_images: nImages.value,
-                image_studio_seed: seed.value,
-                image_studio_generation_params: generationParams.value,
-            };
-            authStore.updateUserPreferences(payload);
-        }, 1500); 
-    }, { deep: true });
-
-    function handleTaskCompletion(task) {
-        let result = task.result;
-        if (typeof result === 'string') {
-            try { result = JSON.parse(result); } catch (e) {}
-        }
-
-        const isImageTask = task.name.startsWith('Generating') && task.name.includes('image(s)');
-        const isEditTask = task.name.startsWith('Editing image:');
-        
-        if ((isImageTask || isEditTask) && task.status === 'completed' && result) {
-            const newItems = Array.isArray(result) ? result : [result];
-            if (newItems.length > 0 && newItems[0]) {
-                const reversedNewItems = [...newItems].reverse();
-                images.value.unshift(...reversedNewItems);
-                emit('image:generated', reversedNewItems[0]); 
-                uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
-            }
-        } else if ((isImageTask || isEditTask) && task.status === 'failed') {
-            uiStore.addNotification('Image generation failed. Check task manager for details.', 'error');
-        }
-    }
-
-    on('task:completed', handleTaskCompletion);
-
-    // --- Album Actions ---
+    // --- ACTIONS & METHODS (Declared BEFORE watchers & event listeners) ---
     async function fetchAlbums() {
         try {
             const response = await apiClient.get('/api/image-studio/albums');
@@ -116,7 +72,6 @@ export const useImageStore = defineStore('images', () => {
             await apiClient.delete(`/api/image-studio/albums/${id}`);
             albums.value = albums.value.filter(a => a.id !== id);
             if (selectedAlbumId.value === id) selectedAlbumId.value = null;
-            // Also refresh images as they are now ungrouped
             fetchImages(); 
             uiStore.addNotification('Album deleted.', 'success');
         } catch (error) {
@@ -127,11 +82,9 @@ export const useImageStore = defineStore('images', () => {
     async function moveImageToAlbum(imageId, albumId) {
         try {
             await apiClient.put(`/api/image-studio/images/${imageId}/album`, { album_id: albumId });
-            // Update local state if currently viewing a filtered list
             const imgIndex = images.value.findIndex(i => i.id === imageId);
             if (imgIndex !== -1) {
                 images.value[imgIndex].album_id = albumId;
-                // If viewing a specific album and image moved out, remove from view
                 if (selectedAlbumId.value && selectedAlbumId.value !== albumId) {
                     images.value.splice(imgIndex, 1);
                 }
@@ -142,22 +95,40 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
-    // --- Image Actions ---
-    async function fetchImages() {
+    async function fetchImages(page = 1, append = false) {
         isLoading.value = true;
+        currentPage.value = page;
         try {
-            const params = {};
+            const params = {
+                page: page,
+                page_size: pageSize.value
+            };
             if (selectedAlbumId.value) params.album_id = selectedAlbumId.value;
-            // If explicit 'ungrouped' view is needed, could use a flag, but 'null' param works if backend handles it.
-            // Current backend logic: if album_id is missing, it returns ALL.
-            // If we want "Ungrouped", we need to pass a special value or change logic.
-            // Let's assume standard view shows everything unless filtered.
+            if (searchQuery.value && searchQuery.value.trim()) params.search = searchQuery.value.trim();
             
             const response = await apiClient.get('/api/image-studio', { params });
-            images.value = Array.isArray(response.data) ? response.data : [];
+            const data = response.data;
+
+            if (data && Array.isArray(data.items)) {
+                totalImages.value = data.total;
+                totalPages.value = data.total_pages;
+                currentPage.value = data.page;
+                
+                if (append) {
+                    const existingIds = new Set(images.value.map(i => i.id));
+                    const newItems = data.items.filter(i => !existingIds.has(i.id));
+                    images.value.push(...newItems);
+                } else {
+                    images.value = data.items;
+                }
+            } else if (Array.isArray(data)) {
+                images.value = data;
+                totalImages.value = data.length;
+                totalPages.value = 1;
+            }
         } catch (error) {
             console.error("Failed to fetch images:", error);
-            images.value = [];
+            if (!append) images.value = [];
         } finally {
             isLoading.value = false;
         }
@@ -239,6 +210,29 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
+    async function downloadBatch(imageIds) {
+        if (!imageIds || imageIds.length === 0) return;
+        uiStore.addNotification(`Preparing ZIP for ${imageIds.length} image(s)...`, 'info');
+        try {
+            const response = await apiClient.post('/api/image-studio/download-batch', {
+                image_ids: imageIds
+            }, { responseType: 'blob' });
+
+            const url = window.URL.createObjectURL(new Blob([response.data], { type: 'application/zip' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', `lollms_gallery_${Date.now()}.zip`);
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            window.URL.revokeObjectURL(url);
+            uiStore.addNotification('Download started.', 'success');
+        } catch (error) {
+            console.error("Batch download failed:", error);
+            uiStore.addNotification('Failed to download batch.', 'error');
+        }
+    }
+
     async function moveImageToDiscussion(imageId, discussionId) {
         try {
             await apiClient.post(`/api/image-studio/${imageId}/move-to-discussion`, {
@@ -247,6 +241,19 @@ export const useImageStore = defineStore('images', () => {
             uiStore.addNotification('Image added to the active discussion.', 'success');
         } catch (error) {
             // Handled globally
+        }
+    }
+
+    async function moveImagesToDiscussionBatch(imageIds, discussionId) {
+        try {
+            const response = await apiClient.post(`/api/image-studio/move-to-discussion-batch`, {
+                image_ids: imageIds,
+                discussion_id: discussionId
+            });
+            uiStore.addNotification(response.data.message || 'Images added to discussion.', 'success');
+        } catch (error) {
+            console.error("Batch move failed:", error);
+            uiStore.addNotification('Failed to send images to discussion.', 'error');
         }
     }
 
@@ -262,12 +269,69 @@ export const useImageStore = defineStore('images', () => {
         }
     }
 
+    // --- WATCHERS & EVENT LISTENERS (Attached AFTER functions are defined) ---
+    function handleTaskCompletion(task) {
+        let result = task.result;
+        if (typeof result === 'string') {
+            try { result = JSON.parse(result); } catch (e) {}
+        }
+
+        const isImageTask = task.name && task.name.startsWith('Generating') && task.name.includes('image(s)');
+        const isEditTask = task.name && task.name.startsWith('Editing image:');
+        
+        if ((isImageTask || isEditTask) && task.status === 'completed' && result) {
+            const newItems = Array.isArray(result) ? result : [result];
+            if (newItems.length > 0 && newItems[0]) {
+                const reversedNewItems = [...newItems].reverse();
+                images.value.unshift(...reversedNewItems);
+                emit('image:generated', reversedNewItems[0]); 
+                uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
+            }
+        } else if ((isImageTask || isEditTask) && task.status === 'failed') {
+            uiStore.addNotification('Image generation failed. Check task manager for details.', 'error');
+        }
+    }
+
+    on('task:completed', handleTaskCompletion);
+
+    watch(() => authStore.user, (newUser) => {
+        if (newUser) {
+            prompt.value = newUser.image_studio_prompt || '';
+            negativePrompt.value = newUser.image_studio_negative_prompt || '';
+            imageSize.value = newUser.image_studio_image_size || '1024x1024';
+            nImages.value = newUser.image_studio_n_images || 1;
+            seed.value = newUser.image_studio_seed ?? -1;
+            generationParams.value = newUser.image_studio_generation_params || {};
+        }
+    }, { immediate: true });
+
+    watch([prompt, negativePrompt, imageSize, nImages, seed, generationParams], () => {
+        if (!authStore.isAuthenticated) return;
+        clearTimeout(saveDebounceTimer);
+        saveDebounceTimer = setTimeout(() => {
+            const payload = {
+                image_studio_prompt: prompt.value,
+                image_studio_negative_prompt: negativePrompt.value,
+                image_studio_image_size: imageSize.value,
+                image_studio_n_images: nImages.value,
+                image_studio_seed: seed.value,
+                image_studio_generation_params: generationParams.value,
+            };
+            authStore.updateUserPreferences(payload);
+        }, 1500); 
+    }, { deep: true });
+
     return {
         images,
         albums,
         selectedAlbumId,
         isLoading,
         isGenerating,
+        currentPage,
+        pageSize,
+        totalImages,
+        totalPages,
+        searchQuery,
         prompt,
         negativePrompt,
         imageSize,
@@ -285,7 +349,9 @@ export const useImageStore = defineStore('images', () => {
         saveCanvasAsNewImage,
         uploadImages,
         deleteImage,
+        downloadBatch,
         moveImageToDiscussion,
+        moveImagesToDiscussionBatch,
         enhanceImagePrompt,
     };
 });

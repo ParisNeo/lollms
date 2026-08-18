@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia';
-import { ref, reactive, watch } from 'vue';
+import { ref, reactive, computed, watch } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 import { useTasksStore } from './tasks'; 
@@ -73,7 +73,7 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingSttBindings = ref(false);
     const availableSttBindingTypes = ref([]);
     
-    // NEW: TTV and TTM State Definitions
+    // TTV and TTM State Definitions
     const ttvBindings = ref([]);
     const isLoadingTtvBindings = ref(false);
     const availableTtvBindingTypes = ref([]);
@@ -148,51 +148,82 @@ export const useAdminStore = defineStore('admin', () => {
         searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'name', sortOrder: 'asc', currentPage: 1, pageSize: 24
     }));
 
-    watch(appFilters, (newFilters) => { localStorage.setItem('lollms-app-filters', JSON.stringify(newFilters)); }, { deep: true });
-    watch(mcpFilters, (newFilters) => { localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters)); }, { deep: true });
-    watch(promptFilters, (newFilters) => { localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters)); }, { deep: true });
-    watch(personalityFilters, (newFilters) => { localStorage.setItem('lollms-personality-filters', JSON.stringify(newFilters)); }, { deep: true });
-
-    async function handleTaskCompletion(task) {
-        if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
-        const taskName = (task.name || '').toLowerCase();
-        
-        if (taskName.includes('app') || taskName.includes('mcp')) {
-            fetchZooApps(true); fetchZooMcps(true);
-        }
-        if (taskName.includes('prompt')) { fetchZooPrompts(true); }
-        if (taskName.includes('personality')) { fetchZooPersonalities(true); }
-
-        if (taskName.includes('purge unused temporary files') && task.status === 'completed') {
-            const message = task.result?.message || 'Purge completed successfully.';
-            uiStore.addNotification(message, 'success', 6000);
-        }
-
-        if (taskName.includes('generate self-signed certificate') && task.status === 'completed') {
-            fetchGlobalSettings(true);
-            uiStore.addNotification('Certificate generated successfully. Reloading settings...', 'success', 6000);
-        }
-        
-        if (taskName.includes('content') && task.status === 'completed') {
-            uiStore.addNotification('Moderation task completed.', 'success', 6000);
-        }
-
-        if (taskName.includes('generate fun facts') && task.status === 'completed') {
-             uiStore.addNotification('Fun Facts Generated!', 'success');
-             fetchFunFacts(true);
-             fetchFunFactCategories(true);
-        }
-        
-        if (taskName.includes('install requirement') && task.status === 'completed') {
-            fetchRequirements();
-            uiStore.addNotification('Requirement installed successfully.', 'success');
-        }
-        
-        if (taskName.includes('sanitization') && task.status === 'completed') {
-            uiStore.addNotification(task.result?.message || 'Sanitization completed.', 'success', 8000);
-        }
+    // --- ACTIONS & FUNCTIONS (Declared BEFORE computeds/watchers) ---
+    async function fetchDashboardStats() { 
+        isLoadingDashboardStats.value = true; 
+        try { const response = await apiClient.get('/api/admin/stats'); dashboardStats.value = response.data; } 
+        catch { dashboardStats.value = null; } 
+        finally { isLoadingDashboardStats.value = false; } 
     }
-    on('task:completed', handleTaskCompletion);
+
+    async function fetchConnectedUsers() { 
+        isLoadingConnectedUsers.value = true; 
+        try { const response = await apiClient.get('/api/admin/ws-connections'); connectedUsers.value = response.data; } 
+        catch { connectedUsers.value = []; } 
+        finally { isLoadingConnectedUsers.value = false; } 
+    }
+
+    async function fetchGlobalGenerationStats() { 
+        if (globalGenerationStats.value) return; 
+        isLoadingGlobalGenerationStats.value = true; 
+        try { const response = await apiClient.get('/api/admin/global-generation-stats'); globalGenerationStats.value = response.data; } 
+        catch (error) { globalGenerationStats.value = null; } 
+        finally { isLoadingGlobalGenerationStats.value = false; } 
+    }
+
+    async function fetchSystemStatus() { 
+        isLoadingSystemStatus.value = true; 
+        try { const response = await apiClient.get('/api/admin/system-status'); systemStatus.value = response.data; } 
+        finally { isLoadingSystemStatus.value = false; } 
+    }
+
+    async function fetchSystemLogs(force = false) { 
+        if (!force && systemLogs.value.length > 0) return;
+        isLoadingSystemLogs.value = true; 
+        try { const response = await apiClient.get('/api/admin/system/logs'); systemLogs.value = response.data; } 
+        catch (error) { uiStore.addNotification('Failed to fetch system logs.', 'error'); } 
+        finally { isLoadingSystemLogs.value = false; } 
+    }
+
+    async function fetchServerInfo() { 
+        if (serverInfo.value) return;
+        isLoadingServerInfo.value = true; 
+        try { const response = await apiClient.get('/api/admin/server-info'); serverInfo.value = response.data; } 
+        finally { isLoadingServerInfo.value = false; } 
+    }
+
+    async function fetchModelUsageStats() { 
+        isLoadingModelUsageStats.value = true; 
+        try { const response = await apiClient.get('/api/admin/model-usage-stats'); modelUsageStats.value = response.data || []; } 
+        catch (error) { console.error("Failed to fetch model usage stats:", error); modelUsageStats.value = []; } 
+        finally { isLoadingModelUsageStats.value = false; } 
+    }
+
+    async function fetchGlobalSettings(force = false) { 
+        if (!force && globalSettings.value.length > 0) return;
+        isLoadingSettings.value = true; 
+        try { const response = await apiClient.get('/api/admin/settings'); globalSettings.value = response.data.map(s => ({ ...s, value: castSettingValue(s.value, s.type) })); } 
+        finally { isLoadingSettings.value = false; } 
+    }
+
+    async function updateGlobalSettings(configs) { 
+        await apiClient.put('/api/admin/settings', { configs }); 
+        await fetchGlobalSettings(true); 
+        uiStore.addNotification('Settings updated.', 'success'); 
+    }
+
+    async function fetchAiBotSettings(force = false) { 
+        if (!force && aiBotSettings.value) return;
+        isLoadingAiBotSettings.value = true; 
+        try { const response = await apiClient.get('/api/admin/ai-bot-settings'); aiBotSettings.value = response.data; } 
+        finally { isLoadingAiBotSettings.value = false; } 
+    }
+
+    async function updateAiBotSettings(settingsData) { 
+        const response = await apiClient.put('/api/admin/ai-bot-settings', settingsData); 
+        aiBotSettings.value = response.data; 
+        uiStore.addNotification('AI Bot user settings updated.', 'success'); 
+    }
 
     async function forceAllUsersConfig(payload) {
         try {
@@ -242,73 +273,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function broadcastMessage(message) { await apiClient.post('/api/admin/broadcast', { message }); }
     async function killProcess(pid) { await apiClient.post('/api/admin/system/kill-process', { pid }); uiStore.addNotification(`Process ${pid} killed.`, 'success'); fetchSystemStatus(); }
-    
-    async function fetchDashboardStats() { 
-        isLoadingDashboardStats.value = true; 
-        try { const response = await apiClient.get('/api/admin/stats'); dashboardStats.value = response.data; } 
-        catch { dashboardStats.value = null; } 
-        finally { isLoadingDashboardStats.value = false; } 
-    }
-    async function fetchConnectedUsers() { 
-        isLoadingConnectedUsers.value = true; 
-        try { const response = await apiClient.get('/api/admin/ws-connections'); connectedUsers.value = response.data; } 
-        catch { connectedUsers.value = []; } 
-        finally { isLoadingConnectedUsers.value = false; } 
-    }
-    async function fetchGlobalGenerationStats() { 
-        if (globalGenerationStats.value) return; 
-        isLoadingGlobalGenerationStats.value = true; 
-        try { const response = await apiClient.get('/api/admin/global-generation-stats'); globalGenerationStats.value = response.data; } 
-        catch (error) { globalGenerationStats.value = null; } 
-        finally { isLoadingGlobalGenerationStats.value = false; } 
-    }
-    async function fetchSystemStatus() { 
-        isLoadingSystemStatus.value = true; 
-        try { const response = await apiClient.get('/api/admin/system-status'); systemStatus.value = response.data; } 
-        finally { isLoadingSystemStatus.value = false; } 
-    }
-    async function fetchSystemLogs(force = false) { 
-        if (!force && systemLogs.value.length > 0) return;
-        isLoadingSystemLogs.value = true; 
-        try { const response = await apiClient.get('/api/admin/system/logs'); systemLogs.value = response.data; } 
-        catch (error) { uiStore.addNotification('Failed to fetch system logs.', 'error'); } 
-        finally { isLoadingSystemLogs.value = false; } 
-    }
-    async function fetchServerInfo() { 
-        if (serverInfo.value) return;
-        isLoadingServerInfo.value = true; 
-        try { const response = await apiClient.get('/api/admin/server-info'); serverInfo.value = response.data; } 
-        finally { isLoadingServerInfo.value = false; } 
-    }
-    async function fetchModelUsageStats() { 
-        isLoadingModelUsageStats.value = true; 
-        try { const response = await apiClient.get('/api/admin/model-usage-stats'); modelUsageStats.value = response.data || []; } 
-        catch (error) { console.error("Failed to fetch model usage stats:", error); modelUsageStats.value = []; } 
-        finally { isLoadingModelUsageStats.value = false; } 
-    }
-    async function fetchGlobalSettings(force = false) { 
-        if (!force && globalSettings.value.length > 0) return;
-        isLoadingSettings.value = true; 
-        try { const response = await apiClient.get('/api/admin/settings'); globalSettings.value = response.data.map(s => ({ ...s, value: castSettingValue(s.value, s.type) })); } 
-        finally { isLoadingSettings.value = false; } 
-    }
-    async function updateGlobalSettings(configs) { 
-        await apiClient.put('/api/admin/settings', { configs }); 
-        await fetchGlobalSettings(true); 
-        uiStore.addNotification('Settings updated.', 'success'); 
-    }
-    async function fetchAiBotSettings(force = false) { 
-        if (!force && aiBotSettings.value) return;
-        isLoadingAiBotSettings.value = true; 
-        try { const response = await apiClient.get('/api/admin/ai-bot-settings'); aiBotSettings.value = response.data; } 
-        finally { isLoadingAiBotSettings.value = false; } 
-    }
-    async function updateAiBotSettings(settings) { 
-        const response = await apiClient.put('/api/admin/ai-bot-settings', settings); 
-        aiBotSettings.value = response.data; 
-        uiStore.addNotification('AI Bot user settings updated.', 'success'); 
-    }
-    
+
     // Bindings Actions
     async function fetchBindings(force = false) { if (!force && bindings.value.length > 0) return; isLoadingBindings.value = true; try { const r = await apiClient.get('/api/admin/bindings'); bindings.value = r.data; } finally { isLoadingBindings.value = false; } }
     async function fetchAvailableBindingTypes(force = false) { if (!force && availableBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/bindings/available_types'); availableBindingTypes.value = r.data; }
@@ -337,14 +302,14 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateSttBinding(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; uiStore.addNotification(`STT Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteSttBinding(id) { await apiClient.delete(`/api/admin/stt-bindings/${id}`); sttBindings.value = sttBindings.value.filter(b => b.id !== id); uiStore.addNotification('STT Binding deleted.', 'success'); }
     
-    // TTV (NEW)
+    // TTV
     async function fetchTtvBindings(force = false) { if (!force && ttvBindings.value.length > 0) return; isLoadingTtvBindings.value = true; try { const r = await apiClient.get('/api/admin/ttv-bindings'); ttvBindings.value = r.data; } finally { isLoadingTtvBindings.value = false; } }
     async function fetchAvailableTtvBindingTypes(force = false) { if (!force && availableTtvBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttv-bindings/available_types'); availableTtvBindingTypes.value = r.data; }
     async function addTtvBinding(payload) { const r = await apiClient.post('/api/admin/ttv-bindings', payload); ttvBindings.value.push(r.data); uiStore.addNotification(`TTV Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtvBinding(id, payload) { const r = await apiClient.put(`/api/admin/ttv-bindings/${id}`, payload); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; uiStore.addNotification(`TTV Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtvBinding(id) { await apiClient.delete(`/api/admin/ttv-bindings/${id}`); ttvBindings.value = ttvBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTV Binding deleted.', 'success'); }
 
-    // TTM (NEW)
+    // TTM
     async function fetchTtmBindings(force = false) { if (!force && ttmBindings.value.length > 0) return; isLoadingTtmBindings.value = true; try { const r = await apiClient.get('/api/admin/ttm-bindings'); ttmBindings.value = r.data; } finally { isLoadingTtmBindings.value = false; } }
     async function fetchAvailableTtmBindingTypes(force = false) { if (!force && availableTtmBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttm-bindings/available_types'); availableTtmBindingTypes.value = r.data; }
     async function addTtmBinding(payload) { const r = await apiClient.post('/api/admin/ttm-bindings', payload); ttmBindings.value.push(r.data); uiStore.addNotification(`TTM Binding '${r.data.alias}' created.`, 'success'); }
@@ -389,7 +354,7 @@ export const useAdminStore = defineStore('admin', () => {
 
     async function fetchRagBindingModels(id) { const r = await apiClient.get(`/api/admin/rag-bindings/${id}/models`); return r.data; }
     async function saveRagModelAlias(id, payload) { const r = await apiClient.put(`/api/admin/rag-bindings/${id}/alias`, payload); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ragBindings.value[i], r.data); }
-    async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ragBindings.value[i], r.data); }    async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) ragBindings.value[i] = r.data; }
+    async function deleteRagModelAlias(id, name) { const r = await apiClient.delete(`/api/admin/rag-bindings/${id}/alias`, { data: { original_model_name: name } }); const i = ragBindings.value.findIndex(b => b.id === id); if (i !== -1) Object.assign(ragBindings.value[i], r.data); }
     async function fetchRagModelsForType(type) { const r = await apiClient.get(`/api/admin/rag-bindings/models-for-type/${type}`); return r.data; }
     async function addOrUpdateRagAlias(payload) { await apiClient.post('/api/admin/rag/aliases', payload); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${payload.alias_name}' saved.`, 'success'); }
     async function deleteRagAlias(name) { await apiClient.delete('/api/admin/rag/aliases', { data: { alias_name: name } }); await fetchGlobalSettings(true); uiStore.addNotification(`Alias '${name}' deleted.`, 'success'); }
@@ -629,6 +594,69 @@ export const useAdminStore = defineStore('admin', () => {
             return false;
         }
     }
+
+    // --- COMPUTEDS (Declared AFTER functions) ---
+    const modelDisplayMode = computed({
+      get() {
+        if (!Array.isArray(globalSettings.value)) {
+            return 'mixed';
+        }
+        const setting = globalSettings.value.find(s => s.key === 'model_display_mode');
+        return setting ? setting.value : 'mixed';
+      },
+      set(newValue) {
+        updateGlobalSettings({ 'model_display_mode': newValue });
+      }
+    });
+
+    // --- EVENT LISTENERS & WATCHERS (Attached AFTER functions are defined) ---
+    async function handleTaskCompletion(task) {
+        if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
+        const taskName = (task.name || '').toLowerCase();
+        
+        if (taskName.includes('app') || taskName.includes('mcp')) {
+            fetchZooApps(true); fetchZooMcps(true);
+        }
+        if (taskName.includes('prompt')) { fetchZooPrompts(true); }
+        if (taskName.includes('personality')) { fetchZooPersonalities(true); }
+
+        if (taskName.includes('purge unused temporary files') && task.status === 'completed') {
+            const message = task.result?.message || 'Purge completed successfully.';
+            uiStore.addNotification(message, 'success', 6000);
+        }
+
+        if (taskName.includes('generate self-signed certificate') && task.status === 'completed') {
+            fetchGlobalSettings(true);
+            uiStore.addNotification('Certificate generated successfully. Reloading settings...', 'success', 6000);
+        }
+        
+        if (taskName.includes('content') && task.status === 'completed') {
+            uiStore.addNotification('Moderation task completed.', 'success', 6000);
+        }
+
+        if (taskName.includes('generate fun facts') && task.status === 'completed') {
+             uiStore.addNotification('Fun Facts Generated!', 'success');
+             fetchFunFacts(true);
+             fetchFunFactCategories(true);
+        }
+        
+        if (taskName.includes('install requirement') && task.status === 'completed') {
+            fetchRequirements();
+            uiStore.addNotification('Requirement installed successfully.', 'success');
+        }
+        
+        if (taskName.includes('sanitization') && task.status === 'completed') {
+            uiStore.addNotification(task.result?.message || 'Sanitization completed.', 'success', 8000);
+        }
+    }
+
+    on('task:completed', handleTaskCompletion);
+
+    watch(appFilters, (newFilters) => { localStorage.setItem('lollms-app-filters', JSON.stringify(newFilters)); }, { deep: true });
+    watch(mcpFilters, (newFilters) => { localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters)); }, { deep: true });
+    watch(promptFilters, (newFilters) => { localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters)); }, { deep: true });
+    watch(personalityFilters, (newFilters) => { localStorage.setItem('lollms-personality-filters', JSON.stringify(newFilters)); }, { deep: true });
+
     return {
         // State
         dashboardStats, isLoadingDashboardStats, allUsers, isLoadingUsers,
@@ -649,6 +677,7 @@ export const useAdminStore = defineStore('admin', () => {
         isImporting, isEnhancingEmail, adminAvailableLollmsModels, isLoadingLollmsModels,
         appFilters, mcpFilters, promptFilters, personalityFilters, systemLogs, isLoadingSystemLogs,
         systemRequirements, isLoadingRequirements,
+        modelDisplayMode,
 
         // Actions
         forceAllUsersConfig, 
@@ -689,8 +718,8 @@ export const useAdminStore = defineStore('admin', () => {
 
         fetchModerationQueue, approveContent, deleteContent,
         fetchRequirements, installRequirement, fixAllRequirements,
-        sanitizeDatabase, // EXPORTED
-        createUser, deleteUser, // ADDED
-        setAsBeginnerDefault, // EXPORTED
+        sanitizeDatabase,
+        createUser, deleteUser,
+        setAsBeginnerDefault,
     };
 });

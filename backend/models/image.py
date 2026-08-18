@@ -33,6 +33,17 @@ class UserImagePublic(BaseModel):
     height: Optional[int] = None
     album_id: Optional[str] = None
 
+class PaginatedUserImages(BaseModel):
+    items: List[UserImagePublic]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+class MoveImagesToDiscussionBatchRequest(BaseModel):
+    image_ids: List[str]
+    discussion_id: str
+
 class ImageGenerationRequest(BaseModel):
     prompt: str
     negative_prompt: Optional[str] = ""

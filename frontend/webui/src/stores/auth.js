@@ -311,11 +311,17 @@ export const useAuthStore = defineStore('auth', () => {
                     });
                     break;
                 case 'dm_deleted':
-                    if (activeConversations.value[data.data.partner_id] || (data.data.conversation_id && activeConversations.value[data.data.conversation_id])) {
-                        const targetId = data.data.conversation_id || data.data.partner_id;
-                        activeConversations.value[targetId].messages = activeConversations.value[targetId].messages.filter(m => m.id !== data.data.message_id);
-                    }
-                    fetchConversations();
+                    getSocialStore().then(social => {
+                        if (social.activeConversations) {
+                            const targetId = data.data.conversation_id || data.data.partner_id;
+                            if (social.activeConversations[targetId]) {
+                                social.activeConversations[targetId].messages = (social.activeConversations[targetId].messages || []).filter(m => m.id !== data.data.message_id);
+                            }
+                        }
+                        if (typeof social.fetchConversations === 'function') {
+                            social.fetchConversations();
+                        }
+                    });
                     break;
             }
         };
@@ -579,7 +585,6 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function updateUserPreferences(preferences, notify = true) {
-        // 0. Robust Equality Guard
         if (user.value) {
             let isActualChange = false;
             for (const [key, value] of Object.entries(preferences)) {
@@ -600,59 +605,25 @@ export const useAuthStore = defineStore('auth', () => {
             if (!isActualChange) return;
         }
 
-        // --- Handle Personality Requirements & Context Safety ---
-        const dataStore = (await import('./data')).useDataStore();
         const uiStore = useUiStore();
-
-        // 1. Determine Intent: Are we selecting a NEW personality?
-        // Check for undefined AND null (explicit clear) vs just presence
-        const isExplicitlySettingPersonality = preferences.active_personality_id !== undefined;
-        const targetPersonalityId = isExplicitlySettingPersonality ? preferences.active_personality_id : user.value?.active_personality_id;
-
-        if (targetPersonalityId) {
-            const personality = dataStore.getPersonalityById(targetPersonalityId);
-            if (personality?.required_context_options?.length > 0) {
-
-                let hasViolations = false;
-
-                personality.required_context_options.forEach(opt => {
-                    const key = optionToPrefKey(opt);
-                    if (!key) return;
-
-                    // A. VIOLATION CHECK: User is actively turning a required feature OFF
-                    if (preferences[key] === false) {
-                        hasViolations = true;
-                    } 
-
-                    // B. REQUIREMENT FULFILLMENT: Only force features ON if we are ACTIVELY switching 
-                    //    to this personality for the first time.
-                    if (isExplicitlySettingPersonality && preferences[key] === undefined && !user.value[key]) {
-                        preferences[key] = true;
-                    }
-                });
-
-                if (hasViolations) {
-                    // User priority: They want the feature OFF. Revert to default personality.
-                    preferences.active_personality_id = null;
-                    if (notify) uiStore.addNotification('Setting manually disabled: Reverting to default personality.', 'info');
-                }
-            }
-        }
 
         // 1. Optimistic Update
         if (user.value) {
             user.value = { ...user.value, ...preferences };
         }
 
-        const response = await apiClient.put('/api/auth/me', preferences);
-        if (user.value) {
-            // CRITICAL: Replace the object reference to ensure deep reactivity 
-            // and trigger computed properties in the UI (like breadcrumb badges)
-            user.value = { ...user.value, ...response.data };
-            
-            if (preferences.message_font_size) uiStore.message_font_size = preferences.message_font_size;
+        try {
+            const response = await apiClient.put('/api/auth/me', preferences);
+            if (user.value) {
+                user.value = { ...user.value, ...response.data };
+                if (preferences.message_font_size) uiStore.message_font_size = preferences.message_font_size;
+            }
+            if (notify) uiStore.addNotification('Settings saved.', 'success');
+        } catch (err) {
+            console.error("Failed to update preferences:", err);
+            if (notify) uiStore.addNotification('Failed to save settings.', 'error');
+            throw err;
         }
-        if (notify) uiStore.addNotification('Settings saved.', 'success');
     }
 
     async function changePassword(passwordData) {

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from typing import List, Optional
 from PIL import Image
+from pydantic import BaseModel
 import io
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Request, Form
@@ -116,23 +117,94 @@ async def move_image_to_album(
 
 # --- Image Management ---
 
-@image_studio_router.get("", response_model=List[UserImagePublic])
+from backend.models.image import (
+    UserImagePublic, PaginatedUserImages, ImageGenerationRequest, MoveImageToDiscussionRequest, 
+    MoveImagesToDiscussionBatchRequest,
+    ImageEditRequest, ImagePromptEnhancementRequest, ImagePromptEnhancementResponse,
+    SaveCanvasRequest, TimelapseRequest,
+    ImageAlbumCreate, ImageAlbumUpdate, ImageAlbumPublic, MoveImageToAlbumRequest
+)
+
+@image_studio_router.get("", response_model=PaginatedUserImages)
 async def get_user_images(
     album_id: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 24,
+    search: Optional[str] = None,
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     query = db.query(UserImage).filter(UserImage.owner_user_id == current_user.id)
+
     if album_id:
-        query = query.filter(UserImage.album_id == album_id)
-    else:
-        # Optional: Decide if default view shows ALL images or only ungrouped. 
-        # Usually "All Photos" shows everything. 
-        # If we pass explicit 'none' string, filter for null.
         if album_id == 'none':
             query = query.filter(UserImage.album_id == None)
-            
-    return query.order_by(UserImage.created_at.desc()).all()
+        else:
+            query = query.filter(UserImage.album_id == album_id)
+
+    if search and search.strip():
+        search_term = f"%{search.strip().lower()}%"
+        query = query.filter(
+            UserImage.prompt.ilike(search_term) | UserImage.model.ilike(search_term)
+        )
+
+    total = query.count()
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    offset = (page - 1) * page_size
+
+    items = query.order_by(UserImage.created_at.desc()).offset(offset).limit(page_size).all()
+
+    return PaginatedUserImages(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages
+    )
+
+@image_studio_router.get("/{image_id}/thumbnail")
+async def get_image_thumbnail(
+    image_id: str,
+    size: int = 384,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns a lightweight, compressed thumbnail cached on disk.
+    Drastically accelerates gallery loading.
+    """
+    image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
+    filename = image_record.filename if image_record else image_id
+    filename = secure_filename(filename)
+    user_images_dir = get_user_images_path(current_user.username)
+    file_path = user_images_dir / filename
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Original image not found.")
+
+    # Thumbnail cache path
+    thumbs_dir = user_images_dir / ".thumbnails"
+    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    thumb_path = thumbs_dir / f"{Path(filename).stem}_thumb_{size}.webp"
+
+    # Generate thumbnail if not cached or if source is newer
+    if not thumb_path.exists() or thumb_path.stat().st_mtime < file_path.stat().st_mtime:
+        try:
+            with Image.open(file_path) as img:
+                if img.mode not in ("RGB", "RGBA"):
+                    img = img.convert("RGBA" if "A" in img.mode else "RGB")
+                img.thumbnail((size, size), Image.Resampling.LANCZOS)
+                img.save(thumb_path, "WEBP", quality=80, method=4)
+        except Exception as e:
+            trace_exception(e)
+            # Fallback to original image on processing failure
+            return FileResponse(str(file_path))
+
+    return FileResponse(
+        str(thumb_path),
+        media_type="image/webp",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"}
+    )
 
 @image_studio_router.get("/{image_id}/file")
 async def get_image_file(
@@ -296,26 +368,64 @@ async def move_image_to_discussion(
     image_record = db.query(UserImage).filter(UserImage.id == image_id, UserImage.owner_user_id == current_user.id).first()
     if not image_record:
         raise HTTPException(status_code=404, detail="Image not found.")
-        
+
     discussion = get_user_discussion(current_user.username, request.discussion_id)
     if not discussion:
         raise HTTPException(status_code=404, detail="Discussion not found.")
-        
+
     file_path = get_user_images_path(current_user.username) / image_record.filename
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image file not found on disk.")
-        
+
     with open(file_path, "rb") as f:
         image_bytes = f.read()
     image_b64 = base64.b64encode(image_bytes).decode('utf-8')
-    
+
     discussion.add_discussion_image(image_b64, source=f"ImageStudio: {image_record.filename}")
     discussion.commit()
-    
+
     image_record.discussion_id = request.discussion_id
     db.commit()
-    
+
     return {"message": "Image successfully added to the discussion's data zone."}
+
+@image_studio_router.post("/move-to-discussion-batch")
+async def move_images_to_discussion_batch(
+    payload: MoveImagesToDiscussionBatchRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Transfers multiple selected images into a discussion workspace with indexed labels (#1, #2, ...).
+    """
+    discussion = get_user_discussion(current_user.username, payload.discussion_id)
+    if not discussion:
+        raise HTTPException(status_code=404, detail="Discussion not found.")
+
+    user_images_dir = get_user_images_path(current_user.username)
+    images = db.query(UserImage).filter(
+        UserImage.id.in_(payload.image_ids),
+        UserImage.owner_user_id == current_user.id
+    ).all()
+
+    # Preserve order
+    id_map = {img.id: img for img in images}
+    ordered_images = [id_map[i] for i in payload.image_ids if i in id_map]
+
+    for index, image_record in enumerate(ordered_images, 1):
+        file_path = user_images_dir / image_record.filename
+        if file_path.exists():
+            with open(file_path, "rb") as f:
+                image_bytes = f.read()
+            image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+            label = f"Image #{index}: {image_record.prompt[:30]}..." if image_record.prompt else f"Image #{index}"
+            discussion.add_discussion_image(image_b64, source=label)
+            image_record.discussion_id = payload.discussion_id
+
+    discussion.commit()
+    db.commit()
+
+    return {"message": f"Successfully sent {len(ordered_images)} labeled images to discussion."}
 
 @image_studio_router.post("/enhance-prompt", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def enhance_image_prompt(
@@ -348,3 +458,47 @@ async def generate_timelapse(
         owner_username=current_user.username
     )
     return db_task
+
+class BatchDownloadRequest(BaseModel):
+    image_ids: List[str]
+
+@image_studio_router.post("/download-batch")
+async def download_images_batch(
+    payload: BatchDownloadRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Packages selected images into a single downloadable ZIP archive.
+    """
+    import zipfile
+    from fastapi.responses import StreamingResponse
+
+    images = db.query(UserImage).filter(
+        UserImage.id.in_(payload.image_ids),
+        UserImage.owner_user_id == current_user.id
+    ).all()
+
+    if not images:
+        raise HTTPException(status_code=404, detail="No images found for the provided IDs.")
+
+    user_images_dir = get_user_images_path(current_user.username)
+    zip_buffer = io.BytesIO()
+
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for img in images:
+            file_path = user_images_dir / img.filename
+            if file_path.is_file():
+                # Provide a clean archive name
+                arcname = f"{img.prompt[:40]}_{img.filename}" if img.prompt else img.filename
+                arcname = "".join(c for c in arcname if c.isalnum() or c in ("-", "_", ".")).rstrip()
+                zip_file.writestr(arcname, file_path.read_bytes())
+
+    zip_buffer.seek(0)
+    zip_filename = f"lollms_images_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'}
+    )

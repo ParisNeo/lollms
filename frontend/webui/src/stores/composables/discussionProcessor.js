@@ -97,7 +97,6 @@ export function processSingleMessage(msg) {
         sender_type: senderType,
         events,
         sources,
-        // Ensure forms are preserved in the processed message object
         forms: msg.forms || metadata.forms || [],
         image_references: msg.image_references || [],
         active_images: msg.active_images || [],
@@ -105,7 +104,7 @@ export function processSingleMessage(msg) {
         vision_support: visionSupport,
         branches: msg.branches || null,
     };
-    }
+}
 
 /**
  * Processes an array of raw message objects.

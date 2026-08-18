@@ -17,7 +17,7 @@ export const useUiStore = defineStore('ui', {
       imageList: [],
       startIndex: 0,
     },
-    // NEW: Slideshow State
+    // Slideshow State
     slideshow: {
         isOpen: false,
         slides: [], // Items with { src, prompt, duration? }
@@ -29,7 +29,9 @@ export const useUiStore = defineStore('ui', {
         title: 'Are you sure?',
         message: 'This action cannot be undone.',
         confirmText: 'Confirm',
+        cancelText: 'Cancel',
         onConfirm: () => {},
+        onCancel: () => {},
         inputType: null,
         inputOptions: [],
         inputValue: null,
@@ -40,11 +42,13 @@ export const useUiStore = defineStore('ui', {
     emailModalBackgroundColor: '#f4f4f8',
     emailModalSendAsText: false,
     isSidebarOpen: true,
-    isChatSidebarOpen: false, // NEW: Chat Sidebar State
+    isChatSidebarOpen: false,
     keywords: [],
     isDataZoneVisible: false,
     isDataZoneExpanded: false,
-    dataZoneTab: 'context', // 'context', 'files', 'workspace'
+    dataZoneTab: 'context', // 'context', 'files', 'workspace', 'memory', 'personality'
+    activeSplitArtefactTitle: null, // Title of the artefact open in the workspace split view
+    showNewMessagesButton: false,
     generatePersonalityModalProps: {
         prompt: '',
         customEnhancePrompt: ''
@@ -55,24 +59,27 @@ export const useUiStore = defineStore('ui', {
     // Maintenance & System State
     isMaintenanceMode: false,
     maintenanceMessage: '',
-    isConnectionLost: false, // New connection state
+    isConnectionLost: false,
     appVersion: '',
   }),
 
   getters: {
     activeModal: (state) => state.modalStack.length > 0 ? state.modalStack[state.modalStack.length - 1] : null,
     modalData: (state) => (name) => state.modalProps[name] || null,
+    isImageViewerOpen: (state) => state.imageViewer.isOpen,
+    imageViewerData: (state) => state.imageViewer,
+    isSlideshowOpen: (state) => state.slideshow.isOpen,
+    slideshowData: (state) => state.slideshow,
     /**
      * Resolves the current source URL/Data for the image viewer.
      */
     imageViewerSrc: (state) => {
         const item = state.imageViewer.imageList[state.imageViewer.startIndex];
-        return item ? item.src : null;
+        return item ? (item.src || item) : null;
     }
   },
 
   actions: {
-    // NEW: Toggle Chat Sidebar
     toggleChatSidebar() {
         this.isChatSidebarOpen = !this.isChatSidebarOpen;
     },
@@ -140,6 +147,7 @@ export const useUiStore = defineStore('ui', {
             delete this.modalProps[closedModalName];
         }
     },
+    
     // Version Check & Changelog Logic
     async checkVersionUpdates() {
         try {
@@ -157,7 +165,6 @@ export const useUiStore = defineStore('ui', {
                         changelog: changelogRes.data 
                     });
                 } catch(e) {
-                     // Fallback if changelog endpoint missing or fails
                      this.openModal('whatsNext', { 
                         isUpdate: true, 
                         changelog: { title: `Updated to v${currentVer}`, content: "Check the GitHub repository for detailed release notes." } 
@@ -193,7 +200,6 @@ export const useUiStore = defineStore('ui', {
     },
 
     setVibe(vibe) {
-        // Clean all vibe classes from the root HTML element
         const root = document.documentElement;
         const vibeClasses = Array.from(root.classList).filter(c => c.startsWith('vibe-'));
         vibeClasses.forEach(c => root.classList.remove(c));
@@ -223,7 +229,7 @@ export const useUiStore = defineStore('ui', {
     },
 
     openImageViewer({ imageList, startIndex = 0 }) {
-        this.imageViewer.imageList = imageList;
+        this.imageViewer.imageList = imageList || [];
         this.imageViewer.startIndex = startIndex;
         this.imageViewer.isOpen = true;
     },
@@ -236,9 +242,8 @@ export const useUiStore = defineStore('ui', {
         }, 300);
     },
     
-    // NEW: Slideshow Actions
     openSlideshow({ slides, startIndex = 0, title = 'Slideshow', messageId = null }) {
-        this.slideshow.slides = slides;
+        this.slideshow.slides = slides || [];
         this.slideshow.startIndex = startIndex;
         this.slideshow.title = title;
         this.slideshow.messageId = messageId;
@@ -294,7 +299,6 @@ export const useUiStore = defineStore('ui', {
 
     async fetchLanguages() {
         try {
-            // Using apiClient directly as imported
             const response = await apiClient.get('/api/languages/');
             this.availableLanguages = response.data;
         } catch (error) {
@@ -332,6 +336,11 @@ export const useUiStore = defineStore('ui', {
         localStorage.setItem('lollms-sidebar-open', this.isSidebarOpen);
     },
 
+    openSidebar() {
+        this.isSidebarOpen = true;
+        localStorage.setItem('lollms-sidebar-open', 'true');
+    },
+
     closeSidebar() {
         this.isSidebarOpen = false;
         localStorage.setItem('lollms-sidebar-open', 'false');
@@ -340,9 +349,13 @@ export const useUiStore = defineStore('ui', {
     initializeSidebarState() {
         const storedState = localStorage.getItem('lollms-sidebar-open');
         if (storedState !== null) {
-            this.isSidebarOpen = JSON.parse(storedState);
+            try {
+                this.isSidebarOpen = JSON.parse(storedState);
+            } catch (e) {
+                this.isSidebarOpen = window.innerWidth > 768;
+            }
         } else {
-            this.isSidebarOpen = window.innerWidth <= 768;
+            this.isSidebarOpen = window.innerWidth > 768;
         }
     },
     
@@ -366,11 +379,10 @@ export const useUiStore = defineStore('ui', {
         this.isMaintenanceMode = enabled;
         this.maintenanceMessage = message;
         if (!enabled) {
-            this.closeModal(); // Close overlays if maintenance is over
+            this.closeModal();
         }
     },
 
-    // New action to handle connection loss overlay
     setConnectionLost(status) {
         this.isConnectionLost = status;
     }

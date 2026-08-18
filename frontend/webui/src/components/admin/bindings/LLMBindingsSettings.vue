@@ -162,7 +162,7 @@ const modelDisplayMode = computed({
     return setting ? setting.value : 'mixed';
   },
   set(newValue) {
-    adminStore.updateGlobalSettings({ 'model_display_mode': newValue });
+    updateGlobalSettings({ 'model_display_mode': newValue });
   }
 });
 
