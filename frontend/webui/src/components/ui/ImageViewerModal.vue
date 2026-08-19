@@ -129,12 +129,18 @@ const pan = ref({ x: 0, y: 0 });
 const isPanning = ref(false);
 const startPos = ref({ x: 0, y: 0 });
 
-watch(() => data.value, (newData) => {
-  if (newData) {
-    currentIndex.value = newData.startIndex || 0;
-    resetZoom();
-  }
-}, { immediate: true });
+watch(
+  [() => uiStore.imageViewer.isOpen, () => uiStore.imageViewer.startIndex, () => uiStore.imageViewer.imageList],
+  ([isOpen, startIdx, list]) => {
+    if (isOpen) {
+      const targetIdx = typeof startIdx === 'number' ? startIdx : 0;
+      const maxIdx = Math.max(0, (list?.length || 1) - 1);
+      currentIndex.value = Math.min(Math.max(0, targetIdx), maxIdx);
+      resetZoom();
+    }
+  },
+  { immediate: true, deep: true }
+);
 
 function resetZoom() {
   zoom.value = 1;

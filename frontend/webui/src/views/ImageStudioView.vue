@@ -1,7 +1,7 @@
 <!-- [UPDATE] frontend/webui/src/views/ImageStudioView.vue -->
 <template>
     <!-- 1. Header Title Portal: Studio Status, Album & Selection Toggle -->
-    <Teleport to="#global-header-title-target">
+    <Teleport to="#global-header-title-target" v-if="hasHeaderTarget">
         <div class="flex items-center gap-2 sm:gap-3 pointer-events-auto bg-gray-100/80 dark:bg-gray-800/80 px-3 py-1.5 rounded-xl border dark:border-gray-700/50 backdrop-blur-md max-w-[220px] sm:max-w-md transition-all shadow-inner">
             <div class="flex items-center gap-2 min-w-0">
                 <input 
@@ -24,7 +24,7 @@
     </Teleport>
 
     <!-- 2. Header Actions Portal: Tools, Batch Drawer & Execution -->
-    <Teleport to="#global-header-actions-target">
+    <Teleport to="#global-header-actions-target" v-if="hasHeaderTarget">
         <div class="flex items-center gap-1 sm:gap-2 pointer-events-auto">
             <!-- Selection Mode Active Banner -->
             <div v-if="isSelectionMode" class="flex items-center gap-1 bg-blue-50 dark:bg-blue-900/30 px-3 py-1 rounded-xl border border-blue-200 dark:border-blue-800 mr-2 animate-in fade-in slide-in-from-right-4 shadow-sm">
@@ -624,7 +624,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue';
+import { ref, onMounted, onUnmounted, computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useImageStore } from '../stores/images';
 import { useDataStore } from '../stores/data';
@@ -676,6 +676,7 @@ const { user } = storeToRefs(authStore);
 const { imageGenerationTasks, imageGenerationTasksCount } = storeToRefs(tasksStore);
 
 // Studio Local State
+const hasHeaderTarget = ref(false);
 const activeDockTab = ref('prompt'); // 'prompt' | 'parameters'
 const selectedStyle = ref('None');
 const showMobileSidebar = ref(false);
@@ -825,7 +826,7 @@ function isCategoryCollapsed(cat) {
     return !!collapsedStyles.value[cat];
 }
 
-// 50+ Curated State-of-the-Art Style Presets for Diffusion Models
+// 140+ Curated State-of-the-Art Style Presets for Diffusion Models (16 per category)
 const styleLibrary = {
     '💎 Image Enhancement & Restoration': [
         { name: '4K Remaster', emoji: '💎', prompt: 'masterpiece, 8k uhd, pristine sharp focus, ultra-detailed micro texture, noise reduction, crystal clear details, natural pore structure, ProRes cinematic remaster', negative: 'blurry, noise, artifacts, low resolution, pixelated, jpeg compression, bad anatomy, over-smoothed' },
@@ -833,7 +834,17 @@ const styleLibrary = {
         { name: 'Portrait Refine', emoji: '👤', prompt: 'subsurface scattering, realistic natural skin texture, visible fine pores, catchlights in eyes, individually defined hair strands, studio quality headshot, photorealistic', negative: 'plastic skin, airbrushed, cartoon, doll-like, waxy face, smooth blur' },
         { name: 'Damage Repair', emoji: '🩹', prompt: 'restored photograph, seamless scratch repair, crease removal, stain heal, sharp details recovered, crisp edges, damage-free vintage photo restoration', negative: 'scratches, cracks, stains, torn, fold lines, dust spots, blur, noise' },
         { name: 'Tack Sharp Edge', emoji: '🔍', prompt: 'tack sharp contrast, crisp high-definition line recovery, well-resolved edges, geometric clarity, clean micro-details, ultra-focused', negative: 'blurry edges, halo artifacts, chromatic aberration, fuzzy' },
-        { name: 'De-Blur & Focus', emoji: '🎯', prompt: 'de-blurred, sharp focal alignment, recovered subject contours, clean separation, pristine optical clarity', negative: 'motion blur, camera shake, out of focus, soft haze' }
+        { name: 'De-Blur & Focus', emoji: '🎯', prompt: 'de-blurred, sharp focal alignment, recovered subject contours, clean separation, pristine optical clarity', negative: 'motion blur, camera shake, out of focus, soft haze' },
+        { name: 'Noise Cleanse', emoji: '🧼', prompt: 'ultra clean denoising, grain removal, pristine smooth gradients, artifact elimination, studio clean sensor fidelity', negative: 'film grain, digital noise, chromatic noise, compression artifacts, gritty' },
+        { name: 'Face Symmetry', emoji: '🪞', prompt: 'balanced facial symmetry, natural anatomical perfection, realistic proportions, harmonious facial features, photorealistic headshot', negative: 'asymmetric eyes, crooked mouth, distorted nose, bad anatomy, deformed facial features' },
+        { name: 'Micro Detail Texture', emoji: '🔬', prompt: 'hyper-detailed micro-surface textures, intricate fine details, sharp fabric weave, realistic pore fidelity, 8k resolution macro', negative: 'blurry, flat texture, low resolution, smooth plastic' },
+        { name: 'White Balance Neutral', emoji: '⚖️', prompt: 'perfect neutral white balance, corrected color cast, true-to-life tones, natural daylight calibration, calibrated color profile', negative: 'yellow tint, blue cast, magenta tint, green color cast, washed out' },
+        { name: 'Dynamic Range Recover', emoji: '⛅', prompt: 'recovered shadow detail, balanced dynamic range, pulled highlights, zero clipping, smooth tonal roll-off, raw development', negative: 'blown out highlights, crushed blacks, harsh contrast, clipped dynamic range' },
+        { name: 'Hair & Fur Groom', emoji: '🦁', prompt: 'fine strand separation, individual hair rendering, realistic soft fur texture, detailed edge definition, natural volume', negative: 'clumpy hair, painted blob, blurry edges, low polygon' },
+        { name: 'Vector Line Sharpener', emoji: '🖋️', prompt: 'clean vectorized ink lines, crisp edge detection, anti-aliased smooth contours, high-contrast black line recovery', negative: 'pixelated jagged lines, blurry ink, smudges, halo effect' },
+        { name: 'Artifact Heal', emoji: '🧩', prompt: 'removed JPEG artifacts, band removal, pixelation fix, scanline cleanup, clean reconstructed raster', negative: 'banding, posterization, compression blocks, glitch, corrupted pixels' },
+        { name: 'Studio Relighting', emoji: '💡', prompt: 'professional three-point studio relighting, soft fill light, sharp rim accent, balanced key light, dimensional sculpting', negative: 'harsh flash, flat lighting, muddy shadows, underexposed' },
+        { name: 'Iris Catchlight', emoji: '👁️', prompt: 'deep intricate iris patterns, sharp corneal reflection, luminous crystalline catchlight, crystal clear gaze, high resolution macro eyes', negative: 'dull lifeless eyes, blurry pupil, bloodshot, deformed iris' }
     ],
 
     '🌈 Colorization & Color Grading': [
@@ -844,7 +855,15 @@ const styleLibrary = {
         { name: 'Teal & Orange', emoji: '🎬', prompt: 'cinematic teal and orange color harmony, cool moody shadow tones, warm golden subject accents, atmospheric Hollywood film grade', negative: 'green tint, muddy colors, flat monochrome' },
         { name: 'Warm Terracotta', emoji: '🍯', prompt: 'warm amber and terracotta color grade, rich honey undertones, golden sunlight hues, cozy inviting atmosphere, sun-kissed warmth', negative: 'cold blue, stark sterile, pale' },
         { name: 'Cyber Duotone', emoji: '🟣', prompt: 'striking dual-tone duotone, electric cyan and hot magenta contrast, high-impact graphic poster lighting, stylized chromatic split', negative: 'natural lighting, muted colors, muddy' },
-        { name: 'Hand-Tinted Antique', emoji: '🖌️', prompt: 'hand-tinted vintage photograph, delicate watercolor washes over silver gelatin print, antique subtle tinting, historic nostalgic charm', negative: 'modern digital HDR, harsh neon saturation' }
+        { name: 'Hand-Tinted Antique', emoji: '🖌️', prompt: 'hand-tinted vintage photograph, delicate watercolor washes over silver gelatin print, antique subtle tinting, historic nostalgic charm', negative: 'modern digital HDR, harsh neon saturation' },
+        { name: 'Nordic Muted Cold', emoji: '❄️', prompt: 'scandinavian cinema grade, cold desaturated tones, icy blue undertones, minimalist Nordic mood, muted earthy accents', negative: 'oversaturated, warm yellow, tropical bright' },
+        { name: 'Autumn Warmth', emoji: '🍂', prompt: 'rich autumn color grade, deep crimson reds, burnt orange, golden mustard tones, crisp cozy warmth', negative: 'neon colors, cold blue, vibrant green' },
+        { name: 'Sepia Nostalgia', emoji: '📜', prompt: 'authentic antique sepia tone, rich warm monochrome brown palette, historical vintage photographic aesthetic', negative: 'vibrant modern colors, RGB, neon, cool cyan' },
+        { name: 'Fuji Velvia Vivid', emoji: '🏔️', prompt: 'Fujifilm Velvia 50 film simulation, vivid emerald greens, deep saturated blues, punchy high-contrast color landscape', negative: 'flat, desaturated, digital video look' },
+        { name: 'Kodachrome 64', emoji: '📻', prompt: 'classic 1970s Kodachrome 64 slide film, iconic documentary colors, rich saturated primary tones, timeless analog nostalgia', negative: 'cold modern digital, oversaturated HDR' },
+        { name: 'Midnight Cyan', emoji: '🌙', prompt: 'deep midnight navy palette, bioluminescent cyan highlights, moody low-key cool tones, cinematic night atmosphere', negative: 'warm daylight, yellow sunlight' },
+        { name: 'Sunset Coral & Lilac', emoji: '🪸', prompt: 'dreamy sunset gradient palette, soft coral pink and lavender purple skies, luminous twilight hues, romantic aesthetic', negative: 'harsh noon lighting, dull grey' },
+        { name: 'High-Key Pure White', emoji: '⚪', prompt: 'high-key pure white minimalist palette, clean porcelain whites, delicate subtle silver tones, airy bright composition', negative: 'dark shadows, saturated colors, dirty textures' }
     ],
 
     '📸 Photographic & Realism': [
@@ -857,20 +876,32 @@ const styleLibrary = {
         { name: 'National Geographic', emoji: '🌍', prompt: 'National Geographic award-winning wildlife and landscape photography, dramatic natural light, authentic documentary realism, telephoto lens', negative: 'staged, studio, amateur, low resolution, fake' },
         { name: 'Film Noir B&W', emoji: '🕵️', prompt: 'classic film noir black and white photography, high contrast chiaroscuro, dramatic Venetian blind shadows, atmospheric grain, 1940s moody', negative: 'color, flat lighting, daylight' },
         { name: 'Drone Aerial', emoji: '🛰️', prompt: 'breathtaking drone aerial landscape photography, top-down bird eye view, expansive golden hour light, high altitude perspective, 4k ultra-detailed', negative: 'ground level, close up, fisheye' },
-        { name: 'Fashion Editorial', emoji: '👗', prompt: 'high-fashion editorial photography, Vogue magazine style, dramatic studio lighting, avant-garde styling, ultra sharp, clean solid backdrop', negative: 'amateur, passport photo, flat lighting' }
+        { name: 'Fashion Editorial', emoji: '👗', prompt: 'high-fashion editorial photography, Vogue magazine style, dramatic studio lighting, avant-garde styling, ultra sharp, clean solid backdrop', negative: 'amateur, passport photo, flat lighting' },
+        { name: 'Lomography Toy Cam', emoji: '🎯', prompt: 'Lomography Diana camera aesthetic, heavy circular vignette, cross-processed saturated colors, soft focus optical distortion, playful analog', negative: 'clean digital, sharp clinical, 3d render' },
+        { name: 'Wet Plate Tintype', emoji: '🏺', prompt: '19th-century tintype wet plate collodion photograph, silver emulsion streaks, antique chemical patina, dark moody historical portrait', negative: 'clean modern photo, digital color' },
+        { name: 'Architectural Digest', emoji: '🏛️', prompt: 'Architectural Digest professional interior and exterior photography, tilt-shift straight vertical lines, pristine balanced natural light, ultra sharp', negative: 'crooked angles, wide distortion, messy lighting' },
+        { name: 'Paparazzi Flash', emoji: '📸', prompt: 'direct camera flash aesthetic, high-contrast celebrity night snap, harsh dramatic drop shadow, 2000s paparazzi style', negative: 'soft studio light, diffused painting' },
+        { name: 'Long Exposure Waves', emoji: '🌊', prompt: 'long exposure photography, silky smooth water flow, luminous light trails, ethereal motion blur, tack-sharp static elements', negative: 'choppy frozen water, daytime snapshot' },
+        { name: 'Pinhole Camera', emoji: '🕳️', prompt: 'primitive pinhole camera exposure, infinite soft depth of field, dramatic edge vignetting, organic analog blur, dreamlike simplicity', negative: 'sharp modern lens, digital crispness' }
     ],
 
     '🎮 3D, CGI & Sci-Fi': [
         { name: 'Unreal Engine 5', emoji: '🎮', prompt: 'rendered in Unreal Engine 5, Octane Render, 8k, Ray Tracing, Lumen Global Illumination, volumetric fog, hyper-detailed textures, cinematic composition', negative: 'flat 2d, sketch, low poly, noisy' },
         { name: 'Pixar / Disney 3D', emoji: '🧸', prompt: '3D animated movie style, Pixar Disney aesthetic, cute expressive stylized character, soft subsurface scattering, vibrant warm lighting, 4k render', negative: 'gritty, photorealistic, creepy, flat 2d' },
         { name: 'Cyberpunk 2077', emoji: '🌃', prompt: 'cyberpunk aesthetic, high-tech low-life, neon volumetric light, rain-soaked reflective asphalt, holographic interfaces, futuristic megalopolis', negative: 'medieval, rustic, pastoral, daylight' },
-        { name: 'Steampunk', emoji: '⚙️', prompt: 'intricate steampunk aesthetic, polished brass gears, copper pressure gauges, Victorian industrial craftsmanship, steam vapors, warm amber atmosphere', negative: 'cyberpunk, sleek modern plastic, neon' },
+        { name: 'Steampunk Industrial', emoji: '⚙️', prompt: 'intricate steampunk aesthetic, polished brass gears, copper pressure gauges, Victorian industrial craftsmanship, steam vapors, warm amber atmosphere', negative: 'cyberpunk, sleek modern plastic, neon' },
         { name: 'Synthwave 80s', emoji: '🌴', prompt: '1980s synthwave retrowave aesthetic, glowing neon grid horizon, magenta and cyan gradient sunset, chrome reflections, VHS glitch aesthetic', negative: 'monochrome, gritty photorealism' },
-        { name: 'Solarpunk', emoji: '🌿', prompt: 'solarpunk architecture, lush vertical gardens, gleaming eco-futuristic curved glass towers, clean renewable energy, golden morning sunlight, utopian', negative: 'dystopian, smog, grim cyberpunk grime' },
+        { name: 'Solarpunk City', emoji: '🌿', prompt: 'solarpunk architecture, lush vertical gardens, gleaming eco-futuristic curved glass towers, clean renewable energy, golden morning sunlight, utopian', negative: 'dystopian, smog, grim cyberpunk grime' },
         { name: 'Low Poly 3D', emoji: '🔷', prompt: 'isometric low poly 3D render, minimalist geometric aesthetic, soft pastel studio lighting, clean blender modeling, charming diorama', negative: 'hyperrealistic, high detail noisy textures' },
-        { name: 'Claymation', emoji: '🗿', prompt: 'stop-motion claymation, sculpted plasticine clay textures, visible fingerprint details, Aardman style studio miniature lighting, charming handcrafted', negative: 'smooth digital 3d, glossy vector, CGI' },
+        { name: 'Claymation Motion', emoji: '🗿', prompt: 'stop-motion claymation, sculpted plasticine clay textures, visible fingerprint details, Aardman style studio miniature lighting, charming handcrafted', negative: 'smooth digital 3d, glossy vector, CGI' },
         { name: 'Papercraft Cutout', emoji: '📜', prompt: 'layered papercraft cutout art, multi-depth shadow box, textured craft paper, delicate folded origami, soft warm ambient lighting', negative: 'metallic, glossy plastic, photographic' },
-        { name: 'Voxel Art', emoji: '🧊', prompt: 'detailed 3D voxel art, isometric blocky miniature diorama, colorful pixel-cubes, MagicaVoxel aesthetic, soft ambient occlusion shadows', negative: 'smooth, organic realistic' }
+        { name: 'Voxel Diorama', emoji: '🧊', prompt: 'detailed 3D voxel art, isometric blocky miniature diorama, colorful pixel-cubes, MagicaVoxel aesthetic, soft ambient occlusion shadows', negative: 'smooth, organic realistic' },
+        { name: 'Biomechanical Giger', emoji: '👽', prompt: 'H.R. Giger biomechanical aesthetic, intricate organic alien machinery, dark chrome bone structures, surreal industrial xenomorph horror', negative: 'bright cheerful, cartoon, simple geometric' },
+        { name: 'Ray-Traced Crystal', emoji: '🔮', prompt: 'ultra-realistic 3D ray tracing, complex glass refraction, chromatic dispersion, caustic light patterns, pristine crystal material render', negative: 'opaque, flat 2d, matte plastic' },
+        { name: 'Mecha Anime Robot', emoji: '🤖', prompt: 'detailed Japanese mecha concept art, intricate mechanical joints, armor plating, hydraulic pistons, Gundam Macross industrial design', negative: 'organic human, fantasy medieval' },
+        { name: 'Holographic HUD', emoji: '🥽', prompt: 'futuristic translucent holographic interface, glowing wireframe geometry, glowing blue HUD telemetry, floating data particles', negative: 'solid opaque, vintage paper, rustic' },
+        { name: 'Diorama Isometric', emoji: '🏰', prompt: 'miniature tilt-shift 3D diorama, intricate tiny world modeling, toy box aesthetic, soft ray-traced ambient occlusion', negative: 'full scale real world, flat 2d' },
+        { name: 'Fractal 3D Dream', emoji: '🌀', prompt: 'Mandelbulb 3D fractal art, infinitely complex geometric recursion, kaleidoscopic iridescent surfaces, mathematical dimensional wonder', negative: 'simple low poly, mundane real world' }
     ],
 
     '🎨 Traditional Mediums': [
@@ -880,7 +911,16 @@ const styleLibrary = {
         { name: 'Charcoal Sketch', emoji: '✏️', prompt: 'expressive charcoal and chalk pastel drawing on textured vintage paper, smudged shadows, dramatic tonal contrast, raw hand-drawn hatching', negative: 'clean vector, digital gradient, saturated color' },
         { name: 'Ukiyo-e Woodblock', emoji: '🌊', prompt: 'traditional Japanese Ukiyo-e woodblock print, Hokusai and Hiroshige style, bold outlines, flat decorative color blocks, aged washi paper texture', negative: 'photorealistic, modern 3d, smooth shading' },
         { name: 'Opaque Gouache', emoji: '🌄', prompt: 'matte opaque gouache painting, mid-century modern aesthetic, rich flat colors, stylized hand-painted textures, clean folk art aesthetic', negative: 'glossy, 3d CGI, photorealistic' },
-        { name: 'Stained Glass', emoji: '🕯️', prompt: 'intricate stained glass window art, luminous colorful translucent glass panels, leaded black contours, radiant glowing backlighting, cathedral cathedral aesthetic', negative: 'opaque, paper sketch, photo' }
+        { name: 'Stained Glass', emoji: '🕯️', prompt: 'intricate stained glass window art, luminous colorful translucent glass panels, leaded black contours, radiant glowing backlighting, cathedral cathedral aesthetic', negative: 'opaque, paper sketch, photo' },
+        { name: 'Pointillism Dots', emoji: '🟣', prompt: 'Georges Seurat pointillism masterpiece, composed entirely of tiny distinct color dots, optical color blending, classical post-impressionist', negative: 'smooth continuous strokes, digital vector' },
+        { name: 'Fresco Mural', emoji: '🏛️', prompt: 'aged Renaissance fresco plaster mural, weathered texture, crackled lime plaster surface, historic pigment patina, timeless wall painting', negative: 'glossy oil, modern digital, clean photo' },
+        { name: 'Linocut Block Print', emoji: '✂️', prompt: 'handcrafted linocut print, bold graphic black-and-white gouged textures, raw expressive relief carving, craft printmaking ink', negative: 'smooth airbrush, gradient shading, 3d' },
+        { name: 'Pastel Chalk Soft', emoji: '🖍️', prompt: 'soft French pastel chalk on velvet paper, delicate feathery blending, luminous powdery pigment dust, dreamy impressionist texture', negative: 'hard digital lines, glossy vector' },
+        { name: 'Encaustic Beeswax', emoji: '🕯️', prompt: 'molten beeswax encaustic painting, layered translucent wax depth, embedded textured pigments, luminous dimensional surface', negative: 'flat 2d print, digital vector' },
+        { name: 'Colored Pencil Layer', emoji: '✏️', prompt: 'meticulous colored pencil drawing, fine cross-hatched layering, crisp waxy pigment sheen, heavy archival bristol paper texture', negative: 'watercolor bleed, digital airbrush, 3d CGI' },
+        { name: 'Scratchboard Art', emoji: '🖤', prompt: 'scratchboard art, white lines meticulously scraped out of black India ink board, high-contrast precision engraving look', negative: 'soft color wash, blurry edges, watercolor' },
+        { name: 'Roman Mosaic', emoji: '🏺', prompt: 'ancient Roman mosaic artwork, thousands of tiny hand-placed colorful stone tesserae tiles, weathered grout lines, classical antiquity', negative: 'smooth paint, vector, photograph' },
+        { name: 'Copperplate Etching', emoji: '📜', prompt: 'fine copperplate intaglio etching, Albrecht Dürer master engraving style, ultra-fine parallel hatching, antique printmaker ink', negative: 'modern color, smooth airbrush, cartoon' }
     ],
 
     '🎌 Anime, Manga & Comics': [
@@ -891,7 +931,15 @@ const styleLibrary = {
         { name: 'Graphic Novel Noir', emoji: '🕶️', prompt: 'Sin City graphic novel style, high-contrast stark black and white ink, selective vibrant splash of red, gritty urban shadows, Frank Miller', negative: 'colorful, soft pastel, realistic photograph' },
         { name: 'Manga Screentone', emoji: '📖', prompt: 'authentic Japanese manga page, sharp black ink line art, professional screentone dot patterns, expressive cross-hatching, dramatic speedlines', negative: 'color, watercolor, photorealistic, 3d' },
         { name: 'Chibi Kawaii', emoji: '🐱', prompt: 'super deformed chibi character art, oversized expressive head, kawaii aesthetic, cute bright pastels, charming sticker look, clean vector outlines', negative: 'realistic proportions, dark scary' },
-        { name: 'Pop Art Silkscreen', emoji: '🥫', prompt: 'Andy Warhol and Roy Lichtenstein pop art, bold primary silkscreen colors, commercial graphic advertising aesthetic, high contrast print', negative: 'subtle, dark, realistic photograph' }
+        { name: 'Pop Art Silkscreen', emoji: '🥫', prompt: 'Andy Warhol and Roy Lichtenstein pop art, bold primary silkscreen colors, commercial graphic advertising aesthetic, high contrast print', negative: 'subtle, dark, realistic photograph' },
+        { name: '90s Battle Shonen', emoji: '⚡', prompt: 'classic 1990s battle shonen manga style, explosive dynamic action lines, intense muscular anatomy, screaming power aura, hand-inked', negative: 'soft pastel, cute chibi, western cartoon' },
+        { name: 'Shojo Romance', emoji: '💖', prompt: 'delicate Japanese shojo manga illustration, sparkling ethereal flower backgrounds, expressive emotional eyes, flowing ribbon hair', negative: 'gritty dark, violent, heavy mechanical' },
+        { name: 'Dark Fantasy Berserk', emoji: '🗡️', prompt: 'Berserk Kentaro Miura aesthetic, ultra-dense cross-hatching, grim dark fantasy ink, terrifying demon monstrosities, majestic medieval horror', negative: 'bright cheerful, modern flat cartoon, clean 3d' },
+        { name: 'Akira Neo-Tokyo', emoji: '🏍️', prompt: 'Katsuhiro Otomo Akira aesthetic, detailed industrial destruction, hand-painted cel animation background, cinematic neo-Tokyo', negative: 'cute simple, 3d CGI render' },
+        { name: 'Manhwa Webtoon', emoji: '📱', prompt: 'modern Korean webtoon manhwa style, polished digital painting, glowing magical particle effects, dynamic panel lighting', negative: 'monochrome black and white, old cel animation' },
+        { name: 'Ligne Claire Comic', emoji: '🏰', prompt: 'Ligne Claire Franco-Belgian comic style, Hergé Tintin and Moebius aesthetic, clear uniform line weights, flat elegant colors', negative: 'heavy shadows, cross-hatching, 3d' },
+        { name: 'Rubberhose 1930s', emoji: '🎺', prompt: '1930s rubberhose animation, Fleischer Cuphead style, black and white pie-eyes, bouncy rounded anatomy, vintage film grain and scratches', negative: 'modern anime, realistic proportions, 3d CGI' },
+        { name: 'Gothic Lolita Anime', emoji: '🖤', prompt: 'Gothic Lolita anime illustration, intricate lace and frills, porcelain doll aesthetics, dark romantic roses and corsets, moody elegance', negative: 'bright casual sportswear, simple vector' }
     ],
 
     '🏛️ Art Movements & Masters': [
@@ -901,7 +949,16 @@ const styleLibrary = {
         { name: 'Post-Impressionism', emoji: '🌻', prompt: 'post-impressionism in the style of Vincent van Gogh, thick expressive swirling brushstrokes, intense vivid color emotion, starry night aesthetic', negative: 'smooth photo, flat vector' },
         { name: 'Baroque Chiaroscuro', emoji: '👑', prompt: 'Baroque oil masterpiece, Rembrandt and Caravaggio lighting, deep mysterious darks, dramatic illuminated golden highlights, emotional intensity', negative: 'flat high-key, modern bright neon' },
         { name: 'Bauhaus Minimalist', emoji: '🟥', prompt: 'Bauhaus modernism design, clean geometric forms, primary colors red blue yellow, asymmetric balance, functional graphic poster style', negative: 'ornate decorative clutter, realistic photo' },
-        { name: 'Gothic Dark Fantasy', emoji: '🏰', prompt: 'dark gothic fantasy illustration, Soulsborne aesthetic, crumbling cathedral ruins, grim atmospheric mist, Eldritch horror, oil on canvas feel', negative: 'cheerful, bright pastel, modern' }
+        { name: 'Gothic Dark Fantasy', emoji: '🏰', prompt: 'dark gothic fantasy illustration, Soulsborne aesthetic, crumbling cathedral ruins, grim atmospheric mist, Eldritch horror, oil on canvas feel', negative: 'cheerful, bright pastel, modern' },
+        { name: 'Cubism Picasso', emoji: '🔲', prompt: 'analytical cubism in the style of Pablo Picasso and Georges Braque, deconstructed geometric viewpoints, fragmented overlapping facets', negative: 'photorealistic, single perspective, smooth 3d' },
+        { name: 'Monet Impressionism', emoji: '🪷', prompt: 'Claude Monet impressionist masterpiece, dappled outdoor natural sunlight, visible soft loose brush strokes, radiant fleeting light on water', negative: 'sharp hard lines, dark gloomy, photographic' },
+        { name: 'Da Vinci Renaissance', emoji: '🎨', prompt: 'Italian High Renaissance oil painting in the style of Leonardo da Vinci, sfumato soft smoky blending, classical anatomical grace, golden varnish', negative: 'modern digital, harsh neon, cartoon' },
+        { name: 'Turner Romanticism', emoji: '⛵', prompt: 'Romanticism oil painting in the style of J.M.W. Turner and Caspar David Friedrich, immense turbulent skies, sublime awe-inspiring nature', negative: 'tame indoor studio, clean geometric' },
+        { name: 'Matisse Fauvism', emoji: '🐯', prompt: 'wild expressive Fauvism painting in the style of Henri Matisse, explosive non-naturalistic bold colors, passionate painterly freedom', negative: 'realistic subdued colors, monochrome' },
+        { name: 'Constructivism', emoji: '📐', prompt: 'Russian Constructivism propaganda poster, dynamic diagonal typography, stark red black white palette, revolutionary industrial photomontage', negative: 'soft pastel flowers, decorative rococo' },
+        { name: 'Rococo Opulence', emoji: '🪞', prompt: '18th-century French Rococo painting in the style of Fragonard and Boucher, lavish pastel pinks and golds, ornate gilded luxury, playful romance', negative: 'dark brutalist, stark minimalist, modern' },
+        { name: 'Klimt Gold Leaf', emoji: '👑', prompt: 'Gustav Klimt Golden Phase masterpiece, shimmering gold leaf mosaic patterns, intricate decorative Byzantine ornamentation, sensual symbolism', negative: 'plain background, flat monochrome, photographic' },
+        { name: 'Pre-Raphaelite', emoji: '🌿', prompt: 'Pre-Raphaelite masterpiece in the style of John William Waterhouse, romantic medieval legends, intense luminous jewel tones, botanical fidelity', negative: 'modern cartoon, rough sketch, dark low resolution' }
     ],
 
     '✨ Lighting & Atmosphere': [
@@ -911,7 +968,16 @@ const styleLibrary = {
         { name: 'Bioluminescence', emoji: '🪼', prompt: 'luminous bioluminescent neon glow, Avatar Pandora jungle aesthetic, glowing flora and fauna in deep mystical darkness, radiant cyan and violet', negative: 'harsh daylight, washed out' },
         { name: 'Cyber Neon Dual-Tone', emoji: '💡', prompt: 'vibrant dual-tone magenta and cyan neon backlight, sleek reflective edge lighting, dark atmospheric studio environment', negative: 'natural warm sunlight, flat' },
         { name: 'Ethereal Dreamlight', emoji: '🧚', prompt: 'soft diffused dreamlike glow, gentle bloom, sparkling ambient bokeh particles, fairy tale pastel illumination, soft focus highlights', negative: 'harsh dark shadows, gritty' },
-        { name: 'Dramatic Silhouette', emoji: '👤', prompt: 'stark back-lit silhouette against an immense radiant sky, high contrast, dramatic minimalist composition, edge contour glow', negative: 'front lit, washed out details' }
+        { name: 'Dramatic Silhouette', emoji: '👤', prompt: 'stark back-lit silhouette against an immense radiant sky, high contrast, dramatic minimalist composition, edge contour glow', negative: 'front lit, washed out details' },
+        { name: 'Moody Fog & Mist', emoji: '🌫️', prompt: 'dense atmospheric rolling fog, soft diffused cinematic mist, mysterious depth fading into white haze, silent melancholic beauty', negative: 'harsh clear noon sun, high contrast' },
+        { name: 'Strobe Flash Party', emoji: '⚡', prompt: 'vivid strobe light photography, high-energy party motion, dynamic colored gel lights, motion trails and sharp freeze-frame contrast', negative: 'peaceful quiet natural daylight' },
+        { name: 'Candlelight Warmth', emoji: '🕯️', prompt: 'soft flickering candlelight illumination, deep rich warm amber glow, intimate dark room atmosphere, soft dancing shadows', negative: 'harsh fluorescent overhead light, daylight' },
+        { name: 'Aurora Borealis', emoji: '🌠', prompt: 'shimmering green and purple Aurora Borealis Northern Lights dancing across a starry night sky, reflecting on icy water', negative: 'cloudy overcast, daytime sunlight' },
+        { name: 'Noon Desert Sun', emoji: '☀️', prompt: 'harsh blazing midday desert sun, intense hard-edged shadows, blinding bright highlights, heat wave mirage shimmer, searing clarity', negative: 'soft diffused light, cool blue tones, night' },
+        { name: 'Studio Rim Light', emoji: '💡', prompt: 'dramatic razor-sharp rim backlighting, luminous edge contour highlights tracing the subject silhouette in a pitch-black studio', negative: 'flat frontal flash, washed out background' },
+        { name: 'Underwater Caustics', emoji: '🤿', prompt: 'submerged underwater perspective, undulating sunlight caustic patterns dancing across surfaces, deep turquoise gradient, floating bubbles', negative: 'dry land, harsh dry shadows' },
+        { name: 'Lightning Storm', emoji: '🌩️', prompt: 'electric blue lightning flash splitting a stormy black sky, violent rain streaks, dramatic momentary illuminating flash', negative: 'sunny clear skies, peaceful calm' },
+        { name: 'Cyberpunk Neon Rain', emoji: '🌧️', prompt: 'heavy atmospheric rain pouring through neon-illuminated city mist, glowing wet ground reflections, vaporous urban haze', negative: 'dry sunny daylight, rural countryside' }
     ],
 
     '🔭 Camera Angles & Lenses': [
@@ -921,7 +987,16 @@ const styleLibrary = {
         { name: 'Fish-Eye Dynamic', emoji: '🌐', prompt: 'dramatic 180-degree fish-eye lens curvature, warped hemispherical perspective, dynamic extreme action framing, rounded edges', negative: 'flat rectilinear, telephoto' },
         { name: 'Isometric Cutaway', emoji: '📐', prompt: 'isometric 3D cutaway diorama, orthographic view, cross-section detail, clean miniature room modeling, architectural showcase', negative: 'perspective view, ground level camera' },
         { name: 'Low-Angle Hero Shot', emoji: '⚡', prompt: 'extreme low-angle hero perspective looking up, towering monumental stature, imposing powerful presence, epic sky background', negative: 'bird eye view, high angle looking down' },
-        { name: 'First-Person POV', emoji: '👁️', prompt: 'first-person point of view (POV), hands visible interacting in the scene, immersive foreground perspective', negative: 'third person, portrait, wide exterior' }
+        { name: 'First-Person POV', emoji: '👁️', prompt: 'first-person point of view (POV), hands visible interacting in the scene, immersive foreground perspective', negative: 'third person, portrait, wide exterior' },
+        { name: 'Birds Eye Overhead', emoji: '🦅', prompt: 'steep high-angle perspective looking directly down from above, panoramic overview, expansive geometric ground patterns', negative: 'low angle looking up, eye level' },
+        { name: 'Dutch Angle Tension', emoji: '📐', prompt: 'dramatic tilted Dutch angle framing, off-axis diagonal horizon, intense psychological tension, dynamic cinematography', negative: 'perfectly level horizon, flat static' },
+        { name: 'Over-The-Shoulder', emoji: '👥', prompt: 'cinematic over-the-shoulder perspective, foreground shoulder out of focus, framed subject dialogue composition', negative: 'isolated portrait, aerial view' },
+        { name: 'Extreme Close-Up', emoji: '🔬', prompt: 'extreme close-up macro framing, filling the frame with microscopic texture and focal intensity, razor-thin depth of field', negative: 'wide shot, distant full body' },
+        { name: 'Telephoto 200mm', emoji: '🏔️', prompt: 'telephoto 200mm f/2.8 lens compression, flattened distance perspective, massive background scale towering behind subject, creamy bokeh', negative: 'wide angle distortion, fisheye' },
+        { name: 'Dolly Zoom Vertigo', emoji: '🎬', prompt: 'vertigo effect dolly zoom perspective, warping background scale while foreground subject stays constant, psychological shock framing', negative: 'static standard photo' },
+        { name: 'Worms Eye Ground', emoji: '🐛', prompt: 'extreme ground-level worm eye perspective looking up from the floor, towering monumental scale, dramatic floor textures', negative: 'eye level, bird eye view' },
+        { name: 'Split Diopter Focus', emoji: '🔍', prompt: 'vintage cinema split-diopter shot, simultaneous tack-sharp focus on both extreme close-up foreground and distant background', negative: 'standard single focus plane, uniform blur' },
+        { name: 'Rule of Thirds', emoji: '🎯', prompt: 'masterful rule-of-thirds composition, golden ratio framing, ample evocative negative space, balanced artistic storytelling', negative: 'centered passport mugshot, awkward crop' }
     ]
 };
 
@@ -1261,6 +1336,9 @@ function openCameraModal() { uiStore.openModal('cameraCapture'); }
 function handleRefresh() { imageStore.fetchImages(); }
 
 onMounted(() => {
+    nextTick(() => {
+        hasHeaderTarget.value = !!document.getElementById('global-header-title-target') && !!document.getElementById('global-header-actions-target');
+    });
     const savedWidth = localStorage.getItem('lollms_image_studio_sidebar_width');
     if (savedWidth) sidebarWidth.value = parseInt(savedWidth, 10);
     imageStore.fetchImages();

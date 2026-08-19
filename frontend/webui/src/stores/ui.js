@@ -228,18 +228,41 @@ export const useUiStore = defineStore('ui', {
         localStorage.setItem('lollms-language', langCode);
     },
 
-    openImageViewer({ imageList, startIndex = 0 }) {
-        this.imageViewer.imageList = imageList || [];
-        this.imageViewer.startIndex = startIndex;
-        this.imageViewer.isOpen = true;
+    openImageViewer(payload) {
+        let list = [];
+        let index = 0;
+
+        if (typeof payload === 'string') {
+            list = [{ src: payload, prompt: '' }];
+            index = 0;
+        } else if (payload && typeof payload === 'object') {
+            if (Array.isArray(payload.imageList) && payload.imageList.length > 0) {
+                list = payload.imageList;
+                index = typeof payload.startIndex === 'number' ? payload.startIndex : 0;
+            } else if (payload.src) {
+                list = [{ src: payload.src, prompt: payload.prompt || '', thumbnail: payload.thumbnail || payload.src }];
+                index = 0;
+            }
+        }
+
+        if (index < 0 || (list.length > 0 && index >= list.length)) {
+            index = 0;
+        }
+
+        // Reassign with a fresh object state to ensure all computed/watch dependencies trigger
+        this.imageViewer = {
+            isOpen: true,
+            imageList: list,
+            startIndex: index,
+        };
     },
 
     closeImageViewer() {
-        this.imageViewer.isOpen = false;
-        setTimeout(() => {
-            this.imageViewer.imageList = [];
-            this.imageViewer.startIndex = 0;
-        }, 300);
+        this.imageViewer = {
+            isOpen: false,
+            imageList: [],
+            startIndex: 0,
+        };
     },
     
     openSlideshow({ slides, startIndex = 0, title = 'Slideshow', messageId = null }) {

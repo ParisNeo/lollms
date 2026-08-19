@@ -422,17 +422,33 @@ export const useAuthStore = defineStore('auth', () => {
 
             if (user.value) {
                 const uiStore = useUiStore();
-                let targetView = user.value.first_page;
-                if (user.value.user_ui_level < 2 && targetView === 'feed') targetView = 'new_discussion'; 
-                uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
+                const currentPath = window.location.pathname;
 
-                if (targetView === 'last_discussion') {
+                // Only redirect/create discussion if the user is on the root path '/'
+                if (currentPath === '/' || currentPath === '') {
+                    let targetView = user.value.first_page;
+                    if (user.value.user_ui_level < 2 && targetView === 'feed') targetView = 'new_discussion'; 
+                    uiStore.setMainView(targetView === 'feed' ? 'feed' : 'chat');
+
+                    if (targetView === 'last_discussion') {
+                        const lastId = user.value.last_discussion_id;
+                        if (lastId && discussionsStore.sortedDiscussions.some(d => d.id === lastId)) {
+                            await discussionsStore.selectDiscussion(lastId, null, true);
+                        } else if (discussionsStore.sortedDiscussions.length > 0) {
+                            await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id, null, true);
+                        } else {
+                            await discussionsStore.createNewDiscussion();
+                        }
+                    } else if (targetView === 'new_discussion') {
+                        await discussionsStore.createNewDiscussion();
+                    }
+                } else {
+                    // When on a specific studio route (e.g. /image-studio, /notebooks, /settings),
+                    // quietly sync the last active discussion ID in the store without hijacking the route
                     const lastId = user.value.last_discussion_id;
-                    if (lastId && discussionsStore.sortedDiscussions.some(d => d.id === lastId)) await discussionsStore.selectDiscussion(lastId, null, true);
-                    else if (discussionsStore.sortedDiscussions.length > 0) await discussionsStore.selectDiscussion(discussionsStore.sortedDiscussions[0].id, null, true);
-                    else await discussionsStore.createNewDiscussion();
-                } else if (targetView === 'new_discussion') {
-                    await discussionsStore.createNewDiscussion();
+                    if (lastId && discussionsStore.discussions[lastId]) {
+                        discussionsStore.currentDiscussionId = lastId;
+                    }
                 }
             }
             loadingProgress.value = 100;

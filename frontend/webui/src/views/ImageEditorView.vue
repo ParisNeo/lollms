@@ -43,20 +43,136 @@
                 <span class="text-[9px] font-black uppercase tracking-widest text-primary">{{ currentToolName }}</span>
             </div>
 
-            <!-- Primary Color selection & Swatches -->
-            <div class="flex items-center gap-1.5 shrink-0" v-if="['brush', 'line', 'rect', 'circle', 'text', 'gradient'].includes(tool)">
-                <div class="relative w-6 h-6 rounded-lg overflow-hidden border dark:border-gray-700 shadow-sm cursor-pointer" :style="{ backgroundColor: color }">
-                    <input type="color" v-model="color" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+            <!-- Dynamic Color Palette & Swatches Studio -->
+            <div class="flex items-center gap-1.5 shrink-0 relative" v-if="['brush', 'line', 'rect', 'circle', 'text', 'gradient'].includes(tool)">
+                <!-- Current Active Color Box with Quick Picker -->
+                <div 
+                    @click="isPaletteStudioOpen = !isPaletteStudioOpen" 
+                    class="relative w-7 h-7 rounded-xl overflow-hidden border-2 border-black/20 dark:border-white/20 shadow-md cursor-pointer hover:scale-105 transition-transform flex items-center justify-center"
+                    :style="{ backgroundColor: color }"
+                    :title="`Current Color: ${color} (Click to open Color Studio)`"
+                >
+                    <span class="text-[8px] font-black mix-blend-difference text-white">🎨</span>
                 </div>
-                <!-- Recent Colors -->
-                <div class="hidden sm:flex items-center gap-1">
+
+                <!-- Live Swatch Strip (Active Palette) -->
+                <div class="hidden md:flex items-center gap-1 max-w-[200px] overflow-x-auto no-scrollbar py-0.5">
                     <button 
-                        v-for="swatch in recentColors" 
+                        v-for="swatch in activePaletteColors" 
                         :key="swatch" 
-                        @click="color = swatch" 
-                        class="w-4 h-4 rounded-md border border-black/10 dark:border-white/10 hover:scale-110 transition-transform" 
+                        @click="selectColor(swatch)" 
+                        class="w-4.5 h-4.5 rounded-lg border border-black/10 dark:border-white/10 hover:scale-115 transition-all shrink-0 shadow-xs" 
+                        :class="color.toLowerCase() === swatch.toLowerCase() ? 'ring-2 ring-blue-500 scale-110 z-10' : ''"
                         :style="{ backgroundColor: swatch }"
+                        :title="swatch"
                     ></button>
+                </div>
+
+                <!-- Palette Studio Popover Button -->
+                <button 
+                    @click="isPaletteStudioOpen = !isPaletteStudioOpen" 
+                    class="px-2 py-1 text-[9px] font-black uppercase tracking-wider rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center gap-1"
+                >
+                    <span>{{ selectedPaletteName }}</span>
+                    <IconChevronDown class="w-3 h-3 transition-transform" :class="{'rotate-180': isPaletteStudioOpen}" />
+                </button>
+
+                <!-- Floating Color & Palette Studio Popover -->
+                <div 
+                    v-if="isPaletteStudioOpen" 
+                    v-on-click-outside="() => isPaletteStudioOpen = false"
+                    class="absolute top-full left-0 mt-3 w-80 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 p-4 space-y-4 z-50 animate-in fade-in slide-in-from-top-2"
+                >
+                    <!-- Header -->
+                    <div class="flex items-center justify-between border-b dark:border-gray-800 pb-2.5">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-primary">Color Studio</span>
+                            <span class="text-[9px] font-mono font-bold text-gray-400 bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">{{ activePaletteColors.length }} Swatches</span>
+                        </div>
+                        <button @click="isPaletteStudioOpen = false" class="p-1 text-gray-400 hover:text-red-500">
+                            <IconXMark class="w-4 h-4" />
+                        </button>
+                    </div>
+
+                    <!-- Category Selector -->
+                    <div class="space-y-1">
+                        <label class="text-[9px] font-black uppercase text-gray-400 tracking-wider block">Palette Theme</label>
+                        <select v-model="selectedPaletteName" class="input-field !text-xs !py-1.5 w-full bg-gray-50 dark:bg-gray-800">
+                            <option value="Essentials">🌟 Essentials Palette</option>
+                            <option value="Custom">⭐ My Custom Palette (Saved)</option>
+                            <option value="Extracted" v-if="extractedPalette.length > 0">📸 Extracted from Canvas</option>
+                            <option value="Skin & Portrait">👤 Skin & Portrait Tones</option>
+                            <option value="Cyberpunk Neon">🌃 Cyberpunk Neon</option>
+                            <option value="Earth & Nature">🌿 Earth & Forest</option>
+                            <option value="Pastel Dreams">🌸 Pastel Dreams</option>
+                            <option value="Vintage Retro">🎞️ 70s Vintage Retro</option>
+                            <option value="Manga & Comic">💥 Manga & Comic Inks</option>
+                            <option value="Monochrome Shading">⚫ Monochrome Shading</option>
+                        </select>
+                    </div>
+
+                    <!-- Swatches Grid -->
+                    <div class="space-y-1.5">
+                        <div class="grid grid-cols-6 gap-2 p-2 bg-gray-50 dark:bg-gray-950/60 rounded-xl border dark:border-gray-800 max-h-40 overflow-y-auto custom-scrollbar">
+                            <div 
+                                v-for="(swatch, idx) in activePaletteColors" 
+                                :key="swatch + idx"
+                                class="group/swatch relative aspect-square rounded-lg border border-black/15 dark:border-white/15 cursor-pointer hover:scale-110 transition-transform shadow-xs flex items-center justify-center"
+                                :class="color.toLowerCase() === swatch.toLowerCase() ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-gray-900' : ''"
+                                :style="{ backgroundColor: swatch }"
+                                @click="selectColor(swatch)"
+                                :title="swatch"
+                            >
+                                <button 
+                                    v-if="selectedPaletteName === 'Custom'" 
+                                    @click.stop="removeColorFromCustomPalette(idx)" 
+                                    class="absolute -top-1 -right-1 bg-red-600 text-white rounded-full w-3.5 h-3.5 flex items-center justify-center text-[8px] opacity-0 group-hover/swatch:opacity-100 transition-opacity shadow"
+                                    title="Delete Swatch"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Interactive Inputs & Tools -->
+                    <div class="space-y-2.5 pt-1 border-t dark:border-gray-800">
+                        <div class="flex items-center gap-2">
+                            <!-- Native Color Picker Trigger -->
+                            <div class="relative w-9 h-9 rounded-xl overflow-hidden border dark:border-gray-700 shrink-0 shadow-sm" :style="{ backgroundColor: color }">
+                                <input type="color" v-model="color" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                            </div>
+                            
+                            <!-- Manual Hex Text Input -->
+                            <div class="relative grow">
+                                <input 
+                                    v-model="color" 
+                                    type="text" 
+                                    class="input-field !text-xs !py-2 font-mono uppercase font-bold w-full pl-6"
+                                    placeholder="#RRGGBB"
+                                />
+                                <span class="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 font-mono text-xs">#</span>
+                            </div>
+
+                            <!-- Add to Custom Palette Button -->
+                            <button 
+                                @click="addColorToCustomPalette(color)"
+                                class="btn btn-secondary btn-sm h-9 px-3 text-xs flex items-center gap-1 font-bold shrink-0"
+                                title="Save current color to My Custom Palette"
+                            >
+                                <IconPlus class="w-3.5 h-3.5 text-blue-500" />
+                                <span>Save</span>
+                            </button>
+                        </div>
+
+                        <!-- One-Click Palette Extractor from Image -->
+                        <button 
+                            @click="extractPaletteFromCanvas" 
+                            class="btn btn-secondary btn-xs w-full py-2 flex items-center justify-center gap-1.5 font-bold uppercase text-[9px] tracking-wider"
+                        >
+                            <span>📸</span> Extract Dominant Palette from Image
+                        </button>
+                    </div>
                 </div>
             </div>
             
@@ -142,15 +258,23 @@
                 </transition>
 
                 <!-- Canvas Wrapper Stack -->
+                <!-- Layer Composition Container -->
                 <div :style="combinedCanvasStyle" class="relative shadow-2xl origin-center canvas-stack">
                     <!-- Base Sizing Anchor Canvas -->
-                    <canvas ref="imageCanvasRef" class="block bg-transparent layer-canvas"></canvas>
+                    <canvas 
+                        ref="imageCanvasRef" 
+                        :width="canvasWidth" 
+                        :height="canvasHeight" 
+                        class="block bg-transparent layer-canvas"
+                    ></canvas>
 
                     <!-- Render All Stacked Layers with Individual Reactivity -->
                     <template v-for="layer in layers" :key="layer.id">
                         <canvas 
                             :ref="el => setLayerCanvasRef(layer, el)" 
                             v-show="layer.visible"
+                            :width="canvasWidth" 
+                            :height="canvasHeight"
                             class="absolute inset-0 layer-canvas" 
                             :style="{ 
                                 zIndex: layer.order, 
@@ -165,6 +289,8 @@
                     <canvas 
                         ref="maskCanvasRef" 
                         v-show="activeLayerId === 'mask' || useInpaintMask"
+                        :width="canvasWidth" 
+                        :height="canvasHeight"
                         class="absolute inset-0 opacity-50 layer-canvas pointer-events-none" 
                         style="z-index: 998"
                     ></canvas>
@@ -172,6 +298,8 @@
                     <!-- Shape & Interactive Drawing Preview Layer -->
                     <canvas 
                         ref="previewCanvasRef" 
+                        :width="canvasWidth" 
+                        :height="canvasHeight"
                         class="absolute inset-0 pointer-events-none layer-canvas" 
                         style="z-index: 1000"
                     ></canvas>
@@ -648,6 +776,7 @@ import IconCircle from '../assets/icons/IconCircle.vue';
 import IconFolder from '../assets/icons/IconFolder.vue';
 import IconCopy from '../assets/icons/IconCopy.vue';
 import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
+import IconChevronDown from '../assets/icons/IconChevronDown.vue';
 
 // Dynamic Vector Icons
 const IconHand = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [h('path', { d: 'M18 11V6a2 2 0 00-4 0v2a2 2 0 00-4 0v1a2 2 0 00-4 0v8a5 5 0 0010 0v-4a2 2 0 00-2-2z' })]) };
@@ -676,6 +805,9 @@ const maskCanvasRef = ref(null);
 const previewCanvasRef = ref(null);
 const ctxMask = ref(null);
 const ctxPreview = ref(null);
+
+const canvasWidth = ref(1024);
+const canvasHeight = ref(1024);
 
 const activeLayerId = ref('base');
 const tool = ref('brush');
@@ -785,6 +917,100 @@ const keyTolerance = ref(28);
 const keySoftness = ref(12);
 const keySpillSuppression = ref(true);
 
+const isPaletteStudioOpen = ref(false);
+const selectedPaletteName = ref('Essentials');
+const customPalette = ref(JSON.parse(localStorage.getItem('lollms_custom_palette') || '["#3B82F6", "#EC4899", "#10B981", "#F59E0B", "#8B5CF6", "#EF4444", "#06B6D4", "#F97316"]'));
+const extractedPalette = ref([]);
+
+// Curated Professional Palette Collections
+const presetPalettes = {
+    'Essentials': ['#000000', '#FFFFFF', '#374151', '#9CA3AF', '#EF4444', '#F97316', '#F59E0B', '#10B981', '#06B6D4', '#3B82F6', '#6366F1', '#EC4899'],
+    'Skin & Portrait': ['#FCE5D8', '#F5D0B9', '#E8B99A', '#D09B79', '#B57C58', '#8D5638', '#5E341E', '#3D1E0E', '#F8B4B4', '#E06D53', '#8C2E2E', '#3A1414'],
+    'Cyberpunk Neon': ['#00F0FF', '#FF0055', '#FFE600', '#7000FF', '#00FF66', '#FF00AA', '#120024', '#002B49', '#1A0033', '#FF5500', '#00E5FF', '#FFFF00'],
+    'Earth & Nature': ['#1E3A1E', '#2D5A27', '#4E8752', '#86B049', '#D0E17C', '#F4E8C1', '#C89D7C', '#8C6239', '#5C3818', '#38220F', '#4A6B82', '#7DA0B5'],
+    'Pastel Dreams': ['#FDE2E4', '#FFCAD4', '#B5E2FA', '#C5DEDD', '#DFE7FD', '#E2ECE9', '#F0E6EF', '#FFF1E6', '#FCD2D1', '#D6E2E9', '#BCD4E6', '#99C1DE'],
+    'Vintage Retro': ['#DDA77A', '#C85A32', '#A33327', '#4E2B1F', '#7E8D52', '#3D5A45', '#1B3B36', '#E2D1A8', '#E68A00', '#B83B1D', '#5C4033', '#1A1110'],
+    'Manga & Comic': ['#000000', '#333333', '#666666', '#999999', '#CCCCCC', '#FFFFFF', '#E50914', '#0070F3', '#FFD700', '#FF4500', '#22C55E', '#A855F7'],
+    'Monochrome Shading': ['#000000', '#18181B', '#27272A', '#3F3F46', '#52525B', '#71717A', '#A1A1AA', '#D4D4D8', '#E4E4E7', '#F4F4F5', '#FAFAFA', '#FFFFFF']
+};
+
+const activePaletteColors = computed(() => {
+    if (selectedPaletteName.value === 'Custom') return customPalette.value;
+    if (selectedPaletteName.value === 'Extracted') return extractedPalette.value;
+    return presetPalettes[selectedPaletteName.value] || presetPalettes['Essentials'];
+});
+
+function selectColor(hex) {
+    color.value = hex;
+    if (!recentColors.value.includes(hex)) {
+        recentColors.value.unshift(hex);
+        if (recentColors.value.length > 7) recentColors.value.pop();
+    }
+}
+
+function addColorToCustomPalette(hex) {
+    const formatted = hex.toUpperCase();
+    if (!customPalette.value.includes(formatted)) {
+        customPalette.value.push(formatted);
+        localStorage.setItem('lollms_custom_palette', JSON.stringify(customPalette.value));
+        selectedPaletteName.value = 'Custom';
+        uiStore.addNotification(`Saved ${formatted} to My Custom Palette!`, 'success', 1500);
+    }
+}
+
+function removeColorFromCustomPalette(idx) {
+    customPalette.value.splice(idx, 1);
+    localStorage.setItem('lollms_custom_palette', JSON.stringify(customPalette.value));
+}
+
+// ── COLOR QUANTIZATION: AUTOMATIC PALETTE EXTRACTION FROM CANVAS ──
+function extractPaletteFromCanvas() {
+    if (!imageCanvasRef.value) return;
+    const comp = document.createElement('canvas');
+    comp.width = 120;
+    comp.height = 120;
+    const cc = comp.getContext('2d');
+    
+    layers.value.filter(l => l.visible).forEach(l => {
+        if (l.ctx) {
+            cc.globalAlpha = l.opacity;
+            cc.globalCompositeOperation = l.blendMode || 'source-over';
+            cc.drawImage(l.ctx.canvas, 0, 0, 120, 120);
+        }
+    });
+
+    const imgData = cc.getImageData(0, 0, 120, 120).data;
+    const colorCounts = new Map();
+
+    for (let i = 0; i < imgData.length; i += 16) {
+        const a = imgData[i + 3];
+        if (a < 100) continue; // Skip transparent
+        
+        // Quantize colors (group neighboring shades into clusters)
+        const r = Math.round(imgData[i] / 32) * 32;
+        const g = Math.round(imgData[i + 1] / 32) * 32;
+        const b = Math.round(imgData[i + 2] / 32) * 32;
+        
+        const hex = `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1).toUpperCase()}`;
+        colorCounts.set(hex, (colorCounts.get(hex) || 0) + 1);
+    }
+
+    const sorted = Array.from(colorCounts.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(entry => entry[0])
+        .slice(0, 18);
+
+    if (sorted.length > 0) {
+        extractedPalette.value = sorted;
+        selectedPaletteName.value = 'Extracted';
+        uiStore.addNotification(`Extracted ${sorted.length} dominant colors from artwork!`, 'success', 2000);
+    } else {
+        uiStore.addNotification('Could not extract colors (canvas is transparent/empty).', 'warning');
+    }
+}
+
+
+
 // Quick Modifiers for Image Editor
 const quickEditModifiers = [
     { label: '4K Enhance', emoji: '💎', prompt: 'masterpiece, 8k uhd, pristine sharp focus, ultra-detailed micro texture, noise reduction, crystal clear details', negative: 'blurry, noise, artifacts, low resolution' },
@@ -842,21 +1068,12 @@ watch(() => activeTask.value?.status, async (newStatus) => {
 
 function initNewBlankCanvas() {
     const defaultW = 1024, defaultH = 1024;
-    imageCanvasRef.value.width = defaultW;
-    imageCanvasRef.value.height = defaultH;
-    
-    [maskCanvasRef, previewCanvasRef].forEach(c => { 
-        if (c.value) {
-            c.value.width = defaultW; 
-            c.value.height = defaultH; 
-        }
-    });
+    canvasWidth.value = defaultW;
+    canvasHeight.value = defaultH;
 
     nextTick(() => {
         const base = layers.value.find(l => l.id === 'base') || layers.value[0];
         if (base?.el) {
-            base.el.width = defaultW;
-            base.el.height = defaultH;
             base.ctx = base.el.getContext('2d');
             base.ctx.fillStyle = '#FFFFFF';
             base.ctx.fillRect(0, 0, defaultW, defaultH);
@@ -875,29 +1092,21 @@ async function loadImage(id) {
             img.onerror = reject; 
             img.src = URL.createObjectURL(res.data); 
         });
-        
+
         const w = img.naturalWidth;
         const h = img.naturalHeight;
 
-        imageCanvasRef.value.width = w; 
-        imageCanvasRef.value.height = h;
-        
-        [maskCanvasRef, previewCanvasRef].forEach(c => { 
-            if (c.value) {
-                c.value.width = w; 
-                c.value.height = h; 
-            }
-        });
+        canvasWidth.value = w; 
+        canvasHeight.value = h;
 
         await nextTick();
         const base = layers.value.find(l => l.id === 'base') || layers.value[0];
         if (base?.el) {
-            base.el.width = w;
-            base.el.height = h;
             base.ctx = base.el.getContext('2d');
+            base.ctx.clearRect(0, 0, w, h);
             base.ctx.drawImage(img, 0, 0);
         }
-        
+
         saveState(); 
         fitToScreen();
     } catch (e) { 
@@ -912,10 +1121,6 @@ function setLayerCanvasRef(layer, el) {
     if (el) {
         layer.el = el;
         layer.ctx = el.getContext('2d');
-        if (imageCanvasRef.value && (el.width !== imageCanvasRef.value.width || el.height !== imageCanvasRef.value.height)) {
-            el.width = imageCanvasRef.value.width;
-            el.height = imageCanvasRef.value.height;
-        }
     }
 }
 
@@ -940,9 +1145,7 @@ function addNewLayer(name = null) {
     activeLayerId.value = id;
     nextTick(() => {
         const l = layers.value.find(x => x.id === id);
-        if (l && l.el) {
-            l.el.width = imageCanvasRef.value.width; 
-            l.el.height = imageCanvasRef.value.height;
+        if (l?.el) {
             l.ctx = l.el.getContext('2d');
         }
         saveState();
@@ -1056,42 +1259,60 @@ function rotateActiveLayer(deg) {
     saveState();
 }
 
-function expandCanvas(direction, amount = 256) {
-    const oldW = imageCanvasRef.value.width;
-    const oldH = imageCanvasRef.value.height;
+async function expandCanvas(direction, amount = 256) {
+    const oldW = canvasWidth.value;
+    const oldH = canvasHeight.value;
     const newW = direction === 'horizontal' ? oldW + amount : oldW;
     const newH = direction === 'vertical' ? oldH + amount : oldH;
 
     const offsetX = direction === 'horizontal' ? amount / 2 : 0;
     const offsetY = direction === 'vertical' ? amount / 2 : 0;
 
-    imageCanvasRef.value.width = newW;
-    imageCanvasRef.value.height = newH;
+    // 1. Snapshot all layer contents offscreen before dimensions change
+    const layerSnapshots = layers.value.map(l => {
+        if (!l.el) return null;
+        const temp = document.createElement('canvas');
+        temp.width = oldW;
+        temp.height = oldH;
+        temp.getContext('2d').drawImage(l.el, 0, 0);
+        return { layerId: l.id, canvas: temp };
+    }).filter(Boolean);
 
-    [maskCanvasRef, previewCanvasRef].forEach(c => {
-        if (c.value) {
-            c.value.width = newW;
-            c.value.height = newH;
+    // Snapshot mask if it exists
+    let maskSnapshot = null;
+    if (maskCanvasRef.value && ctxMask.value) {
+        const tempMask = document.createElement('canvas');
+        tempMask.width = oldW;
+        tempMask.height = oldH;
+        tempMask.getContext('2d').drawImage(maskCanvasRef.value, 0, 0);
+        maskSnapshot = tempMask;
+    }
+
+    // 2. Reactively update canvas dimensions across all template bound elements
+    canvasWidth.value = newW;
+    canvasHeight.value = newH;
+
+    // 3. Await Vue DOM template update
+    await nextTick();
+
+    // 4. Redraw layers centered at the new offset
+    layerSnapshots.forEach(snap => {
+        const l = layers.value.find(x => x.id === snap.layerId);
+        if (l?.ctx) {
+            l.ctx.clearRect(0, 0, newW, newH);
+            l.ctx.drawImage(snap.canvas, offsetX, offsetY);
         }
     });
 
-    layers.value.forEach(layer => {
-        if (layer.ctx) {
-            const temp = document.createElement('canvas');
-            temp.width = oldW;
-            temp.height = oldH;
-            temp.getContext('2d').drawImage(layer.ctx.canvas, 0, 0);
-
-            layer.el.width = newW;
-            layer.el.height = newH;
-            layer.ctx = layer.el.getContext('2d');
-            layer.ctx.drawImage(temp, offsetX, offsetY);
-        }
-    });
+    // Redraw mask centered
+    if (maskSnapshot && ctxMask.value) {
+        ctxMask.value.clearRect(0, 0, newW, newH);
+        ctxMask.value.drawImage(maskSnapshot, offsetX, offsetY);
+    }
 
     saveState();
     fitToScreen();
-    uiStore.addNotification(`Canvas expanded to ${newW}x${newH}px.`, 'success');
+    uiStore.addNotification(`Canvas expanded to ${newW}×${newH}px.`, 'success');
 }
 
 function clearMask() {
@@ -1750,7 +1971,13 @@ function redo() {
 
 async function applyHistory(snapshot) {
     if (!snapshot) return;
-    
+
+    const w = snapshot.width || canvasWidth.value;
+    const h = snapshot.height || canvasHeight.value;
+
+    canvasWidth.value = w;
+    canvasHeight.value = h;
+
     const restoredLayers = snapshot.layers.map(s => {
         const existing = layers.value.find(l => l.id === s.id);
         return {
@@ -1771,15 +1998,9 @@ async function applyHistory(snapshot) {
 
     await nextTick();
 
-    const w = snapshot.width || imageCanvasRef.value.width;
-    const h = snapshot.height || imageCanvasRef.value.height;
-
     snapshot.layers.forEach(s => {
         const l = layers.value.find(x => x.id === s.id);
-        if (l && l.el && s.data) {
-            l.el.width = w;
-            l.el.height = h;
-            l.ctx = l.el.getContext('2d');
+        if (l?.ctx && s.data) {
             const img = new Image();
             img.onload = () => {
                 l.ctx.clearRect(0, 0, w, h);

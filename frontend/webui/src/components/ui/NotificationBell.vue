@@ -4,6 +4,7 @@ import { useSocialStore } from '../../stores/social';
 import { useUiStore } from '../../stores/ui';
 import { useRouter } from 'vue-router';
 import UserAvatar from './Cards/UserAvatar.vue';
+import IconXMark from '../../assets/icons/IconXMark.vue';
 
 const socialStore = useSocialStore();
 const uiStore = useUiStore();
