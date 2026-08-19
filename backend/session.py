@@ -997,6 +997,11 @@ def get_user_dm_assets_path(username: str) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+def get_user_social_assets_path(username: str) -> Path:
+    path = get_user_data_root(username) / "social_assets"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 def get_user_temp_uploads_path(username: str) -> Path:
     path = get_user_data_root(username) / TEMP_UPLOADS_DIR_NAME
     path.mkdir(parents=True, exist_ok=True)

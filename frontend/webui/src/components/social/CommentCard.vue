@@ -24,6 +24,7 @@ const uiStore = useUiStore();
 const user = computed(() => authStore.user);
 const isAuthor = computed(() => user.value?.id === props.comment.author.id);
 const canDelete = computed(() => isAuthor.value || user.value?.is_admin || user.value?.is_moderator);
+const isBot = computed(() => props.comment.is_ai_generated || props.comment.author?.username?.toLowerCase() === 'lollms');
 
 function formatTimestamp(dateString) {
   const date = new Date(dateString);
@@ -66,10 +67,15 @@ async function handleDelete() {
     <div class="flex-1 min-w-0">
       <div class="bg-gray-100 dark:bg-gray-700 rounded-xl p-3">
         <div class="flex justify-between items-center mb-1">
-          <router-link :to="`/profile/${comment.author.username}`" class="font-bold text-sm text-gray-900 dark:text-gray-100 hover:underline">
-            {{ comment.author.username }}
-          </router-link>
-          
+          <div class="flex items-center gap-2">
+            <router-link :to="`/profile/${comment.author.username}`" class="font-bold text-sm text-gray-900 dark:text-gray-100 hover:underline">
+              {{ comment.author.username }}
+            </router-link>
+            <span v-if="isBot" class="px-1.5 py-0.2 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800 select-none">
+              🤖 AI Assistant
+            </span>
+          </div>
+
           <button v-if="canDelete" @click="handleDelete" class="text-gray-400 hover:text-red-500" title="Delete comment">
              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
           </button>

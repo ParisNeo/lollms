@@ -35,9 +35,14 @@ function refreshFeed() {
     <div class="grow bg-gray-100 dark:bg-gray-900 overflow-y-auto">
       <div class="mx-auto py-6 px-4">
         <div class="flex items-center justify-between mb-6">
-            <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">
-            Home Feed
-            </h1>
+            <div class="flex items-center gap-3">
+              <h1 class="text-2xl font-bold text-gray-800 dark:text-gray-100">
+                Home Feed
+              </h1>
+              <span class="px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 text-[10px] font-black uppercase tracking-widest border border-blue-200 dark:border-blue-800 select-none shadow-xs" title="Ranked by relationship affinity, engagement velocity & recency decay">
+                ✨ Smart Ranking
+              </span>
+            </div>
             <button 
                 @click="refreshFeed" 
                 class="btn-icon p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-800 transition-colors"

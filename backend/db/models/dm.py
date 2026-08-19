@@ -7,18 +7,21 @@ from backend.db.base import Base
 class DirectMessage(Base):
     __tablename__ = "direct_messages"
     id = Column(Integer, primary_key=True, index=True)
-    sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    # receiver_id is nullable for group messages
-    receiver_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
-    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True)
+    sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    receiver_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True, index=True)
     content = Column(String, nullable=False)
-    image_references = Column(JSON, nullable=True) # JSON list of image paths
-    sent_at = Column(DateTime(timezone=True), server_default=func.now())
+    image_references = Column(JSON, nullable=True)
+    media = Column(JSON, nullable=True)
+    reply_to_id = Column(Integer, ForeignKey("direct_messages.id", ondelete="SET NULL"), nullable=True)
+    reactions = Column(JSON, nullable=True)
+    sent_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     read_at = Column(DateTime(timezone=True), nullable=True)
 
     sender = relationship("User", foreign_keys=[sender_id], backref="sent_dms")
     receiver = relationship("User", foreign_keys=[receiver_id], backref="received_dms")
     conversation = relationship("Conversation", back_populates="messages")
+    reply_to = relationship("DirectMessage", remote_side=[id], foreign_keys=[reply_to_id])
 
 class Conversation(Base):
     __tablename__ = "conversations"

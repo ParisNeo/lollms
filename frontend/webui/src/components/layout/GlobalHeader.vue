@@ -52,7 +52,7 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
 const showMainSidebarToggle = computed(() => {
     if (!authStore.isAuthenticated) return false;
-    const noSidebarPaths = ['/settings', '/admin', '/datastores', '/personality-studio', '/friends', '/help', '/profile', '/messages', '/voices-studio', '/image-studio', '/image-studio/edit'];
+    const noSidebarPaths = ['/settings', '/admin', '/friends', '/help', '/profile', '/messages'];
     return !noSidebarPaths.some(path => route.path.startsWith(path));
 });
 

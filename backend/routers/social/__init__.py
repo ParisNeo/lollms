@@ -1,14 +1,26 @@
 # backend/routers/social/__init__.py
-from typing import List, Optional
+import uuid
+import shutil
+import io
+import re
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+from urllib.parse import urlparse
+import requests
+from bs4 import BeautifulSoup
+from PIL import Image
+from werkzeug.utils import secure_filename
+
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, exists, select, insert, delete, func
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, HttpUrl
 from ascii_colors import trace_exception
-import re
+
 from backend.settings import settings
 from backend.task_manager import task_manager
 from backend.tasks.social_tasks import _respond_to_mention_task, _moderate_content_task
-
 from backend.db import get_db
 from backend.db.base import PostVisibility, FriendshipStatus, follows_table
 from backend.db.models.user import User as DBUser, Friendship as DBFriendship
@@ -22,9 +34,13 @@ from backend.models import (
     CommentPublic,
     AuthorPublic
 )
-from backend.session import get_current_active_user, get_current_db_user_from_token
+from backend.session import (
+    get_current_active_user,
+    get_current_db_user_from_token,
+    get_user_social_assets_path
+)
 from backend.routers.social.mentions import mentions_router
-from backend.security import sanitize_content
+from backend.security import sanitize_content, validate_url
 
 social_router = APIRouter(
     prefix="/api/social",
@@ -33,21 +49,28 @@ social_router = APIRouter(
 )
 social_router.include_router(mentions_router, prefix="/mentions")
 
+import datetime
+
 # --- Helpers ---
 def get_post_public(db: Session, post: DBPost, current_user_id: int) -> PostPublic:
-    # Logic to convert DBPost to PostPublic, including like counts and status
     like_count = db.query(DBPostLike).filter(DBPostLike.post_id == post.id).count()
     has_liked = db.query(exists().where(and_(DBPostLike.post_id == post.id, DBPostLike.user_id == current_user_id))).scalar()
-    
+
     post_public = PostPublic.model_validate(post)
     post_public.like_count = like_count
-    post_public.has_liked = has_liked
-    
-    # Filter comments based on moderation status
+    post_public.has_liked = bool(has_liked)
+    post_public.is_pinned = getattr(post, 'is_pinned', False) or False
+    post_public.is_ai_generated = bool(post.author and post.author.username.lower() == 'lollms')
+
     if post.comments:
         valid_comments = [c for c in post.comments if c.moderation_status != 'flagged']
-        post_public.comments = [CommentPublic.model_validate(c) for c in valid_comments]
-        
+        comment_objs = []
+        for c in valid_comments:
+            c_pub = CommentPublic.model_validate(c)
+            c_pub.is_ai_generated = bool(c.author and c.author.username.lower() == 'lollms')
+            comment_objs.append(c_pub)
+        post_public.comments = comment_objs
+
     return post_public
 
 def get_posts_public_batched(db: Session, posts: List[DBPost], current_user_id: int) -> List[PostPublic]:
@@ -57,37 +80,41 @@ def get_posts_public_batched(db: Session, posts: List[DBPost], current_user_id: 
     """
     if not posts:
         return []
-    
+
     post_ids = [p.id for p in posts]
-    
-    # Batch fetch likes count
+
     like_counts_rows = db.query(
         DBPostLike.post_id,
         func.count(DBPostLike.user_id)
     ).filter(DBPostLike.post_id.in_(post_ids)).group_by(DBPostLike.post_id).all()
-    
+
     like_counts = {r[0]: r[1] for r in like_counts_rows}
-    
-    # Batch fetch user likes
+
     user_likes_rows = db.query(DBPostLike.post_id).filter(
         DBPostLike.post_id.in_(post_ids),
         DBPostLike.user_id == current_user_id
     ).all()
     user_likes = set(r[0] for r in user_likes_rows)
-    
+
     results = []
     for post in posts:
         post_public = PostPublic.model_validate(post)
         post_public.like_count = like_counts.get(post.id, 0)
         post_public.has_liked = post.id in user_likes
-        
-        # Filter comments based on moderation status
+        post_public.is_pinned = getattr(post, 'is_pinned', False) or False
+        post_public.is_ai_generated = bool(post.author and post.author.username.lower() == 'lollms')
+
         if post.comments:
             valid_comments = [c for c in post.comments if c.moderation_status != 'flagged']
-            post_public.comments = [CommentPublic.model_validate(c) for c in valid_comments]
-            
+            comment_objs = []
+            for c in valid_comments:
+                c_pub = CommentPublic.model_validate(c)
+                c_pub.is_ai_generated = bool(c.author and c.author.username.lower() == 'lollms')
+                comment_objs.append(c_pub)
+            post_public.comments = comment_objs
+
         results.append(post_public)
-        
+
     return results
 
 # --- Follow/Unfollow Endpoints ---
@@ -136,6 +163,242 @@ def unfollow_user(
     db.commit()
     return
 
+# --- Post Media & Link Verification Models ---
+
+class LinkPreviewRequest(BaseModel):
+    url: str
+
+class LinkPreviewResponse(BaseModel):
+    url: str
+    title: Optional[str] = None
+    description: Optional[str] = None
+    image: Optional[str] = None
+    domain: str
+
+# Allowed Media Configurations
+ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "image/gif": ".gif"}
+ALLOWED_VIDEO_TYPES = {"video/mp4": ".mp4", "video/webm": ".webm", "video/ogg": ".ogv", "video/quicktime": ".mov"}
+ALLOWED_AUDIO_TYPES = {"audio/mpeg": ".mp3", "audio/mp3": ".mp3", "audio/wav": ".wav", "audio/ogg": ".ogg", "audio/webm": ".webm", "audio/aac": ".aac"}
+
+MAX_IMAGE_SIZE = 15 * 1024 * 1024  # 15 MB
+MAX_VIDEO_SIZE = 60 * 1024 * 1024  # 60 MB
+MAX_AUDIO_SIZE = 25 * 1024 * 1024  # 25 MB
+
+def _sanitize_media_items(media_list: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    if not media_list or not isinstance(media_list, list):
+        return []
+
+    clean_media = []
+    for item in media_list[:10]:  # Cap at 10 items max per post
+        if not isinstance(item, dict):
+            continue
+
+        m_type = item.get("type", "").lower()
+        if m_type in ["image", "video", "audio"]:
+            url_val = item.get("url", "")
+            if url_val.startswith("/api/social/media/"):
+                clean_media.append({
+                    "type": m_type,
+                    "url": sanitize_content(url_val),
+                    "filename": sanitize_content(item.get("filename", "media")),
+                    "size": int(item.get("size", 0)) if isinstance(item.get("size"), (int, float)) else 0
+                })
+        elif m_type == "link":
+            raw_url = item.get("url", "").strip()
+            if raw_url:
+                try:
+                    validate_url(raw_url)
+                    clean_media.append({
+                        "type": "link",
+                        "url": raw_url,
+                        "title": sanitize_content(item.get("title", "")[:200]) if item.get("title") else None,
+                        "description": sanitize_content(item.get("description", "")[:500]) if item.get("description") else None,
+                        "image": item.get("image") if item.get("image") and (item.get("image").startswith("http://") or item.get("image").startswith("https://")) else None,
+                        "domain": sanitize_content(item.get("domain", "")[:100])
+                    })
+                except ValueError:
+                    continue
+
+    return clean_media
+
+# --- Media Upload & Link Verification Endpoints ---
+
+@social_router.post("/upload-media", response_model=List[Dict[str, Any]], status_code=status.HTTP_201_CREATED)
+async def upload_post_media(
+    files: List[UploadFile] = File(...),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Safely ingests and verifies image/video/audio attachments for social posts.
+    Enforces MIME verification, deep magic-byte inspection, and size restrictions.
+    """
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="Maximum 10 files allowed per post.")
+
+    saved_media = []
+    user_social_path = get_user_social_assets_path(current_user.username)
+
+    for file in files:
+        if not file.filename:
+            continue
+
+        s_filename = secure_filename(file.filename or "media_upload")
+        content_type = (file.content_type or "").lower()
+
+        # 1. Determine media category and validate size
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+
+        media_type = None
+        ext = Path(s_filename).suffix.lower()
+
+        if content_type in ALLOWED_IMAGE_TYPES:
+            if file_size > MAX_IMAGE_SIZE:
+                raise HTTPException(status_code=413, detail=f"Image '{s_filename}' exceeds 15MB limit.")
+            # Deep PIL Image Verification (Blocks polyglots/scripts)
+            try:
+                img = Image.open(file.file)
+                img.verify()
+                file.file.seek(0)
+            except Exception:
+                raise HTTPException(status_code=400, detail=f"Corrupted or invalid image content: '{s_filename}'")
+            media_type = "image"
+            if not ext or ext not in [".jpg", ".jpeg", ".png", ".webp", ".gif"]:
+                ext = ALLOWED_IMAGE_TYPES.get(content_type, ".png")
+
+        elif content_type in ALLOWED_VIDEO_TYPES:
+            if file_size > MAX_VIDEO_SIZE:
+                raise HTTPException(status_code=413, detail=f"Video '{s_filename}' exceeds 60MB limit.")
+            if ext not in [".mp4", ".webm", ".ogv", ".mov"]:
+                ext = ALLOWED_VIDEO_TYPES.get(content_type, ".mp4")
+            media_type = "video"
+
+        elif content_type in ALLOWED_AUDIO_TYPES:
+            if file_size > MAX_AUDIO_SIZE:
+                raise HTTPException(status_code=413, detail=f"Audio '{s_filename}' exceeds 25MB limit.")
+            if ext not in [".mp3", ".wav", ".ogg", ".webm", ".m4a", ".aac"]:
+                ext = ALLOWED_AUDIO_TYPES.get(content_type, ".mp3")
+            media_type = "audio"
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported media format: '{content_type}'")
+
+        # 2. Persist with secure random name
+        unique_name = f"{uuid.uuid4().hex}{ext}"
+        target_path = user_social_path / unique_name
+
+        try:
+            with open(target_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+        finally:
+            file.file.close()
+
+        saved_media.append({
+            "type": media_type,
+            "url": f"/api/social/media/{current_user.username}/{unique_name}",
+            "filename": s_filename,
+            "size": file_size
+        })
+
+    return saved_media
+
+@social_router.get("/media/{username}/{filename}")
+async def get_social_media_file(
+    username: str,
+    filename: str,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Serves stored social post media with path containment checks and nosniff protections.
+    """
+    s_username = secure_filename(username)
+    s_filename = secure_filename(filename)
+
+    user_social_path = get_user_social_assets_path(s_username).resolve()
+    target_file = (user_social_path / s_filename).resolve()
+
+    if not target_file.is_relative_to(user_social_path) or not target_file.is_file():
+        raise HTTPException(status_code=404, detail="Media asset not found.")
+
+    return FileResponse(
+        str(target_file),
+        headers={"X-Content-Type-Options": "nosniff"}
+    )
+
+@social_router.post("/link-preview", response_model=LinkPreviewResponse)
+async def extract_link_preview(
+    payload: LinkPreviewRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Fetches OpenGraph title, description, and preview image for an external URL.
+    Enforces SSRF prevention via validate_url, tight timeouts, and response size guards.
+    """
+    raw_url = payload.url.strip()
+    if not raw_url:
+        raise HTTPException(status_code=400, detail="URL cannot be empty.")
+
+    try:
+        validate_url(raw_url)
+    except ValueError as val_err:
+        raise HTTPException(status_code=400, detail=f"Access to URL is forbidden: {str(val_err)}")
+
+    parsed = urlparse(raw_url)
+    domain = parsed.netloc
+
+    title = None
+    description = None
+    image_url = None
+
+    try:
+        headers = {
+            "User-Agent": "LoLLMs-Platform-Bot/2.1 (+https://github.com/ParisNeo/lollms)"
+        }
+        resp = requests.get(raw_url, headers=headers, timeout=4, stream=True)
+        resp.raise_for_status()
+
+        # Read only up to 512KB to prevent memory exhaustion from massive files
+        content_chunk = b""
+        for chunk in resp.iter_content(chunk_size=16384):
+            content_chunk += chunk
+            if len(content_chunk) > 524288:
+                break
+
+        soup = BeautifulSoup(content_chunk.decode("utf-8", errors="ignore"), "html.parser")
+
+        # OpenGraph extraction
+        og_title = soup.find("meta", property="og:title") or soup.find("meta", attrs={"name": "twitter:title"})
+        if og_title and og_title.get("content"):
+            title = og_title["content"].strip()
+        elif soup.title and soup.title.string:
+            title = soup.title.string.strip()
+
+        og_desc = soup.find("meta", property="og:description") or soup.find("meta", attrs={"name": "twitter:description"}) or soup.find("meta", attrs={"name": "description"})
+        if og_desc and og_desc.get("content"):
+            description = og_desc["content"].strip()
+
+        og_img = soup.find("meta", property="og:image") or soup.find("meta", attrs={"name": "twitter:image"})
+        if og_img and og_img.get("content"):
+            cand_img = og_img["content"].strip()
+            try:
+                validate_url(cand_img)
+                image_url = cand_img
+            except ValueError:
+                image_url = None
+
+    except Exception:
+        # Fallback to domain name if scraping is blocked or fails
+        title = title or domain
+
+    return LinkPreviewResponse(
+        url=raw_url,
+        title=sanitize_content(title[:200]) if title else domain,
+        description=sanitize_content(description[:400]) if description else None,
+        image=image_url,
+        domain=domain
+    )
+
 # --- Post Management Endpoints ---
 
 @social_router.post("/posts", response_model=PostPublic, status_code=status.HTTP_201_CREATED)
@@ -152,12 +415,15 @@ def create_post(
 
     # Sanitize content to prevent Stored XSS
     clean_content = sanitize_content(post_data.content)
+    is_pinned = bool(post_data.is_pinned and getattr(current_user, 'is_admin', False))
+    clean_media = _sanitize_media_items(post_data.media)
 
     new_post = DBPost(
         author_id=current_user.id,
         content=clean_content,
         visibility=post_data.visibility,
-        media=post_data.media,
+        is_pinned=is_pinned,
+        media=clean_media if clean_media else None,
         moderation_status=initial_status
     )
     db.add(new_post)
@@ -241,33 +507,68 @@ def update_post(
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found.")
 
-    if post.author_id != current_user.id:
+    is_author = post.author_id == current_user.id
+    is_admin = getattr(current_user, 'is_admin', False)
+
+    if not is_author and not is_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only edit your own posts.")
 
     update_data = post_data.model_dump(exclude_unset=True)
-    
-    # Sanitize content update
-    if 'content' in update_data and update_data['content']:
-        update_data['content'] = sanitize_content(update_data['content'])
 
-    for key, value in update_data.items():
-        setattr(post, key, value)
-    
+    # Sanitize content update
+    if 'content' in update_data and update_data['content'] is not None:
+        if not update_data['content'].strip():
+            raise HTTPException(status_code=400, detail="Post content cannot be empty.")
+        post.content = sanitize_content(update_data['content'])
+
+    if 'visibility' in update_data and update_data['visibility'] is not None:
+        post.visibility = update_data['visibility']
+
+    if 'media' in update_data and update_data['media'] is not None:
+        post.media = _sanitize_media_items(update_data['media'])
+
+    if 'is_pinned' in update_data and update_data['is_pinned'] is not None:
+        if is_admin:
+            post.is_pinned = bool(update_data['is_pinned'])
+        else:
+            raise HTTPException(status_code=403, detail="Only administrators can feature or pin posts.")
+
     # Reset moderation status on edit if moderation is enabled
     moderation_enabled = settings.get("ai_bot_moderation_enabled", False)
-    post.moderation_status = 'pending' if moderation_enabled else 'validated'
-    
+    if moderation_enabled and 'content' in update_data:
+        post.moderation_status = 'pending'
+    else:
+        post.moderation_status = 'validated'
+
     db.commit()
     db.refresh(post, ['author'])
-    
-    if moderation_enabled:
-         task_manager.submit_task(
+
+    if moderation_enabled and 'content' in update_data:
+        task_manager.submit_task(
             name=f"Moderating post {post.id}",
             target=_moderate_content_task,
             args=('post', post.id),
             owner_username='lollms'
         )
 
+    return get_post_public(db, post, current_user.id)
+
+@social_router.post("/posts/{post_id}/pin", response_model=PostPublic)
+def toggle_pin_post(
+    post_id: int,
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    if not getattr(current_user, 'is_admin', False):
+        raise HTTPException(status_code=403, detail="Only administrators can feature or pin posts.")
+
+    post = db.query(DBPost).filter(DBPost.id == post_id).first()
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found.")
+
+    post.is_pinned = not bool(getattr(post, 'is_pinned', False))
+    db.commit()
+    db.refresh(post, ['author'])
     return get_post_public(db, post, current_user.id)
 
 @social_router.delete("/posts/{post_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -372,7 +673,7 @@ def get_main_feed(
     try:
         following_ids_query = select(follows_table.c.following_id).where(follows_table.c.follower_id == current_user.id)
         following_ids_res = db.execute(following_ids_query).scalars().all()
-        following_ids = [uid for uid in following_ids_res if uid is not None]
+        following_ids = set(uid for uid in following_ids_res if uid is not None)
 
         friend_ids_q1 = select(DBFriendship.user2_id).where(
             DBFriendship.user1_id == current_user.id,
@@ -382,38 +683,79 @@ def get_main_feed(
             DBFriendship.user2_id == current_user.id,
             DBFriendship.status == FriendshipStatus.ACCEPTED
         )
-        friend_ids = list(db.execute(friend_ids_q1).scalars().all()) + list(db.execute(friend_ids_q2).scalars().all())
-        friend_ids = [uid for uid in friend_ids if uid is not None]
+        friend_ids = set(list(db.execute(friend_ids_q1).scalars().all()) + list(db.execute(friend_ids_q2).scalars().all()))
 
         conditions = [
             DBPost.visibility == PostVisibility.public,
             DBPost.author_id == current_user.id
         ]
-        
+
         if following_ids:
             conditions.append(and_(
                 DBPost.visibility == PostVisibility.followers,
-                DBPost.author_id.in_(following_ids)
+                DBPost.author_id.in_(list(following_ids))
             ))
-            
+
         if friend_ids:
             conditions.append(and_(
                 DBPost.visibility == PostVisibility.friends,
-                DBPost.author_id.in_(friend_ids)
+                DBPost.author_id.in_(list(friend_ids))
             ))
 
         visibility_conditions = or_(*conditions)
 
-        results = db.query(DBPost).options(
+        candidates = db.query(DBPost).options(
             joinedload(DBPost.author),
-            joinedload(DBPost.comments).joinedload(DBComment.author)
+            joinedload(DBPost.comments).joinedload(DBComment.author),
+            joinedload(DBPost.likes)
         ).filter(
             visibility_conditions,
             DBPost.moderation_status != 'flagged'
-        ).order_by(DBPost.created_at.desc()).limit(50).all()
-        
-        # Optimized batch fetching
-        return get_posts_public_batched(db, results, current_user.id)
+        ).order_by(DBPost.created_at.desc()).limit(200).all()
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+
+        def calculate_post_score(post: DBPost) -> float:
+            is_pinned = getattr(post, 'is_pinned', False) or False
+            created_at = post.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+
+            age_hours = max(0.05, (now - created_at).total_seconds() / 3600.0)
+
+            # Pinned admin announcements maintain highest priority tier
+            if is_pinned:
+                return 1000000.0 + (1000.0 / (1.0 + age_hours / 24.0))
+
+            # 1. Social Relationship Affinity
+            author_id = post.author_id
+            is_self = (author_id == current_user.id)
+            is_friend = (author_id in friend_ids)
+            is_following = (author_id in following_ids)
+            is_bot = bool(post.author and post.author.username.lower() == 'lollms')
+
+            affinity = 15.0
+            if is_self:
+                affinity += 30.0
+            if is_friend:
+                affinity += 75.0
+            if is_following:
+                affinity += 40.0
+            if is_bot:
+                affinity += 30.0
+
+            # 2. Engagement Factor
+            like_count = len(post.likes) if post.likes else 0
+            comment_count = len([c for c in (post.comments or []) if c.moderation_status != 'flagged'])
+            engagement = (like_count * 5.0) + (comment_count * 8.0)
+
+            # 3. 48-hour half-life exponential time decay
+            decay = 1.0 / (1.0 + (age_hours / 48.0) ** 1.35)
+
+            return (affinity + engagement) * decay
+
+        sorted_candidates = sorted(candidates, key=calculate_post_score, reverse=True)[:50]
+        return get_posts_public_batched(db, sorted_candidates, current_user.id)
 
     except Exception as e:
         trace_exception(e)

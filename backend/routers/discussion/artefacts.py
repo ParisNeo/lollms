@@ -1482,8 +1482,16 @@ def build_artefacts_router(router: APIRouter):
 
         from backend.ws_manager import manager
         manager.send_personal_message_sync({
-            "type": "notification",
-            "data": {"message": f"🎁 {current_user.username} shared an artefact: {decoded_title}", "type": "success", "duration": 5000}
+            "type": "artefact_shared",
+            "data": {
+                "message": f"🎁 {current_user.username} shared document: {decoded_title}",
+                "sender_username": current_user.username,
+                "sender_icon": current_user.icon,
+                "artefact_title": decoded_title,
+                "discussion_id": target_discussion_id,
+                "type": "success",
+                "duration": 6000
+            }
         }, target_user.id)
 
         manager.send_personal_message_sync({

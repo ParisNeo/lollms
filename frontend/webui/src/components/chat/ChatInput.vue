@@ -48,6 +48,7 @@ import IconPresentationChartBar from '../../assets/icons/IconPresentationChartBa
 import IconThinking from '../../assets/icons/IconThinking.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconFolder from '../../assets/icons/IconFolder.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue'; 
 import IconObservation from '../../assets/icons/IconObservation.vue';
 import IconUserGroup from '../../assets/icons/IconUserGroup.vue'; 
@@ -104,6 +105,7 @@ const textareaRef = ref(null);
 const isWebSearchActive = ref(false); 
 const stagedImages = ref([]); 
 const user = computed(() => authStore.user);
+const isSavedLibraryItem = computed(() => discussionsStore.currentDiscussionId === 'saved');
 
 
 const providerNames = {

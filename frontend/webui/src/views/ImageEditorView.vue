@@ -789,6 +789,21 @@ const IconGradient = { render: () => h('svg', { viewBox: '0 0 24 24', fill: 'non
 const props = defineProps({ id: { type: String, default: null } });
 const router = useRouter();
 const imageStore = useImageStore();
+
+// Click Outside Directive
+const vOnClickOutside = {
+  mounted: (el, binding) => {
+    el.clickOutsideEvent = event => {
+      if (!(el === event.target || el.contains(event.target))) {
+        binding.value(event);
+      }
+    };
+    document.addEventListener('mousedown', el.clickOutsideEvent);
+  },
+  unmounted: el => {
+    document.removeEventListener('mousedown', el.clickOutsideEvent);
+  },
+};
 const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
@@ -1025,14 +1040,14 @@ onMounted(async () => {
     isComponentMounted.value = true;
     uiStore.setPageTitle({ title: '', icon: null });
     nextTick(() => hasHeaderTarget.value = !!document.getElementById('global-header-title-target'));
-    
+
     if (dataStore.availableTtiModels.length === 0) {
         await dataStore.fetchAvailableTtiModels();
     }
 
     if (maskCanvasRef.value) ctxMask.value = maskCanvasRef.value.getContext('2d');
     if (previewCanvasRef.value) ctxPreview.value = previewCanvasRef.value.getContext('2d');
-    
+
     if (props.id && props.id !== 'new') {
         await loadImage(props.id);
     } else {
@@ -1042,8 +1057,19 @@ onMounted(async () => {
     if (authStore.user) {
         selectedModel.value = authStore.user.iti_binding_model_name || authStore.user.tti_binding_model_name || '';
     }
-    
+
     window.addEventListener('keydown', handleKeydown);
+});
+
+// Watch for route ID changes when switching between images in sidebar
+watch(() => props.id, async (newId, oldId) => {
+    if (newId !== oldId && isComponentMounted.value) {
+        if (newId && newId !== 'new') {
+            await loadImage(newId);
+        } else {
+            initNewBlankCanvas();
+        }
+    }
 });
 
 onUnmounted(() => { 
@@ -1084,6 +1110,10 @@ function initNewBlankCanvas() {
 }
 
 async function loadImage(id) {
+    if (!id || id === 'new') {
+        initNewBlankCanvas();
+        return;
+    }
     try {
         const res = await apiClient.get(`/api/image-studio/${id}/file`, { responseType: 'blob' });
         const img = new Image();
@@ -1099,12 +1129,34 @@ async function loadImage(id) {
         canvasWidth.value = w; 
         canvasHeight.value = h;
 
+        // Reset layer stack to single base plate for the newly loaded image
+        layers.value = [
+            { 
+                id: 'base', 
+                name: 'Base Image Plate', 
+                visible: true, 
+                order: 0, 
+                el: null, 
+                ctx: null, 
+                opacity: 1.0, 
+                blendMode: 'normal',
+                adjustments: defaultAdjustments() 
+            }
+        ];
+        activeLayerId.value = 'base';
+        history.value = [];
+        historyIndex.value = -1;
+
         await nextTick();
         const base = layers.value.find(l => l.id === 'base') || layers.value[0];
         if (base?.el) {
             base.ctx = base.el.getContext('2d');
             base.ctx.clearRect(0, 0, w, h);
             base.ctx.drawImage(img, 0, 0);
+        }
+
+        if (maskCanvasRef.value && ctxMask.value) {
+            ctxMask.value.clearRect(0, 0, w, h);
         }
 
         saveState(); 

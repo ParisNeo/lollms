@@ -48,6 +48,9 @@ import IconShare from '../../assets/icons/IconShare.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconArrowsUpDown from '../../assets/icons/IconArrowsUpDown.vue';
+import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
+import IconEye from '../../assets/icons/IconEye.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 
 const store = useDiscussionsStore();
@@ -188,8 +191,37 @@ onMounted(() => {
     if (notebookStore.notebooks.length === 0) notebookStore.fetchNotebooks();
     if (dataStore.ownedDataStores.length === 0) dataStore.fetchDataStores();
     if (imageStore.albums.length === 0) imageStore.fetchAlbums();
+    imageStore.fetchImages();
     if (flowStore.flows.length === 0) flowStore.fetchFlows();
 });
+
+function handleTabClick(tab) {
+    activeTab.value = tab;
+    if (tab === 'chat' || tab === 'notes' || tab === 'skills' || tab === 'artefacts') {
+        if (route.path !== '/') {
+            router.push('/');
+        }
+        uiStore.setMainView('chat');
+    } else if (tab === 'notebooks') {
+        if (!route.path.startsWith('/notebooks') && !route.path.startsWith('/notebook-studio')) {
+            router.push('/notebooks');
+        }
+    } else if (tab === 'data') {
+        if (!route.path.startsWith('/datastores')) {
+            router.push('/datastores');
+        }
+    } else if (tab === 'flows') {
+        if (!route.path.startsWith('/flow-studio')) {
+            router.push('/flow-studio');
+        }
+    } else if (tab === 'images') {
+        if (!route.path.startsWith('/image-studio')) {
+            router.push('/image-studio');
+        }
+        imageStore.fetchAlbums();
+        imageStore.fetchImages();
+    }
+}
 
 // Watch route changes to automatically select the correct tab
 watch(() => route.path, (path) => {
@@ -446,7 +478,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
             <!-- Tab Switcher -->
             <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto custom-scrollbar pb-1">
                 <button 
-                    @click="activeTab = 'chat'" 
+                    @click="handleTabClick('chat')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'chat' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Chats"
@@ -455,7 +487,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>CHAT</span>
                 </button>
                 <button 
-                    @click="activeTab = 'notes'" 
+                    @click="handleTabClick('notes')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'notes' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Notes"
@@ -464,7 +496,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>NOTE</span>
                 </button>
                 <button 
-                    @click="activeTab = 'skills'" 
+                    @click="handleTabClick('skills')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'skills' ? 'bg-white dark:bg-gray-700 text-teal-600 dark:text-teal-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Skills"
@@ -473,7 +505,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>SKILL</span>
                 </button>
                 <button 
-                    @click="activeTab = 'artefacts'" 
+                    @click="handleTabClick('artefacts')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'artefacts' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Artefacts"
@@ -482,7 +514,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>ART</span>
                 </button>
                 <button 
-                    @click="activeTab = 'images'" 
+                    @click="handleTabClick('images')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'images' ? 'bg-white dark:bg-gray-900/50 text-pink-600 dark:text-pink-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Images"
@@ -491,7 +523,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>IMG</span>
                 </button>
                 <button 
-                    @click="activeTab = 'notebooks'" 
+                    @click="handleTabClick('notebooks')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'notebooks' ? 'bg-white dark:bg-gray-900/50 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Notebooks"
@@ -500,7 +532,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>BOOK</span>
                 </button>
                 <button 
-                    @click="activeTab = 'data'" 
+                    @click="handleTabClick('data')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'data' ? 'bg-white dark:bg-gray-900/50 text-green-600 dark:text-green-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Data Stores"
@@ -509,7 +541,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>DATA</span>
                 </button>
                 <button 
-                    @click="activeTab = 'flows'" 
+                    @click="handleTabClick('flows')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'flows' ? 'bg-white dark:bg-gray-900/50 text-cyan-600 dark:text-cyan-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                     title="Workflows"

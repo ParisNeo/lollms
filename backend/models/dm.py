@@ -1,17 +1,32 @@
 import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, constr, ConfigDict
 
 class DirectMessageBase(BaseModel):
-    content: constr(min_length=1)
+    content: str = Field(..., min_length=1)
 
 class DirectMessageCreate(DirectMessageBase):
     model_config = ConfigDict(populate_by_name=True)
     receiver_user_id: Optional[int] = Field(None, alias='receiverUserId')
     conversation_id: Optional[int] = Field(None, alias='conversationId')
+    reply_to_id: Optional[int] = Field(None, alias='replyToId')
+
+class MessageReactionRequest(BaseModel):
+    emoji: str = Field(..., min_length=1, max_length=10)
+
+class BulkDeleteMessagesRequest(BaseModel):
+    message_ids: List[int]
+
+class CleanConversationRequest(BaseModel):
+    days: Optional[int] = None
+    only_my_messages: bool = False
+
+class TypingSignalRequest(BaseModel):
+    target_id: int
+    is_group: bool = False
 
 class CreateGroupRequest(BaseModel):
-    name: str = Field(..., min_length=1)
+    name: str = Field(..., min_length=1, max_length=100)
     participant_ids: List[int]
 
 class AddMemberRequest(BaseModel):
@@ -45,4 +60,11 @@ class DirectMessagePublic(DirectMessageBase):
     read_at: Optional[datetime.datetime] = None
     sender_username: str
     receiver_username: Optional[str] = None
+    sender_icon: Optional[str] = None
     image_references: Optional[List[str]] = None
+    media: Optional[List[Dict[str, Any]]] = None
+    reply_to_id: Optional[int] = None
+    reply_to_content: Optional[str] = None
+    reply_to_sender: Optional[str] = None
+    reactions: Optional[Dict[str, List[int]]] = None
+    is_ai_generated: bool = False

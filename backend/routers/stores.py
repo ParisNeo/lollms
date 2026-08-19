@@ -1303,6 +1303,19 @@ async def share_datastore(datastore_id: str, share_request: DataStoreShareReques
     )
     try:
         db.add(new_link); db.commit()
+        manager.send_personal_message_sync({
+            "type": "datastore_shared",
+            "data": {
+                "message": f"🎁 {current_user.username} shared Data Store: {ds_to_share.name}",
+                "sender_username": current_user.username,
+                "sender_icon": current_user.icon,
+                "datastore_id": datastore_id,
+                "datastore_name": ds_to_share.name,
+                "permission_level": share_request.permission_level,
+                "type": "success",
+                "duration": 6000
+            }
+        }, target_user_db.id)
         return {"message": f"DataStore '{ds_to_share.name}' shared successfully with user '{target_user_db.username}'."}
     except IntegrityError: 
         db.rollback(); raise HTTPException(status_code=400, detail="Sharing conflict (race condition).")

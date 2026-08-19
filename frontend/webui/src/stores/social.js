@@ -29,9 +29,10 @@ export const useSocialStore = defineStore('social', () => {
     const isLoadingGroupFeed = ref(false);
 
     // Chat State
-    const conversations = ref([]); // List of summary objects (groups + DMs)
-    const activeConversations = ref({}); // Cache of detailed conversation objects { [id]: { ...details, messages: [] } }
-    const activeConversationId = ref(null); // ID of the conversation (group ID or partner ID for legacy)
+    const conversations = ref([]); 
+    const activeConversations = ref({}); 
+    const activeConversationId = ref(null); 
+    const typingUsers = ref({}); // { [convoId/partnerId]: { username, timer } }
     const isLoadingConversations = ref(false);
     const isLoadingMessages = ref(false);
 
@@ -320,16 +321,96 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
     
+    async function uploadPostMedia(files) {
+        if (!files || files.length === 0) return [];
+        const formData = new FormData();
+        files.forEach(file => formData.append('files', file));
+
+        try {
+            const response = await apiClient.post('/api/social/upload-media', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            return response.data;
+        } catch (error) {
+            console.error("Media upload failed:", error);
+            useUiStore().addNotification(error.response?.data?.detail || 'Media upload failed.', 'error');
+            throw error;
+        }
+    }
+
+    async function fetchLinkPreview(url) {
+        try {
+            const response = await apiClient.post('/api/social/link-preview', { url });
+            return response.data;
+        } catch (error) {
+            console.warn("Link preview extraction failed:", error);
+            return null;
+        }
+    }
+
     async function createPost(postData) {
         try {
             const response = await apiClient.post('/api/social/posts', postData);
             feedPosts.value.unshift(response.data);
             useUiStore().addNotification('Post created successfully!', 'success');
+            return response.data;
         } catch (error) {
             throw error;
         }
     }
-    
+
+    async function updatePost({ postId, content, visibility, is_pinned, media }) {
+        try {
+            const payload = {};
+            if (content !== undefined) payload.content = content;
+            if (visibility !== undefined) payload.visibility = visibility;
+            if (is_pinned !== undefined) payload.is_pinned = is_pinned;
+            if (media !== undefined) payload.media = media;
+            const response = await apiClient.put(`/api/social/posts/${postId}`, payload);
+            const updated = response.data;
+
+            const feedIdx = feedPosts.value.findIndex(p => p.id === postId);
+            if (feedIdx !== -1) {
+                feedPosts.value[feedIdx] = { ...feedPosts.value[feedIdx], ...updated };
+            }
+            for (const username in userPosts.value) {
+                const userPostIdx = userPosts.value[username].findIndex(p => p.id === postId);
+                if (userPostIdx !== -1) {
+                    userPosts.value[username][userPostIdx] = { ...userPosts.value[username][userPostIdx], ...updated };
+                }
+            }
+            useUiStore().addNotification('Post updated successfully!', 'success');
+            return updated;
+        } catch (error) {
+            console.error("Failed to update post:", error);
+            useUiStore().addNotification('Failed to update post.', 'error');
+            throw error;
+        }
+    }
+
+    async function togglePinPost(postId) {
+        try {
+            const response = await apiClient.post(`/api/social/posts/${postId}/pin`);
+            const updated = response.data;
+            const feedIdx = feedPosts.value.findIndex(p => p.id === postId);
+            if (feedIdx !== -1) {
+                feedPosts.value[feedIdx] = { ...feedPosts.value[feedIdx], ...updated };
+            }
+            for (const username in userPosts.value) {
+                const userPostIdx = userPosts.value[username].findIndex(p => p.id === postId);
+                if (userPostIdx !== -1) {
+                    userPosts.value[username][userPostIdx] = { ...userPosts.value[username][userPostIdx], ...updated };
+                }
+            }
+            useUiStore().addNotification(updated.is_pinned ? 'Post featured & pinned to top.' : 'Post unpinned.', 'success');
+            return updated;
+        } catch (error) {
+            console.error("Failed to toggle pin on post:", error);
+            useUiStore().addNotification('Failed to update pin status.', 'error');
+            throw error;
+        }
+    }
+
     async function deletePost(postId) {
         try {
             await apiClient.delete(`/api/social/posts/${postId}`);
@@ -548,33 +629,35 @@ export const useSocialStore = defineStore('social', () => {
         }
     }
 
-    async function sendDirectMessage({ targetId, isGroup, content, files }) {
+    async function sendDirectMessage({ targetId, isGroup, content, files, replyToId = null }) {
         const formData = new FormData();
         formData.append('content', content);
-        
+
         if (isGroup) {
             formData.append('conversationId', targetId);
         } else {
             formData.append('receiverUserId', targetId);
         }
-        
+
+        if (replyToId) {
+            formData.append('replyToId', replyToId);
+        }
+
         if (files && files.length > 0) {
             files.forEach(f => formData.append('files', f));
         }
-        
+
         try {
             const res = await apiClient.post('/api/dm/send', formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             const msg = res.data;
-            
-            // We manually push here for immediate UI update, but the WebSocket might also arrive.
-            // Duplicate ID check is handled in handleNewDm, but we should do it here too just in case.
+
             if (activeConversations.value[targetId]) {
                 const exists = activeConversations.value[targetId].messages.some(m => m.id === msg.id);
                 if (!exists) activeConversations.value[targetId].messages.push(msg);
             }
-            
+
             const listIndex = conversations.value.findIndex(c => isGroup ? c.id === targetId : c.partner_user_id === targetId);
             if (listIndex !== -1) {
                 const item = conversations.value.splice(listIndex, 1)[0];
@@ -582,8 +665,105 @@ export const useSocialStore = defineStore('social', () => {
                 item.last_message_at = new Date().toISOString();
                 conversations.value.unshift(item);
             }
+            return msg;
+        } catch(e) { 
+            console.error("Send DM failed:", e); 
+            useUiStore().addNotification("Failed to send message.", "error");
+            throw e;
+        }
+    }
 
-        } catch(e) { console.error(e); }
+    async function toggleDmReaction({ messageId, emoji, targetId }) {
+        try {
+            const res = await apiClient.post(`/api/dm/messages/${messageId}/reactions`, { emoji });
+            if (activeConversations.value[targetId]) {
+                const m = activeConversations.value[targetId].messages.find(x => x.id === messageId);
+                if (m) m.reactions = res.data.reactions;
+            }
+        } catch (e) {
+            console.error("Toggle reaction failed:", e);
+        }
+    }
+
+    async function sendTypingSignal({ targetId, isGroup = false }) {
+        try {
+            await apiClient.post('/api/dm/typing', { target_id: targetId, is_group: isGroup });
+        } catch(e) {}
+    }
+
+    async function bulkDeleteDmMessages({ messageIds, targetId }) {
+        if (!messageIds || messageIds.length === 0) return;
+        try {
+            await apiClient.post('/api/dm/messages/bulk-delete', { message_ids: messageIds });
+            if (activeConversations.value[targetId]) {
+                const set = new Set(messageIds);
+                activeConversations.value[targetId].messages = activeConversations.value[targetId].messages.filter(m => !set.has(m.id));
+            }
+            useUiStore().addNotification(`Deleted ${messageIds.length} message(s).`, 'success');
+        } catch(e) {
+            useUiStore().addNotification('Bulk delete failed.', 'error');
+        }
+    }
+
+    async function cleanConversationHistory({ targetId, isGroup, days = null, onlyMyMessages = false }) {
+        try {
+            const res = await apiClient.post(`/api/dm/conversation/${targetId}/clean`, {
+                days,
+                only_my_messages: onlyMyMessages
+            }, { params: { is_group: isGroup } });
+
+            if (activeConversations.value[targetId]) {
+                activeConversations.value[targetId].page = 1;
+                activeConversations.value[targetId].messages = [];
+                await fetchMessages(targetId, isGroup);
+            }
+            useUiStore().addNotification(`Cleaned ${res.data.deleted_count} messages.`, 'success');
+        } catch(e) {
+            useUiStore().addNotification('Clean-up failed.', 'error');
+        }
+    }
+
+    function handleDmReaction(data) {
+        const { message_id, conversation_id, partner_id, reactions } = data;
+        const targetKey = conversation_id || partner_id;
+        if (activeConversations.value[targetKey]) {
+            const msg = activeConversations.value[targetKey].messages.find(m => m.id === message_id);
+            if (msg) msg.reactions = reactions;
+        }
+    }
+
+    function handleDmTyping(data) {
+        const { user_id, username, is_group, target_id } = data;
+        const key = is_group ? target_id : user_id;
+
+        if (typingUsers.value[key]?.timer) {
+            clearTimeout(typingUsers.value[key].timer);
+        }
+
+        typingUsers.value[key] = {
+            username,
+            timer: setTimeout(() => {
+                delete typingUsers.value[key];
+            }, 3000)
+        };
+    }
+
+    function handleDmBulkDeleted(data) {
+        const { message_ids } = data;
+        const set = new Set(message_ids);
+        for (const cid in activeConversations.value) {
+            activeConversations.value[cid].messages = activeConversations.value[cid].messages.filter(m => !set.has(m.id));
+        }
+    }
+
+    function handleDmCleaned(data) {
+        const { conversation_id, partner_id } = data;
+        const key = conversation_id || partner_id;
+        if (activeConversations.value[key]) {
+            activeConversations.value[key].page = 1;
+            activeConversations.value[key].messages = [];
+            fetchMessages(key, !!conversation_id);
+        }
     }
 
     async function deleteMessage(messageId) {
@@ -777,6 +957,7 @@ export const useSocialStore = defineStore('social', () => {
         conversations, 
         activeConversations, 
         activeConversationId,
+        typingUsers,
         socialGroups,
         activeGroupDetails,
         groupFeedPosts,
@@ -803,10 +984,12 @@ export const useSocialStore = defineStore('social', () => {
 
         // ACTIONS
         fetchFriends, fetchConversations, openConversation, sendDirectMessage,
+        toggleDmReaction, sendTypingSignal, bulkDeleteDmMessages, cleanConversationHistory,
+        handleDmReaction, handleDmTyping, handleDmBulkDeleted, handleDmCleaned,
         deleteMessage, deleteConversation, exportConversation, importConversation, createGroupConversation, addMemberToGroup,
         fetchPendingRequests, fetchBlockedUsers, fetchUserProfile, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser,
         handleNewDm, handleNewComment, handleIncomingFriendRequest, markConversationAsRead,
-        fetchFeed, fetchUserPosts, createPost, deletePost, fetchComments, createComment, deleteComment,
+        fetchFeed, fetchUserPosts, uploadPostMedia, fetchLinkPreview, createPost, updatePost, togglePinPost, deletePost, fetchComments, createComment, deleteComment,
         followUser, unfollowUser, toggleLike, searchForMentions,
         fetchSocialGroups, createSocialGroup, fetchSocialGroupDetails, updateSocialGroup, deleteSocialGroup, addMemberToSocialGroup, removeMemberFromSocialGroup, fetchSocialGroupFeed,
         $reset

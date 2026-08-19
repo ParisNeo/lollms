@@ -1,5 +1,6 @@
-import { createRouter, createWebHistory } from 'vue-router'
-import HomeView from '../views/HomeView.vue'
+import { createRouter, createWebHistory } from 'vue-router';
+import HomeView from '../views/HomeView.vue';
+import { useAuthStore } from '../stores/auth';
 
 const routes = [
   {
@@ -8,19 +9,9 @@ const routes = [
     component: HomeView
   },
   {
-    path: '/profile/:username',
-    name: 'Profile',
-    component: () => import('../views/ProfileView.vue')
-  },
-  {
-    path: '/settings',
-    name: 'Settings',
-    component: () => import('../views/SettingsView.vue')
-  },
-  {
-    path: '/admin',
-    name: 'Admin',
-    component: () => import('../views/AdminView.vue')
+    path: '/about',
+    name: 'About',
+    component: () => import('../views/AboutView.vue')
   },
   {
     path: '/help',
@@ -28,34 +19,89 @@ const routes = [
     component: () => import('../views/HelpView.vue')
   },
   {
-    path: '/about',
-    name: 'About',
-    component: () => import('../views/AboutView.vue')
+    path: '/news',
+    name: 'News',
+    component: () => import('../views/NewsView.vue')
   },
   {
-    path: '/datastores',
-    name: 'DataStores',
-    component: () => import('../views/DataStoresView.vue')
+    path: '/settings',
+    name: 'Settings',
+    component: () => import('../views/SettingsView.vue'),
+    meta: { requiresAuth: true }
   },
   {
-    path: '/personality-studio',
-    name: 'PersonalityStudio',
-    component: () => import('../views/PersonalityStudioView.vue')
+    path: '/admin',
+    name: 'Admin',
+    component: () => import('../views/AdminView.vue'),
+    meta: { requiresAuth: true, requiresAdmin: true }
   },
   {
-    path: '/notebooks',
-    name: 'Notebooks',
-    component: () => import('../views/NotebookStudioView.vue')
+    path: '/profile/:username',
+    name: 'Profile',
+    component: () => import('../views/ProfileView.vue'),
+    meta: { requiresAuth: true }
   },
   {
     path: '/friends',
     name: 'Friends',
-    component: () => import('../views/FriendsView.vue')
+    component: () => import('../views/FriendsView.vue'),
+    meta: { requiresAuth: true }
   },
   {
-      path: '/news',
-      name: 'News',
-      component: () => import('../views/NewsView.vue')
+    path: '/messages',
+    name: 'Messages',
+    component: () => import('../views/MessagesView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/personality-studio',
+    name: 'PersonalityStudio',
+    component: () => import('../views/PersonalityStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/datastores',
+    name: 'DataStores',
+    component: () => import('../views/DataStoresView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/notebooks',
+    alias: ['/notebook-studio'],
+    name: 'Notebooks',
+    component: () => import('../views/NotebookStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/flow-studio',
+    name: 'FlowStudio',
+    component: () => import('../views/FlowStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/voices-studio',
+    name: 'VoicesStudio',
+    component: () => import('../views/VoicesStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/image-studio',
+    name: 'ImageStudio',
+    component: () => import('../views/ImageStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/image-studio/edit/:id?',
+    name: 'ImageEditor',
+    component: () => import('../views/ImageEditorView.vue'),
+    props: true,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/image-studio/timelapse',
+    name: 'Timelapse',
+    component: () => import('../views/TimelapseView.vue'),
+    meta: { requiresAuth: true }
   },
   {
     path: '/reset-password',
@@ -64,45 +110,44 @@ const routes = [
   },
   {
     path: '/app/:appId',
+    name: 'AppSsoLogin',
+    component: () => import('../views/SsoLoginView.vue')
+  },
+  {
+    path: '/sso-login',
     name: 'SsoLogin',
     component: () => import('../views/SsoLoginView.vue')
   },
   {
-    path: '/voices-studio',
-    name: 'VoicesStudio',
-    component: () => import('../views/VoicesStudioView.vue')
-  },
-  {
-    path: '/image-studio',
-    name: 'ImageStudio',
-    component: () => import('../views/ImageStudioView.vue')
-  },
-  {
-    path: '/image-studio/edit/:id',
-    name: 'ImageEditor',
-    component: () => import('../views/ImageEditorView.vue'),
-    props: true
-  },
-  {
-    path: '/image-studio/timelapse',
-    name: 'Timelapse',
-    component: () => import('../views/TimelapseView.vue')
-  },
-  {
-    path: '/messages',
-    name: 'Messages',
-    component: () => import('../views/MessagesView.vue')
-  },
-  {
-      path: '/flow-studio',
-      name: 'FlowStudio',
-      component: () => import('../views/FlowStudioView.vue')
+    path: '/:pathMatch(.*)*',
+    redirect: '/'
   }
-]
+];
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes
-})
+});
 
-export default router
+router.beforeEach(async (to, from) => {
+  const authStore = useAuthStore();
+
+  // Allow public routes
+  if (!to.meta.requiresAuth) {
+    return true;
+  }
+
+  // Check if authenticated
+  if (!authStore.isAuthenticated) {
+    return { name: 'Home' };
+  }
+
+  // Check admin privileges
+  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+    return { name: 'Home' };
+  }
+
+  return true;
+});
+
+export default router;

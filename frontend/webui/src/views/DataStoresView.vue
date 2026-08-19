@@ -35,6 +35,7 @@ import IconMagnifyingGlass from '../assets/icons/IconMagnifyingGlass.vue';
 import IconCopy from '../assets/icons/IconCopy.vue';
 import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
 import IconInfo from '../assets/icons/IconInfo.vue';
+import IconFileText from '../assets/icons/IconFileText.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();

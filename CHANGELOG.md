@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-19 16:32]
+
+- feat(social): implement direct messaging and social feed functionality
+
 ## [2026-08-19 15:03]
 
 - build(frontend): rebuild assets and update image editor and auth stores

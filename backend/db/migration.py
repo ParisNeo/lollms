@@ -428,10 +428,19 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             
     if inspector.has_table("direct_messages"):
         direct_messages_columns_db = [col['name'] for col in inspector.get_columns('direct_messages')]
-        new_direct_messages_cols_defs = { "image_references": "JSON" }
+        new_direct_messages_cols_defs = {
+            "image_references": "JSON",
+            "media": "JSON",
+            "reply_to_id": "INTEGER REFERENCES direct_messages(id) ON DELETE SET NULL",
+            "reactions": "JSON"
+        }
         for col_name, col_sql_def in new_direct_messages_cols_defs.items():
             if col_name not in direct_messages_columns_db:
-                connection.execute(text(f"ALTER TABLE direct_messages ADD COLUMN {col_name} {col_sql_def}"))
+                try:
+                    connection.execute(text(f"ALTER TABLE direct_messages ADD COLUMN {col_name} {col_sql_def}"))
+                    connection.commit()
+                except Exception:
+                    connection.rollback()
         connection.commit()
         
         dm_cols_full = inspector.get_columns('direct_messages')
@@ -923,7 +932,14 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("ALTER TABLE posts ADD COLUMN group_id INTEGER REFERENCES user_groups(id) ON DELETE CASCADE"))
                 connection.commit()
             except Exception: connection.rollback()
-        
+
+        if 'is_pinned' not in posts_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE posts ADD COLUMN is_pinned BOOLEAN DEFAULT 0 NOT NULL"))
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_posts_is_pinned ON posts (is_pinned)"))
+                connection.commit()
+            except Exception: connection.rollback()
+
         if 'moderation_status' not in posts_columns_db:
             try:
                 connection.execute(text("ALTER TABLE posts ADD COLUMN moderation_status VARCHAR DEFAULT 'pending' NOT NULL"))

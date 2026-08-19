@@ -20,11 +20,30 @@ const uiStore = useUiStore();
 
 const isOptionsMenuOpen = ref(false);
 const isCommentsVisible = ref(false);
+const isEditing = ref(false);
+const editContent = ref('');
+const editVisibility = ref('public');
+const isSubmittingEdit = ref(false);
 
 const user = computed(() => authStore.user);
-// Safe access to author properties
+const isAdmin = computed(() => authStore.isAdmin);
 const isAuthor = computed(() => user.value?.id === props.post.author?.id);
 const canDelete = computed(() => isAuthor.value || user.value?.is_admin || user.value?.is_moderator);
+const isBot = computed(() => props.post.is_ai_generated || props.post.author?.username?.toLowerCase() === 'lollms');
+
+// Media Categorizers
+const postImages = computed(() => (props.post.media || []).filter(m => m.type === 'image'));
+const postVideos = computed(() => (props.post.media || []).filter(m => m.type === 'video'));
+const postAudios = computed(() => (props.post.media || []).filter(m => m.type === 'audio'));
+const postLinks = computed(() => (props.post.media || []).filter(m => m.type === 'link'));
+
+function openImageLightbox(index) {
+  const list = postImages.value.map(img => ({
+    src: img.url,
+    prompt: img.filename || `Image from ${props.post.author?.username}'s post`
+  }));
+  uiStore.openImageViewer({ imageList: list, startIndex: index });
+}
 
 const commentCount = computed(() => {
   const comments = socialStore.getCommentsForPost(props.post.id);
@@ -65,8 +84,37 @@ function toggleOptionsMenu() {
 }
 
 function handleEdit() {
-    console.log("Editing post:", props.post.id);
+    editContent.value = props.post.content;
+    editVisibility.value = props.post.visibility || 'public';
+    isEditing.value = true;
     closeOptionsMenu();
+}
+
+async function handleSaveEdit() {
+    if (!editContent.value.trim() || isSubmittingEdit.value) return;
+    isSubmittingEdit.value = true;
+    try {
+        await socialStore.updatePost({
+            postId: props.post.id,
+            content: editContent.value.trim(),
+            visibility: editVisibility.value
+        });
+        isEditing.value = false;
+    } catch (err) {
+        console.error("Failed to update post:", err);
+    } finally {
+        isSubmittingEdit.value = false;
+    }
+}
+
+function handleCancelEdit() {
+    isEditing.value = false;
+    editContent.value = '';
+}
+
+async function handleTogglePin() {
+    closeOptionsMenu();
+    await socialStore.togglePinPost(props.post.id);
 }
 
 async function handleDelete() {
@@ -108,7 +156,23 @@ function toggleComments() {
 </script>
 
 <template>
-  <div class="bg-white dark:bg-gray-800 rounded-lg shadow-md flex flex-col">
+  <div 
+    class="bg-white dark:bg-gray-800 rounded-2xl shadow-md border dark:border-gray-700/60 overflow-visible flex flex-col transition-all relative" 
+    :class="[
+      {'ring-2 ring-amber-500/40 border-amber-400 dark:border-amber-600 shadow-amber-500/5': post.is_pinned},
+      {'z-30': isOptionsMenuOpen}
+    ]"
+  >
+
+    <!-- Pinned / Featured Announcement Header -->
+    <div v-if="post.is_pinned" class="rounded-t-2xl px-4 py-1.5 bg-gradient-to-r from-amber-500/15 via-orange-500/10 to-amber-500/5 dark:from-amber-500/20 dark:to-transparent border-b border-amber-300/40 dark:border-amber-700/40 flex items-center justify-between text-amber-800 dark:text-amber-300 select-none">
+      <div class="flex items-center gap-2">
+        <span class="text-xs">📌</span>
+        <span class="text-[10px] font-black uppercase tracking-widest font-mono">Featured Announcement</span>
+      </div>
+      <span class="text-[9px] font-mono opacity-80 uppercase tracking-tighter">God Mode Pin</span>
+    </div>
+
     <div class="p-4 flex space-x-4">
       <!-- Avatar Column -->
       <div class="shrink-0">
@@ -120,43 +184,130 @@ function toggleComments() {
       <!-- Main Content Column -->
       <div class="flex-1 min-w-0">
         <!-- Post Header -->
-        <div class="flex justify-between items-center">
-          <div>
-            <router-link :to="`/profile/${post.author?.username}`" class="font-bold text-gray-900 dark:text-gray-100 hover:underline">
+        <div class="flex justify-between items-center mb-1">
+          <div class="flex items-center flex-wrap gap-2">
+            <router-link :to="`/profile/${post.author?.username}`" class="font-bold text-gray-900 dark:text-gray-100 hover:underline text-sm">
               {{ post.author?.username }}
             </router-link>
-            <span class="text-sm text-gray-500 dark:text-gray-400 ml-2">
+
+            <!-- AI Generated Tag Badge -->
+            <span v-if="isBot" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 border border-purple-200 dark:border-purple-800 select-none shadow-xs">
+              🤖 AI Generated
+            </span>
+
+            <span class="text-xs text-gray-500 dark:text-gray-400">
               · {{ formatTimestamp(post.created_at) }}
             </span>
           </div>
-          
+
           <!-- Options Menu -->
-          <div v-if="canDelete" class="relative options-menu-container">
-            <button @click.stop="toggleOptionsMenu"  class="p-1 rounded-full text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700">
-              <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
+          <div v-if="canDelete || isAdmin" class="relative options-menu-container z-30">
+            <button @click.stop="toggleOptionsMenu" class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+              <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" /></svg>
             </button>
-            <div v-if="isOptionsMenuOpen" class="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-md shadow-lg z-10 border dark:border-gray-700">
-              <div class="py-1">
-                <button v-if="isAuthor" @click="handleEdit" class="w-full text-left flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>
-                  Edit Post
-                </button>
-                <button @click="handleCopyMarkdown" class="w-full text-left flex items-center px-4 py-2 text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3" viewBox="0 0 20 20" fill="currentColor"><path d="M7 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H7zm0 2h8v12H7V4z"/><path d="M4 6a2 2 0 012-2h2v2H6v12h8v-2h2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/></svg>
-                  Copy as Markdown
-                </button>
-                <div v-if="canDelete" class="border-t border-gray-100 dark:border-gray-800 my-1"></div>
-                <button v-if="canDelete" @click="handleDelete" class="w-full text-left flex items-center px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-800">
-                  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
-                  Delete Post
-                </button>
-              </div>
+            <div v-if="isOptionsMenuOpen" class="absolute right-0 mt-2 w-56 bg-white dark:bg-gray-900 rounded-xl shadow-2xl z-40 border dark:border-gray-700 py-1 overflow-hidden">
+              <button v-if="isAuthor || isAdmin" @click="handleEdit" class="w-full text-left flex items-center px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-3 text-blue-500" viewBox="0 0 20 20" fill="currentColor"><path d="M17.414 2.586a2 2 0 00-2.828 0L7 10.172V13h2.828l7.586-7.586a2 2 0 000-2.828z" /><path fill-rule="evenodd" d="M2 6a2 2 0 012-2h4a1 1 0 010 2H4v10h10v-4a1 1 0 112 0v4a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" clip-rule="evenodd" /></svg>
+                Edit Post
+              </button>
+
+              <button v-if="isAdmin" @click="handleTogglePin" class="w-full text-left flex items-center px-4 py-2 text-xs font-bold text-amber-600 dark:text-amber-400 hover:bg-gray-100 dark:hover:bg-gray-800">
+                <span class="mr-3 text-sm">📌</span>
+                {{ post.is_pinned ? 'Unpin Announcement' : 'Feature / Pin to Top' }}
+              </button>
+
+              <button @click="handleCopyMarkdown" class="w-full text-left flex items-center px-4 py-2 text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-3 text-gray-500" viewBox="0 0 20 20" fill="currentColor"><path d="M7 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V4a2 2 0 00-2-2H7zm0 2h8v12H7V4z"/><path d="M4 6a2 2 0 012-2h2v2H6v12h8v-2h2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/></svg>
+                Copy as Markdown
+              </button>
+
+              <div v-if="canDelete" class="border-t border-gray-100 dark:border-gray-800 my-1"></div>
+              <button v-if="canDelete" @click="handleDelete" class="w-full text-left flex items-center px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
+                Delete Post
+              </button>
             </div>
           </div>
         </div>
 
-        <!-- Post Content -->
-        <MessageContentRenderer :content="post.content" class="mt-2 prose prose-sm dark:prose-invert max-w-none" />
+        <!-- Inline Post Edit Form -->
+        <div v-if="isEditing" class="my-3 p-3 bg-gray-50 dark:bg-gray-900/60 rounded-xl border border-blue-200 dark:border-blue-800/50 space-y-3 animate-in fade-in">
+          <textarea 
+            v-model="editContent" 
+            rows="4" 
+            class="input-field w-full text-sm font-sans resize-none"
+            placeholder="Edit your post content..."
+          ></textarea>
+          <div class="flex items-center justify-between">
+            <select v-model="editVisibility" class="input-field !py-1 !text-xs">
+              <option value="public">Public</option>
+              <option value="followers">Followers Only</option>
+              <option value="friends">Friends Only</option>
+            </select>
+            <div class="flex items-center gap-2">
+              <button @click="handleCancelEdit" class="btn btn-secondary btn-sm" :disabled="isSubmittingEdit">Cancel</button>
+              <button @click="handleSaveEdit" class="btn btn-primary btn-sm px-4" :disabled="isSubmittingEdit || !editContent.trim()">
+                {{ isSubmittingEdit ? 'Saving...' : 'Save Changes' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Post Content View -->
+        <div v-else>
+          <MessageContentRenderer :content="post.content" class="mt-2 prose prose-sm dark:prose-invert max-w-none" />
+
+          <!-- Multi-Modal Media Rendering Pipeline (Images, Videos, Link Cards) -->
+          <div v-if="post.media && post.media.length > 0" class="mt-4 space-y-3">
+            <!-- 1. Embedded Image Gallery with Lightbox -->
+            <div v-if="postImages.length > 0" class="grid gap-2" :class="postImages.length === 1 ? 'grid-cols-1 max-w-xl' : (postImages.length === 2 ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-3')">
+              <div 
+                v-for="(img, iIdx) in postImages" 
+                :key="iIdx" 
+                @click="openImageLightbox(iIdx)"
+                class="relative aspect-video sm:aspect-square rounded-xl overflow-hidden border border-gray-100 dark:border-gray-800 bg-black/5 dark:bg-black/40 cursor-pointer group/img shadow-sm"
+              >
+                <img :src="img.url" class="w-full h-full object-cover transition-transform duration-500 group-hover/img:scale-105" loading="lazy" />
+                <div class="absolute inset-0 bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                  <span class="text-white text-xs font-bold uppercase tracking-wider bg-black/60 px-2 py-1 rounded-lg backdrop-blur-sm">Zoom</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 2. Responsive Video Player -->
+            <div v-for="(vid, vIdx) in postVideos" :key="'vid-'+vIdx" class="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-black shadow-md max-w-2xl">
+              <video 
+                :src="vid.url" 
+                controls 
+                preload="metadata" 
+                class="w-full max-h-[450px] object-contain mx-auto"
+              ></video>
+            </div>
+
+            <!-- 3. Audio Player -->
+            <div v-for="(aud, aIdx) in postAudios" :key="'aud-'+aIdx" class="p-3 bg-gray-50 dark:bg-gray-900/60 rounded-xl border border-gray-200 dark:border-gray-800 flex items-center gap-3">
+              <span class="text-xl">🎵</span>
+              <div class="flex-1 min-w-0">
+                <span class="text-xs font-bold truncate block text-gray-800 dark:text-gray-200">{{ aud.filename || 'Audio Attachment' }}</span>
+                <audio :src="aud.url" controls class="w-full h-8 mt-1"></audio>
+              </div>
+            </div>
+
+            <!-- 4. Rich Link Cards -->
+            <div v-for="(lnk, lIdx) in postLinks" :key="'lnk-'+lIdx" class="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 hover:border-blue-500/50 transition-all shadow-sm group/link">
+              <a :href="lnk.url" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row gap-3 p-3.5 no-underline">
+                <div v-if="lnk.image" class="w-full sm:w-32 h-24 rounded-xl overflow-hidden shrink-0 bg-gray-200 dark:bg-gray-800">
+                  <img :src="lnk.image" class="w-full h-full object-cover group-hover/link:scale-105 transition-transform" />
+                </div>
+                <div class="min-w-0 flex-1 flex flex-col justify-center">
+                  <span class="text-[9px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">{{ lnk.domain || 'External Link' }}</span>
+                  <h4 class="text-sm font-bold text-gray-900 dark:text-gray-100 truncate mt-0.5 group-hover/link:text-blue-600 transition-colors">{{ lnk.title || lnk.url }}</h4>
+                  <p v-if="lnk.description" class="text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mt-1 leading-relaxed">{{ lnk.description }}</p>
+                </div>
+              </a>
+            </div>
+          </div>
+        </div>
 
         <!-- Action Buttons -->
         <div class="mt-4 flex justify-between text-gray-500">

@@ -47,6 +47,7 @@ import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../assets/icons/IconCircle.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue'; 
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
+import IconGather from '../../assets/icons/IconGather.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconWrenchScrewdriver from '../../assets/icons/IconWrenchScrewdriver.vue';
 

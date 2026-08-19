@@ -130,8 +130,11 @@ def build_discussion_sharing_router(router: APIRouter):
                     "type": "new_shared_discussion", 
                     "data": {
                         "from_user": current_user.username, 
+                        "sender_username": current_user.username,
+                        "sender_icon": current_user.icon,
                         "discussion_title": new_link.discussion_title,
                         "discussion_id": discussion_id,
+                        "permission_level": new_link.permission_level,
                         "update_type": "new_share"
                     }
                 },

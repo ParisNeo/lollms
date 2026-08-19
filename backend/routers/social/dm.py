@@ -2,30 +2,155 @@
 import uuid
 import json
 import shutil
+import re
+import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile, Body
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc, func, update, and_
 from werkzeug.utils import secure_filename
-from datetime import datetime
 from pydantic import BaseModel, Field
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.dm import DirectMessage as DBDirectMessage, Conversation as DBConversation, ConversationMember as DBConversationMember
-from backend.models import UserAuthDetails, DirectMessagePublic, CreateGroupRequest, ConversationPublic, ConversationMemberPublic, AddMemberRequest
-from backend.session import get_current_active_user, get_user_dm_assets_path
+from backend.models.dm import (
+    DirectMessagePublic, CreateGroupRequest, ConversationPublic,
+    ConversationMemberPublic, AddMemberRequest, MessageReactionRequest,
+    BulkDeleteMessagesRequest, CleanConversationRequest, TypingSignalRequest
+)
+from backend.models.user import UserAuthDetails
+from backend.session import (
+    get_current_active_user, get_user_dm_assets_path,
+    build_lollms_client_from_params
+)
 from backend.ws_manager import manager
 from backend.config import DM_ASSETS_DIR_NAME
 from backend.task_manager import task_manager, Task
 from backend.security import sanitize_content
+from backend.settings import settings
+from ascii_colors import trace_exception
 
 dm_router = APIRouter(prefix="/api/dm", tags=["Direct Messaging"])
 
 class BroadcastDMRequest(BaseModel):
     content: str = Field(..., min_length=1)
+
+def _respond_to_dm_task(task: Task, conversation_id: Optional[int], partner_user_id: int, trigger_message_id: int):
+    task.log("AI Assistant @lollms generating conversational DM reply...")
+    db = next(get_db())
+    try:
+        settings.refresh(db)
+        if not settings.get("ai_bot_enabled", False):
+            return
+
+        bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
+        if not bot_user:
+            return
+
+        # Fetch triggering message
+        trigger_msg = db.query(DBDirectMessage).filter(DBDirectMessage.id == trigger_message_id).first()
+        if not trigger_msg:
+            return
+
+        # Build message history for conversational context
+        if conversation_id:
+            history = db.query(DBDirectMessage).options(joinedload(DBDirectMessage.sender))\
+                .filter(DBDirectMessage.conversation_id == conversation_id)\
+                .order_by(desc(DBDirectMessage.sent_at)).limit(15).all()
+        else:
+            history = db.query(DBDirectMessage).options(joinedload(DBDirectMessage.sender))\
+                .filter(
+                    or_(
+                        and_(DBDirectMessage.sender_id == partner_user_id, DBDirectMessage.receiver_id == bot_user.id),
+                        and_(DBDirectMessage.sender_id == bot_user.id, DBDirectMessage.receiver_id == partner_user_id)
+                    ),
+                    DBDirectMessage.conversation_id.is_(None)
+                ).order_by(desc(DBDirectMessage.sent_at)).limit(15).all()
+
+        history_reversed = list(reversed(history))
+        dialogue_lines = []
+        for m in history_reversed:
+            sender_name = m.sender.username if m.sender else "User"
+            dialogue_lines.append(f"{sender_name}: {m.content}")
+
+        context_prompt = "\n".join(dialogue_lines)
+
+        system_prompt = (
+            "You are @lollms, a friendly, intelligent, and natural conversational AI companion in a direct chat. "
+            "Respond helpfully, concisely, and naturally as if texting. Support markdown formatting for code and emphasis."
+        )
+
+        lc = build_lollms_client_from_params(username='lollms')
+        full_prompt = f"Chat History:\n{context_prompt}\n\nRespond as @lollms directly to the last message:"
+        reply_content = lc.generate_text(full_prompt, system_prompt=system_prompt, max_new_tokens=1024)
+
+        clean_reply = sanitize_content(reply_content.strip())
+        if not clean_reply:
+            return
+
+        ai_message = DBDirectMessage(
+            sender_id=bot_user.id,
+            receiver_id=partner_user_id if not conversation_id else None,
+            conversation_id=conversation_id,
+            content=clean_reply,
+            reply_to_id=trigger_message_id,
+            sent_at=datetime.datetime.now(datetime.timezone.utc)
+        )
+        db.add(ai_message)
+        db.commit()
+        db.refresh(ai_message)
+
+        resp_public = _map_direct_message_public(ai_message, db)
+        payload = { "type": "new_dm", "data": resp_public.model_dump(mode="json") }
+
+        if conversation_id:
+            members = db.query(DBConversationMember).filter(DBConversationMember.conversation_id == conversation_id).all()
+            for m in members:
+                manager.send_personal_message_sync(payload, m.user_id)
+        else:
+            manager.send_personal_message_sync(payload, partner_user_id)
+
+    except Exception as e:
+        trace_exception(e)
+    finally:
+        db.close()
+
+def _map_direct_message_public(m: DBDirectMessage, db: Session) -> DirectMessagePublic:
+    sender_username = m.sender.username if m.sender else "Unknown"
+    sender_icon = m.sender.icon if m.sender else None
+    receiver_username = m.receiver.username if m.receiver else None
+
+    reply_to_content = None
+    reply_to_sender = None
+    if m.reply_to_id:
+        parent = db.query(DBDirectMessage).options(joinedload(DBDirectMessage.sender)).filter(DBDirectMessage.id == m.reply_to_id).first()
+        if parent:
+            reply_to_content = parent.content[:150]
+            reply_to_sender = parent.sender.username if parent.sender else "Unknown"
+
+    return DirectMessagePublic(
+        id=m.id,
+        sender_id=m.sender_id,
+        receiver_id=m.receiver_id,
+        conversation_id=m.conversation_id,
+        content=m.content,
+        sent_at=m.sent_at,
+        read_at=m.read_at,
+        sender_username=sender_username,
+        receiver_username=receiver_username,
+        sender_icon=sender_icon,
+        image_references=m.image_references if isinstance(m.image_references, list) else [],
+        media=m.media if isinstance(m.media, list) else [],
+        reply_to_id=m.reply_to_id,
+        reply_to_content=reply_to_content,
+        reply_to_sender=reply_to_sender,
+        reactions=m.reactions if isinstance(m.reactions, dict) else {},
+        is_ai_generated=bool(sender_username.lower() == "lollms")
+    )
 
 def _broadcast_dm_task(task: Task, sender_id: int, content: str):
     db = next(get_db())
@@ -197,6 +322,7 @@ async def add_member_to_group(
 async def send_direct_message(
     receiver_user_id: Optional[int] = Form(None, alias="receiverUserId"),
     conversation_id: Optional[int] = Form(None, alias="conversationId"),
+    reply_to_id: Optional[int] = Form(None, alias="replyToId"),
     content: str = Form(..., min_length=1),
     files: Optional[List[UploadFile]] = File(None),
     current_user: UserAuthDetails = Depends(get_current_active_user),
@@ -205,85 +331,271 @@ async def send_direct_message(
     if not receiver_user_id and not conversation_id:
         raise HTTPException(status_code=400, detail="Either receiverUserId or conversationId must be provided.")
 
-    # Sanitize DM content
     clean_content = sanitize_content(content)
+    media_items = []
+    legacy_image_paths = []
 
-    image_paths = []
     if files:
         dm_assets_path = get_user_dm_assets_path(current_user.username)
         for file in files:
-            if not file.filename: continue
-            s_filename = secure_filename(file.filename or "image.png")
-            unique_filename = f"{uuid.uuid4().hex}{Path(s_filename).suffix}"
+            if not file.filename:
+                continue
+
+            s_filename = secure_filename(file.filename or "attachment")
+            ext = Path(s_filename).suffix.lower()
+            content_type = (file.content_type or "").lower()
+            unique_filename = f"{uuid.uuid4().hex}{ext}"
             file_path = dm_assets_path / unique_filename
+
+            # Determine media type & validate
+            media_type = "file"
+            if content_type.startswith("image/") or ext in [".png", ".jpg", ".jpeg", ".webp", ".gif"]:
+                try:
+                    file.file.seek(0)
+                    img = Image.open(file.file)
+                    img.verify()
+                    file.file.seek(0)
+                except Exception:
+                    pass
+                media_type = "image"
+            elif content_type.startswith("video/") or ext in [".mp4", ".webm", ".ogv", ".mov"]:
+                media_type = "video"
+            elif content_type.startswith("audio/") or ext in [".wav", ".mp3", ".ogg", ".webm", ".m4a"]:
+                media_type = "audio"
+
             try:
                 with open(file_path, "wb") as buffer:
                     shutil.copyfileobj(file.file, buffer)
-                # Save a URL path that the frontend can use to fetch the image via the new endpoint
-                image_paths.append(f"/api/dm/file/{current_user.username}/{unique_filename}")
+
+                url_path = f"/api/dm/file/{current_user.username}/{unique_filename}"
+                if media_type == "image":
+                    legacy_image_paths.append(url_path)
+
+                media_items.append({
+                    "type": media_type,
+                    "url": url_path,
+                    "filename": s_filename,
+                    "size": file_path.stat().st_size
+                })
             finally:
                 file.file.close()
 
     new_message = DBDirectMessage(
         sender_id=current_user.id,
         content=clean_content,
-        image_references=image_paths if image_paths else None
+        image_references=legacy_image_paths if legacy_image_paths else None,
+        media=media_items if media_items else None,
+        reply_to_id=reply_to_id,
+        reactions={}
     )
 
     recipient_ids = []
+    is_bot_recipient = False
 
     if conversation_id:
-        # Group or linked conversation
         conv = db.query(DBConversation).filter(DBConversation.id == conversation_id).first()
-        if not conv: raise HTTPException(status_code=404, detail="Conversation not found")
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
         new_message.conversation_id = conversation_id
-        
-        # Get recipients
+
         members = db.query(DBConversationMember).filter(DBConversationMember.conversation_id == conversation_id).all()
         recipient_ids = [m.user_id for m in members if m.user_id != current_user.id]
-        
+
     elif receiver_user_id:
-        # Legacy 1-on-1
         if current_user.id == receiver_user_id:
             raise HTTPException(status_code=400, detail="Cannot message self.")
         new_message.receiver_id = receiver_user_id
         recipient_ids = [receiver_user_id]
 
+        target_receiver = db.query(DBUser).filter(DBUser.id == receiver_user_id).first()
+        if target_receiver and target_receiver.username.lower() == 'lollms':
+            is_bot_recipient = True
+
     db.add(new_message)
     db.commit()
     db.refresh(new_message)
-    
-    # Prepare response
-    resp = DirectMessagePublic(
-        id=new_message.id,
-        sender_id=new_message.sender_id,
-        receiver_id=new_message.receiver_id or 0,
-        conversation_id=new_message.conversation_id,
-        content=new_message.content,
-        sent_at=new_message.sent_at,
-        sender_username=current_user.username,
-        receiver_username="", 
-        image_references=new_message.image_references if isinstance(new_message.image_references, list) else []
-    )
 
-    payload = { "type": "new_dm", "data": json.loads(resp.model_dump_json()) }
-    
-    # 1. Send Immediately to recipients if connected locally (Realtime Fix)
+    resp = _map_direct_message_public(new_message, db)
+    payload = { "type": "new_dm", "data": resp.model_dump(mode="json") }
+
+    # Send immediately
     for uid in recipient_ids:
         if uid in manager.active_connections:
             await manager.send_personal_message(payload, uid)
-            
-    # Echo back to sender immediately for consistency across tabs
+
     if current_user.id in manager.active_connections:
         await manager.send_personal_message(payload, current_user.id)
 
-    # 2. Queue for Broadcast (Multi-worker support & Persistence guarantee)
-    # The frontend is responsible for de-duplicating messages if it receives both
     for uid in recipient_ids:
         manager.send_personal_message_sync(payload, uid)
-    manager.send_personal_message_sync(payload, current_user.id) 
+    manager.send_personal_message_sync(payload, current_user.id)
+
+    # Trigger AI bot response if communicating with @lollms or mentioned
+    if is_bot_recipient or (conversation_id and re.search(r'\B@lollms\b', clean_content, re.IGNORECASE)):
+        task_manager.submit_task(
+            name=f"AI DM Reply to {current_user.username}",
+            target=_respond_to_dm_task,
+            args=(conversation_id, current_user.id, new_message.id),
+            description=f"AI synthesizing direct message reply",
+            owner_username='lollms'
+        )
 
     return resp
+
+@dm_router.post("/messages/{message_id}/reactions", response_model=DirectMessagePublic)
+async def toggle_dm_reaction(
+    message_id: int,
+    payload: MessageReactionRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    msg = db.query(DBDirectMessage).filter(DBDirectMessage.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    emoji = payload.emoji.strip()
+    current_reactions = dict(msg.reactions or {})
+
+    user_list = list(current_reactions.get(emoji, []))
+    if current_user.id in user_list:
+        user_list.remove(current_user.id)
+        if not user_list:
+            del current_reactions[emoji]
+        else:
+            current_reactions[emoji] = user_list
+    else:
+        user_list.append(current_user.id)
+        current_reactions[emoji] = user_list
+
+    msg.reactions = current_reactions
+    db.commit()
+    db.refresh(msg)
+
+    resp = _map_direct_message_public(msg, db)
+    sync_payload = {
+        "type": "dm_reaction",
+        "data": {
+            "message_id": msg.id,
+            "conversation_id": msg.conversation_id,
+            "partner_id": msg.receiver_id if msg.sender_id == current_user.id else msg.sender_id,
+            "reactions": msg.reactions
+        }
+    }
+
+    if msg.conversation_id:
+        members = db.query(DBConversationMember).filter(DBConversationMember.conversation_id == msg.conversation_id).all()
+        for m in members:
+            manager.send_personal_message_sync(sync_payload, m.user_id)
+    else:
+        partner_id = msg.receiver_id if msg.sender_id == current_user.id else msg.sender_id
+        manager.send_personal_message_sync(sync_payload, current_user.id)
+        if partner_id:
+            manager.send_personal_message_sync(sync_payload, partner_id)
+
+    return resp
+
+@dm_router.post("/typing", status_code=200)
+async def send_typing_signal(
+    payload: TypingSignalRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    typing_payload = {
+        "type": "dm_typing",
+        "data": {
+            "user_id": current_user.id,
+            "username": current_user.username,
+            "is_group": payload.is_group,
+            "target_id": payload.target_id
+        }
+    }
+
+    if payload.is_group:
+        members = db.query(DBConversationMember).filter(DBConversationMember.conversation_id == payload.target_id).all()
+        for m in members:
+            if m.user_id != current_user.id:
+                manager.send_personal_message_sync(typing_payload, m.user_id)
+    else:
+        manager.send_personal_message_sync(typing_payload, payload.target_id)
+
+    return {"status": "ok"}
+
+@dm_router.post("/messages/bulk-delete", status_code=200)
+async def bulk_delete_messages(
+    payload: BulkDeleteMessagesRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    if not payload.message_ids:
+        return {"deleted_count": 0}
+
+    query = db.query(DBDirectMessage).filter(DBDirectMessage.id.in_(payload.message_ids))
+    if not current_user.is_admin:
+        query = query.filter(or_(DBDirectMessage.sender_id == current_user.id, DBDirectMessage.receiver_id == current_user.id))
+
+    messages_to_delete = query.all()
+    deleted_ids = [m.id for m in messages_to_delete]
+
+    for m in messages_to_delete:
+        db.delete(m)
+    db.commit()
+
+    broadcast = {
+        "type": "dm_bulk_deleted",
+        "data": { "message_ids": deleted_ids }
+    }
+    manager.broadcast_sync(broadcast)
+    return {"deleted_count": len(deleted_ids)}
+
+@dm_router.post("/conversation/{target_id}/clean", status_code=200)
+async def clean_conversation_history(
+    target_id: int,
+    payload: CleanConversationRequest,
+    is_group: bool = False,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    query = db.query(DBDirectMessage)
+    if is_group:
+        member = db.query(DBConversationMember).filter_by(conversation_id=target_id, user_id=current_user.id).first()
+        if not member and not current_user.is_admin:
+            raise HTTPException(status_code=403, detail="Not a member of this group")
+        query = query.filter(DBDirectMessage.conversation_id == target_id)
+    else:
+        query = query.filter(
+            or_(
+                and_(DBDirectMessage.sender_id == current_user.id, DBDirectMessage.receiver_id == target_id),
+                and_(DBDirectMessage.sender_id == target_id, DBDirectMessage.receiver_id == current_user.id)
+            ),
+            DBDirectMessage.conversation_id.is_(None)
+        )
+
+    if payload.only_my_messages:
+        query = query.filter(DBDirectMessage.sender_id == current_user.id)
+
+    if payload.days and payload.days > 0:
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=payload.days)
+        query = query.filter(DBDirectMessage.sent_at < cutoff)
+
+    deleted_count = query.delete(synchronize_session=False)
+    db.commit()
+
+    sync_payload = {
+        "type": "dm_cleaned",
+        "data": {
+            "conversation_id": target_id if is_group else None,
+            "partner_id": target_id if not is_group else None
+        }
+    }
+    if is_group:
+        members = db.query(DBConversationMember).filter(DBConversationMember.conversation_id == target_id).all()
+        for m in members:
+            manager.send_personal_message_sync(sync_payload, m.user_id)
+    else:
+        manager.send_personal_message_sync(sync_payload, current_user.id)
+        manager.send_personal_message_sync(sync_payload, target_id)
+
+    return {"deleted_count": deleted_count}
 
 @dm_router.get("/file/{username}/{filename}")
 async def get_dm_attachment(
@@ -429,14 +741,7 @@ async def get_conversation_messages(
         )
 
     messages = query.order_by(desc(DBDirectMessage.sent_at)).offset(skip).limit(limit).all()
-    
-    return [DirectMessagePublic(
-        id=m.id, sender_id=m.sender_id, receiver_id=m.receiver_id or 0, conversation_id=m.conversation_id,
-        content=m.content, sent_at=m.sent_at, read_at=m.read_at,
-        sender_username=m.sender.username, 
-        # Safely handle image_references being 'null' string, None, or list
-        image_references=m.image_references if isinstance(m.image_references, list) else []
-    ) for m in messages]
+    return [_map_direct_message_public(m, db) for m in messages]
 
 @dm_router.post("/conversation/{user_id}/read", status_code=200)
 async def mark_conversation_as_read(

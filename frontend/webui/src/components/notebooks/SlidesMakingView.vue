@@ -112,13 +112,39 @@ const languages = [
     { code: 'en', name: 'English' }, { code: 'fr', name: 'French' }, { code: 'es', name: 'Spanish' }, { code: 'de', name: 'German' }, { code: 'it', name: 'Italian' }, { code: 'pt', name: 'Portuguese' }, { code: 'zh', name: 'Chinese' }, { code: 'ja', name: 'Japanese' }, { code: 'ru', name: 'Russian' }, { code: 'ar', name: 'Arabic' }
 ];
 
-const slidesTabs = computed(() => (props.notebook.tabs || []).filter(t => t.type === 'slides'));
-const currentTab = computed(() => slidesTabs.value[activeTabIdx.value]);
+const slidesTabs = computed(() => (props.notebook.tabs || []).filter(t => t.type === 'slides' || !t.type));
+const currentTab = computed(() => {
+    if (!props.notebook.tabs?.length) return null;
+    const slides = slidesTabs.value;
+    if (slides.length > 0) {
+        return slides.find(t => t.id === activeTabId.value) || slides[0];
+    }
+    return props.notebook.tabs.find(t => t.id === activeTabId.value) || props.notebook.tabs[0];
+});
 
 const slideData = computed(() => {
     if (!currentTab.value || !currentTab.value.content) return { slides_data: [], mode: 'hybrid', summary: '' };
     try { return JSON.parse(currentTab.value.content); } catch (e) { return { slides_data: [], mode: 'hybrid', summary: '' }; }
 });
+
+const initSlidesView = () => {
+    if (props.notebook.tabs?.length > 0) {
+        if (!activeTabId.value || !props.notebook.tabs.find(t => t.id === activeTabId.value)) {
+            const slideTab = props.notebook.tabs.find(t => t.type === 'slides') || props.notebook.tabs[0];
+            activeTabId.value = slideTab ? slideTab.id : props.notebook.tabs[0].id;
+        }
+    }
+};
+
+watch(() => props.notebook.id, (newId, oldId) => {
+    if (newId !== oldId) {
+        activeTabId.value = null;
+        selectedSlideIdx.value = 0;
+        initSlidesView();
+    }
+}, { immediate: true });
+
+watch(() => props.notebook.tabs, initSlidesView, { deep: true });
 
 const currentSlide = computed(() => slideData.value.slides_data[selectedSlideIdx.value] || null);
 

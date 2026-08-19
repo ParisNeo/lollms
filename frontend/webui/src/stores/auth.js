@@ -171,9 +171,11 @@ export const useAuthStore = defineStore('auth', () => {
 
         ws.value.onopen = () => {
             console.log('[WebSocket] Connected.');
+            const uiStore = useUiStore();
+            uiStore.setConnectionLost(false);
             if (hasConnectedOnce.value && !wsConnected.value) {
                 audioRecovered.play().catch(() => {});
-                useUiStore().addNotification('Connection recovered', 'success');
+                uiStore.addNotification('Connection recovered', 'success');
             }
 
             wsConnected.value = true;
@@ -238,18 +240,91 @@ export const useAuthStore = defineStore('auth', () => {
                     uiStore.addNotification(`${data.data.username} is now online.`, 'info', 4000, false, null, data.data.icon); 
                     break;
                 case 'new_shared_discussion': 
+                    audioChime.play().catch(() => {});
                     getDiscussionsStore().then(async (s) => {
-                        // 1. Immediately trigger the fetch to update the sidebar list
                         await s.fetchSharedWithMe(); 
-
-                        // 2. Determine message based on update type
                         const isUpdate = data.data.update_type === 'permission_change';
-                        const verb = isUpdate ? 'updated permissions for' : 'shared a new discussion:';
-
+                        const verb = isUpdate ? 'updated permissions for' : 'shared discussion';
                         uiStore.addNotification(
-                            `${data.data.from_user} ${verb} '${data.data.discussion_title}'`, 
-                            'info',
-                            6000 // Show for slightly longer (6s)
+                            `🎁 ${data.data.sender_username || data.data.from_user} ${verb}: '${data.data.discussion_title}'`, 
+                            'success',
+                            7000,
+                            false,
+                            data.data.sender_username || data.data.from_user,
+                            data.data.sender_icon
+                        );
+                    });
+                    break;
+                case 'artefact_shared':
+                    audioChime.play().catch(() => {});
+                    getDiscussionsStore().then(async (s) => {
+                        await s.fetchAllUserArtefacts();
+                        if (s.currentDiscussionId) await s.fetchArtefacts(s.currentDiscussionId);
+                        uiStore.addNotification(
+                            data.data.message || `🎁 ${data.data.sender_username} shared an artefact: ${data.data.artefact_title}`,
+                            'success',
+                            7000,
+                            false,
+                            data.data.sender_username,
+                            data.data.sender_icon
+                        );
+                    });
+                    break;
+                case 'note_shared':
+                case 'note_saved':
+                    audioChime.play().catch(() => {});
+                    import('./notes').then(async (m) => {
+                        await m.useNotesStore().fetchNotes();
+                        uiStore.addNotification(
+                            data.data.message || `🎁 Research note received: ${data.data.title}`,
+                            'success',
+                            7000,
+                            false,
+                            data.data.sender_username,
+                            data.data.sender_icon
+                        );
+                    });
+                    break;
+                case 'skill_shared':
+                    audioChime.play().catch(() => {});
+                    import('./skills').then(async (m) => {
+                        await m.useSkillsStore().fetchSkills();
+                        uiStore.addNotification(
+                            data.data.message || `🎁 AI Skill received: ${data.data.title}`,
+                            'success',
+                            7000,
+                            false,
+                            data.data.sender_username,
+                            data.data.sender_icon
+                        );
+                    });
+                    break;
+                case 'datastore_shared':
+                    audioChime.play().catch(() => {});
+                    getDataStore().then(async (ds) => {
+                        await ds.fetchDataStores();
+                        uiStore.addNotification(
+                            data.data.message || `🎁 Data Store shared: ${data.data.datastore_name}`,
+                            'success',
+                            7000,
+                            false,
+                            data.data.sender_username,
+                            data.data.sender_icon
+                        );
+                    });
+                    break;
+                case 'personality_shared':
+                case 'personality_received':
+                    audioChime.play().catch(() => {});
+                    getDataStore().then(async (ds) => {
+                        await ds.fetchPersonalities();
+                        uiStore.addNotification(
+                            data.data.message || `🎁 AI Persona received: ${data.data.name}`,
+                            'success',
+                            7000,
+                            false,
+                            data.data.sender_username,
+                            data.data.sender_icon
                         );
                     });
                     break;
@@ -322,6 +397,18 @@ export const useAuthStore = defineStore('auth', () => {
                             social.fetchConversations();
                         }
                     });
+                    break;
+                case 'dm_reaction':
+                    getSocialStore().then(social => social.handleDmReaction(data.data));
+                    break;
+                case 'dm_typing':
+                    getSocialStore().then(social => social.handleDmTyping(data.data));
+                    break;
+                case 'dm_bulk_deleted':
+                    getSocialStore().then(social => social.handleDmBulkDeleted(data.data));
+                    break;
+                case 'dm_cleaned':
+                    getSocialStore().then(social => social.handleDmCleaned(data.data));
                     break;
             }
         };

@@ -2,7 +2,7 @@
 from sqlalchemy import (
     Column, Integer, String,
     ForeignKey, UniqueConstraint,
-    DateTime, Text, JSON
+    DateTime, Text, JSON, Boolean
 )
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
@@ -27,6 +27,7 @@ class Post(Base):
     content = Column(Text, nullable=False)
     media = Column(JSON, nullable=True) 
     visibility = Column(SQLAlchemyEnum(PostVisibility), nullable=False, default=PostVisibility.public, index=True)
+    is_pinned = Column(Boolean, default=False, nullable=False, index=True)
     moderation_status = Column(String, default="pending", nullable=False, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

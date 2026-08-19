@@ -24,7 +24,13 @@ api.interceptors.request.use(
 );
 
 api.interceptors.response.use(
-    response => response,
+    response => {
+        const uiStore = useUiStore();
+        if (uiStore.isConnectionLost) {
+            uiStore.setConnectionLost(false);
+        }
+        return response;
+    },
     error => {
       const uiStore = useUiStore();
       const authStore = useAuthStore();

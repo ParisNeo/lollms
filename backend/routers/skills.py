@@ -201,12 +201,18 @@ async def share_skill(
     try:
         db.commit()
         from backend.ws_manager import manager
-        # 1. Notify Receiver via Toast
         manager.send_personal_message_sync({
-            "type": "notification",
-            "data": {"message": f"🎁 {current_user.username} sent you a skill: {skill.name}", "type": "success", "duration": 5000}
+            "type": "skill_shared",
+            "data": {
+                "message": f"🎁 {current_user.username} shared AI skill: {skill.name}",
+                "sender_username": current_user.username,
+                "sender_icon": current_user.icon,
+                "skill_id": new_skill.id,
+                "title": skill.name,
+                "type": "success",
+                "duration": 6000
+            }
         }, target_user.id)
-        # 2. Force Refresh Receiver's list
         manager.send_personal_message_sync({"type": "skill_saved", "data": {"title": skill.name}}, target_user.id)
         
         return {"message": f"Skill shared with {payload.target_username}"}
