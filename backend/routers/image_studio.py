@@ -286,12 +286,19 @@ async def generate_image(
 @image_studio_router.post("/edit", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def edit_image(
     request: Request,
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
     request_data = await request.json()
-    model_full_name = request_data.get("model") or current_user.tti_binding_model_name
+    model_full_name = request_data.get("model") or current_user.iti_binding_model_name or current_user.tti_binding_model_name
+
     if not model_full_name or '/' not in model_full_name:
-        raise HTTPException(status_code=400, detail="A valid TTI model must be selected.")
+        default_tti = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+        if default_tti:
+            model_full_name = f"{default_tti.alias}/{default_tti.default_model_name or ''}"
+            request_data["model"] = model_full_name
+        else:
+            raise HTTPException(status_code=400, detail="A valid TTI model must be configured for editing.")
 
     db_task = task_manager.submit_task(
         name=f"Editing image: {request_data.get('prompt', '')[:30]}...",

@@ -67,38 +67,35 @@ export const useTasksStore = defineStore('tasks', () => {
         }
     }
 
+    const completedTaskIds = new Set();
+
     function addTask(taskData) {
         if (!taskData || !taskData.id) return;
-        
-        console.log(`[TasksStore] Adding/updating task: ${taskData.id} - ${taskData.name} (${taskData.status})`);
-        
-        // Create a new array to ensure Vue detects the change
+
         const currentTasks = [...tasks.value];
         const existingIndex = currentTasks.findIndex(t => t.id === taskData.id);
-        
+
         if (existingIndex !== -1) {
-            // Preserve logs if not provided in update
             const existingLogs = currentTasks[existingIndex].logs || [];
             const newLogs = taskData.logs || existingLogs;
-            
-            // Merge the task data
+
             currentTasks[existingIndex] = { 
                 ...currentTasks[existingIndex], 
                 ...taskData, 
                 logs: newLogs 
             };
         } else {
-            // Add new task at the beginning
             currentTasks.unshift(taskData);
         }
-        
-        // Replace the entire array to trigger reactivity
+
         tasks.value = currentTasks;
 
-        // Emit events for important state changes
+        // Emit task:completed ONCE per task ID on completion
         if (['completed', 'failed', 'cancelled'].includes(taskData.status)) {
-            console.log(`[TasksStore] Task ${taskData.id} ended with status: ${taskData.status}`);
-            emit('task:completed', taskData);
+            if (!completedTaskIds.has(taskData.id)) {
+                completedTaskIds.add(taskData.id);
+                emit('task:completed', taskData);
+            }
         }
     }
     

@@ -162,7 +162,9 @@ export const useImageStore = defineStore('images', () => {
         isGenerating.value = true;
         try {
             const response = await apiClient.post('/api/image-studio/save-canvas', payload);
-            images.value.unshift(response.data);
+            if (response.data && !images.value.some(i => i.id === response.data.id)) {
+                images.value.unshift(response.data);
+            }
             uiStore.addNotification('Image saved successfully!', 'success');
             return response.data;
         } catch (error) {
@@ -179,7 +181,7 @@ export const useImageStore = defineStore('images', () => {
         files.forEach(file => {
             formData.append('files', file);
         });
-        
+
         if (selectedAlbumId.value) {
             formData.append('album_id', selectedAlbumId.value);
         }
@@ -190,8 +192,12 @@ export const useImageStore = defineStore('images', () => {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             if (Array.isArray(response.data) && response.data.length > 0) {
-                images.value.unshift(...response.data.reverse());
-                uiStore.addNotification(`${response.data.length} image(s) uploaded successfully!`, 'success');
+                const existingIds = new Set(images.value.map(img => img.id));
+                const uniqueUploads = response.data.filter(img => !existingIds.has(img.id));
+                if (uniqueUploads.length > 0) {
+                    images.value.unshift(...uniqueUploads.reverse());
+                    uiStore.addNotification(`${uniqueUploads.length} image(s) uploaded successfully!`, 'success');
+                }
             }
         } catch (error) {
             // Handled globally
@@ -282,10 +288,15 @@ export const useImageStore = defineStore('images', () => {
         if ((isImageTask || isEditTask) && task.status === 'completed' && result) {
             const newItems = Array.isArray(result) ? result : [result];
             if (newItems.length > 0 && newItems[0]) {
-                const reversedNewItems = [...newItems].reverse();
-                images.value.unshift(...reversedNewItems);
-                emit('image:generated', reversedNewItems[0]); 
-                uiStore.addNotification(`${newItems.length} new image(s) added.`, 'success');
+                const existingIds = new Set(images.value.map(img => img.id));
+                const uniqueNewItems = newItems.filter(item => item && item.id && !existingIds.has(item.id));
+
+                if (uniqueNewItems.length > 0) {
+                    const reversedNewItems = [...uniqueNewItems].reverse();
+                    images.value.unshift(...reversedNewItems);
+                    emit('image:generated', reversedNewItems[0]); 
+                    uiStore.addNotification(`${uniqueNewItems.length} new image(s) added.`, 'success');
+                }
             }
         } else if ((isImageTask || isEditTask) && task.status === 'failed') {
             uiStore.addNotification('Image generation failed. Check task manager for details.', 'error');

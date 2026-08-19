@@ -382,7 +382,6 @@ def _image_studio_generate_task(task: Task, username: str, request_data: dict):
     return generated_images_data
 
 def _image_studio_edit_task(task: Task, username: str, request_data: dict):
-    # ... (existing code remains the same)
     task.log("Starting image studio edit task...")
     task.set_progress(5)
 
@@ -391,8 +390,8 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
         if not user:
             raise Exception(f"User '{username}' not found.")
 
-        model_full_name = request_data.get('model') or user.iti_binding_model_name
-        
+        model_full_name = request_data.get('model') or user.iti_binding_model_name or user.tti_binding_model_name
+
         tti_binding_alias = None
         tti_model_name = None
         if model_full_name and '/' in model_full_name:
@@ -401,10 +400,18 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
             default_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
             if default_tti_binding:
                 tti_binding_alias = default_tti_binding.alias
+                tti_model_name = default_tti_binding.default_model_name
             else:
                 raise Exception("No active TTI binding found to determine a default for editing.")
 
         runtime_params = {k: v for k, v in request_data.items() if k not in ['model', 'image_ids', 'base_image_b64']}
+
+        # Clean optional mask
+        if 'mask' in runtime_params:
+            if not runtime_params['mask']:
+                del runtime_params['mask']
+            elif isinstance(runtime_params['mask'], str) and ',' in runtime_params['mask']:
+                runtime_params['mask'] = runtime_params['mask'].split(',', 1)[1]
 
         lc = build_lollms_client_from_params(
             username=username,
@@ -427,8 +434,11 @@ def _image_studio_edit_task(task: Task, username: str, request_data: dict):
         source_images_b64 = []
 
         if request_data.get('base_image_b64'):
-            task.log("Using provided base64 image for editing.")
-            source_images_b64.append(request_data['base_image_b64'])
+            task.log("Using provided base64 canvas buffer for editing.")
+            raw_b64 = request_data['base_image_b64']
+            if isinstance(raw_b64, str) and ',' in raw_b64:
+                raw_b64 = raw_b64.split(',', 1)[1]
+            source_images_b64.append(raw_b64)
         else:
             task.log("Loading source images from file...")
             image_ids = request_data.get('image_ids', [])

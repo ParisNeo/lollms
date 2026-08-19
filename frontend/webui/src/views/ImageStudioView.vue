@@ -805,12 +805,14 @@ function startResizing(event) {
 // Preset Library
 const styleSearchTerm = ref('');
 const collapsedStyles = ref({
+    '💎 Image Enhancement & Restoration': false,
+    '🌈 Colorization & Color Grading': false,
     '📸 Photographic & Realism': false,
-    '🎮 3D, CGI & Sci-Fi': false,
+    '🎮 3D, CGI & Sci-Fi': true,
     '🎨 Traditional Mediums': true,
-    '🎌 Anime, Manga & Comics': false,
+    '🎌 Anime, Manga & Comics': true,
     '🏛️ Art Movements & Masters': true,
-    '✨ Lighting & Atmosphere': false,
+    '✨ Lighting & Atmosphere': true,
     '🔭 Camera Angles & Lenses': true
 });
 
@@ -825,6 +827,26 @@ function isCategoryCollapsed(cat) {
 
 // 50+ Curated State-of-the-Art Style Presets for Diffusion Models
 const styleLibrary = {
+    '💎 Image Enhancement & Restoration': [
+        { name: '4K Remaster', emoji: '💎', prompt: 'masterpiece, 8k uhd, pristine sharp focus, ultra-detailed micro texture, noise reduction, crystal clear details, natural pore structure, ProRes cinematic remaster', negative: 'blurry, noise, artifacts, low resolution, pixelated, jpeg compression, bad anatomy, over-smoothed' },
+        { name: 'HDR Clarity', emoji: '🌟', prompt: 'high dynamic range, crystal clear clarity, hyper-fine details, de-noised, sharp edges, clean lighting, balanced exposure, immaculate textures', negative: 'grainy, noisy, dark artifacts, washed out, blurry' },
+        { name: 'Portrait Refine', emoji: '👤', prompt: 'subsurface scattering, realistic natural skin texture, visible fine pores, catchlights in eyes, individually defined hair strands, studio quality headshot, photorealistic', negative: 'plastic skin, airbrushed, cartoon, doll-like, waxy face, smooth blur' },
+        { name: 'Damage Repair', emoji: '🩹', prompt: 'restored photograph, seamless scratch repair, crease removal, stain heal, sharp details recovered, crisp edges, damage-free vintage photo restoration', negative: 'scratches, cracks, stains, torn, fold lines, dust spots, blur, noise' },
+        { name: 'Tack Sharp Edge', emoji: '🔍', prompt: 'tack sharp contrast, crisp high-definition line recovery, well-resolved edges, geometric clarity, clean micro-details, ultra-focused', negative: 'blurry edges, halo artifacts, chromatic aberration, fuzzy' },
+        { name: 'De-Blur & Focus', emoji: '🎯', prompt: 'de-blurred, sharp focal alignment, recovered subject contours, clean separation, pristine optical clarity', negative: 'motion blur, camera shake, out of focus, soft haze' }
+    ],
+
+    '🌈 Colorization & Color Grading': [
+        { name: 'B&W to Color', emoji: '🎨', prompt: 'natural historical colorization, authentic human skin tones, realistic clothing pigments, vibrant balanced color depth, accurate environmental colors, colorized from black and white', negative: 'monochrome, black and white, grayscale, washed out color, sepia tint, oversaturated neon' },
+        { name: '50s Technicolor', emoji: '📼', prompt: '1950s 3-strip Technicolor film aesthetic, lush saturated primary colors, warm golden skin tones, rich velvety reds and emerald greens, classic Hollywood palette', negative: 'modern desaturated, cold digital, monochrome' },
+        { name: 'Vibrant Color Pop', emoji: '💥', prompt: 'vivid dynamic color palette, rich color depth, chromatic brilliance, high saturation balance, vibrant eye-catching hues, radiant colors', negative: 'dull, muted, faded, washed out, monochromatic, muddy' },
+        { name: 'Pastel Dreams', emoji: '🌸', prompt: 'soft pastel color grading, gentle creamy tones, subtle lavender, peach and mint hues, airy diffused lighting, delicate romantic aesthetic', negative: 'harsh contrast, garish neon, dark muddy shadows' },
+        { name: 'Teal & Orange', emoji: '🎬', prompt: 'cinematic teal and orange color harmony, cool moody shadow tones, warm golden subject accents, atmospheric Hollywood film grade', negative: 'green tint, muddy colors, flat monochrome' },
+        { name: 'Warm Terracotta', emoji: '🍯', prompt: 'warm amber and terracotta color grade, rich honey undertones, golden sunlight hues, cozy inviting atmosphere, sun-kissed warmth', negative: 'cold blue, stark sterile, pale' },
+        { name: 'Cyber Duotone', emoji: '🟣', prompt: 'striking dual-tone duotone, electric cyan and hot magenta contrast, high-impact graphic poster lighting, stylized chromatic split', negative: 'natural lighting, muted colors, muddy' },
+        { name: 'Hand-Tinted Antique', emoji: '🖌️', prompt: 'hand-tinted vintage photograph, delicate watercolor washes over silver gelatin print, antique subtle tinting, historic nostalgic charm', negative: 'modern digital HDR, harsh neon saturation' }
+    ],
+
     '📸 Photographic & Realism': [
         { name: 'Photo RAW', emoji: '📸', prompt: 'photorealistic, RAW photo, 8k uhd, dslr, soft lighting, high detailed skin texture, sharp focus, professional award-winning photography', negative: 'drawing, cartoon, 3d render, plastic, airbrushed, oversaturated' },
         { name: 'Cinematic 35mm', emoji: '🎬', prompt: 'cinematic still, 35mm anamorphic lens, dramatic atmosphere, color graded, subtle lens flare, teal and orange film aesthetic, Panavision', negative: 'amateur, grainy, low quality, overexposed, flat lighting' },

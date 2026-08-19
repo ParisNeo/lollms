@@ -38,14 +38,14 @@
     <div class="h-full flex flex-col bg-gray-100 dark:bg-gray-950 overflow-hidden relative select-none font-sans">
         
         <!-- Top Tool Options HUD (Floating Pill) -->
-        <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 animate-in fade-in slide-from-top-3 max-w-[95vw] overflow-x-auto no-scrollbar">
+        <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 animate-in fade-in slide-in-from-top-3 max-w-[95vw] overflow-x-auto no-scrollbar">
             <!-- Active Tool Indicator -->
             <div class="flex items-center gap-1.5 pr-2 border-r dark:border-gray-800 shrink-0">
                 <span class="text-[9px] font-black uppercase tracking-widest text-primary">{{ currentToolName }}</span>
             </div>
 
             <!-- Primary Color & Swatches -->
-            <div class="flex items-center gap-1.5 shrink-0" v-if="['brush', 'line', 'rect', 'circle', 'text', 'gradient'].includes(tool)">
+            <div class="flex items-center gap-1.5 shrink-0" v-if="['brush', 'line', 'rect', 'circle', 'text', 'fill', 'gradient'].includes(tool)">
                 <div class="relative w-6 h-6 rounded-lg overflow-hidden border dark:border-gray-700 shadow-sm cursor-pointer" :style="{ backgroundColor: color }">
                     <input type="color" v-model="color" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
                 </div>
@@ -70,18 +70,31 @@
             </div>
 
             <!-- Size / Thickness Slider -->
-            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand'].includes(tool)">
+            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand', 'blur'].includes(tool)">
                 <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">
-                    {{ tool === 'text' ? 'Font' : (tool === 'wand' ? 'Tolerance' : 'Size') }}
+                    {{ tool === 'text' ? 'Font' : (tool === 'wand' || tool === 'fill' ? 'Tolerance' : 'Size') }}
                 </span>
                 <input 
                     type="range" 
                     v-model.number="brushSize" 
-                    :min="tool === 'wand' ? 0 : 1" 
-                    :max="tool === 'wand' ? 100 : 300" 
+                    :min="tool === 'wand' || tool === 'fill' ? 0 : 1" 
+                    :max="tool === 'wand' || tool === 'fill' ? 100 : 300" 
                     class="w-20 sm:w-28 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 >
                 <span class="text-[9px] font-mono font-bold w-7 text-center bg-gray-100 dark:bg-gray-800 py-0.5 rounded">{{ brushSize }}</span>
+            </div>
+
+            <!-- Brush Hardness / Smoothness -->
+            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser'].includes(tool)">
+                <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Hardness</span>
+                <input 
+                    type="range" 
+                    v-model.number="brushHardness" 
+                    min="0" 
+                    max="1" 
+                    step="0.05" 
+                    class="w-16 sm:w-20 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                >
             </div>
 
             <!-- Clone Tool Anchor State -->
@@ -134,7 +147,7 @@
                     <!-- Base Sizing Anchor Canvas -->
                     <canvas ref="imageCanvasRef" class="block bg-transparent layer-canvas"></canvas>
 
-                    <!-- Render All Stacked Layers -->
+                    <!-- Render All Stacked Layers with Individual Reactivity -->
                     <template v-for="layer in layers" :key="layer.id">
                         <canvas 
                             :ref="el => setLayerCanvasRef(layer, el)" 
@@ -152,7 +165,7 @@
                     <!-- Inpainting Mask Canvas Layer -->
                     <canvas 
                         ref="maskCanvasRef" 
-                        v-show="activeLayerId === 'mask' || showMaskOverlay"
+                        v-show="activeLayerId === 'mask' || useInpaintMask"
                         class="absolute inset-0 opacity-50 layer-canvas pointer-events-none" 
                         style="z-index: 998"
                     ></canvas>
@@ -189,7 +202,7 @@
                 </div>
             </main>
 
-            <!-- Right Inspector Sidebar (Layers & AI Controls) -->
+            <!-- Right Inspector Sidebar (Layers, Transform & AI Controls) -->
             <aside 
                 class="absolute inset-y-0 right-0 z-30 w-80 bg-white dark:bg-gray-900 border-l dark:border-gray-800 transform transition-transform lg:relative lg:translate-x-0 flex flex-col shadow-2xl"
                 :class="showMobileSidebar ? 'translate-x-0' : 'translate-x-full'"
@@ -203,6 +216,13 @@
                             :class="activeInspectorTab === 'layers' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
                         >
                             Layers
+                        </button>
+                        <button 
+                            @click="activeInspectorTab = 'transform'" 
+                            class="flex-1 py-1 text-[10px] font-black uppercase tracking-wider rounded-lg transition-all"
+                            :class="activeInspectorTab === 'transform' ? 'bg-white dark:bg-gray-700 text-blue-600 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                        >
+                            Transform
                         </button>
                         <button 
                             @click="activeInspectorTab = 'adjust'" 
@@ -259,7 +279,7 @@
                             >
                                 <button @click.stop="toggleLayerVisibility(layer)" class="p-1 text-gray-400 hover:text-blue-500">
                                     <IconEye v-if="layer.visible" class="w-3.5 h-3.5 text-blue-500"/>
-                                    <IconEyeOff v-else class="w-3.5 h-3.5 text-gray-400"/>
+                                    <IconEyeOff v-else class="w-3.5 h-3.5"/>
                                 </button>
                                 
                                 <span class="text-xs font-bold truncate grow" :class="layer.id === 'base' ? 'font-black' : ''">{{ layer.name }}</span>
@@ -291,57 +311,90 @@
                         </div>
                     </div>
 
-                    <!-- ── TAB 2: NON-DESTRUCTIVE ADJUSTMENTS ── -->
+                    <!-- ── TAB 2: GEOMETRY & TRANSFORMS ── -->
+                    <div v-show="activeInspectorTab === 'transform'" class="space-y-4">
+                        <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest block">Canvas & Layer Transform</span>
+
+                        <div class="grid grid-cols-2 gap-2">
+                            <button @click="flipActiveLayerHorizontal" class="btn btn-secondary btn-sm text-xs flex items-center justify-center gap-1.5">
+                                ↔ Flip Horiz
+                            </button>
+                            <button @click="flipActiveLayerVertical" class="btn btn-secondary btn-sm text-xs flex items-center justify-center gap-1.5">
+                                ↕ Flip Vert
+                            </button>
+                            <button @click="rotateActiveLayer(90)" class="btn btn-secondary btn-sm text-xs flex items-center justify-center gap-1.5">
+                                ↻ Rotate 90°
+                            </button>
+                            <button @click="rotateActiveLayer(-90)" class="btn btn-secondary btn-sm text-xs flex items-center justify-center gap-1.5">
+                                ↺ Rotate -90°
+                            </button>
+                        </div>
+
+                        <!-- Canvas Size Expansion (Outpaint prep) -->
+                        <div class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-700/60 space-y-3">
+                            <span class="text-[9px] font-black uppercase text-gray-400 tracking-widest block">Expand Canvas (Outpainting)</span>
+                            <div class="grid grid-cols-2 gap-2">
+                                <button @click="expandCanvas('horizontal', 256)" class="btn btn-secondary btn-xs py-2 font-bold">
+                                    +256px Width
+                                </button>
+                                <button @click="expandCanvas('vertical', 256)" class="btn btn-secondary btn-xs py-2 font-bold">
+                                    +256px Height
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── TAB 3: NON-DESTRUCTIVE ADJUSTMENTS ── -->
                     <div v-show="activeInspectorTab === 'adjust'" class="space-y-4">
                         <div class="flex justify-between items-center">
-                            <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Color & Filters</span>
+                            <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Adjustments ({{ activeLayer.name }})</span>
                             <button @click="resetAdjustments" class="text-[9px] font-bold text-blue-500 uppercase hover:underline">Reset</button>
                         </div>
 
-                        <div class="space-y-3 p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-700/60">
+                        <div v-if="activeLayer && activeLayer.adjustments" class="space-y-3 p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-700/60">
                             <!-- Brightness -->
                             <div class="space-y-1">
                                 <div class="flex justify-between text-xs">
                                     <span class="text-[10px] font-bold text-gray-500">Brightness</span>
-                                    <span class="font-mono text-[10px]">{{ Math.round(adjustments.brightness * 100) }}%</span>
+                                    <span class="font-mono text-[10px]">{{ Math.round(activeLayer.adjustments.brightness * 100) }}%</span>
                                 </div>
-                                <input type="range" v-model.number="adjustments.brightness" min="0" max="2" step="0.05" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                                <input type="range" v-model.number="activeLayer.adjustments.brightness" @change="saveState" min="0" max="2" step="0.05" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
                             </div>
 
                             <!-- Contrast -->
                             <div class="space-y-1">
                                 <div class="flex justify-between text-xs">
                                     <span class="text-[10px] font-bold text-gray-500">Contrast</span>
-                                    <span class="font-mono text-[10px]">{{ Math.round(adjustments.contrast * 100) }}%</span>
+                                    <span class="font-mono text-[10px]">{{ Math.round(activeLayer.adjustments.contrast * 100) }}%</span>
                                 </div>
-                                <input type="range" v-model.number="adjustments.contrast" min="0" max="2" step="0.05" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                                <input type="range" v-model.number="activeLayer.adjustments.contrast" @change="saveState" min="0" max="2" step="0.05" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
                             </div>
 
                             <!-- Saturation -->
                             <div class="space-y-1">
                                 <div class="flex justify-between text-xs">
                                     <span class="text-[10px] font-bold text-gray-500">Saturation</span>
-                                    <span class="font-mono text-[10px]">{{ Math.round(adjustments.saturate * 100) }}%</span>
+                                    <span class="font-mono text-[10px]">{{ Math.round(activeLayer.adjustments.saturate * 100) }}%</span>
                                 </div>
-                                <input type="range" v-model.number="adjustments.saturate" min="0" max="2" step="0.05" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                                <input type="range" v-model.number="activeLayer.adjustments.saturate" @change="saveState" min="0" max="2" step="0.05" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
                             </div>
 
                             <!-- Hue Rotation -->
                             <div class="space-y-1">
                                 <div class="flex justify-between text-xs">
                                     <span class="text-[10px] font-bold text-gray-500">Hue Shift</span>
-                                    <span class="font-mono text-[10px]">{{ adjustments.hueRotate }}°</span>
+                                    <span class="font-mono text-[10px]">{{ activeLayer.adjustments.hueRotate }}°</span>
                                 </div>
-                                <input type="range" v-model.number="adjustments.hueRotate" min="0" max="360" step="5" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                                <input type="range" v-model.number="activeLayer.adjustments.hueRotate" @change="saveState" min="0" max="360" step="5" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
                             </div>
 
                             <!-- Blur -->
                             <div class="space-y-1">
                                 <div class="flex justify-between text-xs">
                                     <span class="text-[10px] font-bold text-gray-500">Blur Filter</span>
-                                    <span class="font-mono text-[10px]">{{ adjustments.blur }}px</span>
+                                    <span class="font-mono text-[10px]">{{ activeLayer.adjustments.blur }}px</span>
                                 </div>
-                                <input type="range" v-model.number="adjustments.blur" min="0" max="20" step="1" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                                <input type="range" v-model.number="activeLayer.adjustments.blur" @change="saveState" min="0" max="20" step="1" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500">
                             </div>
 
                             <button @click="bakeAdjustmentsToActiveLayer" class="btn btn-secondary btn-xs w-full py-1.5 font-bold uppercase tracking-wider text-[9px] mt-2">
@@ -350,7 +403,7 @@
                         </div>
                     </div>
 
-                    <!-- ── TAB 3: TARGETED AI LAYER EDITING & INPAINTING ── -->
+                    <!-- ── TAB 4: TARGETED AI LAYER EDITING & INPAINTING ── -->
                     <div v-show="activeInspectorTab === 'ai'" class="space-y-4">
                         <div class="flex items-center justify-between">
                             <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">AI Layer Studio</span>
@@ -371,9 +424,25 @@
                             </p>
                         </div>
 
-                        <!-- 2. Prompts -->
-                        <div class="space-y-1.5">
-                            <label class="text-[10px] font-bold text-gray-500">Edit / Inpaint Prompt</label>
+                        <!-- 2. Quick Preset Modifier Chips & Prompts -->
+                        <div class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <label class="text-[10px] font-bold text-gray-500">Edit / Inpaint Prompt</label>
+                                <span class="text-[8px] font-black uppercase text-gray-400">Quick Modifiers</span>
+                            </div>
+
+                            <!-- Quick Preset Buttons -->
+                            <div class="flex items-center gap-1 overflow-x-auto no-scrollbar py-1">
+                                <button 
+                                    v-for="mod in quickEditModifiers" 
+                                    :key="mod.label"
+                                    @click="applyQuickModifier(mod)"
+                                    class="px-2 py-0.5 rounded-full text-[9px] font-bold bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-blue-100 dark:hover:bg-blue-900/40 hover:text-blue-600 whitespace-nowrap transition-colors border border-gray-200 dark:border-gray-700/50"
+                                >
+                                    {{ mod.emoji }} {{ mod.label }}
+                                </button>
+                            </div>
+
                             <textarea 
                                 v-model="prompt" 
                                 rows="3" 
@@ -463,7 +532,6 @@ import { useUiStore } from '../stores/ui';
 import { useAuthStore } from '../stores/auth';
 import { useTasksStore } from '../stores/tasks';
 import apiClient from '../services/api';
-import useEventBus from '../services/eventBus';
 
 // Icons
 import IconPencil from '../assets/icons/IconPencil.vue';
@@ -503,12 +571,11 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const tasksStore = useTasksStore();
-const { on, off } = useEventBus();
 
 const isComponentMounted = ref(false);
 const hasHeaderTarget = ref(false);
 const showMobileSidebar = ref(false);
-const activeInspectorTab = ref('layers'); // 'layers' | 'adjust' | 'ai'
+const activeInspectorTab = ref('layers'); // 'layers' | 'transform' | 'adjust' | 'ai'
 
 const containerRef = ref(null);
 const imageCanvasRef = ref(null);
@@ -522,6 +589,7 @@ const tool = ref('brush');
 const color = ref('#3B82F6');
 const secondaryColor = ref('#EC4899');
 const brushSize = ref(35);
+const brushHardness = ref(0.85);
 const zoom = ref(1);
 const panX = ref(0);
 const panY = ref(0);
@@ -539,8 +607,32 @@ const activeTaskId = ref(null);
 
 const recentColors = ref(['#000000', '#FFFFFF', '#EF4444', '#10B981', '#3B82F6', '#F59E0B', '#8B5CF6']);
 
-// Non-destructive Color Adjustments
-const adjustments = ref({
+// Quick Modifiers for Image Editor
+const quickEditModifiers = [
+    { label: '4K Enhance', emoji: '💎', prompt: 'masterpiece, 8k uhd, pristine sharp focus, ultra-detailed micro texture, noise reduction, crystal clear details', negative: 'blurry, noise, artifacts, low resolution' },
+    { label: 'Colorize B&W', emoji: '🎨', prompt: 'natural historical colorization, authentic human skin tones, realistic clothing pigments, vibrant balanced color depth', negative: 'monochrome, black and white, grayscale, washed out' },
+    { label: 'Face Refine', emoji: '👤', prompt: 'realistic natural skin texture, visible fine pores, catchlights in eyes, individually defined hair strands, photorealistic', negative: 'plastic skin, airbrushed, cartoon, waxy face' },
+    { label: 'Heal Scratches', emoji: '🩹', prompt: 'seamless scratch repair, crease removal, stain heal, sharp details recovered, damage-free restoration', negative: 'scratches, cracks, stains, torn, dust spots' },
+    { label: 'Color Pop', emoji: '💥', prompt: 'vivid dynamic color palette, rich color depth, chromatic brilliance, high saturation balance', negative: 'dull, muted, faded, washed out' },
+    { label: 'Teal & Orange', emoji: '🎬', prompt: 'cinematic teal and orange color harmony, cool moody shadow tones, warm golden subject accents', negative: 'muddy colors, green tint' }
+];
+
+function applyQuickModifier(mod) {
+    if (!prompt.value.trim()) {
+        prompt.value = mod.prompt;
+    } else if (!prompt.value.includes(mod.prompt)) {
+        prompt.value = `${prompt.value}, ${mod.prompt}`;
+    }
+    if (mod.negative) {
+        if (!negativePrompt.value.trim()) {
+            negativePrompt.value = mod.negative;
+        } else if (!negativePrompt.value.includes(mod.negative)) {
+            negativePrompt.value = `${negativePrompt.value}, ${mod.negative}`;
+        }
+    }
+}
+
+const defaultAdjustments = () => ({
     brightness: 1.0,
     contrast: 1.0,
     saturate: 1.0,
@@ -564,7 +656,17 @@ const blendModes = [
 ];
 
 const layers = ref([
-    { id: 'base', name: 'Base Image Plate', visible: true, order: 0, el: null, ctx: null, opacity: 1.0, blendMode: 'normal' }
+    { 
+        id: 'base', 
+        name: 'Base Image Plate', 
+        visible: true, 
+        order: 0, 
+        el: null, 
+        ctx: null, 
+        opacity: 1.0, 
+        blendMode: 'normal',
+        adjustments: defaultAdjustments() 
+    }
 ]);
 
 const sortedLayers = computed(() => [...layers.value].sort((a, b) => b.order - a.order));
@@ -580,6 +682,7 @@ const historyIndex = ref(-1);
 const tools = [ 
     { id: 'pan', name: 'Pan / Move Canvas', icon: IconHand, shortcut: 'Space' }, 
     { id: 'eyedropper', name: 'Eyedropper Sample', icon: IconEyedropper, shortcut: 'I' },
+    { id: 'colorkey', name: 'Chroma Key Click (Remove Color)', icon: IconEyedropper, shortcut: 'K' },
     { id: 'brush', name: 'Drawing Brush', icon: IconPencil, shortcut: 'B' }, 
     { id: 'eraser', name: 'Eraser', icon: IconEraser, shortcut: 'E' }, 
     { id: 'wand', name: 'Magic Wand Transparency', icon: IconWand, shortcut: 'W' },
@@ -602,8 +705,11 @@ onMounted(async () => {
     uiStore.setPageTitle({ title: '', icon: null });
     nextTick(() => hasHeaderTarget.value = !!document.getElementById('global-header-title-target'));
     
-    on('task:completed', onTaskCompleted);
-    
+    // Ensure TTI models catalog is hydrated
+    if (dataStore.availableTtiModels.length === 0) {
+        await dataStore.fetchAvailableTtiModels();
+    }
+
     if (maskCanvasRef.value) ctxMask.value = maskCanvasRef.value.getContext('2d');
     if (previewCanvasRef.value) ctxPreview.value = previewCanvasRef.value.getContext('2d');
     
@@ -622,8 +728,23 @@ onMounted(async () => {
 
 onUnmounted(() => { 
     isComponentMounted.value = false; 
-    off('task:completed', onTaskCompleted); 
     window.removeEventListener('keydown', handleKeydown); 
+});
+
+// Watch active AI task for completion
+watch(() => activeTask.value?.status, async (newStatus) => {
+    if (newStatus === 'completed' && activeTask.value?.result) {
+        isProcessingTask.value = false;
+        const res = Array.isArray(activeTask.value.result) ? activeTask.value.result[0] : activeTask.value.result;
+        if (res?.id) {
+            await loadAiResultOntoCanvas(res.id);
+        }
+        activeTaskId.value = null;
+    } else if (newStatus === 'failed' || newStatus === 'cancelled') {
+        isProcessingTask.value = false;
+        activeTaskId.value = null;
+        uiStore.addNotification('AI task did not complete.', 'error');
+    }
 });
 
 function initNewBlankCanvas() {
@@ -720,7 +841,8 @@ function addNewLayer(name = null) {
         el: null, 
         ctx: null, 
         opacity: 1.0,
-        blendMode: 'normal'
+        blendMode: 'normal',
+        adjustments: defaultAdjustments()
     });
     activeLayerId.value = id;
     nextTick(() => {
@@ -746,7 +868,8 @@ function duplicateActiveLayer() {
         el: null,
         ctx: null,
         opacity: srcLayer.opacity,
-        blendMode: srcLayer.blendMode
+        blendMode: srcLayer.blendMode,
+        adjustments: srcLayer.adjustments ? { ...srcLayer.adjustments } : defaultAdjustments()
     };
     layers.value.push(newLayer);
     activeLayerId.value = newId;
@@ -793,6 +916,91 @@ function deleteLayer(id) {
     saveState();
 }
 
+function flipActiveLayerHorizontal() {
+    const l = activeLayer.value;
+    if (!l?.ctx) return;
+    const temp = document.createElement('canvas');
+    temp.width = l.ctx.canvas.width;
+    temp.height = l.ctx.canvas.height;
+    const tc = temp.getContext('2d');
+    tc.translate(temp.width, 0);
+    tc.scale(-1, 1);
+    tc.drawImage(l.ctx.canvas, 0, 0);
+    l.ctx.clearRect(0, 0, temp.width, temp.height);
+    l.ctx.drawImage(temp, 0, 0);
+    saveState();
+    uiStore.addNotification('Layer flipped horizontally.', 'info', 1000);
+}
+
+function flipActiveLayerVertical() {
+    const l = activeLayer.value;
+    if (!l?.ctx) return;
+    const temp = document.createElement('canvas');
+    temp.width = l.ctx.canvas.width;
+    temp.height = l.ctx.canvas.height;
+    const tc = temp.getContext('2d');
+    tc.translate(0, temp.height);
+    tc.scale(1, -1);
+    tc.drawImage(l.ctx.canvas, 0, 0);
+    l.ctx.clearRect(0, 0, temp.width, temp.height);
+    l.ctx.drawImage(temp, 0, 0);
+    saveState();
+    uiStore.addNotification('Layer flipped vertically.', 'info', 1000);
+}
+
+function rotateActiveLayer(deg) {
+    const l = activeLayer.value;
+    if (!l?.ctx) return;
+    const temp = document.createElement('canvas');
+    temp.width = l.ctx.canvas.width;
+    temp.height = l.ctx.canvas.height;
+    const tc = temp.getContext('2d');
+    tc.translate(temp.width / 2, temp.height / 2);
+    tc.rotate((deg * Math.PI) / 180);
+    tc.drawImage(l.ctx.canvas, -temp.width / 2, -temp.height / 2);
+    l.ctx.clearRect(0, 0, temp.width, temp.height);
+    l.ctx.drawImage(temp, 0, 0);
+    saveState();
+}
+
+function expandCanvas(direction, amount = 256) {
+    const oldW = imageCanvasRef.value.width;
+    const oldH = imageCanvasRef.value.height;
+    const newW = direction === 'horizontal' ? oldW + amount : oldW;
+    const newH = direction === 'vertical' ? oldH + amount : oldH;
+
+    const offsetX = direction === 'horizontal' ? amount / 2 : 0;
+    const offsetY = direction === 'vertical' ? amount / 2 : 0;
+
+    imageCanvasRef.value.width = newW;
+    imageCanvasRef.value.height = newH;
+
+    [maskCanvasRef, previewCanvasRef].forEach(c => {
+        if (c.value) {
+            c.value.width = newW;
+            c.value.height = newH;
+        }
+    });
+
+    layers.value.forEach(layer => {
+        if (layer.ctx) {
+            const temp = document.createElement('canvas');
+            temp.width = oldW;
+            temp.height = oldH;
+            temp.getContext('2d').drawImage(layer.ctx.canvas, 0, 0);
+
+            layer.el.width = newW;
+            layer.el.height = newH;
+            layer.ctx = layer.el.getContext('2d');
+            layer.ctx.drawImage(temp, offsetX, offsetY);
+        }
+    });
+
+    saveState();
+    fitToScreen();
+    uiStore.addNotification(`Canvas expanded to ${newW}x${newH}px.`, 'success');
+}
+
 function clearMask() {
     if (ctxMask.value && maskCanvasRef.value) {
         ctxMask.value.clearRect(0, 0, maskCanvasRef.value.width, maskCanvasRef.value.height);
@@ -824,18 +1032,19 @@ function sampleColorAtPoint(x, y) {
     comp.width = imageCanvasRef.value.width;
     comp.height = imageCanvasRef.value.height;
     const cc = comp.getContext('2d');
-    
+
     layers.value.filter(l => l.visible).forEach(l => {
         if (l.ctx) {
-            cc.globalAlpha = l.opacity;
+            cc.globalAlpha = l.opacity; 
             cc.globalCompositeOperation = l.blendMode || 'source-over';
             cc.drawImage(l.ctx.canvas, 0, 0);
         }
     });
-    
+
     const p = cc.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
     const hex = `#${((1 << 24) + (p[0] << 16) + (p[1] << 8) + p[2]).toString(16).slice(1)}`;
     color.value = hex;
+    keyColor.value = hex;
     if (!recentColors.value.includes(hex)) {
         recentColors.value.unshift(hex);
         if (recentColors.value.length > 7) recentColors.value.pop();
@@ -843,12 +1052,99 @@ function sampleColorAtPoint(x, y) {
     uiStore.addNotification(`Sampled Color: ${hex}`, 'info', 1000);
 }
 
+// ── ADVANCED CHROMA / COLOR KEY ALGORITHM ──
+function executeChromaKey({ targetCtx, hexColor, tolerance = 28, softness = 12, spillSuppression = true }) {
+    if (!targetCtx) return;
+    const w = targetCtx.canvas.width;
+    const h = targetCtx.canvas.height;
+    const imgData = targetCtx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+
+    const kr = parseInt(hexColor.slice(1, 3), 16);
+    const kg = parseInt(hexColor.slice(3, 5), 16);
+    const kb = parseInt(hexColor.slice(5, 7), 16);
+
+    const maxDist = 441.67; // Math.sqrt(255*255*3)
+    const tolThreshold = (tolerance / 100) * maxDist;
+    const softThreshold = (softness / 100) * 120;
+
+    for (let i = 0; i < d.length; i += 4) {
+        const r = d[i];
+        const g = d[i+1];
+        const b = d[i+2];
+        const a = d[i+3];
+
+        if (a === 0) continue;
+
+        const dr = r - kr;
+        const dg = g - kg;
+        const db = b - kb;
+        const dist = Math.sqrt(dr*dr + dg*dg + db*db);
+
+        if (dist <= tolThreshold) {
+            d[i+3] = 0; // Full key out
+        } else if (dist < tolThreshold + softThreshold && softThreshold > 0) {
+            // Feathered soft alpha contour
+            const factor = (dist - tolThreshold) / softThreshold;
+            d[i+3] = Math.round(a * factor);
+
+            // Color spill suppression on subject perimeter
+            if (spillSuppression) {
+                if (kg > kr && kg > kb) {
+                    d[i+1] = Math.min(g, Math.round((r + b) / 2));
+                } else if (kr > kg && kb > kg) {
+                    d[i] = Math.min(r, Math.round(g * 1.1));
+                    d[i+2] = Math.min(b, Math.round(g * 1.1));
+                }
+            }
+        }
+    }
+
+    targetCtx.putImageData(imgData, 0, 0);
+}
+
+function executeChromaKeyOnActiveLayer() {
+    const l = activeLayer.value;
+    if (!l?.ctx) return;
+    executeChromaKey({
+        targetCtx: l.ctx,
+        hexColor: keyColor.value,
+        tolerance: keyTolerance.value,
+        softness: keySoftness.value,
+        spillSuppression: keySpillSuppression.value
+    });
+    saveState();
+    uiStore.addNotification(`Color ${keyColor.value} keyed out of layer.`, 'success');
+}
+
+function keyOutColorAtPoint(x, y) {
+    const l = activeLayer.value;
+    if (!l?.ctx) return;
+    const p = l.ctx.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
+    const hex = `#${((1 << 24) + (p[0] << 16) + (p[1] << 8) + p[2]).toString(16).slice(1)}`;
+    keyColor.value = hex;
+    executeChromaKey({
+        targetCtx: l.ctx,
+        hexColor: hex,
+        tolerance: brushSize.value ? Math.min(brushSize.value, 60) : keyTolerance.value,
+        softness: keySoftness.value,
+        spillSuppression: keySpillSuppression.value
+    });
+    saveState();
+    uiStore.addNotification(`Keyed out ${hex} from layer.`, 'info', 1500);
+}
+
 function startAction(e) {
     if (e.button !== 0) return;
     const { x, y } = getPointerPos(e);
-    
+
     if (tool.value === 'eyedropper') {
         sampleColorAtPoint(x, y);
+        return;
+    }
+
+    if (tool.value === 'colorkey') {
+        keyOutColorAtPoint(x, y);
         return;
     }
     
@@ -1035,13 +1331,19 @@ function magicWandTransparency(startX, startY) {
 }
 
 function getLayerFilterCss(layer) {
-    if (layer.id !== activeLayerId.value) return 'none';
-    const adj = adjustments.value;
+    if (!layer?.adjustments) return 'none';
+    const adj = layer.adjustments;
+    if (adj.brightness === 1.0 && adj.contrast === 1.0 && adj.saturate === 1.0 && adj.hueRotate === 0 && adj.blur === 0) {
+        return 'none';
+    }
     return `brightness(${adj.brightness}) contrast(${adj.contrast}) saturate(${adj.saturate}) hue-rotate(${adj.hueRotate}deg) blur(${adj.blur}px)`;
 }
 
 function resetAdjustments() {
-    adjustments.value = { brightness: 1.0, contrast: 1.0, saturate: 1.0, hueRotate: 0, blur: 0 };
+    if (activeLayer.value?.adjustments) {
+        activeLayer.value.adjustments = defaultAdjustments();
+        saveState();
+    }
 }
 
 function bakeAdjustmentsToActiveLayer() {
@@ -1055,7 +1357,7 @@ function bakeAdjustmentsToActiveLayer() {
     ctx.drawImage(l.ctx.canvas, 0, 0);
     l.ctx.clearRect(0, 0, c.width, c.height);
     l.ctx.drawImage(c, 0, 0);
-    resetAdjustments();
+    l.adjustments = defaultAdjustments();
     saveState();
     uiStore.addNotification('Filter adjustments baked into layer.', 'success');
 }
@@ -1120,30 +1422,20 @@ async function executeTargetedAiEdit() {
             mask: mask64, 
             prompt: prompt.value, 
             negative_prompt: negativePrompt.value,
-            model: selectedModel.value, 
+            model: selectedModel.value || authStore.user?.tti_binding_model_name, 
             width: comp.width, 
             height: comp.height,
             strength: editStrength.value
         });
         if (tsk?.id) {
             activeTaskId.value = tsk.id;
+        } else {
+            isProcessingTask.value = false;
         }
     } catch (e) {
         console.error("AI Edit failed:", e);
         isProcessingTask.value = false;
     }
-}
-
-async function onTaskCompleted(t) { 
-    if (t.id === activeTaskId.value) { 
-        isProcessingTask.value = false; 
-        if (t.status === 'completed' && t.result) {
-            const res = Array.isArray(t.result) ? t.result[0] : t.result;
-            if (res?.id) {
-                await loadAiResultOntoCanvas(res.id);
-            }
-        }
-    } 
 }
 
 async function loadAiResultOntoCanvas(imageId) {
@@ -1239,6 +1531,7 @@ function saveState() {
         v: l.visible, 
         o: l.opacity,
         b: l.blendMode || 'normal',
+        adj: l.adjustments ? { ...l.adjustments } : defaultAdjustments(),
         data: l.el ? l.el.toDataURL('image/png') : null
     }));
 
@@ -1278,7 +1571,7 @@ function redo() {
 
 async function applyHistory(snapshot) {
     if (!snapshot) return;
-    
+
     const restoredLayers = snapshot.layers.map(s => {
         const existing = layers.value.find(l => l.id === s.id);
         return {
@@ -1288,6 +1581,7 @@ async function applyHistory(snapshot) {
             visible: s.v,
             opacity: s.o,
             blendMode: s.b || 'normal',
+            adjustments: s.adj ? { ...s.adj } : defaultAdjustments(),
             el: existing?.el || null,
             ctx: existing?.ctx || null
         };
@@ -1358,6 +1652,7 @@ function handleKeydown(e) {
     if (e.key === 'b' || e.key === 'B') setTool('brush');
     if (e.key === 'e' || e.key === 'E') setTool('eraser');
     if (e.key === 'i' || e.key === 'I') setTool('eyedropper');
+    if (e.key === 'k' || e.key === 'K') setTool('colorkey');
     if (e.key === 'w' || e.key === 'W') setTool('wand');
     if (e.key === 'c' || e.key === 'C') setTool('clone');
     if (e.key === 'g' || e.key === 'G') setTool('gradient');
