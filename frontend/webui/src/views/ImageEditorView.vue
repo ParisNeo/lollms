@@ -18,7 +18,7 @@
 
     <Teleport to="#global-header-actions-target" v-if="isComponentMounted && hasHeaderTarget">
         <div class="flex items-center gap-1.5 pointer-events-auto relative z-[100]">
-            <!-- Undo/Redo -->
+            <!-- Undo / Redo Controls -->
             <button @click="undo" :disabled="historyIndex <= 0" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl disabled:opacity-30 transition-all text-gray-600 dark:text-gray-300" title="Undo (Ctrl+Z)"><IconUndo class="w-4 h-4" /></button>
             <button @click="redo" :disabled="historyIndex >= history.length - 1" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl disabled:opacity-30 transition-all text-gray-600 dark:text-gray-300" title="Redo (Ctrl+Y)"><IconRedo class="w-4 h-4" /></button>
             
@@ -39,17 +39,16 @@
         
         <!-- Top Tool Options HUD (Floating Pill) -->
         <div class="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-3 bg-white/95 dark:bg-gray-900/95 backdrop-blur-xl px-4 py-2 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 animate-in fade-in slide-in-from-top-3 max-w-[95vw] overflow-x-auto no-scrollbar">
-            <!-- Active Tool Indicator -->
             <div class="flex items-center gap-1.5 pr-2 border-r dark:border-gray-800 shrink-0">
                 <span class="text-[9px] font-black uppercase tracking-widest text-primary">{{ currentToolName }}</span>
             </div>
 
-            <!-- Primary Color & Swatches -->
-            <div class="flex items-center gap-1.5 shrink-0" v-if="['brush', 'line', 'rect', 'circle', 'text', 'fill', 'gradient'].includes(tool)">
+            <!-- Primary Color selection & Swatches -->
+            <div class="flex items-center gap-1.5 shrink-0" v-if="['brush', 'line', 'rect', 'circle', 'text', 'gradient'].includes(tool)">
                 <div class="relative w-6 h-6 rounded-lg overflow-hidden border dark:border-gray-700 shadow-sm cursor-pointer" :style="{ backgroundColor: color }">
                     <input type="color" v-model="color" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
                 </div>
-                <!-- Recent Swatches -->
+                <!-- Recent Colors -->
                 <div class="hidden sm:flex items-center gap-1">
                     <button 
                         v-for="swatch in recentColors" 
@@ -61,7 +60,7 @@
                 </div>
             </div>
             
-            <!-- Secondary Color (for Gradients) -->
+            <!-- Secondary Color picker (for Gradients) -->
             <div class="flex items-center gap-1.5 shrink-0" v-if="tool === 'gradient'">
                 <span class="text-[9px] font-bold text-gray-400 uppercase">To</span>
                 <div class="relative w-6 h-6 rounded-lg overflow-hidden border dark:border-gray-700 shadow-sm cursor-pointer" :style="{ backgroundColor: secondaryColor }">
@@ -69,22 +68,22 @@
                 </div>
             </div>
 
-            <!-- Size / Thickness Slider -->
-            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand', 'blur'].includes(tool)">
+            <!-- Size, Thickness & Tolerance Slider Controls -->
+            <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser', 'line', 'rect', 'circle', 'text', 'clone', 'wand', 'colorkey'].includes(tool)">
                 <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">
-                    {{ tool === 'text' ? 'Font' : (tool === 'wand' || tool === 'fill' ? 'Tolerance' : 'Size') }}
+                    {{ tool === 'text' ? 'Font' : (tool === 'wand' || tool === 'colorkey' ? 'Tolerance' : 'Size') }}
                 </span>
                 <input 
                     type="range" 
                     v-model.number="brushSize" 
-                    :min="tool === 'wand' || tool === 'fill' ? 0 : 1" 
-                    :max="tool === 'wand' || tool === 'fill' ? 100 : 300" 
+                    :min="tool === 'wand' || tool === 'colorkey' ? 1 : 1" 
+                    :max="tool === 'wand' || tool === 'colorkey' ? 100 : 300" 
                     class="w-20 sm:w-28 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-500"
                 >
                 <span class="text-[9px] font-mono font-bold w-7 text-center bg-gray-100 dark:bg-gray-800 py-0.5 rounded">{{ brushSize }}</span>
             </div>
 
-            <!-- Brush Hardness / Smoothness -->
+            <!-- Brush Hardness Settings -->
             <div class="flex items-center gap-2 shrink-0" v-if="['brush', 'eraser'].includes(tool)">
                 <span class="text-[9px] font-black text-gray-400 uppercase tracking-widest">Hardness</span>
                 <input 
@@ -97,14 +96,14 @@
                 >
             </div>
 
-            <!-- Clone Tool Anchor State -->
+            <!-- Clone Stamp Anchor Configuration -->
             <div v-if="tool === 'clone'" class="flex items-center gap-2 border-l dark:border-gray-800 pl-3 shrink-0">
                 <button @click="settingCloneAnchor = true" class="btn btn-xs h-6 px-2 text-[10px]" :class="settingCloneAnchor ? 'btn-primary' : 'btn-secondary'">
                     {{ settingCloneAnchor ? 'Click to Set Source...' : 'Set Anchor' }}
                 </button>
             </div>
 
-            <!-- Mask Clear Quick Button -->
+            <!-- Inpaint Mask Actions -->
             <div v-if="activeLayerId === 'mask'" class="flex items-center gap-2 border-l dark:border-gray-800 pl-3 shrink-0">
                 <button @click="clearMask" class="btn btn-xs btn-secondary h-6 text-[10px] text-red-500">
                     Clear Mask
@@ -116,7 +115,7 @@
         </div>
 
         <div class="grow flex min-h-0 relative overflow-hidden">
-            <!-- Central Viewport & Canvas Area -->
+            <!-- Central Viewport & Canvas Composition Stack -->
             <main 
                 ref="containerRef" 
                 class="grow bg-gray-200 dark:bg-black relative overflow-hidden flex items-center justify-center cursor-crosshair pattern-grid" 
@@ -142,7 +141,7 @@
                     </div>
                 </transition>
 
-                <!-- Layer Composition Container -->
+                <!-- Canvas Wrapper Stack -->
                 <div :style="combinedCanvasStyle" class="relative shadow-2xl origin-center canvas-stack">
                     <!-- Base Sizing Anchor Canvas -->
                     <canvas ref="imageCanvasRef" class="block bg-transparent layer-canvas"></canvas>
@@ -279,7 +278,7 @@
                             >
                                 <button @click.stop="toggleLayerVisibility(layer)" class="p-1 text-gray-400 hover:text-blue-500">
                                     <IconEye v-if="layer.visible" class="w-3.5 h-3.5 text-blue-500"/>
-                                    <IconEyeOff v-else class="w-3.5 h-3.5"/>
+                                    <IconEyeOff v-else class="w-3.5 h-3.5 text-gray-400"/>
                                 </button>
                                 
                                 <span class="text-xs font-bold truncate grow" :class="layer.id === 'base' ? 'font-black' : ''">{{ layer.name }}</span>
@@ -401,6 +400,72 @@
                                 Bake Filter into Active Layer
                             </button>
                         </div>
+
+                        <!-- ── DEDICATED COLOR / CHROMA KEY SUITE ── -->
+                        <div class="space-y-3 p-3 bg-purple-50/50 dark:bg-purple-950/20 rounded-2xl border border-purple-200/70 dark:border-purple-900/40">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[9px] font-black uppercase text-purple-700 dark:text-purple-300 tracking-wider flex items-center gap-1.5">
+                                    <span>🎨</span> Chroma / Color Key (Transparency)
+                                </span>
+                            </div>
+
+                            <!-- Key Color Selection -->
+                            <div class="space-y-1.5">
+                                <span class="text-[10px] font-bold text-gray-600 dark:text-gray-400 block">Key Color to Remove</span>
+                                <div class="flex items-center gap-2">
+                                    <div class="relative w-8 h-8 rounded-lg overflow-hidden border dark:border-gray-700 shadow-sm shrink-0" :style="{ backgroundColor: keyColor }">
+                                        <input type="color" v-model="keyColor" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                                    </div>
+                                    <div class="grid grid-cols-5 gap-1 grow">
+                                        <button 
+                                            v-for="pk in [
+                                                { hex: '#00FF00', label: 'Green', bg: 'bg-[#00FF00]' },
+                                                { hex: '#FF00FF', label: 'Magenta', bg: 'bg-[#FF00FF]' },
+                                                { hex: '#FFFFFF', label: 'White', bg: 'bg-white' },
+                                                { hex: '#000000', label: 'Black', bg: 'bg-black' },
+                                                { hex: '#0000FF', label: 'Blue', bg: 'bg-[#0000FF]' }
+                                            ]"
+                                            :key="pk.hex"
+                                            @click="keyColor = pk.hex"
+                                            class="h-6 rounded-md border border-black/10 dark:border-white/10 hover:scale-105 transition-transform"
+                                            :class="pk.bg"
+                                            :title="pk.label"
+                                        ></button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Tolerance Slider -->
+                            <div class="space-y-1">
+                                <div class="flex justify-between text-xs">
+                                    <span class="text-[10px] font-bold text-gray-500">Color Tolerance</span>
+                                    <span class="font-mono text-[10px] font-bold">{{ keyTolerance }}%</span>
+                                </div>
+                                <input type="range" v-model.number="keyTolerance" min="1" max="80" step="1" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500">
+                            </div>
+
+                            <!-- Edge Softness / Feathering Slider -->
+                            <div class="space-y-1">
+                                <div class="flex justify-between text-xs">
+                                    <span class="text-[10px] font-bold text-gray-500">Edge Feathering</span>
+                                    <span class="font-mono text-[10px] font-bold">{{ keySoftness }}%</span>
+                                </div>
+                                <input type="range" v-model.number="keySoftness" min="0" max="50" step="1" class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-500">
+                            </div>
+
+                            <!-- Spill Removal Toggle -->
+                            <div class="flex items-center justify-between pt-1">
+                                <span class="text-[10px] font-bold text-gray-600 dark:text-gray-300">Fringe Spill Suppression</span>
+                                <button @click="keySpillSuppression = !keySpillSuppression" :class="keySpillSuppression ? 'bg-purple-600' : 'bg-gray-300 dark:bg-gray-600'" class="w-8 h-4 rounded-full relative transition-colors">
+                                    <div class="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all" :style="{ left: keySpillSuppression ? '16px' : '2px' }"></div>
+                                </button>
+                            </div>
+
+                            <!-- Apply Button -->
+                            <button @click="executeChromaKeyOnActiveLayer" class="btn btn-primary btn-xs w-full py-2 font-bold uppercase tracking-wider text-[9px] mt-1 shadow-md !bg-purple-600 hover:!bg-purple-700">
+                                Apply Chroma Key to Layer
+                            </button>
+                        </div>
                     </div>
 
                     <!-- ── TAB 4: TARGETED AI LAYER EDITING & INPAINTING ── -->
@@ -496,6 +561,34 @@
                                     <div class="absolute top-0.5 w-3 h-3 bg-white rounded-full transition-all" :style="{ left: outputAsNewLayer ? '16px' : '2px' }"></div>
                                 </button>
                             </div>
+                        </div>
+
+                        <!-- AI Layer Chroma Key Mode -->
+                        <div class="space-y-2 p-3 bg-gray-50 dark:bg-gray-800/80 rounded-xl border dark:border-gray-700">
+                            <div class="flex items-center justify-between">
+                                <span class="text-[10px] font-black uppercase tracking-wider text-gray-700 dark:text-gray-300">Auto Chroma-Key Screen</span>
+                                <span class="text-[9px] font-mono text-purple-500 font-bold">{{ aiKeyScreenMode.toUpperCase() }}</span>
+                            </div>
+                            
+                            <div class="grid grid-cols-4 gap-1">
+                                <button 
+                                    v-for="mode in [
+                                        { id: 'magenta', label: 'Magenta #FF00FF', bg: 'bg-[#FF00FF] text-white' },
+                                        { id: 'green', label: 'Green #00FF00', bg: 'bg-[#00FF00] text-black' },
+                                        { id: 'white', label: 'White #FFFFFF', bg: 'bg-white text-black' },
+                                        { id: 'off', label: 'None (Opaque)', bg: 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300' }
+                                    ]"
+                                    :key="mode.id"
+                                    @click="aiKeyScreenMode = mode.id"
+                                    class="py-1 text-[9px] font-bold rounded-lg border transition-all text-center"
+                                    :class="aiKeyScreenMode === mode.id ? 'border-purple-500 ring-2 ring-purple-500/30 font-black scale-105 ' + mode.bg : 'border-gray-200 dark:border-gray-700 opacity-60 hover:opacity-100'"
+                                >
+                                    {{ mode.id }}
+                                </button>
+                            </div>
+                            <p class="text-[9px] text-gray-400 leading-tight">
+                                Generates against a solid color studio backdrop and automatically cuts out transparency before adding to your layer stack.
+                            </p>
                         </div>
 
                         <div class="space-y-1.5">
@@ -607,32 +700,8 @@ const activeTaskId = ref(null);
 
 const recentColors = ref(['#000000', '#FFFFFF', '#EF4444', '#10B981', '#3B82F6', '#F59E0B', '#8B5CF6']);
 
-// Quick Modifiers for Image Editor
-const quickEditModifiers = [
-    { label: '4K Enhance', emoji: '💎', prompt: 'masterpiece, 8k uhd, pristine sharp focus, ultra-detailed micro texture, noise reduction, crystal clear details', negative: 'blurry, noise, artifacts, low resolution' },
-    { label: 'Colorize B&W', emoji: '🎨', prompt: 'natural historical colorization, authentic human skin tones, realistic clothing pigments, vibrant balanced color depth', negative: 'monochrome, black and white, grayscale, washed out' },
-    { label: 'Face Refine', emoji: '👤', prompt: 'realistic natural skin texture, visible fine pores, catchlights in eyes, individually defined hair strands, photorealistic', negative: 'plastic skin, airbrushed, cartoon, waxy face' },
-    { label: 'Heal Scratches', emoji: '🩹', prompt: 'seamless scratch repair, crease removal, stain heal, sharp details recovered, damage-free restoration', negative: 'scratches, cracks, stains, torn, dust spots' },
-    { label: 'Color Pop', emoji: '💥', prompt: 'vivid dynamic color palette, rich color depth, chromatic brilliance, high saturation balance', negative: 'dull, muted, faded, washed out' },
-    { label: 'Teal & Orange', emoji: '🎬', prompt: 'cinematic teal and orange color harmony, cool moody shadow tones, warm golden subject accents', negative: 'muddy colors, green tint' }
-];
-
-function applyQuickModifier(mod) {
-    if (!prompt.value.trim()) {
-        prompt.value = mod.prompt;
-    } else if (!prompt.value.includes(mod.prompt)) {
-        prompt.value = `${prompt.value}, ${mod.prompt}`;
-    }
-    if (mod.negative) {
-        if (!negativePrompt.value.trim()) {
-            negativePrompt.value = mod.negative;
-        } else if (!negativePrompt.value.includes(mod.negative)) {
-            negativePrompt.value = `${negativePrompt.value}, ${mod.negative}`;
-        }
-    }
-}
-
-const defaultAdjustments = () => ({
+// Non-destructive Color Adjustments
+const adjustments = ref({
     brightness: 1.0,
     contrast: 1.0,
     saturate: 1.0,
@@ -654,6 +723,14 @@ const blendModes = [
     { label: 'Difference', value: 'difference' },
     { label: 'Exclusion', value: 'exclusion' }
 ];
+
+const defaultAdjustments = () => ({
+    brightness: 1.0,
+    contrast: 1.0,
+    saturate: 1.0,
+    hueRotate: 0,
+    blur: 0
+});
 
 const layers = ref([
     { 
@@ -700,12 +777,29 @@ const showCursor = computed(() => ['brush', 'eraser', 'circle', 'text', 'clone',
 const combinedCanvasStyle = computed(() => ({ transform: `translate(${panX.value}px, ${panY.value}px) scale(${zoom.value})` }));
 const activeTask = computed(() => tasksStore.tasks.find(t => t.id === activeTaskId.value));
 
+const aiKeyScreenMode = ref('magenta'); // 'magenta' | 'green' | 'white' | 'off'
+
+// Chroma Key Suite State
+const keyColor = ref('#00FF00');
+const keyTolerance = ref(28);
+const keySoftness = ref(12);
+const keySpillSuppression = ref(true);
+
+// Quick Modifiers for Image Editor
+const quickEditModifiers = [
+    { label: '4K Enhance', emoji: '💎', prompt: 'masterpiece, 8k uhd, pristine sharp focus, ultra-detailed micro texture, noise reduction, crystal clear details', negative: 'blurry, noise, artifacts, low resolution' },
+    { label: 'Colorize B&W', emoji: '🎨', prompt: 'natural historical colorization, authentic human skin tones, realistic clothing pigments, vibrant balanced color depth', negative: 'monochrome, black and white, grayscale, washed out' },
+    { label: 'Face Refine', emoji: '👤', prompt: 'realistic natural skin texture, visible fine pores, catchlights in eyes, individually defined hair strands, photorealistic', negative: 'plastic skin, airbrushed, cartoon, waxy face' },
+    { label: 'Heal Scratches', emoji: '🩹', prompt: 'seamless scratch repair, crease removal, stain heal, sharp details recovered, damage-free restoration', negative: 'scratches, cracks, stains, torn, dust spots' },
+    { label: 'Color Pop', emoji: '💥', prompt: 'vivid dynamic color palette, rich color depth, chromatic brilliance, high saturation balance', negative: 'dull, muted, faded, washed out' },
+    { label: 'Teal & Orange', emoji: '🎬', prompt: 'cinematic teal and orange color harmony, cool moody shadow tones, warm golden subject accents', negative: 'muddy colors, green tint' }
+];
+
 onMounted(async () => {
     isComponentMounted.value = true;
     uiStore.setPageTitle({ title: '', icon: null });
     nextTick(() => hasHeaderTarget.value = !!document.getElementById('global-header-title-target'));
     
-    // Ensure TTI models catalog is hydrated
     if (dataStore.availableTtiModels.length === 0) {
         await dataStore.fetchAvailableTtiModels();
     }
@@ -731,7 +825,6 @@ onUnmounted(() => {
     window.removeEventListener('keydown', handleKeydown); 
 });
 
-// Watch active AI task for completion
 watch(() => activeTask.value?.status, async (newStatus) => {
     if (newStatus === 'completed' && activeTask.value?.result) {
         isProcessingTask.value = false;
@@ -1032,7 +1125,7 @@ function sampleColorAtPoint(x, y) {
     comp.width = imageCanvasRef.value.width;
     comp.height = imageCanvasRef.value.height;
     const cc = comp.getContext('2d');
-
+    
     layers.value.filter(l => l.visible).forEach(l => {
         if (l.ctx) {
             cc.globalAlpha = l.opacity; 
@@ -1040,7 +1133,7 @@ function sampleColorAtPoint(x, y) {
             cc.drawImage(l.ctx.canvas, 0, 0);
         }
     });
-
+    
     const p = cc.getImageData(Math.floor(x), Math.floor(y), 1, 1).data;
     const hex = `#${((1 << 24) + (p[0] << 16) + (p[1] << 8) + p[2]).toString(16).slice(1)}`;
     color.value = hex;
@@ -1052,7 +1145,6 @@ function sampleColorAtPoint(x, y) {
     uiStore.addNotification(`Sampled Color: ${hex}`, 'info', 1000);
 }
 
-// ── ADVANCED CHROMA / COLOR KEY ALGORITHM ──
 function executeChromaKey({ targetCtx, hexColor, tolerance = 28, softness = 12, spillSuppression = true }) {
     if (!targetCtx) return;
     const w = targetCtx.canvas.width;
@@ -1064,7 +1156,7 @@ function executeChromaKey({ targetCtx, hexColor, tolerance = 28, softness = 12, 
     const kg = parseInt(hexColor.slice(3, 5), 16);
     const kb = parseInt(hexColor.slice(5, 7), 16);
 
-    const maxDist = 441.67; // Math.sqrt(255*255*3)
+    const maxDist = 441.67;
     const tolThreshold = (tolerance / 100) * maxDist;
     const softThreshold = (softness / 100) * 120;
 
@@ -1082,13 +1174,11 @@ function executeChromaKey({ targetCtx, hexColor, tolerance = 28, softness = 12, 
         const dist = Math.sqrt(dr*dr + dg*dg + db*db);
 
         if (dist <= tolThreshold) {
-            d[i+3] = 0; // Full key out
+            d[i+3] = 0;
         } else if (dist < tolThreshold + softThreshold && softThreshold > 0) {
-            // Feathered soft alpha contour
             const factor = (dist - tolThreshold) / softThreshold;
             d[i+3] = Math.round(a * factor);
 
-            // Color spill suppression on subject perimeter
             if (spillSuppression) {
                 if (kg > kr && kg > kb) {
                     d[i+1] = Math.min(g, Math.round((r + b) / 2));
@@ -1137,7 +1227,7 @@ function keyOutColorAtPoint(x, y) {
 function startAction(e) {
     if (e.button !== 0) return;
     const { x, y } = getPointerPos(e);
-
+    
     if (tool.value === 'eyedropper') {
         sampleColorAtPoint(x, y);
         return;
@@ -1438,6 +1528,95 @@ async function executeTargetedAiEdit() {
     }
 }
 
+async function generateNewLayerElement() {
+    isProcessingTask.value = true;
+    
+    let colorInstruction = "";
+    if (aiKeyScreenMode.value === 'magenta') colorInstruction = " on a solid clean bright magenta background, studio lighting, isolated subject";
+    else if (aiKeyScreenMode.value === 'green') colorInstruction = " on a solid green screen background, studio lighting, isolated subject";
+    else if (aiKeyScreenMode.value === 'white') colorInstruction = " on a solid clean seamless white background, isolated object";
+
+    const fullPrompt = `${prompt.value}${colorInstruction}`;
+
+    try {
+        const tsk = await imageStore.generateImage({
+            prompt: fullPrompt, 
+            model: selectedModel.value || authStore.user?.tti_binding_model_name, 
+            width: imageCanvasRef.value.width, 
+            height: imageCanvasRef.value.height, 
+            n: 1
+        });
+        if (tsk?.id) {
+            activeTaskId.value = tsk.id;
+            const unwatch = watch(() => tasksStore.tasks.find(t => t.id === tsk.id), async (t) => {
+                if (t?.status === 'completed' && t.result) {
+                    const res = Array.isArray(t.result) ? t.result[0] : t.result;
+                    if (res?.id) {
+                        await loadGeneratedAssetToLayer(res.id);
+                    }
+                    unwatch();
+                } else if (['failed', 'cancelled'].includes(t?.status)) {
+                    isProcessingTask.value = false;
+                    unwatch();
+                }
+            }, { deep: true });
+        } else {
+            isProcessingTask.value = false;
+        }
+    } catch (e) { 
+        console.error("Layer element generation failed:", e);
+        isProcessingTask.value = false; 
+    }
+}
+
+async function loadGeneratedAssetToLayer(id) {
+    try {
+        const res = await apiClient.get(`/api/image-studio/${id}/file`, { responseType: 'blob' });
+        const img = new Image();
+        img.onload = () => {
+            addNewLayer(`AI Element (${prompt.value.slice(0, 15)})`);
+            nextTick(() => {
+                const l = activeLayer.value;
+                if (l?.ctx) {
+                    l.ctx.drawImage(img, 0, 0);
+
+                    // Automatic Chroma Keying based on selected screen mode
+                    if (aiKeyScreenMode.value === 'magenta') {
+                        executeChromaKey({ targetCtx: l.ctx, hexColor: '#FF00FF', tolerance: 30, softness: 12, spillSuppression: true });
+                    } else if (aiKeyScreenMode.value === 'green') {
+                        executeChromaKey({ targetCtx: l.ctx, hexColor: '#00FF00', tolerance: 32, softness: 12, spillSuppression: true });
+                    } else if (aiKeyScreenMode.value === 'white') {
+                        executeChromaKey({ targetCtx: l.ctx, hexColor: '#FFFFFF', tolerance: 18, softness: 10, spillSuppression: false });
+                    }
+
+                    saveState(); 
+                    isProcessingTask.value = false;
+                    uiStore.addNotification('AI Element added and keyed out to transparent layer!', 'success');
+                }
+            });
+        };
+        img.src = URL.createObjectURL(res.data);
+    } catch (e) {
+        console.error("Failed to load asset to layer:", e);
+        isProcessingTask.value = false;
+    }
+}
+
+function applyQuickModifier(mod) {
+    if (!prompt.value.trim()) {
+        prompt.value = mod.prompt;
+    } else if (!prompt.value.includes(mod.prompt)) {
+        prompt.value = `${prompt.value}, ${mod.prompt}`;
+    }
+    if (mod.negative) {
+        if (!negativePrompt.value.trim()) {
+            negativePrompt.value = mod.negative;
+        } else if (!negativePrompt.value.includes(mod.negative)) {
+            negativePrompt.value = `${negativePrompt.value}, ${mod.negative}`;
+        }
+    }
+}
+
 async function loadAiResultOntoCanvas(imageId) {
     try {
         const res = await apiClient.get(`/api/image-studio/${imageId}/file`, { responseType: 'blob' });
@@ -1571,7 +1750,7 @@ function redo() {
 
 async function applyHistory(snapshot) {
     if (!snapshot) return;
-
+    
     const restoredLayers = snapshot.layers.map(s => {
         const existing = layers.value.find(l => l.id === s.id);
         return {
