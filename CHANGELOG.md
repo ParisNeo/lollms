@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-20 23:29]
+
+- build(frontend): rebuild production assets and update layout components
+
 ## [2026-08-20 22:50]
 
 - feat(voices): implement voice studio and STT enhancements
