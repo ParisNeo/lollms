@@ -124,6 +124,19 @@ export const useVoicesStore = defineStore('voices', () => {
         }
     }
 
+    async function audioToAudioTranslate(formData) {
+        try {
+            const response = await apiClient.post('/api/voices-studio/audio-to-audio', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            return response.data;
+        } catch (error) {
+            console.error("Audio-to-Audio translation failed:", error);
+            uiStore.addNotification(error.response?.data?.detail || "Audio translation pipeline failed.", "error");
+            throw error;
+        }
+    }
+
     async function duplicateVoice(voiceId) {
         try {
             const response = await apiClient.post(`/api/voices-studio/${voiceId}/duplicate`);
@@ -147,6 +160,7 @@ export const useVoicesStore = defineStore('voices', () => {
         setActiveVoice,
         testVoice,
         applyEffects,
+        audioToAudioTranslate,
         duplicateVoice,
     };
 });

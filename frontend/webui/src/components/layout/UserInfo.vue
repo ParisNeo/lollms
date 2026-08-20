@@ -39,6 +39,7 @@ const triggerRef = ref(null);
 const user = computed(() => authStore.user);
 const isAdmin = computed(() => authStore.isAdmin);
 const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
+const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 // Highlight Logic
@@ -248,11 +249,13 @@ const vOnClickOutside = {
                                 </div>
                             </router-link>
 
-                            <router-link v-if="isTtsConfigured" to="/voices-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isVoicesStudioActive}">
-                                <IconMicrophone class="h-5 w-5 text-pink-500" />
+                            <router-link v-if="isTtsConfigured || isSttConfigured" to="/voices-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isVoicesStudioActive}">
+                                <IconMicrophone class="w-5 h-5 text-pink-500" />
                                 <div class="flex flex-col">
                                     <span class="font-bold">Voices Studio</span>
-                                    <span class="text-[10px] opacity-60">TTS & Voice Design</span>
+                                    <span class="text-[10px] opacity-60">
+                                        {{ isTtsConfigured && isSttConfigured ? 'TTS, STT & Translation' : (isTtsConfigured ? 'TTS & Voice Design' : 'STT & Transcription') }}
+                                    </span>
                                 </div>
                             </router-link>
 

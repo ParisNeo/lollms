@@ -714,11 +714,11 @@ def build_lollms_client_from_params(
         if load_tts:
             selected_tts_binding = None
             selected_tts_model_name = tts_model_name
-            
+
             user_tts_model_full = user_db.tts_binding_model_name
             if tts_binding_alias:
                 user_tts_model_full = f"{tts_binding_alias}/{tts_model_name or ''}"
-            
+
             if user_tts_model_full:
                 if '/' in user_tts_model_full:
                     tts_binding_alias_local, tts_model_name_local = user_tts_model_full.split('/', 1)
@@ -726,10 +726,10 @@ def build_lollms_client_from_params(
                     if not selected_tts_model_name:
                         selected_tts_model_name = tts_model_name_local
 
-                if not selected_tts_binding:
-                    selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
-                    if selected_tts_binding and not selected_tts_model_name:
-                        selected_tts_model_name = selected_tts_binding.default_model_name
+            if not selected_tts_binding:
+                selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
+                if selected_tts_binding and not selected_tts_model_name:
+                    selected_tts_model_name = selected_tts_binding.default_model_name
 
             if selected_tts_binding:
                 tts_binding_config = selected_tts_binding.config.copy() if selected_tts_binding.config else {}
@@ -764,7 +764,7 @@ def build_lollms_client_from_params(
         if load_stt:
             selected_stt_binding = None
             selected_stt_model_name = stt_model_name
-            
+
             user_stt_model_full = user_db.stt_binding_model_name
             if stt_binding_alias:
                 user_stt_model_full = f"{stt_binding_alias}/{stt_model_name or ''}"
@@ -776,10 +776,10 @@ def build_lollms_client_from_params(
                     if not selected_stt_model_name:
                         selected_stt_model_name = stt_model_name_local
 
-                if not selected_stt_binding:
-                    selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
-                    if selected_stt_binding and not selected_stt_model_name:
-                        selected_stt_model_name = selected_stt_binding.default_model_name
+            if not selected_stt_binding:
+                selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
+                if selected_stt_binding and not selected_stt_model_name:
+                    selected_stt_model_name = selected_stt_binding.default_model_name
 
             if selected_stt_binding:
                 stt_binding_config = selected_stt_binding.config.copy() if selected_stt_binding.config else {}

@@ -6,7 +6,7 @@ import io
 import json
 import base64
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Form, Response
 from fastapi.responses import FileResponse
@@ -264,6 +264,106 @@ async def set_active_voice(
     current_user.active_voice_id = voice_id
     return current_user
 
+
+@voices_studio_router.post("/audio-to-audio", response_model=Dict[str, Any])
+async def audio_to_audio_translation(
+    file: UploadFile = File(...),
+    voice_id: Optional[str] = Form(None),
+    source_language: Optional[str] = Form(None),
+    target_language: Optional[str] = Form("en"),
+    translate: bool = Form(True),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Complete Speech-to-Speech / Audio-to-Audio Translation pipeline:
+    1. Transcribes input audio via active STT binding.
+    2. Translates transcript to target language via LLM (if translate=True).
+    3. Synthesizes translated text into speech using chosen TTS voice.
+    """
+    user_db = db.query(DBUser).filter(DBUser.id == current_user.id).first()
+    if not user_db:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    audio_bytes = await file.read()
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio file provided.")
+
+    # 1. Speech-to-Text (STT)
+    lc_stt = build_lollms_client_from_params(username=current_user.username, load_llm=False, load_stt=True)
+    if not lc_stt.stt:
+        raise HTTPException(status_code=400, detail="Speech-to-Text (STT) service is not configured.")
+
+    try:
+        from backend.generation.stt import _execute_transcription
+        source_text = _execute_transcription(lc_stt.stt, audio_bytes)
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Speech transcription failed: {e}")
+
+    if not source_text or not source_text.strip():
+        raise HTTPException(status_code=400, detail="Could not transcribe any speech from the provided audio.")
+
+    source_text = source_text.strip()
+    translated_text = source_text
+
+    # 2. Text Translation via LLM (if requested and target differs)
+    if translate and target_language:
+        try:
+            lc_llm = build_lollms_client_from_params(username=current_user.username, load_llm=True)
+            system_prompt = (
+                "You are an expert real-time audio translator. Translate the given text accurately and naturally "
+                f"into the target language code '{target_language}'. Preserve emotion, tone, and formatting. "
+                "Output ONLY the translated text without commentary or quotes."
+            )
+            user_prompt = f"Source Text:\n{source_text}"
+            translated_text = lc_llm.generate_text(user_prompt, system_prompt=system_prompt, max_new_tokens=1024).strip()
+        except Exception as e:
+            trace_exception(e)
+            # Fallback to source text if LLM translation encounters an error
+            translated_text = source_text
+
+    # 3. Text-to-Speech (TTS) Synthesis
+    lc_tts = build_lollms_client_from_params(username=current_user.username, load_llm=False, load_tts=True)
+    if not lc_tts.tts:
+        raise HTTPException(status_code=400, detail="Text-to-Speech (TTS) service is not configured.")
+
+    voice_path = None
+    language_to_use = target_language or "en"
+
+    if voice_id:
+        voice = db.query(DBUserVoice).filter(DBUserVoice.id == voice_id, DBUserVoice.owner_user_id == current_user.id).first()
+        if voice:
+            user_voices_path = get_user_voices_path(current_user.username)
+            file_path = user_voices_path / voice.file_path
+            if file_path.exists():
+                voice_path = str(file_path.resolve())
+                if not target_language:
+                    language_to_use = voice.language
+    elif user_db.active_voice_id:
+        active_voice = db.query(DBUserVoice).filter(DBUserVoice.id == user_db.active_voice_id).first()
+        if active_voice:
+            user_voices_path = get_user_voices_path(current_user.username)
+            file_path = user_voices_path / active_voice.file_path
+            if file_path.exists():
+                voice_path = str(file_path.resolve())
+
+    try:
+        synthesized_bytes = lc_tts.tts.generate_audio(
+            text=translated_text,
+            voice=voice_path,
+            language=language_to_use
+        )
+        audio_b64 = base64.b64encode(synthesized_bytes).decode('utf-8')
+        return {
+            "source_text": source_text,
+            "translated_text": translated_text,
+            "target_language": language_to_use,
+            "audio_b64": audio_b64
+        }
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Audio synthesis failed: {e}")
 
 @voices_studio_router.post("/test", response_model=Dict[str, str])
 async def test_voice(

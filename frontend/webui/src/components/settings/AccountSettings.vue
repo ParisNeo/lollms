@@ -38,6 +38,9 @@ const showNewPassword = ref(false);
 const isUploadingIcon = ref(false);
 const fileInput = ref(null);
 
+const isAdmin = computed(() => authStore.isAdmin);
+const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
+const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
 const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 function populateProfileForm() {

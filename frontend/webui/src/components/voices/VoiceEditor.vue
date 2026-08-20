@@ -123,6 +123,8 @@ const props = defineProps({
   voiceData: { type: Object, required: true }
 });
 
+const emit = defineEmits(['updated']);
+
 const voicesStore = useVoicesStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
@@ -173,7 +175,6 @@ watch(() => props.voiceData, (newData) => {
     }
 }, { immediate: true, deep: true });
 
-
 onMounted(loadVoiceData);
 
 watch(() => props.voiceId, loadVoiceData);
@@ -198,8 +199,10 @@ async function handleTrim(trimData) {
 
         const payload = {
             audio_b64: audioBase64,
-            pitch: props.voiceData.pitch, speed: props.voiceData.speed, gain: props.voiceData.gain,
-            reverb_params: props.voiceData.reverb_params,
+            pitch: form.value.pitch || 1.0, 
+            speed: form.value.speed || 1.0, 
+            gain: form.value.gain || 0.0,
+            reverb_params: form.value.reverb_params,
             trim_start: trimData.start,
             trim_end: trimData.end
         };
@@ -297,13 +300,16 @@ async function handleSetAsReference() {
         await voicesStore.replaceVoiceAudio(props.voiceId, currentAudioBlob.value);
         isPreviewingSynth.value = false;
         await loadVoiceData();
+        emit('updated');
         uiStore.addNotification("New audio successfully set as voice reference.", "success");
     } finally {
         isSaving.value = false;
     }
 }
 
-function handleDuplicate() { voicesStore.duplicateVoice(props.voiceId); }
+function handleDuplicate() { 
+    voicesStore.duplicateVoice(props.voiceId); 
+}
 
 async function handleSaveChanges() {
     isSaving.value = true;
@@ -318,6 +324,7 @@ async function handleSaveChanges() {
 
         await voicesStore.updateVoice(props.voiceId, formData);
         pristineState.value = JSON.parse(JSON.stringify(form.value));
+        emit('updated');
     } finally {
         isSaving.value = false;
     }

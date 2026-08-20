@@ -36,6 +36,10 @@ const user = computed(() => authStore.user);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
+const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
+const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
+const isVoicesStudioAvailable = computed(() => isTtsConfigured.value || isSttConfigured.value);
+
 const activityTimeout = ref(null);
 const sidebarRef = ref(null);
 const isFlowWizardOpen = ref(false);
@@ -247,6 +251,7 @@ async function handlePlusClick() {
             </router-link>
 
             <router-link
+              v-if="isVoicesStudioAvailable"
               to="/voices-studio"
               class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
               title="Voices Studio"
