@@ -179,11 +179,11 @@ function handleInputForMentions(event) {
   const text = event.target.value;
   const cursorPosition = event.target.selectionStart;
   const textBeforeCursor = text.substring(0, cursorPosition);
-  const atMatch = textBeforeCursor.match(/@(\w*)$/);
+  const atMatch = textBeforeCursor.match(/@([a-zA-Z0-9_]*)$/);
 
   if (atMatch) {
     mentionStartIndex.value = atMatch.index;
-    const query = atMatch[1];
+    const query = atMatch[1] || '';
     mentionQuery.value = query;
     isMentioning.value = true;
     clearTimeout(mentionDebounceTimer);
@@ -191,7 +191,7 @@ function handleInputForMentions(event) {
       if (mentionQuery.value === query) {
         mentionSuggestions.value = await socialStore.searchForMentions(query);
       }
-    }, 200);
+    }, 100);
   } else {
     isMentioning.value = false;
     mentionSuggestions.value = [];
@@ -221,11 +221,14 @@ function selectMention(u) {
 
       <div class="flex-1 min-w-0 relative">
         <!-- MENTION POPUP -->
-        <div v-if="isMentioning && mentionSuggestions.length > 0" v-on-click-outside="() => isMentioning = false" class="absolute bottom-full left-0 right-0 mb-2 p-2 bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-xl shadow-2xl max-h-48 overflow-y-auto z-30">
+        <div v-if="isMentioning && mentionSuggestions.length > 0" v-on-click-outside="() => isMentioning = false" class="absolute bottom-full left-0 right-0 mb-2 p-2 bg-white dark:bg-gray-900 border dark:border-gray-700 rounded-xl shadow-2xl max-h-52 overflow-y-auto z-30">
           <ul>
-            <li v-for="u in mentionSuggestions" :key="u.id" @click="selectMention(u)" class="flex items-center p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer">
+            <li v-for="u in mentionSuggestions" :key="u.id" @mousedown.prevent="selectMention(u)" class="flex items-center p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer transition-colors">
               <UserAvatar :icon="u.icon" :username="u.username" size-class="h-6 w-6" />
               <span class="ml-2 text-xs font-bold text-gray-800 dark:text-gray-200">{{ u.username }}</span>
+              <span v-if="u.username.toLowerCase() === 'lollms'" class="ml-2 text-[9px] bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 px-1.5 py-0.5 rounded font-black uppercase">
+                AI Bot
+              </span>
             </li>
           </ul>
         </div>

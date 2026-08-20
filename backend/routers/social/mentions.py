@@ -1,5 +1,4 @@
-# backend/routers/social/mentions.py
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
@@ -15,11 +14,12 @@ mentions_router = APIRouter()
 
 @mentions_router.get("/search", response_model=List[UserPublic])
 def search_users_for_mention(
-    q: str = Query(..., min_length=1, max_length=50),
+    q: Optional[str] = Query(default="", max_length=50),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    search_term = f"%{q}%"
+    query_str = (q or "").strip()
+    search_term = f"%{query_str}%" if query_str else "%"
     
     # Get IDs of friends
     friend_ids = db.query(DBFriendship.user1_id, DBFriendship.user2_id)\
@@ -39,12 +39,24 @@ def search_users_for_mention(
         DBUser.username.ilike(search_term)
     ).limit(10)
     
-    users = query.all()
+    users = list(query.all())
     
-    # Add the @lollms bot if it's enabled and matches the search
-    if settings.get("ai_bot_enabled", False) and 'lollms'.startswith(q.lower()):
+    # If the user has few connections, backfill with active searchable accounts
+    if len(users) < 5:
+        more_users = db.query(DBUser).filter(
+            DBUser.id != current_user.id,
+            DBUser.is_searchable == True,
+            DBUser.is_active == True,
+            DBUser.username.ilike(search_term),
+            DBUser.id.notin_(mentionable_user_ids)
+        ).limit(10 - len(users)).all()
+        users.extend(more_users)
+    
+    # Add the @lollms bot if it's enabled and matches the query or query is empty
+    if settings.get("ai_bot_enabled", False) and ('lollms'.startswith(query_str.lower()) or not query_str):
         lollms_bot = db.query(DBUser).filter(DBUser.username == 'lollms').first()
         if lollms_bot and not any(u.id == lollms_bot.id for u in users):
             users.insert(0, lollms_bot)
             
-    return users
+    from backend.routers.users import _project_user_public
+    return [_project_user_public(u) for u in users]

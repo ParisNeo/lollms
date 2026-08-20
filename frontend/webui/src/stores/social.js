@@ -56,11 +56,10 @@ export const useSocialStore = defineStore('social', () => {
 
     // --- ACTIONS ---
     async function searchForMentions(query) {
-        if (!query) return [];
         try {
             // Using the specialized social mentions endpoint for better context (friends, bot, etc.)
-            const response = await apiClient.get('/api/social/mentions/search', { params: { q: query } });
-            return response.data;
+            const response = await apiClient.get('/api/social/mentions/search', { params: { q: query || '' } });
+            return response.data || [];
         } catch (error) {
             console.error("Failed to search for mentions:", error);
             return [];
@@ -992,6 +991,13 @@ export const useSocialStore = defineStore('social', () => {
         fetchFeed, fetchUserPosts, uploadPostMedia, fetchLinkPreview, createPost, updatePost, togglePinPost, deletePost, fetchComments, createComment, deleteComment,
         followUser, unfollowUser, toggleLike, searchForMentions,
         fetchSocialGroups, createSocialGroup, fetchSocialGroupDetails, updateSocialGroup, deleteSocialGroup, addMemberToSocialGroup, removeMemberFromSocialGroup, fetchSocialGroupFeed,
+        handleNewPost(post) {
+            if (!post || !post.id) return;
+            const exists = feedPosts.value.some(p => p.id === post.id);
+            if (!exists) {
+                feedPosts.value.unshift(post);
+            }
+        },
         $reset
     };
 });

@@ -41,6 +41,7 @@ from backend.session import (
 )
 from backend.routers.social.mentions import mentions_router
 from backend.security import sanitize_content, validate_url
+from backend.ws_manager import manager
 
 social_router = APIRouter(
     prefix="/api/social",
@@ -50,6 +51,38 @@ social_router = APIRouter(
 social_router.include_router(mentions_router, prefix="/mentions")
 
 import datetime
+
+def notify_mentioned_users(db: Session, text_content: str, author_user: Any, item_type: str, item_id: int):
+    """Extracts @mentions from content and dispatches WebSocket notifications to tagged users."""
+    if not text_content:
+        return
+
+    mentions = re.findall(r'(?<!\w)@([a-zA-Z0-9_-]+)\b', text_content)
+    if not mentions:
+        return
+
+    unique_usernames = set(m.lower() for m in mentions)
+    author_username = author_user.username if hasattr(author_user, 'username') else 'Someone'
+    author_id = author_user.id if hasattr(author_user, 'id') else None
+    author_icon = getattr(author_user, 'icon', None)
+
+    for uname in unique_usernames:
+        if uname == 'lollms' or (author_username and uname == author_username.lower()):
+            continue
+
+        target_user = db.query(DBUser).filter(func.lower(DBUser.username) == uname, DBUser.is_active == True).first()
+        if target_user and target_user.id != author_id:
+            msg_text = f"📢 @{author_username} mentioned you in a post." if item_type == 'post' else f"💬 @{author_username} mentioned you in a comment."
+            manager.send_personal_message_sync({
+                "type": "notification",
+                "data": {
+                    "message": msg_text,
+                    "type": "info",
+                    "duration": 6000,
+                    "sender_username": author_username,
+                    "sender_icon": author_icon
+                }
+            }, target_user.id)
 
 # --- Helpers ---
 def get_post_public(db: Session, post: DBPost, current_user_id: int) -> PostPublic:
@@ -430,9 +463,12 @@ def create_post(
     db.commit()
     db.refresh(new_post, ['author'])
     
-    # --- NEW: Check for @lollms mention ---
+    # Notify human users mentioned in the post
+    notify_mentioned_users(db, clean_content, current_user, "post", new_post.id)
+
+    # --- Check for @lollms mention ---
     if settings.get("ai_bot_enabled", False):
-        if re.search(r'\B@lollms\b', clean_content, re.IGNORECASE):
+        if re.search(r'(?<!\w)@lollms\b', clean_content, re.IGNORECASE):
             task_manager.submit_task(
                 name=f"AI Bot responding to post by {current_user.username}",
                 target=_respond_to_mention_task,
@@ -440,7 +476,7 @@ def create_post(
                 description=f"Generating AI reply for post ID: {new_post.id}",
                 owner_username='lollms' 
             )
-            
+
     # --- MODERATION ---
     if moderation_enabled:
         task_manager.submit_task(
@@ -449,8 +485,10 @@ def create_post(
             args=('post', new_post.id),
             owner_username='lollms' # System/Bot owns this task
         )
-    
-    return get_post_public(db, new_post, current_user.id)
+
+    post_public_obj = get_post_public(db, new_post, current_user.id)
+    manager.broadcast_sync({"type": "new_post", "data": post_public_obj.model_dump(mode="json")})
+    return post_public_obj
 
 @social_router.get("/posts/{post_id}", response_model=PostPublic)
 def get_post(
@@ -803,14 +841,33 @@ def add_comment_to_post(
     db.commit()
     db.refresh(new_comment, ['author'])
     
-    # Mention Response
+    # Notify human users mentioned in the comment
+    notify_mentioned_users(db, clean_content, current_user, "comment", new_comment.id)
+
+    # Also notify post author if someone commented on their post and they weren't explicitly tagged
+    if post.author_id != current_user.id and (post.author and post.author.username.lower() != 'lollms'):
+        post_author_name = post.author.username.lower()
+        mentioned_names = [m.lower() for m in re.findall(r'(?<!\w)@([a-zA-Z0-9_-]+)\b', clean_content)]
+        if post_author_name not in mentioned_names:
+            manager.send_personal_message_sync({
+                "type": "notification",
+                "data": {
+                    "message": f"💬 @{current_user.username} commented on your post.",
+                    "type": "info",
+                    "duration": 6000,
+                    "sender_username": current_user.username,
+                    "sender_icon": current_user.icon
+                }
+            }, post.author_id)
+
+    # Mention Response for Bot
     if settings.get("ai_bot_enabled", False):
         if current_user.username != 'lollms':
-            is_explicit_mention = re.search(r'\B@lollms\b', clean_content, re.IGNORECASE)
+            is_explicit_mention = re.search(r'(?<!\w)@lollms\b', clean_content, re.IGNORECASE)
             post_author_username = post.author.username if post.author else db.query(DBUser.username).filter(DBUser.id == post.author_id).scalar()
             is_bot_post = (post_author_username == 'lollms')
-            was_mentioned_in_post = re.search(r'\B@lollms\b', post.content, re.IGNORECASE)
-            
+            was_mentioned_in_post = re.search(r'(?<!\w)@lollms\b', post.content, re.IGNORECASE)
+
             lollms_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
             is_active_participant = False
             if lollms_user:
@@ -820,7 +877,7 @@ def add_comment_to_post(
                         DBComment.author_id == lollms_user.id
                     )
                 )).scalar()
-            
+
             if is_explicit_mention or is_bot_post or was_mentioned_in_post or is_active_participant:
                 task_manager.submit_task(
                     name=f"AI Bot responding to comment by {current_user.username}",
@@ -829,7 +886,7 @@ def add_comment_to_post(
                     description=f"Generating AI reply for comment ID: {new_comment.id} (Thread monitoring)",
                     owner_username='lollms'
                 )
-                
+
     # Moderation
     if moderation_enabled:
         task_manager.submit_task(

@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia';
 import { markRaw } from 'vue';
+import router from '../router';
 import apiClient from '../services/api';
 
 export const useUiStore = defineStore('ui', {
@@ -122,6 +123,9 @@ export const useUiStore = defineStore('ui', {
     setMainView(viewName) {
         if (['feed', 'chat', 'messages'].includes(viewName)) {
             this.mainView = viewName;
+            if (viewName !== 'messages' && router.currentRoute.value?.path !== '/') {
+                router.push('/');
+            }
         }
     },
 

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-20 01:34]
+
+- feat(social): implement mentions functionality and update social components
+
 ## [2026-08-19 16:32]
 
 - feat(social): implement direct messaging and social feed functionality

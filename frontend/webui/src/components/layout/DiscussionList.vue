@@ -305,7 +305,12 @@ function handleNewGroup() {
     }
 }
 
-function goToFeed() { uiStore.setMainView('feed'); }
+async function goToFeed() { 
+    uiStore.setMainView('feed'); 
+    if (route.path !== '/') {
+        await router.push('/');
+    }
+}
 
 async function handleRootDrop(event) {
     isRootDragOver.value = false;

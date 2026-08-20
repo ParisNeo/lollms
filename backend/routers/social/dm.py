@@ -712,7 +712,15 @@ async def get_user_conversations(
         ))
 
     all_convos = groups + dms
-    all_convos.sort(key=lambda x: x.last_message_at or datetime.min, reverse=True)
+    min_date = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    all_convos.sort(
+        key=lambda x: (
+            x.last_message_at.replace(tzinfo=datetime.timezone.utc) 
+            if x.last_message_at and x.last_message_at.tzinfo is None 
+            else (x.last_message_at or min_date)
+        ), 
+        reverse=True
+    )
     return all_convos
 
 @dm_router.get("/conversation/{target_id}", response_model=List[DirectMessagePublic])
@@ -749,6 +757,7 @@ async def mark_conversation_as_read(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
     stmt = (
         update(DBDirectMessage)
         .where(
@@ -756,11 +765,11 @@ async def mark_conversation_as_read(
             DBDirectMessage.receiver_id == current_user.id,
             DBDirectMessage.read_at.is_(None)
         )
-        .values(read_at=datetime.utcnow())
+        .values(read_at=now_utc)
     )
     result = db.execute(stmt)
     db.commit()
-    
+
     return {"message": f"Marked {result.rowcount} messages as read."}
 
 @dm_router.delete("/messages/{message_id}", status_code=200)

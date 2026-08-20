@@ -330,8 +330,33 @@ def _run_moderation_loop(task, db, items, total_count):
     db.commit()
     task.set_progress(100)
 
-def _research_and_post_task(task: Task, topic: str, user_instructions: str):
-    task.log(f"Starting research task for query: {topic}")
+def _distill_search_query(raw_topic: str, max_words: int = 8) -> str:
+    """Transforms a potentially long instruction prompt into a clean search-engine keyword phrase."""
+    if not raw_topic:
+        return ""
+
+    # Grab the first line only
+    first_line = raw_topic.strip().split('\n')[0]
+
+    # Strip common prompt / task prefixes in French and English
+    clean = re.sub(
+        r'^(rédiger|écrire|faire|créer|write|create|make|generate|present|explain|discovering|please|svp)\s+(un|une|des|le|la|les|a|an|the)?\s*(article|post|présentation|presentation|guide|paper|summary)?\s*(sur|about|on|de|du|des|regarding|concerning)?\s*',
+        '',
+        first_line,
+        flags=re.IGNORECASE
+    )
+
+    # Remove parenthesis contents and special symbols
+    clean = re.sub(r'\(.*?\)', '', clean)
+    clean = re.sub(r'[^\w\s\-]', ' ', clean)
+    words = [w.strip() for w in clean.split() if len(w.strip()) > 1]
+
+    if words:
+        return " ".join(words[:max_words]).strip()
+    return raw_topic[:50].replace('\n', ' ').strip()
+
+def _research_and_post_task(task: Task, topic: str, user_instructions: str, requester_user_id: Optional[int] = None):
+    task.log(f"Starting research and post generation for: {topic[:60]}...")
     task.set_progress(5)
     db = next(get_db())
     try:
@@ -339,66 +364,68 @@ def _research_and_post_task(task: Task, topic: str, user_instructions: str):
         lollms_bot_user = db.query(DBUser).filter(DBUser.username == 'lollms').first()
         if not lollms_bot_user: return
 
+        # Distill clean keywords for search engines to prevent API 500 errors
+        search_query = _distill_search_query(topic)
+        arxiv_query = re.sub(r'[^\w\s]', ' ', search_query).strip()
+
         # 1. Gather Tools
         enabled_tools = []
         if settings.get("ai_bot_tool_ddg_enabled", False): enabled_tools.append("DuckDuckGo")
         if settings.get("ai_bot_tool_google_enabled", False): enabled_tools.append("Google")
         if settings.get("ai_bot_tool_arxiv_enabled", False): enabled_tools.append("ArXiv")
         if settings.get("ai_bot_tool_scraper_enabled", False): enabled_tools.append("Scraper")
-        
-        task.log(f"Enabled Tools: {enabled_tools}")
+
+        task.log(f"Keywords: '{search_query}' | Enabled Tools: {enabled_tools}")
         task.set_progress(10)
-        
+
         # 2. Research
         research_data = []
         lc = build_lollms_client_from_params(username='lollms')
-        
-        # Calculate progress step for tools
-        # 10% to 70% is allocated for tools (60% total)
+
         total_tools = len(enabled_tools)
         progress_per_tool = 60 / total_tools if total_tools > 0 else 0
         current_progress = 10
 
         # --- DuckDuckGo ---
         if "DuckDuckGo" in enabled_tools:
-            if DDGS:
+            if DDGS and search_query:
                 try:
-                    task.log("Tool: DuckDuckGo - Searching...")
+                    task.log(f"Tool: DuckDuckGo - Searching for '{search_query}'...")
                     with DDGS() as ddgs:
-                        results = [r for r in ddgs.text(topic, max_results=5)]
+                        results = [r for r in ddgs.text(search_query, max_results=5)]
                         if results:
                             formatted_results = [f"Title: {r.get('title')}\nLink: {r.get('href')}\nSnippet: {r.get('body')}" for r in results]
-                            research_data.append(f"### DuckDuckGo Search Results for '{topic}':\n" + "\n---\n".join(formatted_results))
+                            research_data.append(f"### DuckDuckGo Search Results for '{search_query}':\n" + "\n---\n".join(formatted_results))
                             task.log(f"Tool: DuckDuckGo - Found {len(results)} results.")
                         else:
                             task.log("Tool: DuckDuckGo - No results found.", "WARNING")
                 except Exception as e:
-                    task.log(f"Tool: DuckDuckGo - Error: {e}", "ERROR")
+                    task.log(f"Tool: DuckDuckGo - Error: {e}", "WARNING")
             else:
                 task.log("Tool: DuckDuckGo - Library not available.", "WARNING")
-            
+
             current_progress += progress_per_tool
             task.set_progress(int(current_progress))
 
         # --- Google ---
         if "Google" in enabled_tools:
-            if google_build:
+            if google_build and search_query:
                 api_key = settings.get("ai_bot_tool_google_api_key")
                 cse_id = settings.get("ai_bot_tool_google_cse_id")
                 if api_key and cse_id:
                     try:
-                        task.log("Tool: Google Search - Searching...")
+                        task.log(f"Tool: Google Search - Searching for '{search_query}'...")
                         service = google_build("customsearch", "v1", developerKey=api_key)
-                        res = service.cse().list(q=topic, cx=cse_id, num=5).execute()
+                        res = service.cse().list(q=search_query, cx=cse_id, num=5).execute()
                         items = res.get('items', [])
                         if items:
                             formatted_items = [f"Title: {item['title']}\nSnippet: {item.get('snippet', '')}\nLink: {item['link']}" for item in items]
-                            research_data.append(f"### Google Search Results for '{topic}':\n" + "\n---\n".join(formatted_items))
+                            research_data.append(f"### Google Search Results for '{search_query}':\n" + "\n---\n".join(formatted_items))
                             task.log(f"Tool: Google Search - Found {len(items)} results.")
                         else:
                             task.log("Tool: Google Search - No results found.", "WARNING")
                     except Exception as e:
-                        task.log(f"Tool: Google Search - Error: {e}", "ERROR")
+                        task.log(f"Tool: Google Search - Error: {e}", "WARNING")
                 else:
                     task.log("Tool: Google Search - Missing API Key or CSE ID.", "WARNING")
             else:
@@ -409,23 +436,22 @@ def _research_and_post_task(task: Task, topic: str, user_instructions: str):
 
         # --- ArXiv ---
         if "ArXiv" in enabled_tools:
-            if arxiv:
+            if arxiv and arxiv_query:
                 try:
-                    task.log("Tool: ArXiv - Searching...")
-                    # Construct client to be safe with 2.x API
+                    task.log(f"Tool: ArXiv - Searching for '{arxiv_query}'...")
                     client = arxiv.Client()
-                    search = arxiv.Search(query=topic, max_results=5, sort_by=arxiv.SortCriterion.Relevance)
+                    search = arxiv.Search(query=arxiv_query, max_results=3, sort_by=arxiv.SortCriterion.Relevance)
                     results = []
                     for result in client.results(search):
-                        results.append(f"Title: {result.title}\nSummary: {result.summary}\nURL: {result.entry_id}")
-                    
+                        results.append(f"Title: {result.title}\nSummary: {result.summary[:600]}\nURL: {result.entry_id}")
+
                     if results:
-                        research_data.append(f"### ArXiv Papers for '{topic}':\n" + "\n---\n".join(results))
+                        research_data.append(f"### ArXiv Papers for '{arxiv_query}':\n" + "\n---\n".join(results))
                         task.log(f"Tool: ArXiv - Found {len(results)} papers.")
                     else:
                         task.log("Tool: ArXiv - No results found.", "WARNING")
                 except Exception as e:
-                    task.log(f"Tool: ArXiv - Error: {e}", "ERROR")
+                    task.log(f"Tool: ArXiv - Handled search warning: {e}", "WARNING")
             else:
                 task.log("Tool: ArXiv - Library not available.", "WARNING")
 
@@ -472,34 +498,50 @@ def _research_and_post_task(task: Task, topic: str, user_instructions: str):
         # 4. Generate Post
         task.set_progress(70)
         task.log("Generating post content with LLM...")
-        prompt = f"""You are @lollms, an AI assistant.
-[USER INSTRUCTIONS]: {user_instructions}
-[RESEARCH TOPIC]: {topic}
+        prompt = f"""You are @lollms, an intelligent AI assistant and content creator.
+[USER REQUEST / INSTRUCTIONS]: {user_instructions}
+[TOPIC]: {topic}
 
 [RESEARCH DATA]:
 {full_context}
 
 [INSTRUCTION]:
-Write a comprehensive and engaging social media post based on the topic and the research data provided above.
-Use markdown formatting. Cite sources if available in the research data.
-If NO research data was found, acknowledge that you searched but found nothing specific, and provide a general informative response about the topic based on your internal knowledge instead.
+Write a high-quality, comprehensive, and engaging publication on the social feed about the topic.
+- If the user requested a presentation, format the content as a structured slide deck presentation with titles, key takeaways, and bullet points.
+- If the user requested an article or guide, format it as a rich, structured article with headers and explanations.
+- Use markdown formatting cleanly. Cite sources if available in the research data.
+- Do not add conversational fluff at the start like "Sure, here is your post". Go straight into the title and presentation/article.
 """
         post_content = lc.generate_text(prompt, max_new_tokens=2048)
         task.set_progress(90)
-        
+
         if post_content:
             new_post = DBPost(
                 author_id=lollms_bot_user.id,
-                content=post_content,
-                visibility=PostVisibility.public
+                content=post_content.strip(),
+                visibility=PostVisibility.public,
+                moderation_status="validated"
             )
             db.add(new_post)
             db.commit()
             db.refresh(new_post)
-            
+
             from backend.routers.social import get_post_public
             post_public = get_post_public(db, new_post, lollms_bot_user.id)
             manager.broadcast_sync({"type": "new_post", "data": post_public.model_dump(mode="json")})
+
+            if requester_user_id:
+                manager.send_personal_message_sync({
+                    "type": "notification",
+                    "data": {
+                        "message": f"🤖 @lollms published the post you requested: '{topic[:40]}'",
+                        "type": "success",
+                        "duration": 8000,
+                        "sender_username": "lollms",
+                        "sender_icon": lollms_bot_user.icon
+                    }
+                }, requester_user_id)
+
             task.log(f"Post created successfully. ID: {new_post.id}", "SUCCESS")
             task.set_progress(100)
         else:
@@ -556,21 +598,24 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             personality = db.query(DBPersonality).filter(DBPersonality.id == lollms_bot_user.active_personality_id).first()
             if personality: base_system_prompt = personality.prompt_text
         
+        requester_user_id = post.author_id if post else (triggering_comment.author_id if mention_type == 'comment' else None)
+
         augmented_prompt = (
             f"{base_system_prompt}\n\n"
             "## Task\n"
-            "You have been summoned by a user. Analyze their request and the thread context.\n"
-            "1. **Direct Reply**: If the request is simple, conversational, or can be answered directly, reply to the thread.\n"
-            "2. **Research & Post**: If the request requires detailed research, web browsing, ArXiv search, website analysis, or is a request for a full article/post, you must:\n"
-            "   a. Reply to the user acknowledging the request and stating that you will research and create a dedicated post about it.\n"
-            "   b. Define the topic and instructions for the research task.\n"
-            "3. **Ignore**: If the mention is trivial or requires no response.\n\n"
+            "You have been mentioned by a user in the social platform feed. Analyze their request and the thread context.\n"
+            "You must choose whether to reply directly with a comment, or create a dedicated new post / presentation / article on the feed:\n\n"
+            "1. **Direct Comment Reply (`[[REPLY]]`)**: Use this if the user is asking a direct question, engaging in conversation, greeting you, or if the question can be cleanly answered right inside this comment thread.\n"
+            "2. **Create New Dedicated Post / Presentation (`[[CREATE_POST]]` or `[[RESEARCH_AND_POST]]`)**: Use this if the user explicitly asks you to make a post, prepare a presentation, write an article/guide, conduct deep research, or create a full publication on a topic (e.g. 'Please make a presentation about...', 'write a post about...', 'publish an article on...').\n"
+            "   - Format: `[[CREATE_POST]] <acknowledgment comment to user> || <CONCISE 3-8 WORD TOPIC KEYWORDS>`\n"
+            "   - IMPORTANT: The text after || MUST be concise search keywords (e.g. 'egg sexing in ovo methods poultry' or 'quantum computing advances'). Do NOT include full instruction paragraphs after ||.\n"
+            "3. **Ignore (`[[IGNORE]]`)**: Use this only if the mention is completely trivial or requires no response.\n\n"
             "## Output Format\n"
-            "Start your response with ONE of these tags:\n"
-            "- `[[REPLY]] <your direct answer here>`\n"
-            "- `[[RESEARCH_AND_POST]] <acknowledgment comment to user> || <EXACT KEYWORD SEARCH QUERY>`\n"
+            "Start your response with EXACTLY ONE of these tags:\n"
+            "- `[[REPLY]] <your direct comment answer here>`\n"
+            "- `[[CREATE_POST]] <acknowledgment comment to user> || <CONCISE 3-8 WORD TOPIC KEYWORDS>`\n"
+            "- `[[RESEARCH_AND_POST]] <acknowledgment comment to user> || <CONCISE 3-8 WORD TOPIC KEYWORDS>`\n"
             "- `[[IGNORE]]`\n"
-            "For RESEARCH_AND_POST, the part after || must be a concise search string (e.g., 'quantum computing advances 2024' or 'https://example.com/article')."
         )
 
         full_user_input = f"{context_instruction}\n\n[THREAD HISTORY]:\n{thread_context}\n\n[INSTRUCTION]: Generate your response starting with [[REPLY]], [[RESEARCH_AND_POST]], or [[IGNORE]]."
@@ -583,32 +628,34 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             task.set_progress(100)
             return {"status": "ignored"}
 
-        if "[[RESEARCH_AND_POST]]" in clean_response:
-            # Parse split
-            content_part = clean_response.replace("[[RESEARCH_AND_POST]]", "").strip()
+        if "[[RESEARCH_AND_POST]]" in clean_response or "[[CREATE_POST]]" in clean_response:
+            tag_to_remove = "[[RESEARCH_AND_POST]]" if "[[RESEARCH_AND_POST]]" in clean_response else "[[CREATE_POST]]"
+            content_part = clean_response.replace(tag_to_remove, "").strip()
             parts = content_part.split("||")
-            
+
             ack_comment = parts[0].strip()
             research_instructions = parts[1].strip() if len(parts) > 1 else ack_comment
-            
-            if not ack_comment: ack_comment = "I'm on it! I'll research this and create a post shortly."
+
+            if not ack_comment: ack_comment = "I'm on it! I'll prepare this and create a dedicated post shortly."
 
             # 1. Post acknowledgment comment
             new_comment = DBComment(
                 post_id=post_id,
                 author_id=lollms_bot_user.id,
-                content=ack_comment
+                content=ack_comment,
+                moderation_status="validated"
             )
             db.add(new_comment)
             db.commit()
             db.refresh(new_comment, ['author'])
-            
+
             # Broadcast comment
             comment_public = CommentPublic(
                 id=new_comment.id,
                 content=new_comment.content,
                 created_at=new_comment.created_at,
-                author=AuthorPublic.from_orm(new_comment.author)
+                author=AuthorPublic.from_orm(new_comment.author),
+                is_ai_generated=True
             )
             manager.broadcast_sync({
                 "type": "new_comment",
@@ -616,12 +663,12 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             })
             task.log(f"Bot acknowledged request on post ID: {post_id}")
 
-            # 2. Trigger Research Task
+            # 2. Trigger Research & Post Creation Task
             task_manager.submit_task(
                 name=f"Research & Post: {research_instructions[:30]}...",
                 target=_research_and_post_task,
-                args=(research_instructions, thread_context), # passing instruction as topic, and thread context as user_instructions for context
-                description=f"Researching topic requested by user.",
+                args=(research_instructions, thread_context, requester_user_id),
+                description=f"Drafting and publishing post for {research_instructions[:40]}",
                 owner_username='lollms'
             )
             return {"status": "research_triggered"}
@@ -785,24 +832,25 @@ Return ONLY the topic name/summary.
         new_post = DBPost(
             author_id=bot_user.id,
             content=generated_content.strip(),
-            visibility=PostVisibility.public
+            visibility=PostVisibility.public,
+            moderation_status="validated"
         )
         db.add(new_post)
-        
+
         # Update last posted time
-        now_iso = datetime.datetime.utcnow().isoformat()
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
         config_entry = db.query(GlobalConfig).filter(GlobalConfig.key == "ai_bot_last_posted_at").first()
         val_str = json.dumps({"value": now_iso, "type": "string"})
         if config_entry: config_entry.value = val_str
         else: db.add(GlobalConfig(key="ai_bot_last_posted_at", value=val_str, type="string", category="AI Bot"))
-        
+
         db.commit()
-        db.refresh(new_post)
-        
+        db.refresh(new_post, ['author'])
+
         from backend.routers.social import get_post_public
         post_public = get_post_public(db, new_post, bot_user.id)
         manager.broadcast_sync({"type": "new_post", "data": post_public.model_dump(mode="json")})
-        
+
         task.log(f"Successfully posted. ID: {new_post.id}", "SUCCESS")
 
     except Exception as e:

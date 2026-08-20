@@ -221,6 +221,12 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'notification': 
                     uiStore.addNotification(data.data.message, data.data.type || 'info', data.data.duration || 3000); 
                     break;
+                case 'new_post':
+                    getSocialStore().then(s => s.handleNewPost(data.data));
+                    if (user.value && data.data.author && data.data.author.id !== user.value.id) {
+                        uiStore.addNotification(`📢 New post by @${data.data.author.username}`, 'info', 4000);
+                    }
+                    break;
                 case 'new_dm': 
                     getSocialStore().then(s => s.handleNewDm(data.data));
                     if (user.value && data.data.sender_id !== user.value.id) {

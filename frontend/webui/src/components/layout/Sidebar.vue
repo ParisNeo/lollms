@@ -40,8 +40,11 @@ const activityTimeout = ref(null);
 const sidebarRef = ref(null);
 const isFlowWizardOpen = ref(false);
 
-function goToFeed() {
+async function goToFeed() {
     uiStore.setMainView('feed');
+    if (route.path !== '/') {
+        await router.push('/');
+    }
 }
 
 const resetActivityTimer = () => {

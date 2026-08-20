@@ -10,7 +10,7 @@ from backend.db.base import follows_table
 from backend.db.models.user import User as DBUser, Friendship as DBFriendship
 from backend.models import UserAuthDetails, UserProfileResponse, UserPublic
 from backend.session import get_current_active_user
-from typing import List
+from typing import List, Optional
 users_router = APIRouter(
     prefix="/api/users",
     tags=["Users"],
@@ -66,16 +66,17 @@ def search_for_users(
 
 @users_router.get("/mention_search", response_model=List[UserPublic])
 def search_for_mentions(
-    q: str = Query(..., min_length=1, max_length=50),
+    q: Optional[str] = Query(default="", max_length=50),
     db: Session = Depends(get_db),
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
     """
     Searches for users to mention.
-    Returns users whose username starts with the query and are searchable.
+    Returns users whose username matches the query and are searchable.
     Excludes the current user.
     """
-    search_term = f"{q}%"
+    query_str = (q or "").strip()
+    search_term = f"{query_str}%" if query_str else "%"
     users = db.query(DBUser).filter(
         DBUser.id != current_user.id,
         DBUser.is_searchable == True,
