@@ -603,6 +603,13 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_external_id ON users (external_id)"))
                 connection.commit()
             except Exception: connection.rollback()
+
+        if 'password_changed_at' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN password_changed_at DATETIME"))
+                connection.execute(text("UPDATE users SET password_changed_at = created_at WHERE password_changed_at IS NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
         
         if 'scratchpad' in user_columns_db and 'data_zone' not in user_columns_db:
             try:

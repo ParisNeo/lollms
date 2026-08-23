@@ -1438,7 +1438,8 @@ async def export_datastore(
             (export_dir / "documents").mkdir()
 
         # 5. Create ZIP file
-        zip_filename = f"{datastore_record.name}_export.zip"
+        safe_store_name = secure_filename(datastore_record.name) or "datastore"
+        zip_filename = f"{safe_store_name}_export.zip"
         zip_path = temp_dir_path / zip_filename
         
         with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -1494,8 +1495,13 @@ async def import_datastore(
         
         # Extract
         extract_dir = temp_dir_path / "extracted"
+        resolved_extract_dir = extract_dir.resolve()
         try:
             with zipfile.ZipFile(zip_path, 'r') as zipf:
+                for member in zipf.infolist():
+                    target_member_path = (extract_dir / member.filename).resolve()
+                    if not target_member_path.is_relative_to(resolved_extract_dir):
+                        raise HTTPException(status_code=400, detail="Malicious ZIP archive: Path traversal detected.")
                 zipf.extractall(extract_dir)
         except zipfile.BadZipFile:
             raise HTTPException(status_code=400, detail="Invalid ZIP file.")

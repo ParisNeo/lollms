@@ -162,9 +162,17 @@ def _moderate_content_task(task: Task, content_type: str, content_id: int):
         try:
             lc = build_lollms_client_from_params(username='lollms')
         except Exception as e:
-             task.log(f"Failed to initialize LLM client for moderation: {e}", "ERROR")
-             trace_exception(e)
-             return
+            task.log(f"Failed to initialize LLM client for moderation: {e}", "ERROR")
+            trace_exception(e)
+            content_obj.moderation_status = "validated"
+            db.commit()
+            return
+
+        if not lc or not getattr(lc, 'llm', None):
+            task.log("LLM is not available for @lollms bot. Skipping moderation and validating content.", "WARNING")
+            content_obj.moderation_status = "validated"
+            db.commit()
+            return
 
         prompt = f"""You are a strict content moderator AI.
 [MODERATION CRITERIA]
@@ -592,6 +600,9 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
         task.set_progress(20)
         task.log("Generating response...")
         lc = build_lollms_client_from_params(username=lollms_bot_user.username)
+        if not lc or not getattr(lc, 'llm', None):
+            task.log("LLM is not available for @lollms bot. Cannot generate reply.", "ERROR")
+            return
         
         base_system_prompt = settings.get("ai_bot_system_prompt") or "You are @lollms, a helpful AI assistant."
         if lollms_bot_user.active_personality_id:

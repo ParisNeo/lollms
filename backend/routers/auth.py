@@ -545,9 +545,13 @@ async def change_user_password(
         raise HTTPException(status_code=400, detail="New password cannot be the same as the current password.")
         
     db_user_record.hashed_password = get_password_hash(payload.new_password)
+    db_user_record.password_changed_at = datetime.datetime.now(timezone.utc)
 
     try:
         db.commit()
+        if db_user_record.username in user_sessions:
+            del user_sessions[db_user_record.username]
+        manager.disconnect_user_sync(db_user_record.id)
         return {"message": "Password changed successfully."}
     except Exception as e:
         db.rollback()
@@ -633,9 +637,13 @@ async def reset_password(request: PasswordResetRequest, db: Session = Depends(ge
     user.hashed_password = get_password_hash(request.new_password)
     user.password_reset_token = None
     user.reset_token_expiry = None
-    
+    user.password_changed_at = datetime.datetime.now(timezone.utc)
+
     try:
         db.commit()
+        if user.username in user_sessions:
+            del user_sessions[user.username]
+        manager.disconnect_user_sync(user.id)
         return {"message": "Your password has been reset successfully. You can now log in."}
     except Exception as e:
         db.rollback()

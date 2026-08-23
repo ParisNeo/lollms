@@ -409,15 +409,20 @@ def build_artefacts_router(router: APIRouter):
         """Exports a single artefact along with its entire version history into a .laa archive."""
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
         decoded_title = unquote(artefact_title)
+        from werkzeug.utils import secure_filename
+        safe_filename_stem = secure_filename(decoded_title) or "artefact"
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            output_path = Path(temp_dir) / f"{unquote(artefact_title)}.laa"
+            temp_dir_path = Path(temp_dir).resolve()
+            output_path = (temp_dir_path / f"{safe_filename_stem}.laa").resolve()
+            if not output_path.is_relative_to(temp_dir_path):
+                raise HTTPException(status_code=400, detail="Invalid artefact title for export.")
             try:
                 discussion.artefacts.export_artefact_to_archive(decoded_title, str(output_path))
                 return Response(
                     content=output_path.read_bytes(),
                     media_type="application/octet-stream",
-                    headers={"Content-Disposition": f'attachment; filename="{decoded_title}.laa"'}
+                    headers={"Content-Disposition": f'attachment; filename="{safe_filename_stem}.laa"'}
                 )
             except Exception as e:
                 trace_exception(e)
@@ -689,7 +694,14 @@ def build_artefacts_router(router: APIRouter):
     ):
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
         try:
-            art = discussion.import_stackoverflow(request.url, request.auto_load)
+            from backend.security import validate_url
+            url = request.url.strip()
+            try:
+                validate_url(url)
+            except ValueError as ve:
+                raise HTTPException(status_code=400, detail=f"Invalid or forbidden URL: {ve}")
+
+            art = discussion.import_stackoverflow(url, request.auto_load)
             if not art:
                 raise HTTPException(status_code=400, detail="Failed to import StackOverflow content.")
 
@@ -1195,22 +1207,22 @@ def build_artefacts_router(router: APIRouter):
     ):
         title = unquote(artefact_title)
         discussion, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        
+
         try:
-            workspace_data_dir = Path(discussion.workspace_data_path) if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path else None
-            
+            workspace_data_dir = Path(discussion.workspace_data_path).resolve() if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path else None
+
             if workspace_data_dir and workspace_data_dir.exists():
                 possible_extensions = [".md", ".py", ".txt", ".csv", ".db", ".sqlite", ".json", ".yaml", ".yml", ".html", ".css", ".js", ".ts", ""]
                 for ext in possible_extensions:
-                    file_path = workspace_data_dir / f"{title}{ext}"
-                    if file_path.exists():
+                    file_path = (workspace_data_dir / f"{title}{ext}").resolve()
+                    if file_path.is_relative_to(workspace_data_dir) and file_path.exists() and file_path.is_file():
                         try:
                             os.remove(file_path)
                         except Exception:
                             pass
-                
-                comp_file_path = workspace_data_dir / f"{title}::images.md"
-                if comp_file_path.exists():
+
+                comp_file_path = (workspace_data_dir / f"{title}::images.md").resolve()
+                if comp_file_path.is_relative_to(workspace_data_dir) and comp_file_path.exists() and comp_file_path.is_file():
                     try:
                         os.remove(comp_file_path)
                     except Exception:

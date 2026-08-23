@@ -417,7 +417,12 @@ async def admin_reset_user_password(user_id: int, payload: UserPasswordResetAdmi
     
     user.hashed_password = hash_password(payload.new_password)
     user.password_reset_token = user.reset_token_expiry = None
+    user.password_changed_at = datetime.now(timezone.utc)
     db.commit()
+    if user.username in user_sessions:
+        del user_sessions[user.username]
+    from backend.ws_manager import manager
+    manager.disconnect_user_sync(user.id)
     return {"message": f"Password for '{user.username}' reset."}
 
 @user_management_router.post("/users/{user_id}/generate-reset-link", response_model=Dict[str, str])

@@ -299,12 +299,14 @@ async def add_member_to_group(
         new_member = DBConversationMember(conversation_id=conversation_id, user_id=payload.user_id)
         db.add(new_member)
         db.commit()
-        
+
         # System message
+        clean_username = sanitize_content(new_user.username)
+        system_content = sanitize_content(f"{clean_username} was added to the group.")
         sys_msg = DBDirectMessage(
             sender_id=current_user.id,
             conversation_id=conversation_id,
-            content=f"{new_user.username} was added to the group."
+            content=system_content
         )
         db.add(sys_msg)
         db.commit()
@@ -603,13 +605,16 @@ async def get_dm_attachment(
     filename: str, 
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    # Basic access check: currently allows any authenticated user to fetch if they have the link.
-    # In a stricter system, we would check conversation membership.
-    file_path = get_user_dm_assets_path(username) / filename
-    if not file_path.exists() or not file_path.is_file():
+    s_username = secure_filename(username)
+    s_filename = secure_filename(filename)
+
+    dm_assets_path = get_user_dm_assets_path(s_username).resolve()
+    file_path = (dm_assets_path / s_filename).resolve()
+
+    if not file_path.is_relative_to(dm_assets_path) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    
-    return FileResponse(file_path)
+
+    return FileResponse(str(file_path))
 
 async def get_conversation_details_internal(conv_id, user_id, db):
     conv = db.query(DBConversation).filter(DBConversation.id == conv_id).first()

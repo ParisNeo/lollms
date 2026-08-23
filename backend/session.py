@@ -82,38 +82,53 @@ async def get_current_db_user_from_token(
 ) -> DBUser:
     now = datetime.datetime.now(datetime.timezone.utc)
 
-    # 1. Check Cache First
-    with _token_cache_lock:
-        if token in _token_user_cache:
-            cached_user, expiry = _token_user_cache[token]
-            if now < expiry:
-                # Merge the cached user into the current session to ensure it's attached to the DB
-                return db.merge(cached_user, load=False)
-            else:
-                del _token_user_cache[token]
-
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
+    payload = decode_main_access_token(token)
+    if payload is None:
+        ASCIIColors.error(f"[Auth] Token decoding failed (SECRET_KEY mismatch or malformed). Token: ...{token[-10:]}")
+        raise credentials_exception
+
+    username: str = payload.get("sub")
+    if username is None:
+        ASCIIColors.error(f"[Auth] Payload missing 'sub' (username).")
+        raise credentials_exception
+
+    # 1. Check Cache First
+    with _token_cache_lock:
+        if token in _token_user_cache:
+            cached_user, expiry = _token_user_cache[token]
+            if now < expiry:
+                token_iat = payload.get("iat")
+                pwd_changed = cached_user.password_changed_at
+                if pwd_changed and token_iat is not None:
+                    pwd_changed_ts = pwd_changed.replace(tzinfo=datetime.timezone.utc).timestamp() if pwd_changed.tzinfo is None else pwd_changed.timestamp()
+                    if (token_iat + 1) < pwd_changed_ts:
+                        del _token_user_cache[token]
+                        raise credentials_exception
+                return db.merge(cached_user, load=False)
+            else:
+                del _token_user_cache[token]
+
     try:
-        payload = decode_main_access_token(token)
-        if payload is None:
-            ASCIIColors.error(f"[Auth] Token decoding failed (SECRET_KEY mismatch or malformed). Token: ...{token[-10:]}")
-            raise credentials_exception
-
-        username: str = payload.get("sub")
-        if username is None:
-            ASCIIColors.error(f"[Auth] Payload missing 'sub' (username).")
-            raise credentials_exception
-
         # 2. Perform DB Lookup
         user = db.query(DBUser).filter(DBUser.username == username).first()
         if user is None:
             ASCIIColors.error(f"[Auth] User '{username}' not found in database.")
             raise credentials_exception
+
+        # 2.1 Validate Token Issuance vs Password Changed At
+        token_iat = payload.get("iat")
+        if user.password_changed_at is not None and token_iat is not None:
+            pwd_changed = user.password_changed_at
+            pwd_changed_ts = pwd_changed.replace(tzinfo=datetime.timezone.utc).timestamp() if pwd_changed.tzinfo is None else pwd_changed.timestamp()
+            if (token_iat + 1) < pwd_changed_ts:
+                ASCIIColors.warning(f"[Auth] Stale token rejected for user '{username}': issued at {token_iat} prior to password change at {pwd_changed_ts}.")
+                raise credentials_exception
 
         # 3. Update Last Activity (Throttled & Defensive)
         try:
@@ -550,8 +565,12 @@ def build_lollms_client_from_params(
 
         binding_to_use = None
         
-        # Determine the model name from session or DB
-        user_model_full = session.get("lollms_model_name") or user_db.lollms_model_name
+        # Determine the model name: DB is the source of truth, followed by session
+        user_model_full = user_db.lollms_model_name or session.get("lollms_model_name")
+        if not user_model_full and username == 'lollms':
+            user_model_full = settings.get("ai_bot_binding_model") or settings.get("default_lollms_model_name")
+        elif not user_model_full:
+            user_model_full = settings.get("default_lollms_model_name")
 
         # Always resolve the LLM binding configurations to allow model listings 
         # and metadata queries even when load_llm is set to False.
@@ -579,25 +598,57 @@ def build_lollms_client_from_params(
 
             if user_model_full:
                 target_binding_alias = binding_alias
+                target_model_name = model_name
                 if not target_binding_alias and '/' in user_model_full:
-                    target_binding_alias = user_model_full.split('/', 1)[0]
+                    target_binding_alias, target_model_name = user_model_full.split('/', 1)
+                elif not target_binding_alias:
+                    try:
+                        resolved_alias, resolved_model = resolve_model_name(db, user_model_full, fallback_to_default=False)
+                        target_binding_alias = resolved_alias
+                        if not target_model_name:
+                            target_model_name = resolved_model
+                    except Exception:
+                        pass
 
                 if target_binding_alias:
                     binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
                     if binding_to_use:
-                         ASCIIColors.debug(f"[ClientBuild] Using user-requested binding: {target_binding_alias}")
+                        ASCIIColors.debug(f"[ClientBuild] Using user-requested binding: {target_binding_alias}")
+                        if not model_name:
+                            model_name = target_model_name
 
             if not binding_to_use:
                 binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
                 if binding_to_use:
                     ASCIIColors.debug(f"[ClientBuild] No user model set or binding inactive. Falling back to system default: {binding_to_use.alias}")
-            
+
             if binding_to_use:            
                 final_alias = binding_to_use.alias
                 model_name_for_binding = model_name
                 if not model_name_for_binding:
-                    selected_binding_alias, selected_model_name = (user_model_full.split('/', 1) + [None])[:2] if user_model_full else (None, None)
-                    model_name_for_binding = selected_model_name if selected_binding_alias == final_alias else binding_to_use.default_model_name
+                    if user_model_full and '/' in user_model_full:
+                        selected_binding_alias, selected_model_name = user_model_full.split('/', 1)
+                        if selected_binding_alias == final_alias:
+                            model_name_for_binding = selected_model_name
+                    elif user_model_full and user_model_full != final_alias:
+                        try:
+                            _, resolved_model = resolve_model_name(db, user_model_full, fallback_to_default=False)
+                            model_name_for_binding = resolved_model
+                        except Exception:
+                            pass
+
+                if not model_name_for_binding:
+                    model_name_for_binding = binding_to_use.default_model_name
+
+                if not model_name_for_binding:
+                    try:
+                        from lollms_client.lollms_llm_binding import list_binding_models
+                        avail_models = list_binding_models(llm_binding_name=binding_to_use.name, llm_binding_config=binding_to_use.config)
+                        if avail_models and isinstance(avail_models, list) and len(avail_models) > 0:
+                            first_m = avail_models[0]
+                            model_name_for_binding = first_m if isinstance(first_m, str) else (first_m.get("name") or first_m.get("id") or first_m.get("model_name"))
+                    except Exception:
+                        pass
 
                 llm_init_params = { **binding_to_use.config }
                 

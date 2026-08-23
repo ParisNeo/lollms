@@ -70,11 +70,11 @@ def _ingest_notebook_sources_task(
     task: Task, 
     username: str, 
     notebook_id: str, 
-    urls: List[str], 
-    youtube_configs: List[Dict[str, str]] = None, 
-    wikipedia_urls: List[str] = None,
-    google_search_queries: List[str] = None,
-    arxiv_queries: List[str] = None,
+    urls: Optional[List[str]] = None, 
+    youtube_configs: Optional[List[Dict[str, str]]] = None, 
+    wikipedia_urls: Optional[List[str]] = None,
+    google_search_queries: Optional[List[str]] = None,
+    arxiv_queries: Optional[List[str]] = None,
     initial_prompt: Optional[str] = None,
     target_tab_id: Optional[str] = None,
     arxiv_config: Optional[Dict[str, Any]] = None,
@@ -82,14 +82,15 @@ def _ingest_notebook_sources_task(
 ):
     task.log("Starting production ingestion...")
     task.set_progress(5)
-    
+
+    url_list = urls or []
     yt_list = youtube_configs or []
     wiki_list = wikipedia_urls or []
     google_list = google_search_queries or []
     arxiv_list = arxiv_queries or []
     arxiv_selected = arxiv_selected_list or []
-    
-    total_ops = len(urls) + len(yt_list) + len(wiki_list) + len(google_list) + len(arxiv_list) + len(arxiv_selected)
+
+    total_ops = len(url_list) + len(yt_list) + len(wiki_list) + len(google_list) + len(arxiv_list) + len(arxiv_selected)
     current_op = 0
 
     with task.db_session_factory() as db:
@@ -151,10 +152,10 @@ def _ingest_notebook_sources_task(
                 task.log(f"Wikipedia system error: {e}", "ERROR")
 
         # 2. Web URLs Ingestion
-        if urls:
+        if url_list:
             try:
                 from scrapemaster import ScrapeMaster
-                for url in urls:
+                for url in url_list:
                     if task.cancellation_event.is_set():
                         break
                     try:

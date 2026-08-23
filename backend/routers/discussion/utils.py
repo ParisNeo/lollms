@@ -271,12 +271,9 @@ def build_utils_router(router: APIRouter):
         
         safe_title = re.sub(r'[^a-zA-Z0-9_-]', '', discussion_obj.metadata.get('title', 'discussion').replace(' ', '_'))
         zip_filename = f"code_export_{safe_title}_{discussion_id[:8]}.zip"
-        
+
         headers = {'Content-Disposition': f'attachment; filename="{zip_filename}"'}
         return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
-
-    return router
-
 
     @router.post("/export-message-code", response_class=StreamingResponse)
     async def export_message_code(
@@ -285,7 +282,7 @@ def build_utils_router(router: APIRouter):
     ):
         code_files = []
         code_block_counter = 1
-        
+
         code_block_pattern = re.compile(r"```(\w*)\n([\s\S]*?)\n```")
         filename_pattern = re.compile(
             r"^(?:----?\s*)?(?:\[(?:CREATE|UPDATE)\]\s*)?([a-zA-Z0-9_./\\-]+?\.\w+)(?:\s*----?)?$",
@@ -325,7 +322,7 @@ def build_utils_router(router: APIRouter):
                     if match:
                         filename = match.group(1)
                         break
-            
+
             if filename:
                 if ".." in filename or Path(filename).is_absolute():
                     filename = ""
@@ -336,7 +333,7 @@ def build_utils_router(router: APIRouter):
                 ext = lang_ext_map.get(lang, 'txt')
                 filename = f"script_{code_block_counter}.{ext}"
                 code_block_counter += 1
-            
+
             code_files.append((filename, code_content))
 
         if not code_files:
@@ -346,12 +343,12 @@ def build_utils_router(router: APIRouter):
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
             for filepath, content in code_files:
                 zf.writestr(filepath, content)
-        
+
         zip_buffer.seek(0)
-        
+
         safe_title = re.sub(r'[^a-zA-Z0-9_-]', '', payload.discussion_title.replace(' ', '_'))
         zip_filename = f"code_export_{safe_title}.zip"
-        
+
         headers = {'Content-Disposition': f'attachment; filename="{zip_filename}"'}
         return StreamingResponse(zip_buffer, media_type="application/zip", headers=headers)
 

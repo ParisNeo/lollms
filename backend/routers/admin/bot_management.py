@@ -162,8 +162,17 @@ async def update_ai_bot_settings(settings: AiBotSettingsUpdate, db: Session = De
     if settings.active_personality_id is not None:
         bot_user.active_personality_id = settings.active_personality_id
 
+    # Synchronize in-memory session cache for @lollms user
+    from backend.session import user_sessions
+    if "lollms" in user_sessions:
+        user_sessions["lollms"]["lollms_model_name"] = bot_user.lollms_model_name
+        user_sessions["lollms"]["active_personality_id"] = bot_user.active_personality_id
+        user_sessions["lollms"].pop("lollms_clients_cache", None)
+
     # 2. Update Global Configs (Upsert)
     configs_to_update = [
+        ("ai_bot_binding_model", settings.lollms_model_name, "string"),
+        ("ai_bot_personality_id", settings.active_personality_id, "string"),
         ("ai_bot_enabled", settings.ai_bot_enabled, "boolean"),
         ("ai_bot_system_prompt", settings.ai_bot_system_prompt, "text"),
         ("ai_bot_auto_post", settings.ai_bot_auto_post, "boolean"),

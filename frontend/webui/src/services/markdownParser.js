@@ -122,6 +122,9 @@ function sanitizeDangerousTags(html) {
     // 4. Neutralize event handlers (onclick, onerror, etc) - both quoted and unquoted
     clean = clean.replace(/\son\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]*)/gi, '');
 
+    // 5. Neutralize dangerous URL schemes in href and src attributes (e.g. javascript:, vbscript:)
+    clean = clean.replace(/\s(href|src)\s*=\s*["']?\s*(?:javascript:|vbscript:|data:text\/html)[^"'>\s]*/gi, ' $1="#"');
+
     return clean;
 }
 

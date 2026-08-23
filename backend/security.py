@@ -91,13 +91,17 @@ def sanitize_content(content: str) -> str:
     """
     if not content:
         return content
-    
+
     # Remove script blocks entirely including their content
     content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)
-    
+
+    # Neutralize dangerous javascript: and pseudo-protocols in links/markdown
+    content = re.sub(r'href\s*=\s*["\']?\s*(?:javascript|vbscript|data):[^"\'>\s]*', 'href="#"', content, flags=re.IGNORECASE)
+    content = re.sub(r'\[(.*?)\]\(\s*(?:javascript|vbscript|data):[^\)]*\)', r'[\1](#)', content, flags=re.IGNORECASE)
+
     # bleach.clean will strip or escape tags not in ALLOWED_TAGS
     # and strip attributes not in ALLOWED_ATTRS.
-    return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, strip=True)
+    return bleach.clean(content, tags=ALLOWED_TAGS, attributes=ALLOWED_ATTRS, protocols=['http', 'https', 'mailto'], strip=True)
 
 def verify_custom_node_code(code: str, lollms_client: Optional[Any] = None) -> Tuple[bool, str]:
     """
@@ -220,8 +224,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode = data.copy()
     from backend.settings import settings
 
+    now_utc = datetime.now(timezone.utc)
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        expire = now_utc + expires_delta
     else:
         try:
             expire_minutes = settings.get("access_token_expire_minutes", 30*24*3600)
@@ -237,9 +242,12 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
             print(f"WARNING: Invalid 'access_token_expire_minutes' value ({expire_minutes}). Using fallback of 30 days.")
             minutes = 30*24*3600 # 30 days in minutes
 
-        expire = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+        expire = now_utc + timedelta(minutes=minutes)
 
-    to_encode.update({"exp": expire})
+    to_encode.update({
+        "exp": expire,
+        "iat": int(now_utc.timestamp())
+    })
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 

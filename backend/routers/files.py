@@ -27,7 +27,10 @@ from pptx.util import Inches as PptxInches, Pt as PptxPt
 from markdown_pdf import MarkdownPdf, Section 
 from docx.oxml import parse_xml
 from docx.oxml.ns import qn
-from latex2mathml.converter import convert as latex2mathml
+try:
+    from latex2mathml.converter import convert as latex2mathml
+except ImportError:
+    latex2mathml = None
 from PIL import Image
 
 # Try to import optional document parsing libraries
@@ -379,18 +382,24 @@ def _download_image_to_temp(src: str) -> str:
     return tf.name
 
 def _insert_math(p, latex):
-    mathml = latex2mathml(latex)
-    # Replace MathML namespace for Office Math
-    omath_xml = (
-        f'<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
-        f'<m:oMath>'
-        f'{mathml}'
-        f'</m:oMath>'
-        f'</m:oMathPara>'
-    )
-    # Attach OMML to paragraph
-    omath_element = parse_xml(omath_xml)
-    p._p.append(omath_element)
+    if not latex2mathml:
+        p.add_run(f" ${latex}$ ")
+        return
+    try:
+        mathml = latex2mathml(latex)
+        # Replace MathML namespace for Office Math
+        omath_xml = (
+            f'<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
+            f'<m:oMath>'
+            f'{mathml}'
+            f'</m:oMath>'
+            f'</m:oMathPara>'
+        )
+        # Attach OMML to paragraph
+        omath_element = parse_xml(omath_xml)
+        p._p.append(omath_element)
+    except Exception:
+        p.add_run(f" ${latex}$ ")
     
 def html_to_docx_bytes(html: str) -> bytes:
     soup = BeautifulSoup(html, "html.parser")

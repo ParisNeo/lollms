@@ -85,17 +85,18 @@ class TestNotebookIngestionSSRFSecurity(unittest.TestCase):
     @patch('wikipedia.page')
     def test_wikipedia_ingestion_blocks_ssrf(self, mock_wiki):
         from backend.tasks.notebook_tasks.ingestion import _ingest_notebook_sources_task
-        
+
         mock_task = MagicMock()
         mock_task.cancellation_event.is_set.return_value = False
         mock_task.db_session_factory.return_value.__enter__.return_value = MagicMock()
-        
+
         malicious_url = "http://127.0.0.1:8080/admin"
-        
+
         _ingest_notebook_sources_task(
             task=mock_task,
             username="test_user",
             notebook_id="dummy_id",
+            urls=[],
             wikipedia_urls=[malicious_url]
         )
         
