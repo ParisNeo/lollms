@@ -27,6 +27,7 @@ class TestSessionExpirationSecurity:
         mock_user.username = "alice"
         mock_user.is_active = True
         mock_user.password_changed_at = datetime.datetime.now(timezone.utc)
+        mock_user.last_activity_at = None
 
         mock_db = MagicMock()
         mock_db.query.return_value.filter.return_value.first.return_value = mock_user

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-23 19:05]
+
+- fix(backend): improve XML validation, token encoding, and session activity tracking
+
 ## [2026-08-23 18:07]
 
 - refactor(backend): update user authentication and admin management logic

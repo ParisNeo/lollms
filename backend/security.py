@@ -244,10 +244,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
         expire = now_utc + timedelta(minutes=minutes)
 
-    to_encode.update({
-        "exp": expire,
-        "iat": int(now_utc.timestamp())
-    })
+    if "exp" not in to_encode:
+        to_encode["exp"] = expire
+    if "iat" not in to_encode:
+        to_encode["iat"] = int(now_utc.timestamp())
+
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 

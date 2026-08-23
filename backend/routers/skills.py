@@ -233,10 +233,10 @@ async def import_skill(file: UploadFile = File(...), current_user: UserAuthDetai
     
     try:
         # Detect XML (Custom format)
-        if "<skill" in text_content[:100]:
-            if "<!DOCTYPE" in text_content.upper() or "<!ENTITY" in text_content.upper():
-                raise ValueError("XML DTD and custom entity declarations are forbidden.")
+        if "<!DOCTYPE" in text_content.upper() or "<!ENTITY" in text_content.upper():
+            raise ValueError("XML DTD and custom entity declarations are forbidden.")
 
+        if "<skill" in text_content:
             cdata_match = re.search(r'<!\[CDATA\[(.*?)\]\]>', text_content, re.DOTALL)
             cdata_content = cdata_match.group(1) if cdata_match else ""
 

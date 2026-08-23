@@ -132,11 +132,17 @@ async def get_current_db_user_from_token(
 
         # 3. Update Last Activity (Throttled & Defensive)
         try:
-            last_activity_aware = user.last_activity_at.replace(tzinfo=datetime.timezone.utc) if user.last_activity_at and user.last_activity_at.tzinfo is None else user.last_activity_at
-            if not last_activity_aware or (now - last_activity_aware) > datetime.timedelta(seconds=60):
+            last_act = user.last_activity_at
+            if last_act is None:
                 user.last_activity_at = now
                 db.commit()
-                db.refresh(user) # Ensure object is valid for caller
+                db.refresh(user)
+            elif isinstance(last_act, datetime.datetime):
+                last_activity_aware = last_act.replace(tzinfo=datetime.timezone.utc) if last_act.tzinfo is None else last_act
+                if (now - last_activity_aware) > datetime.timedelta(seconds=60):
+                    user.last_activity_at = now
+                    db.commit()
+                    db.refresh(user)
         except Exception as e:
             # Telemetry update failure should NOT block the handshake
             ASCIIColors.warning(f"[Auth] Throttled activity update failed (DB Busy?): {e}")
