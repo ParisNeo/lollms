@@ -46,7 +46,7 @@ async function handleSave() {
         await adminStore.updateAppEnv(app.value.id, envContent.value);
         uiStore.closeModal('appEnvConfig');
     } catch (error) {
-        // Error is handled globally by api client
+        // Error handled globally
     } finally {
         isSaving.value = false;
     }
@@ -54,29 +54,29 @@ async function handleSave() {
 </script>
 
 <template>
-    <GenericModal modalName="appEnvConfig" :title="`.env Configuration: ${app?.name || ''}`" maxWidthClass="max-w-4xl">
+    <GenericModal modal-name="appEnvConfig" :title="`.env Configuration: ${app?.name || ''}`" max-width-class="max-w-3xl">
         <template #body>
-            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Edit the environment variables for this application. Changes will be applied on the next start of the application.
+            <p class="text-xs text-gray-600 dark:text-gray-400 mb-3">
+                Configure environment variables directly. Updates will take effect on the next application restart.
             </p>
-            <div class="relative bg-gray-900 text-white font-mono text-sm p-4 rounded-md h-96">
-                <div v-if="isLoading" class="absolute inset-0 bg-gray-900/80 flex items-center justify-center">
-                    <IconAnimateSpin class="w-8 h-8" />
+            <div class="relative bg-gray-950 text-gray-100 font-mono text-xs p-4 rounded-2xl border border-gray-800 h-80 overflow-hidden shadow-inner">
+                <div v-if="isLoading" class="absolute inset-0 bg-gray-950/80 backdrop-blur-xs flex items-center justify-center z-10">
+                    <IconAnimateSpin class="w-6 h-6 text-primary animate-spin" />
                 </div>
                 <textarea 
                     v-model="envContent"
-                    class="w-full h-full bg-transparent border-none focus:ring-0 resize-none p-0 text-sm"
-                    placeholder="Loading .env content..."
+                    class="w-full h-full bg-transparent border-none focus:ring-0 focus:outline-hidden resize-none p-0 text-xs font-mono leading-relaxed"
+                    placeholder="# Loading environment variables..."
                     spellcheck="false"
                 ></textarea>
             </div>
         </template>
         <template #footer>
-            <div class="flex justify-end gap-3">
-                <button @click="uiStore.closeModal('appEnvConfig')" type="button" class="btn btn-secondary">Cancel</button>
-                <button @click="handleSave" type="button" class="btn btn-primary" :disabled="isLoading || isSaving">
-                    <IconAnimateSpin v-if="isSaving" class="w-5 h-5 mr-2" />
-                    {{ isSaving ? 'Saving...' : 'Save Changes' }}
+            <div class="flex justify-end gap-2">
+                <button @click="uiStore.closeModal('appEnvConfig')" type="button" class="btn btn-secondary btn-sm">Cancel</button>
+                <button @click="handleSave" type="button" class="btn btn-primary btn-sm font-semibold" :disabled="isLoading || isSaving">
+                    <IconAnimateSpin v-if="isSaving" class="w-4 h-4 mr-1.5 animate-spin" />
+                    {{ isSaving ? 'Saving...' : 'Save .env' }}
                 </button>
             </div>
         </template>

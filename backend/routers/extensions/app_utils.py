@@ -566,42 +566,96 @@ def start_app_task(task: Task, app_id: str):
         app = db_session.query(DBApp).filter(DBApp.id == app_id).first()
         if not app: raise ValueError("Installed app metadata not found.")
 
-        # Ensure the app has a port before trying to start
-        if app.port is None:
-            new_port = _get_next_available_app_port_for_batch(db_session, set())
-            app.port = new_port
-            db_session.commit() # Commit this change so it's persisted immediately
-            task.log(f"App '{app.name}' had no port, assigned new port {new_port}.", "INFO")
+        # 1. Clean up any lingering PID recorded on this app
+        if app.pid:
+            try:
+                p = psutil.Process(app.pid)
+                if p.is_running():
+                    task.log(f"Terminating previous lingering process (PID {app.pid})...", "INFO")
+                    p.terminate()
+                    p.wait(timeout=3)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            except Exception as pid_err:
+                task.log(f"Note: Could not terminate old PID {app.pid}: {pid_err}", "DEBUG")
+            app.pid = None
+
+        # 2. Verify port availability and auto-reassign if occupied
+        target_port = app.port if (app.port and app.port >= 1024) else 9601
+        try:
+            free_port = find_next_available_port(target_port)
+            if free_port != app.port:
+                task.log(f"Port {app.port or 'None'} was unavailable or in use. Auto-reassigned '{app.name}' to free port {free_port}.", "WARNING")
+                app.port = free_port
+                db_session.commit()
+        except Exception as port_err:
+            task.log(f"Warning during port validation: {port_err}", "WARNING")
 
 
         log_file_path = app_path / "app.log"
         log_file_handle = open(log_file_path, "w", encoding="utf-8", buffering=1)
 
         venv_path = app_path / "venv"
-        python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-        
+        python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / ("python.exe" if sys.platform == "win32" else "python")
+        if not python_executable.exists():
+            python_executable = venv_path / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+
         main_server_host = settings.get("host", "0.0.0.0")
         host_to_bind = "0.0.0.0" if main_server_host in ["0.0.0.0", "::"] else "127.0.0.1"
+
+        # Prepare Environment with .env overrides and unbuffered I/O
+        process_env = os.environ.copy()
+        process_env["PYTHONUNBUFFERED"] = "1"
+        process_env["PYTHONIOENCODING"] = "utf-8"
+        process_env["PYTHONPATH"] = str(app_path) + os.pathsep + process_env.get("PYTHONPATH", "")
+
+        env_file_path = app_path / ".env"
+        if env_file_path.exists():
+            try:
+                for line in env_file_path.read_text(encoding="utf-8").splitlines():
+                    clean_line = line.strip()
+                    if clean_line and not clean_line.startswith("#") and "=" in clean_line:
+                        k, v = clean_line.split("=", 1)
+                        process_env[k.strip()] = v.strip().strip('"').strip("'")
+            except Exception as env_err:
+                task.log(f"Warning: Could not parse .env file: {env_err}", "WARNING")
 
         command_template = (app.app_metadata or {}).get('run_command')
         if command_template:
             command = [str(arg).replace("{python_executable}", str(python_executable)).replace("{port}", str(app.port)).replace("{host}", host_to_bind) for arg in command_template]
         else:
             item_type = (app.app_metadata or {}).get('item_type', 'app')
+            server_script = "server.py" if (app_path / "server.py").exists() else "main.py"
             if item_type == 'mcp':
-                command = [str(python_executable), "server.py", "--host", host_to_bind, "--port", str(app.port)]
+                command = [str(python_executable), server_script, "--host", host_to_bind, "--port", str(app.port)]
             else:
                 command = [str(python_executable), "-m", "uvicorn", "server:app", "--host", host_to_bind, "--port", str(app.port)]
 
         task.log(f"Executing start command: {' '.join(command)}")
-        process = subprocess.Popen(command, cwd=str(app_path), stdout=log_file_handle, stderr=subprocess.STDOUT)
-        
+        process = subprocess.Popen(
+            command, 
+            cwd=str(app_path), 
+            stdout=log_file_handle, 
+            stderr=subprocess.STDOUT,
+            env=process_env
+        )
+
         open_log_files[app.id] = log_file_handle
         task.process = process
-        time.sleep(5) 
-        
+        time.sleep(4) 
+
         if process.poll() is not None:
-            raise Exception(f"Application failed to start. Process exited with code {process.poll()}. Check task logs and app.log.")
+            log_file_handle.flush()
+            log_output = ""
+            if log_file_path.exists():
+                try:
+                    log_output = log_file_path.read_text(encoding="utf-8", errors="ignore").strip()
+                except Exception:
+                    pass
+
+            error_details = log_output if log_output else f"Process exited with return code {process.poll()}."
+            task.log(f"Process crashed on startup:\n{error_details}", "ERROR")
+            raise Exception(f"Application failed to start (exit code {process.poll()}).\n{error_details}")
 
         app_host = get_accessible_host()
         app.pid = process.pid

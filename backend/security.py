@@ -387,11 +387,11 @@ def _send_email_gmail(to_email: str, subject: str, html_content: Optional[str], 
         raise
 
 def _send_email_system_mail_text(to_email: str, subject: str, text_content: str):
-    """Sends a plain text email using system commands."""
-    
-    # Try sendmail first
+    """Sends a plain text email using system commands (sendmail, mailx, or mail)."""
+    safe_subject = subject.replace("\n", " ").replace("\r", " ")
+
+    # 1. Try sendmail first
     if shutil.which("sendmail"):
-        safe_subject = subject.replace("\n", " ").replace("\r", " ")
         full_email = (
             f"To: {to_email}\n"
             f"Subject: {safe_subject}\n"
@@ -399,83 +399,48 @@ def _send_email_system_mail_text(to_email: str, subject: str, text_content: str)
             f"\n"
             f"{text_content}"
         )
-        # -t reads recipients from headers
         command = ["sendmail", "-t"]
         try:
             subprocess.run(command, input=full_email, capture_output=True, text=True, check=True, encoding="utf-8")
             print(f"INFO: Email (Text system mail) sent to {to_email} via sendmail.")
             return
-        except subprocess.CalledProcessError as e:
-            print(f"WARNING: sendmail failed: {e.stderr}")
-            # Fall through to mailx
+        except Exception as e:
+            print(f"WARNING: sendmail failed: {e}")
 
-    if not shutil.which("mailx"):
-        raise FileNotFoundError("Neither 'sendmail' nor 'mailx' found.")
-    
-    # Fallback to mailx for simple text
-    command = ["mailx", "-s", subject, to_email]
-    try:
-        subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding="utf-8")
-        print(f"INFO: Email (Text system mail) sent to {to_email} via mailx.")
-    except subprocess.CalledProcessError as e:
-        print(f"ERROR: mailx failed: {e.stderr}")
-        raise
+    # 2. Try mailx
+    if shutil.which("mailx"):
+        command = ["mailx", "-s", safe_subject, to_email]
+        try:
+            subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding="utf-8")
+            print(f"INFO: Email (Text system mail) sent to {to_email} via mailx.")
+            return
+        except Exception as e:
+            print(f"WARNING: mailx failed: {e}")
+
+    # 3. Try standard mail
+    if shutil.which("mail"):
+        command = ["mail", "-s", safe_subject, to_email]
+        try:
+            subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding="utf-8")
+            print(f"INFO: Email (Text system mail) sent to {to_email} via mail.")
+            return
+        except Exception as e:
+            print(f"ERROR: mail command failed: {e}")
+            raise
+
+    raise FileNotFoundError("Neither 'sendmail', 'mailx', nor 'mail' command found on host system.")
 
 def _send_email_system_mail_html(to_email: str, subject: str, html_content: str, text_content: str):
-    """Alternative approach using sendmail or a temporary file with mailx."""
-    
-    # Check for sendmail first (more reliable for MIME)
+    """Sends HTML multipart email using sendmail or mailx with graceful plain text fallback."""
     if shutil.which("sendmail"):
-        return _send_email_sendmail_html(to_email, subject, html_content, text_content)
-    
-    if not shutil.which("mailx"):
-        raise FileNotFoundError("Neither 'sendmail' nor 'mailx' found.")
-    
-    safe_subject = subject.replace("\n", " ").replace("\r", " ")
-    boundary = f"----=_NextPart_{secrets.token_hex(16)}"
-    
-    # Create full email with headers
-    full_email = (
-        f"To: {to_email}\n"
-        f"Subject: {safe_subject}\n"
-        f"MIME-Version: 1.0\n"
-        f"Content-Type: multipart/alternative; boundary=\"{boundary}\"\n"
-        f"\n"
-        f"This is a multi-part message in MIME format.\n"
-        f"--{boundary}\n"
-        f"Content-Type: text/plain; charset=utf-8\n"
-        f"Content-Transfer-Encoding: 8bit\n\n"
-        f"{text_content}\n\n"
-        f"--{boundary}\n"
-        f"Content-Type: text/html; charset=utf-8\n"
-        f"Content-Transfer-Encoding: 8bit\n\n"
-        f"{html_content}\n\n"
-        f"--{boundary}--\n"
-    )
-    
-    # Write to temp file and use mailx -t (read headers from message)
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.eml', delete=False) as f:
-        f.write(full_email)
-        temp_file = f.name
-    
-    try:
-        command = ["mailx", "-v", "-t"]  # -t means read headers from message
-        
-        with open(temp_file, 'r') as f:
-            process = subprocess.run(
-                command,
-                stdin=f,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-        
-        print(f"INFO: Email (HTML system mail) sent to {to_email}.")
-    except subprocess.CalledProcessError as e:
-        print(f"ERROR: System 'mailx' command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
-        raise
-    finally:
-        os.unlink(temp_file)
+        try:
+            return _send_email_sendmail_html(to_email, subject, html_content, text_content)
+        except Exception as ex:
+            print(f"WARNING: sendmail HTML delivery failed: {ex}. Falling back to system text mail.")
+            return _send_email_system_mail_text(to_email, subject, text_content)
+
+    # If sendmail is absent, use system text command fallback
+    return _send_email_system_mail_text(to_email, subject, text_content)
 
 def _send_email_sendmail_html(to_email: str, subject: str, html_content: str, text_content: str):
     """Send HTML email using sendmail (more reliable for MIME)."""
@@ -555,8 +520,10 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
     # Prepare HTML wrapper if needed
     html_body = _get_full_html_email(body, background_color) if not send_as_text else None
     
-    # FIX: Accept 'automatic' as 'smtp' since that's what the UI/Settings calls it
-    if recovery_mode == "smtp" or recovery_mode == "automatic":
+    # Normalize mode casing and aliases
+    recovery_mode = str(recovery_mode).lower().strip()
+
+    if recovery_mode in ("smtp", "automatic"):
         text_content = _convert_html_to_text(body)
         _send_email_smtp(to_email, subject, html_body, text_content)
     elif recovery_mode == "gmail":
@@ -578,17 +545,49 @@ def send_generic_email(to_email: str, subject: str, body: str, background_color:
         print(f"WARNING: {error_msg}")
         raise ValueError(error_msg)
 
+def generate_verification_code(length: int = 6) -> str:
+    """Generates a secure numeric OTP verification code."""
+    return ''.join(secrets.choice('0123456789') for _ in range(length))
+
+def send_verification_code_email(to_email: str, code: str, username: str, expiry_minutes: int = 10):
+    """Sends a 2FA/Email Verification login code."""
+    subject = "Your LoLLMs Authentication Code"
+    body_content = f"""
+    <h2>Authentication Verification</h2>
+    <p>Hello <strong>{username}</strong>,</p>
+    <p>A login request requires email verification. Use the following security code to complete sign-in:</p>
+    <div style="background-color: #f1f5f9; padding: 18px; border-radius: 12px; font-size: 28px; font-weight: bold; letter-spacing: 6px; text-align: center; color: #1e293b; margin: 24px 0;">
+        {code}
+    </div>
+    <p style="color: #64748b; font-size: 13px;">This code will expire in {expiry_minutes} minutes. If you did not attempt to sign in, please secure your account immediately.</p>
+    """
+    try:
+        send_generic_email(to_email, subject, body_content, background_color="#f8fafc", send_as_text=False)
+    except Exception as e:
+        print(f"ERROR: Failed sending verification code email to {to_email}: {e}")
+        # Fallback to plain text transmission
+        text_content = f"Hello {username},\n\nYour LoLLMs authentication code is: {code}\nThis code expires in {expiry_minutes} minutes."
+        send_generic_email(to_email, subject, text_content, send_as_text=True)
+
 def send_password_reset_email(to_email: str, reset_link: str, username: str):
     """Prepares and sends a password reset email using the configured method."""
     subject = "Password Reset Request"
     body_content = f"""
-    <p>Hello {username},</p>
-    <p>You requested a password reset for your account. Please click the link below to set a new password:</p>
-    <p><a href="{reset_link}" style="color: #ffffff; background-color: #007bff; padding: 10px 15px; text-decoration: none; border-radius: 5px; display: inline-block;">Reset Your Password</a></p>
-    <p>This link will expire in 1 hour.</p>
-    <p>If you did not request a password reset, please ignore this email.</p>
+    <h2>Password Reset Request</h2>
+    <p>Hello <strong>{username}</strong>,</p>
+    <p>You requested a password reset for your LoLLMs account. Click the button below to set a new password:</p>
+    <div style="margin: 25px 0;">
+        <a href="{reset_link}" style="color: #ffffff; background-color: #2563eb; padding: 12px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; display: inline-block;">Reset Password</a>
+    </div>
+    <p style="color: #64748b; font-size: 13px;">Or copy and paste this URL into your browser:<br><a href="{reset_link}" style="color: #2563eb;">{reset_link}</a></p>
+    <p style="color: #94a3b8; font-size: 12px;">This link expires in 1 hour. If you did not request this, you can safely ignore this email.</p>
     """
-    send_generic_email(to_email, subject, body_content, send_as_text=False)
+    try:
+        send_generic_email(to_email, subject, body_content, background_color="#f8fafc", send_as_text=False)
+    except Exception as e:
+        print(f"ERROR: HTML password reset email failed for {to_email}: {e}. Retrying as plain text...")
+        text_content = f"Hello {username},\n\nYou requested a password reset for your LoLLMs account.\nReset link: {reset_link}\nThis link expires in 1 hour."
+        send_generic_email(to_email, subject, text_content, send_as_text=True)
 
 def decode_main_access_token(token: str) -> Optional[dict]:
     """Decodes a main application JWT using the global SECRET_KEY."""

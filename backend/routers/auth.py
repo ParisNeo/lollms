@@ -33,7 +33,7 @@ from backend.models.user import (
     DataZoneUpdate,
     MemoryUpdate
 )
-from backend.models.auth import Token
+from backend.models.auth import Token, VerifyEmailCodeRequest, ResendVerificationCodeRequest
 from backend.session import (
     get_current_active_user, 
     get_current_db_user_from_token, 
@@ -130,6 +130,7 @@ async def login_for_access_token(
     form_data: OAuth2PasswordRequestForm = Depends(), 
     db: Session = Depends(get_db)
 ):
+    settings.refresh(db)
     admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
     admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
 
@@ -223,8 +224,51 @@ async def login_for_access_token(
             detail=detail_msg,
         )
 
+    # --- EMAIL 2FA / VERIFICATION OPTION ---
+    is_email_verification_enabled = settings.get("email_verification_enabled", False)
+    bypass_admins = settings.get("email_verification_bypass_admins", False)
+
+    if is_email_verification_enabled and not (user.is_admin and bypass_admins):
+        if not user.email or "@" not in user.email:
+            if user.is_admin:
+                print(f"WARNING: Admin '{user.username}' has no email configured. Bypassing email verification.")
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email verification is enabled by the administrator, but your account has no email address configured. Please contact an administrator."
+                )
+        else:
+            from backend.security import generate_verification_code, send_verification_code_email
+            import uuid
+
+            code = generate_verification_code(6)
+            expiry_minutes = int(settings.get("email_verification_code_expiry_minutes", 10))
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+            temp_token = str(uuid.uuid4())
+            user.email_verification_code = code
+            user.email_verification_code_expiry = now_utc + datetime.timedelta(minutes=expiry_minutes)
+            user.email_verification_token = temp_token
+            db.commit()
+
+            # Dispatch email containing OTP code
+            send_verification_code_email(user.email, code, user.username, expiry_minutes=expiry_minutes)
+
+            # Obfuscate email for hint
+            parts = user.email.split("@")
+            user_part, domain_part = parts[0], parts[1]
+            hint = user_part[0] + "***" + (user_part[-1] if len(user_part) > 1 else "") + "@" + domain_part
+
+            return {
+                "access_token": "",
+                "token_type": "bearer",
+                "email_verification_required": True,
+                "temp_token": temp_token,
+                "email_hint": hint
+            }
+
     access_token = create_access_token(data={"sub": user.username})
-    
+
     if user.username not in user_sessions:
         print(f"INFO: Initializing session state for user: {user.username}")
         
@@ -265,6 +309,65 @@ async def login_for_access_token(
                 db_session_for_init.close()
     
     return {"access_token": access_token, "token_type": "bearer"}
+
+@auth_router.post("/verify-email-code", response_model=Token)
+async def verify_email_login_code(
+    payload: VerifyEmailCodeRequest,
+    db: Session = Depends(get_db)
+):
+    """Verifies the OTP code sent to user email and issues the full JWT access token."""
+    user = db.query(DBUser).filter(DBUser.email_verification_token == payload.temp_token).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification session.")
+
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    expiry = user.email_verification_code_expiry
+    if expiry and expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=datetime.timezone.utc)
+
+    if not expiry or expiry < now_utc:
+        user.email_verification_code = None
+        user.email_verification_token = None
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Verification code has expired. Please log in again.")
+
+    if user.email_verification_code != payload.code.strip():
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect verification code. Please check your email.")
+
+    # Verification successful: clear OTP token fields
+    user.email_verification_code = None
+    user.email_verification_code_expiry = None
+    user.email_verification_token = None
+    db.commit()
+
+    access_token = create_access_token(data={"sub": user.username})
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "email_verification_required": False
+    }
+
+@auth_router.post("/resend-verification-code", response_model=Dict[str, str])
+async def resend_email_login_code(
+    payload: ResendVerificationCodeRequest,
+    db: Session = Depends(get_db)
+):
+    """Resends a new OTP verification code for an active login session."""
+    user = db.query(DBUser).filter(DBUser.email_verification_token == payload.temp_token).first()
+    if not user or not user.email:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid verification session.")
+
+    from backend.security import generate_verification_code, send_verification_code_email
+    code = generate_verification_code(6)
+    expiry_minutes = int(settings.get("email_verification_code_expiry_minutes", 10))
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+
+    user.email_verification_code = code
+    user.email_verification_code_expiry = now_utc + datetime.timedelta(minutes=expiry_minutes)
+    db.commit()
+
+    send_verification_code_email(user.email, code, user.username, expiry_minutes=expiry_minutes)
+    return {"message": "A new verification code has been dispatched to your email."}
 
 @auth_router.post("/introspect")
 async def introspect_token(
@@ -562,29 +665,30 @@ async def change_user_password(
 async def forgot_password(
     request: ForgotPasswordRequest,
     fastapi_request: Request,
-    db: Session = Depends(get_db),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
 ):
+    settings.refresh(db)
     user = db.query(DBUser).filter(
-        or_(DBUser.username == request.username_or_email, DBUser.email == request.username_or_email)
+        or_(
+            func.lower(DBUser.username) == func.lower(request.username_or_email.strip()),
+            func.lower(DBUser.email) == func.lower(request.username_or_email.strip())
+        )
     ).first()
 
     if user:
-        recovery_mode = settings.get("password_recovery_mode", "manual")
-        
-        # Determine if email sending is viable
+        recovery_mode = str(settings.get("password_recovery_mode", "manual")).lower().strip()
+        print(f"INFO: Forgot password requested for user '{user.username}'. Mode: '{recovery_mode}', Email: '{user.email}'")
+
         can_send_email = False
-        if user.email:
-            if recovery_mode == 'automatic':
-                # For automatic (SMTP), we need a host configured
+        if user.email and "@" in user.email:
+            if recovery_mode in ['automatic', 'smtp']:
                 if settings.get("smtp_host"):
                     can_send_email = True
             elif recovery_mode == 'gmail':
-                # For Gmail, we need the user (email) configured
                 if settings.get("smtp_user"):
                     can_send_email = True
             elif recovery_mode in ['system_mail', 'outlook']:
-                # These modes assume local configuration implies readiness
                 can_send_email = True
 
         if can_send_email:
@@ -595,26 +699,27 @@ async def forgot_password(
                 db.commit()
                 base_url = str(fastapi_request.base_url).strip('/')
                 reset_link = f"{base_url}/reset-password?token={token}"
+                print(f"INFO: Scheduling password reset email for {user.email}")
                 background_tasks.add_task(send_password_reset_email, user.email, reset_link, user.username)
             except Exception as e:
                 db.rollback()
-                # Fallback to manual mode notification on error
+                trace_exception(e)
                 await manager.broadcast_to_admins({
                     "id": 0, "sender_id": 0, "sender_username": "System Alert",
                     "receiver_id": -1, "receiver_username": "Admins",
-                    "content": f"User '{user.username}' (ID: {user.id}) requested password reset via {recovery_mode}, but it failed. Please assist manually. Error: {e}",
+                    "content": f"User '{user.username}' (ID: {user.id}) requested password reset via {recovery_mode}, but it failed: {e}",
                     "sent_at": datetime.datetime.now(timezone.utc).isoformat()
                 })
-
-        else: # Manual mode or configuration missing for selected mode
+        else:
+            print(f"INFO: Email delivery not viable for user '{user.username}' in mode '{recovery_mode}'. Broadcasting alert to admins.")
             dm_notification = {
                 "id": 0, "sender_id": 0, "sender_username": "System Alert",
                 "receiver_id": -1, "receiver_username": "Admins",
-                "content": f"User '{user.username}' (ID: {user.id}) has requested a password reset. Please go to the admin panel to generate a reset link for them.",
+                "content": f"User '{user.username}' (ID: {user.id}) has requested a password reset (Mode: {recovery_mode}). Please generate a reset link in the admin panel.",
                 "sent_at": datetime.datetime.now(timezone.utc).isoformat()
             }
             await manager.broadcast_to_admins(dm_notification)
-    
+
     return {"message": "If an account with that username or email exists, a password reset process has been initiated."}
 
 @auth_router.post("/reset-password", status_code=status.HTTP_200_OK)

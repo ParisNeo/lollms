@@ -1,10 +1,11 @@
-<!-- [UPDATE] frontend/webui/src/components/modals/LoginModal.vue -->
 <script setup>
-import { ref, computed, watch, nextTick, onMounted } from 'vue';
+import { ref, computed } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import GenericModal from './GenericModal.vue';
-import IconLogin from '../../assets/icons/IconLogin.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconShieldCheck from '../../assets/icons/IconCheckCircle.vue';
+import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -12,157 +13,165 @@ const uiStore = useUiStore();
 const username = ref('');
 const password = ref('');
 const isLoading = ref(false);
-const errorMessage = ref('');
 
-const usernameInput = ref(null);
+// 2FA / Email Verification View State
+const is2FaStep = ref(false);
+const verificationCode = ref('');
+const tempAuthToken = ref('');
+const emailHint = ref('');
+const isVerifying = ref(false);
+const isResending = ref(false);
 
-const ssoClientConfig = computed(() => authStore.ssoClientConfig);
-
-onMounted(() => {
-    if(!authStore.ssoClientConfig.enabled) {
-        authStore.fetchSsoClientConfig();
-    }
-});
-function ssoLogin() {
-    window.location.href = '/api/sso-client/login';
-}
-
-
-// When the modal becomes active, focus the username input
-watch(() => uiStore.activeModal, (newModal) => {
-    if (newModal === 'login') {
-        nextTick(() => {
-            usernameInput.value?.focus();
-        });
-    }
-});
-
-const handleLogin = async () => {
-    errorMessage.value = '';
+async function handleLogin() {
+    if (!username.value.trim() || !password.value) return;
     isLoading.value = true;
     try {
-        await authStore.login(username.value, password.value);
-        // On success, the authStore will handle fetching user data and closing the modal.
-    } catch (error) {
-        errorMessage.value = 'Incorrect username or password.';
+        const result = await authStore.login(username.value.trim(), password.value);
+        if (result?.email_verification_required) {
+            is2FaStep.value = true;
+            tempAuthToken.value = result.temp_token;
+            emailHint.value = result.email_hint || 'your registered email';
+            verificationCode.value = '';
+            uiStore.addNotification(`Verification code dispatched to ${emailHint.value}.`, 'info', 5000);
+        }
+    } catch (e) {
+        // Handled in store
     } finally {
         isLoading.value = false;
     }
-};
+}
 
-const openRegister = () => {
+async function handleVerifyCode() {
+    if (!verificationCode.value.trim() || !tempAuthToken.value) return;
+    isVerifying.value = true;
+    try {
+        await authStore.verifyEmailCode(tempAuthToken.value, verificationCode.value.trim());
+    } catch (e) {
+        // Handled in store
+    } finally {
+        isVerifying.value = false;
+    }
+}
+
+async function handleResendCode() {
+    if (!tempAuthToken.value || isResending.value) return;
+    isResending.value = true;
+    try {
+        await authStore.resendVerificationCode(tempAuthToken.value);
+    } finally {
+        isResending.value = false;
+    }
+}
+
+function backToCredentials() {
+    is2FaStep.value = false;
+    verificationCode.value = '';
+    tempAuthToken.value = '';
+}
+
+function openRegister() {
     uiStore.closeModal('login');
     uiStore.openModal('register');
-};
+}
 
-const openForgotPassword = () => {
+function openForgotPassword() {
     uiStore.closeModal('login');
     uiStore.openModal('forgotPassword');
-};
+}
 </script>
 
 <template>
-  <GenericModal
-    modalName="login"
-    title="Welcome Back"
-    maxWidthClass="max-w-md"
-  >
+  <GenericModal modalName="login" :title="is2FaStep ? 'Two-Factor Email Verification' : 'Sign In to LoLLMs'" maxWidthClass="max-w-md">
     <template #body>
-      <div class="text-center mb-6">
-        <div class="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 mb-3">
-          <IconLogin class="w-6 h-6" />
-        </div>
-        <h3 class="text-lg font-medium text-gray-900 dark:text-white">Sign in to your account</h3>
-        <p class="text-sm text-gray-500 dark:text-gray-400">Enter your credentials to access your workspace.</p>
-      </div>
-
-      <form @submit.prevent="handleLogin" class="space-y-5">
+      <!-- STEP 1: CREDENTIALS -->
+      <form v-if="!is2FaStep" @submit.prevent="handleLogin" class="space-y-4 py-2">
         <div>
-          <label for="login-username" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Username or Email</label>
-          <div class="mt-1">
-            <input
-                ref="usernameInput"
-                v-model="username"
-                type="text"
-                id="login-username"
-                required
-                :disabled="isLoading"
-                class="input-field w-full"
-                placeholder="Enter username"
-                autocomplete="username"
-            />
+          <label class="label">Username or Email</label>
+          <input 
+            v-model="username" 
+            type="text" 
+            class="input-field mt-1" 
+            placeholder="Username or email address"
+            required 
+            autofocus 
+          />
+        </div>
+
+        <div>
+          <div class="flex justify-between items-center">
+            <label class="label">Password</label>
+            <button type="button" @click="openForgotPassword" class="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+              Forgot password?
+            </button>
+          </div>
+          <input 
+            v-model="password" 
+            type="password" 
+            class="input-field mt-1" 
+            placeholder="••••••••"
+            required 
+          />
+        </div>
+
+        <div class="pt-2">
+          <button type="submit" class="btn btn-primary w-full py-2.5 font-bold flex items-center justify-center gap-2 shadow-lg" :disabled="isLoading">
+            <IconAnimateSpin v-if="isLoading" class="w-4 h-4 animate-spin" />
+            <span>{{ isLoading ? 'Authenticating...' : 'Sign In' }}</span>
+          </button>
+        </div>
+
+        <div class="text-center pt-2">
+          <p class="text-xs text-gray-500 dark:text-gray-400">
+            Don't have an account?
+            <button type="button" @click="openRegister" class="text-blue-600 dark:text-blue-400 font-bold hover:underline ml-1">
+              Register here
+            </button>
+          </p>
+        </div>
+      </form>
+
+      <!-- STEP 2: 2FA EMAIL OTP VERIFICATION -->
+      <form v-else @submit.prevent="handleVerifyCode" class="space-y-5 py-2 animate-in fade-in">
+        <div class="p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 rounded-2xl flex items-start gap-3">
+          <IconShieldCheck class="w-6 h-6 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+          <div class="text-xs leading-relaxed text-blue-900 dark:text-blue-200">
+            <span class="font-bold block mb-0.5">Security Code Dispatched</span>
+            We have sent a 6-digit login authorization code to <strong>{{ emailHint }}</strong>.
           </div>
         </div>
 
         <div>
-            <label for="login-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
-            <div class="mt-1">
-                <input
-                v-model="password"
-                type="password"
-                id="login-password"
-                required
-                :disabled="isLoading"
-                class="input-field w-full"
-                placeholder="Enter password"
-                autocomplete="current-password"
-                />
-            </div>
-            <!-- Forgot Password Link moved below input -->
-            <div class="mt-2 text-right">
-                <a @click.prevent="openForgotPassword" href="#" class="text-sm font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 transition-colors">
-                    Forgot password?
-                </a>
-            </div>
+          <label class="label text-center block mb-1">Enter 6-Digit Code</label>
+          <input 
+            v-model="verificationCode" 
+            type="text" 
+            maxlength="10"
+            class="input-field text-center font-mono text-2xl font-bold tracking-widest py-3 uppercase"
+            placeholder="000000"
+            required 
+            autofocus 
+          />
         </div>
 
-        <div v-if="errorMessage" class="rounded-md bg-red-50 dark:bg-red-900/20 p-3">
-            <div class="flex">
-                <div class="shrink-0">
-                    <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" />
-                    </svg>
-                </div>
-                <div class="ml-3">
-                    <h3 class="text-sm font-medium text-red-800 dark:text-red-200">{{ errorMessage }}</h3>
-                </div>
-            </div>
-        </div>
-
-        <div>
-          <button type="submit" class="btn btn-primary w-full justify-center py-2.5 text-sm font-semibold shadow-sm hover:shadow transition-all" :disabled="isLoading">
-            <span v-if="isLoading" class="flex items-center">
-                <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Signing in...
-            </span>
-            <span v-else>Sign In</span>
+        <div class="flex items-center justify-between text-xs pt-1">
+          <button type="button" @click="backToCredentials" class="text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 flex items-center gap-1 font-semibold">
+            <IconArrowLeft class="w-3.5 h-3.5" /> Back
+          </button>
+          <button type="button" @click="handleResendCode" :disabled="isResending" class="text-blue-600 dark:text-blue-400 hover:underline font-bold">
+            {{ isResending ? 'Sending...' : 'Resend Code' }}
           </button>
         </div>
 
-        <div v-if="ssoClientConfig.enabled" class="relative">
-            <div class="absolute inset-0 flex items-center">
-                <div class="w-full border-t border-gray-300 dark:border-gray-600"></div>
-            </div>
-            <div class="relative flex justify-center text-sm">
-                <span class="px-2 bg-white dark:bg-gray-800 text-gray-500">Or continue with</span>
-            </div>
-        </div>
-
-        <button v-if="ssoClientConfig.enabled" @click="ssoLogin" type="button" class="btn btn-secondary w-full justify-center flex items-center gap-3 py-2.5">
-            <img v-if="ssoClientConfig.icon_url" :src="ssoClientConfig.icon_url" alt="" class="w-5 h-5">
-            {{ ssoClientConfig.display_name }}
-        </button>
-
-        <div class="text-sm text-center text-gray-600 dark:text-gray-400 pt-2">
-          Don't have an account?
-          <a @click.prevent="openRegister" href="#" class="font-semibold text-blue-600 hover:text-blue-500 dark:text-blue-400 dark:hover:text-blue-300 ml-1 transition-colors">
-            Register now
-          </a>
+        <div>
+          <button type="submit" class="btn btn-primary w-full py-2.5 font-bold flex items-center justify-center gap-2 shadow-lg" :disabled="isVerifying || !verificationCode.trim()">
+            <IconAnimateSpin v-if="isVerifying" class="w-4 h-4 animate-spin" />
+            <span>{{ isVerifying ? 'Verifying Code...' : 'Authorize Login' }}</span>
+          </button>
         </div>
       </form>
+    </template>
+    <template #footer>
+      <div></div>
     </template>
   </GenericModal>
 </template>

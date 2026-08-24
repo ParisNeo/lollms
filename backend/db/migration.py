@@ -72,6 +72,9 @@ def _bootstrap_global_settings(connection):
         "registration_mode": { "value": APP_SETTINGS.get("registration_mode", "admin_approval"), "type": "string", "description": "Method for new user activation: 'direct' or 'admin_approval'.", "category": "Registration" },
         "access_token_expire_minutes": { "value": APP_SETTINGS.get("access_token_expires_minutes", 43200), "type": "integer", "description": "Duration in minutes a user's login session remains valid.", "category": "Authentication" },
         "password_recovery_mode": { "value": "manual", "type": "string", "description": "Password recovery mode: 'manual', 'automatic' (SMTP), or 'system_mail' (uses server's 'mail' command).", "category": "Authentication" },
+        "email_verification_enabled": { "value": False, "type": "boolean", "description": "Require email verification code (2FA) upon user login.", "category": "Authentication" },
+        "email_verification_code_expiry_minutes": { "value": 10, "type": "integer", "description": "Expiry time in minutes for email login verification codes.", "category": "Authentication" },
+        "email_verification_bypass_admins": { "value": False, "type": "boolean", "description": "Allow administrator accounts to bypass email login verification.", "category": "Authentication" },
         "sso_client_enabled": { "value": False, "type": "boolean", "description": "Enable Single Sign-On (SSO) for users to log in via an external provider.", "category": "SSO Client" },
         "sso_client_provider_url": { "value": "", "type": "string", "description": "The OpenID Connect (OIDC) provider's discovery URL (e.g., https://accounts.google.com/.well-known/openid-configuration).", "category": "SSO Client" },
         "sso_client_id": { "value": "", "type": "string", "description": "The Client ID provided by your SSO provider.", "category": "SSO Client" },
@@ -608,6 +611,25 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
             try:
                 connection.execute(text("ALTER TABLE users ADD COLUMN password_changed_at DATETIME"))
                 connection.execute(text("UPDATE users SET password_changed_at = created_at WHERE password_changed_at IS NULL"))
+                connection.commit()
+            except Exception: connection.rollback()
+
+        if 'email_verification_code' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN email_verification_code VARCHAR"))
+                connection.commit()
+            except Exception: connection.rollback()
+
+        if 'email_verification_code_expiry' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN email_verification_code_expiry DATETIME"))
+                connection.commit()
+            except Exception: connection.rollback()
+
+        if 'email_verification_token' not in user_columns_db:
+            try:
+                connection.execute(text("ALTER TABLE users ADD COLUMN email_verification_token VARCHAR"))
+                connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_email_verification_token ON users (email_verification_token) WHERE email_verification_token IS NOT NULL"))
                 connection.commit()
             except Exception: connection.rollback()
         

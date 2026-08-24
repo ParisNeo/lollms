@@ -138,6 +138,42 @@ async def admin_update_global_settings(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
+@settings_management_router.post("/test-email-dispatch", response_model=Dict[str, str])
+async def test_email_dispatch(
+    to_email: str = Form(...),
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
+):
+    """Dispatches an immediate test email to verify SMTP / system mail connectivity."""
+    settings.refresh(db)
+    recovery_mode = str(settings.get("password_recovery_mode", "manual")).lower().strip()
+
+    if recovery_mode == "manual":
+        raise HTTPException(
+            status_code=400,
+            detail="Email sending is set to 'manual'. Please select 'system_mail', 'smtp', or 'gmail' first."
+        )
+
+    from backend.security import send_generic_email
+    subject = "LoLLMs Email Delivery Test"
+    body = f"""
+    <h3>Email Configuration Test</h3>
+    <p>This is an automated diagnostic test from your LoLLMs Server.</p>
+    <ul>
+        <li><strong>Mode:</strong> {recovery_mode}</li>
+        <li><strong>Timestamp:</strong> {datetime.datetime.now(datetime.timezone.utc).isoformat()}</li>
+        <li><strong>Triggered By:</strong> {current_admin.username}</li>
+    </ul>
+    <p style="color: #10b981; font-weight: bold;">If you are reading this, your email dispatch pipeline is fully operational.</p>
+    """
+
+    try:
+        send_generic_email(to_email.strip(), subject, body, background_color="#f8fafc", send_as_text=False)
+        return {"message": f"Test email successfully sent to {to_email} via '{recovery_mode}'."}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Email delivery test failed: {str(e)}")
+
 @settings_management_router.post("/upload-logo", response_model=Dict[str, str])
 async def upload_custom_logo(file: UploadFile = File(...)):
     if not file.content_type or not file.content_type.startswith("image/"):

@@ -69,6 +69,7 @@ const NoteGroupModal = defineAsyncComponent(() => import('./NoteGroupModal.vue')
 const SystemLogModal = defineAsyncComponent(() => import('./SystemLogModal.vue'));
 const ScrapeUrlModal = defineAsyncComponent(() => import('./ScrapeUrlModal.vue'));
 const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactImportWizardModal.vue'));
+const PendingUsersModal = defineAsyncComponent(() => import('./PendingUsersModal.vue'));
 const RenameArtefactModal = defineAsyncComponent(() => import('./RenameArtefactModal.vue'));
 const ArtefactVersionManagerModal = defineAsyncComponent(() => import('./ArtefactVersionManagerModal.vue'));
 // Registered the NotebookWizardModal here
@@ -87,6 +88,7 @@ const EmailNotesModal = defineAsyncComponent(() => import('./EmailNotesModal.vue
     <RegisterModal v-if="activeModal === 'register'" />
     <ForgotPasswordModal v-if="activeModal === 'forgotPassword'" />
     <PasswordResetLinkModal v-if="activeModal === 'passwordResetLink'" />
+    <PendingUsersModal v-if="activeModal === 'pendingUsers'" />
     <RenameDiscussionModal v-if="activeModal === 'renameDiscussion'" />
     <PersonalityEditorModal v-if="activeModal === 'personalityEditor'" />
     <AdminUserEditModal v-if="activeModal === 'adminUserEdit'" />

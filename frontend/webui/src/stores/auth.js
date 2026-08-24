@@ -583,34 +583,77 @@ export const useAuthStore = defineStore('auth', () => {
 
     async function login(username, password) {
         try {
-          // 1️⃣  Préparer les paramètres
           const params = new URLSearchParams();
           params.append('username', username);
           params.append('password', password);
-      
-          // 2️⃣  Envoyer avec le bon header
+
           const response = await apiClient.post(
             '/api/auth/token',
             params,
             { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } }
           );
-      
-          // 3️⃣  Traiter le token
+
+          // Check for 2FA / Email Verification Requirement
+          if (response.data.email_verification_required) {
+              return {
+                  email_verification_required: true,
+                  temp_token: response.data.temp_token,
+                  email_hint: response.data.email_hint
+              };
+          }
+
           token.value = response.data.access_token;
           localStorage.setItem('lollms-token', token.value);
-      
-          // 4️⃣  UI & data
+
           useUiStore().closeModal();
           isAuthenticating.value = true;
           await fetchUserAndInitialData();
           isAuthenticating.value = false;
-      
+
+          return { email_verification_required: false };
+
         } catch (error) {
           isAuthenticating.value = false;
-          useUiStore().addNotification('Login failed.', 'error');
+          const msg = error.response?.data?.detail || 'Login failed.';
+          useUiStore().addNotification(msg, 'error');
           throw error;
         }
-      }
+    }
+
+    async function verifyEmailCode(tempToken, code) {
+        try {
+            const response = await apiClient.post('/api/auth/verify-email-code', {
+                temp_token: tempToken,
+                code: code.trim()
+            });
+
+            token.value = response.data.access_token;
+            localStorage.setItem('lollms-token', token.value);
+
+            useUiStore().closeModal();
+            isAuthenticating.value = true;
+            await fetchUserAndInitialData();
+            isAuthenticating.value = false;
+            useUiStore().addNotification('Authentication verified successfully!', 'success');
+        } catch (error) {
+            const msg = error.response?.data?.detail || 'Verification code failed.';
+            useUiStore().addNotification(msg, 'error');
+            throw error;
+        }
+    }
+
+    async function resendVerificationCode(tempToken) {
+        try {
+            const response = await apiClient.post('/api/auth/resend-verification-code', {
+                temp_token: tempToken
+            });
+            useUiStore().addNotification(response.data.message || 'Verification code resent.', 'info');
+        } catch (error) {
+            const msg = error.response?.data?.detail || 'Failed to resend code.';
+            useUiStore().addNotification(msg, 'error');
+            throw error;
+        }
+    }
     function clearAuthData() {
         user.value = null;
         token.value = null;
@@ -757,7 +800,7 @@ export const useAuthStore = defineStore('auth', () => {
         ssoClientConfig, isFetchingFunFact,
         latex_builder_enabled, export_to_txt_enabled, export_to_markdown_enabled, export_to_html_enabled, export_to_pdf_enabled, export_to_docx_enabled, export_to_xlsx_enabled, export_to_pptx_enabled,
         allow_user_chunking_config, default_chunk_size, default_chunk_overlap,
-        attemptInitialAuth, login, register, logout, fetchWelcomeInfo, fetchNewFunFact,
+        attemptInitialAuth, login, verifyEmailCode, resendVerificationCode, register, logout, fetchWelcomeInfo, fetchNewFunFact,
         updateUserProfile, updateUserPreferences, changePassword,
         ssoLoginWithPassword, ssoAuthorizeApplication,
         refreshUser, generateAvatar, fetchSsoClientConfig, connectWebSocket, disconnectWebSocket

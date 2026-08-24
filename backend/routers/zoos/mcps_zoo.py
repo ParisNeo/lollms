@@ -224,10 +224,18 @@ def get_available_zoo_mcps(
 
     filtered_items = final_list
     if installation_status:
-        if installation_status == 'Installed': filtered_items = [i for i in final_list if i.is_installed]
-        elif installation_status == 'Uninstalled': filtered_items = [i for i in final_list if not i.is_installed and not i.is_broken and i.repository != 'Registered']
-        elif installation_status == 'Broken': filtered_items = [i for i in final_list if i.is_broken]
-        elif installation_status == 'Registered': filtered_items = [i for i in final_list if not i.is_installed and i.repository == 'Registered']
+        if installation_status == 'Installed': 
+            filtered_items = [i for i in final_list if i.is_installed]
+        elif installation_status == 'Running': 
+            filtered_items = [i for i in final_list if i.is_installed and i.status == 'running']
+        elif installation_status == 'Stopped': 
+            filtered_items = [i for i in final_list if i.is_installed and i.status != 'running']
+        elif installation_status == 'Uninstalled': 
+            filtered_items = [i for i in final_list if not i.is_installed and not i.is_broken and i.repository != 'Registered']
+        elif installation_status == 'Broken': 
+            filtered_items = [i for i in final_list if i.is_broken]
+        elif installation_status == 'Registered': 
+            filtered_items = [i for i in final_list if not i.is_installed and i.repository == 'Registered']
     
     if repository and repository != 'All': filtered_items = [i for i in filtered_items if i.repository == repository]
     if category and category != 'All': filtered_items = [i for i in filtered_items if i.category == category]

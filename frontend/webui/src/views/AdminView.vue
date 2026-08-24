@@ -9,7 +9,6 @@ import IconDashboard from '../assets/icons/IconDashboard.vue';
 import IconUserGroup from '../assets/icons/IconUserGroup.vue';
 import IconCpuChip from '../assets/icons/IconCpuChip.vue';
 import IconCog from '../assets/icons/IconCog.vue';
-import IconMail from '../assets/icons/IconMail.vue';
 import IconArrowDownTray from '../assets/icons/IconArrowDownTray.vue';
 import IconSquares2x2 from '../assets/icons/IconSquares2x2.vue';
 import IconMcp from '../assets/icons/IconMcp.vue';
@@ -21,22 +20,17 @@ import IconServer from '../assets/icons/IconServer.vue';
 import IconPhoto from '../assets/icons/IconPhoto.vue';
 import IconLollms from '../assets/icons/IconLollms.vue';
 import IconHome from '../assets/icons/IconHome.vue';
-import IconBuild from '../assets/icons/IconBuild.vue';
 import IconMicrophone from '../assets/icons/IconMicrophone.vue';
 import IconDatabase from '../assets/icons/IconDatabase.vue';
-import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
 import IconFileText from '../assets/icons/IconFileText.vue';
-import IconFingerPrint from '../assets/icons/IconFingerPrint.vue'; // ADDED
 import IconKey from '../assets/icons/IconKey.vue';
 import IconEye from '../assets/icons/IconEye.vue';
-import IconGpu from '../assets/icons/IconGpu.vue';
-import IconHardDrive from '../assets/icons/IconHardDrive.vue';
-import IconWrenchScrewdriver from '../assets/icons/IconWrenchScrewdriver.vue';
 import IconCode from '../assets/icons/IconCode.vue';
 import IconVideoCamera from '../assets/icons/IconVideoCamera.vue';
 import IconSpeakerWave from '../assets/icons/IconSpeakerWave.vue';
-import IconShieldCheck from '../assets/icons/IconShieldCheck.vue'; // NEW
-import IconPower from '../assets/icons/IconPower.vue';
+import IconShieldCheck from '../assets/icons/IconCheckCircle.vue';
+import IconPower from '../assets/icons/IconStopCircle.vue';
+
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore(); 
@@ -49,8 +43,8 @@ const sections = [
   { type: 'link', id: 'dashboard', name: 'Dashboard', icon: markRaw(IconDashboard) },
 
   { type: 'divider', label: 'System Monitoring' },
-  { type: 'link', id: 'system_load', name: 'System Load', icon: markRaw(IconHardDrive) },
-  { type: 'link', id: 'gpu_load', name: 'GPU Load', icon: markRaw(IconGpu) },
+  { type: 'link', id: 'system_load', name: 'System Load', icon: markRaw(IconCpuChip) },
+  { type: 'link', id: 'gpu_load', name: 'GPU Load', icon: markRaw(IconCpuChip) },
   { type: 'link', id: 'logs_analysis', name: 'Logs & Analysis', icon: markRaw(IconFileText) },
   { type: 'link', id: 'requirements', name: 'Requirements', icon: markRaw(IconCode) },
 
@@ -62,7 +56,7 @@ const sections = [
   { type: 'link', id: 'users', name: 'All Users', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'moderation', name: 'Moderation Queue', icon: markRaw(IconEye) },
   { type: 'link', id: 'services_mgmt', name: 'API Usage Stats', icon: markRaw(IconServer) },
-  { type: 'link', id: 'email_marketing', name: 'Email Campaigns', icon: markRaw(IconMail) },
+  { type: 'link', id: 'email_marketing', name: 'Email Campaigns', icon: markRaw(IconSend) },
   { type: 'link', id: 'tasks', name: 'Background Tasks', icon: markRaw(IconTasks) },
 
   { type: 'divider', label: 'Zoos' },
@@ -76,17 +70,17 @@ const sections = [
   { type: 'link', id: 'tti_bindings', name: 'TTI (Image Gen)', icon: markRaw(IconPhoto) },
   { type: 'link', id: 'ttv_bindings', name: 'TTV (Video Gen)', icon: markRaw(IconVideoCamera) }, 
   { type: 'link', id: 'ttm_bindings', name: 'TTM (Music Gen)', icon: markRaw(IconSpeakerWave) }, 
-  { type: 'link', id: 'tts_bindings', name: 'TTS (Speech Gen)', icon: markRaw(IconMicrophone) },
+  { type: 'link', id: 'tts_bindings', name: 'TTS (Speech Gen)', icon: markRaw(IconSpeakerWave) },
   { type: 'link', id: 'stt_bindings', name: 'STT (Transcription)', icon: markRaw(IconMicrophone) },
   { type: 'link', id: 'rag_bindings', name: 'RAG (Knowledge)', icon: markRaw(IconDatabase) },
-  { type: 'link', id: 'builders', name: 'Code Builders', icon: markRaw(IconBuild) },
+  { type: 'link', id: 'builders', name: 'Document Builders', icon: markRaw(IconFileText) },
   { type: 'link', id: 'ai_bot', name: 'AI System Bot', icon: markRaw(IconLollms) },
 
   { type: 'divider', label: 'Global Settings' },
   { type: 'link', id: 'https_settings', name: 'Server & HTTPS', icon: markRaw(IconKey) },
   { type: 'link', id: 'welcome_settings', name: 'Welcome & Splash', icon: markRaw(IconHome) },
-  { type: 'link', id: 'email', name: 'Email (SMTP)', icon: markRaw(IconMail) },
-  { type: 'link', id: 'sso_client_settings', name: 'SSO (OIDC)', icon: markRaw(IconFingerPrint) },
+  { type: 'link', id: 'email', name: 'Email & 2FA', icon: markRaw(IconSend) },
+  { type: 'link', id: 'sso_client_settings', name: 'SSO (OIDC)', icon: markRaw(IconKey) },
   { type: 'link', id: 'scim_settings', name: 'SCIM Provisioning', icon: markRaw(IconUserGroup) },
   { type: 'link', id: 'import', name: 'Import Tools', icon: markRaw(IconArrowDownTray) },
 ];
@@ -97,6 +91,12 @@ const activeSectionId = computed({
         router.push({ query: { ...route.query, section: sectionId } });
     }
 });
+
+function handleNavigateFromChild(payload) {
+    if (payload?.tab) {
+        activeSectionId.value = payload.tab;
+    }
+}
 </script>
 
 <template>
@@ -116,16 +116,19 @@ const activeSectionId = computed({
                    href="#"
                    @click.prevent="activeSectionId = section.id"
                    class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors"
-                   :class="activeSectionId === section.id ? 'bg-gray-200 dark:bg-gray-700 text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50'"
+                   :class="activeSectionId === section.id ? 'bg-blue-600 text-white font-bold shadow-sm' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50'"
                 >
-                    <component :is="section.icon" class="w-5 h-5" />
-                    <span>{{ section.name }}</span>
+                    <component :is="section.icon" class="w-5 h-5 shrink-0" />
+                    <span class="truncate">{{ section.name }}</span>
                 </a>
             </template>
         </template>
         <template #main>
             <div class="p-4 sm:p-6 h-full">
-                <AdminPanel :active-tab="activeSectionId" />
+                <AdminPanel 
+                    :active-tab="activeSectionId" 
+                    @navigate="handleNavigateFromChild"
+                />
             </div>
         </template>
     </PageViewLayout>

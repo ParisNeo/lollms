@@ -1,187 +1,285 @@
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../stores/admin';
+import { useUiStore } from '../../stores/ui';
+import apiClient from '../../services/api';
+
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconShieldCheck from '../../assets/icons/IconCheckCircle.vue';
+import IconSend from '../../assets/icons/IconSend.vue';
 
 const adminStore = useAdminStore();
+const uiStore = useUiStore();
 
-const form = ref({});
-const isLoading = ref(false);
-const hasChanges = ref(false);
-let pristineState = '{}';
+const { globalSettings, isLoadingSettings } = storeToRefs(adminStore);
 
-const emailSettings = computed(() => {
-    return adminStore.globalSettings.filter(s => s.category === 'Email Settings' || s.key === 'password_recovery_mode');
+const isSaving = ref(false);
+const isTestingEmail = ref(false);
+const testRecipient = ref('');
+
+const emailForm = ref({
+    password_recovery_mode: 'manual',
+    smtp_host: '',
+    smtp_port: 587,
+    smtp_user: '',
+    smtp_password: '',
+    smtp_from_email: '',
+    smtp_use_tls: true,
+    // Email 2FA / Verification Options
+    email_verification_enabled: false,
+    email_verification_code_expiry_minutes: 10,
+    email_verification_bypass_admins: false
 });
 
-onMounted(() => {
-    if (adminStore.globalSettings.length === 0) {
-        adminStore.fetchGlobalSettings();
-    } else {
-        populateForm();
-    }
+const isDirty = ref(false);
+let pristineSnapshot = '';
+
+function getSettingVal(key, defaultVal) {
+    const s = globalSettings.value.find(item => item.key === key);
+    return s ? s.value : defaultVal;
+}
+
+function populate() {
+    if (!globalSettings.value || globalSettings.value.length === 0) return;
+
+    emailForm.value = {
+        password_recovery_mode: getSettingVal('password_recovery_mode', 'manual'),
+        smtp_host: getSettingVal('smtp_host', ''),
+        smtp_port: getSettingVal('smtp_port', 587),
+        smtp_user: getSettingVal('smtp_user', ''),
+        smtp_password: getSettingVal('smtp_password', ''),
+        smtp_from_email: getSettingVal('smtp_from_email', ''),
+        smtp_use_tls: getSettingVal('smtp_use_tls', true),
+        email_verification_enabled: getSettingVal('email_verification_enabled', false),
+        email_verification_code_expiry_minutes: getSettingVal('email_verification_code_expiry_minutes', 10),
+        email_verification_bypass_admins: getSettingVal('email_verification_bypass_admins', false)
+    };
+
+    pristineSnapshot = JSON.stringify(emailForm.value);
+    isDirty.value = false;
+}
+
+onMounted(async () => {
+    await adminStore.fetchGlobalSettings();
+    populate();
 });
 
-watch(() => adminStore.globalSettings, populateForm, { deep: true });
+watch(globalSettings, populate, { deep: true });
 
-watch(form, (newValue) => {
-    hasChanges.value = JSON.stringify(newValue) !== pristineState;
+watch(emailForm, (newVal) => {
+    isDirty.value = JSON.stringify(newVal) !== pristineSnapshot;
 }, { deep: true });
 
-function populateForm() {
-    const newFormState = {};
-    if (emailSettings.value.length > 0) {
-        emailSettings.value.forEach(setting => {
-            newFormState[setting.key] = setting.value;
-        });
-        form.value = newFormState;
-        pristineState = JSON.stringify(form.value);
-        hasChanges.value = false;
+async function handleSave() {
+    isSaving.value = true;
+    try {
+        await adminStore.updateGlobalSettings(emailForm.value);
+        pristineSnapshot = JSON.stringify(emailForm.value);
+        isDirty.value = false;
+    } catch (e) {
+        // Store notification handles error
+    } finally {
+        isSaving.value = false;
     }
 }
 
-async function handleSave() {
-    isLoading.value = true;
-    try {
-        const payload = { ...form.value };
-        
-        // Ensure we don't send an empty password and overwrite the existing one.
-        if (payload.smtp_password === null || payload.smtp_password === '') {
-            delete payload.smtp_password;
-        }
+async function handleTestEmail() {
+    if (!testRecipient.value.trim() || !testRecipient.value.includes('@')) {
+        uiStore.addNotification('Please enter a valid recipient email address for testing.', 'warning');
+        return;
+    }
 
-        await adminStore.updateGlobalSettings(payload);
-        // After save, the password field should be cleared on the frontend for security
-        if (payload.smtp_password) {
-            form.value.smtp_password = '';
-        }
-        // The watcher on globalSettings will repopulate the pristine state
-    } catch (error) {
-        // Error is handled globally
+    if (isDirty.value) {
+        await handleSave();
+    }
+
+    isTestingEmail.value = true;
+    try {
+        const formData = new FormData();
+        formData.append('to_email', testRecipient.value.trim());
+
+        const res = await apiClient.post('/api/admin/test-email-dispatch', formData);
+        uiStore.addNotification(res.data.message || 'Test email dispatched successfully!', 'success', 6000);
+    } catch (e) {
+        const msg = e.response?.data?.detail || 'Test email delivery failed.';
+        uiStore.addNotification(msg, 'error', 7000);
     } finally {
-        isLoading.value = false;
+        isTestingEmail.value = false;
     }
 }
 </script>
 
 <template>
-    <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
-        <div class="p-6 border-b border-gray-200 dark:border-gray-700">
-            <h3 class="text-xl font-semibold leading-6 text-gray-900 dark:text-white">
-                Email & Password Recovery
-            </h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Configure the method for sending system emails and managing password recovery.
-            </p>
+  <div class="bg-white dark:bg-gray-800 shadow-md rounded-2xl border border-gray-100 dark:border-gray-700/60 overflow-hidden">
+    <!-- Header -->
+    <div class="p-6 border-b border-gray-200 dark:border-gray-700">
+      <h3 class="text-xl font-bold text-gray-900 dark:text-white">Email & Security Verification Settings</h3>
+      <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">
+        Configure outbound email delivery (System Mail, SMTP, Gmail) and enforce Email 2FA verification for login security.
+      </p>
+    </div>
+
+    <form @submit.prevent="handleSave" class="p-6 space-y-8">
+      
+      <!-- ── SECTION 1: EMAIL VERIFICATION (2FA) GATE ── -->
+      <div class="space-y-4">
+        <div class="flex items-center gap-2">
+            <IconShieldCheck class="w-5 h-5 text-blue-500" />
+            <h4 class="text-base font-bold text-gray-900 dark:text-white">Email Verification & Two-Factor Authentication (2FA)</h4>
         </div>
-        <form v-if="Object.keys(form).length" @submit.prevent="handleSave" class="p-6">
-            <div class="space-y-8">
-                <!-- Main Mode Selector -->
-                <div>
-                    <label for="password_recovery_mode" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Email Sending Method</label>
-                    <select id="password_recovery_mode" v-model="form.password_recovery_mode" class="input-field mt-1">
-                        <option value="manual">Manual (Admin Managed)</option>
-                        <option value="gmail">Gmail</option>
-                        <option value="automatic">SMTP Server</option>
-                        <option value="system_mail">System Mail Command</option>
-                        <option value="outlook">Outlook (Windows only)</option>
-                    </select>
-                </div>
+        <p class="text-xs text-gray-500 dark:text-gray-400">
+            When enabled, users logging in with a password will receive a 6-digit OTP code on their registered email to authorize access.
+        </p>
 
-                <!-- Conditional Helper Text and Configuration -->
-                <div class="mt-4">
-                    <!-- Manual Mode Info -->
-                    <div v-if="form.password_recovery_mode === 'manual'" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <p class="text-sm text-gray-600 dark:text-gray-300">
-                            In <span class="font-semibold">Manual Mode</span>, the system will not send any emails. When a user requests a password reset, a notification will be sent to administrators in the UI. Admins must then manually generate a reset link and send it to the user.
-                        </p>
-                    </div>
-
-                    <!-- System Mail Mode Info -->
-                    <div v-if="form.password_recovery_mode === 'system_mail'" class="p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800/50 rounded-lg">
-                        <p class="text-sm text-yellow-800 dark:text-yellow-200">
-                            <span class="font-semibold">System Mail Mode</span> uses the server's built-in `mail` command (e.g., from `mailutils`). This is a simpler alternative to SMTP but requires the command to be installed and properly configured on the server's operating system.
-                        </p>
-                    </div>
-                    
-                    <!-- Gmail Mode Info -->
-                    <div v-if="form.password_recovery_mode === 'gmail'" class="space-y-6 pt-4">
-                        <div class="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-lg">
-                            <p class="text-sm text-red-800 dark:text-red-200">
-                                <span class="font-semibold">Gmail Mode</span> uses Gmail's SMTP servers automatically.
-                            </p>
-                            <p class="text-xs text-red-700 dark:text-red-300 mt-2">
-                                <strong>Important:</strong> You must use an <strong>App Password</strong> if 2-Step Verification is enabled on your Google Account. Regular passwords often do not work.
-                                <a href="https://support.google.com/accounts/answer/185833" target="_blank" class="underline hover:text-red-900 dark:hover:text-red-100">Learn how to create an App Password</a>.
-                            </p>
-                        </div>
-                        
-                         <div class="grid grid-cols-1 gap-y-6 sm:grid-cols-2 sm:gap-x-6">
-                            <div class="sm:col-span-2">
-                                <label for="gmail_user" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Gmail Address</label>
-                                <input type="email" id="gmail_user" v-model="form.smtp_user" class="input-field mt-1" placeholder="your.name@gmail.com" autocomplete="email">
-                            </div>
-                            <div class="sm:col-span-2">
-                                <label for="gmail_password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">App Password</label>
-                                <input type="password" id="gmail_password" v-model="form.smtp_password" class="input-field mt-1" placeholder="xxxx xxxx xxxx xxxx" autocomplete="new-password">
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- SMTP Configuration Fields (Conditional) -->
-                    <div v-if="form.password_recovery_mode === 'automatic'" class="space-y-6 pt-4">
-                         <div class="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/50 rounded-lg">
-                            <p class="text-sm text-blue-800 dark:text-blue-200">
-                                <span class="font-semibold">SMTP Mode</span> provides the most reliable way to send emails. Fill in your SMTP provider's details below.
-                            </p>
-                        </div>
-                        <div class="grid grid-cols-1 gap-y-6 sm:grid-cols-2 sm:gap-x-6">
-                            <div>
-                                <label for="smtp_host" class="block text-sm font-medium text-gray-700 dark:text-gray-300">SMTP Host</label>
-                                <input type="text" id="smtp_host" v-model="form.smtp_host" class="input-field mt-1">
-                            </div>
-                             <div>
-                                <label for="smtp_port" class="block text-sm font-medium text-gray-700 dark:text-gray-300">SMTP Port</label>
-                                <input type="number" id="smtp_port" v-model="form.smtp_port" class="input-field mt-1">
-                            </div>
-                             <div class="sm:col-span-2">
-                                <label for="smtp_from_email" class="block text-sm font-medium text-gray-700 dark:text-gray-300">From Email Address</label>
-                                <input type="email" id="smtp_from_email" v-model="form.smtp_from_email" class="input-field mt-1">
-                            </div>
-                             <div class="sm:col-span-2">
-                                <label for="smtp_user" class="block text-sm font-medium text-gray-700 dark:text-gray-300">SMTP Username</label>
-                                <input type="text" id="smtp_user" v-model="form.smtp_user" class="input-field mt-1" autocomplete="off">
-                            </div>
-                            <div class="sm:col-span-2">
-                                <label for="smtp_password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">SMTP Password</label>
-                                <input type="password" id="smtp_password" v-model="form.smtp_password" class="input-field mt-1" placeholder="Leave blank to keep existing password" autocomplete="new-password">
-                            </div>
-                             <div class="relative flex items-start">
-                                <div class="flex h-6 items-center">
-                                    <input id="smtp_use_tls" v-model="form.smtp_use_tls" type="checkbox" class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-600">
-                                </div>
-                                <div class="ml-3 text-sm leading-6">
-                                    <label for="smtp_use_tls" class="font-medium text-gray-900 dark:text-gray-100">Use TLS</label>
-                                    <p class="text-gray-500 dark:text-gray-400">Enable TLS encryption for the connection.</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+        <div class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border dark:border-gray-700 space-y-4">
+            <!-- Master Toggle -->
+            <div class="flex items-center justify-between">
+                <span class="grow flex flex-col pr-4">
+                    <span class="text-sm font-bold text-gray-900 dark:text-gray-100">Enforce Email 2FA on Sign-In</span>
+                    <span class="text-xs text-gray-500">Require an email OTP code for all user logins (Deactivated by default).</span>
+                </span>
+                <button 
+                    @click="emailForm.email_verification_enabled = !emailForm.email_verification_enabled" 
+                    type="button" 
+                    :class="[emailForm.email_verification_enabled ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200']"
+                >
+                    <span :class="[emailForm.email_verification_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200']"></span>
+                </button>
             </div>
 
-            <!-- Save Button -->
-            <div class="mt-8 pt-5 border-t border-gray-200 dark:border-gray-700">
-                <div class="flex justify-end">
-                    <button type="submit" class="btn btn-primary" :disabled="isLoading || !hasChanges">
-                        {{ isLoading ? 'Saving...' : 'Save Settings' }}
+            <!-- Additional 2FA Parameters -->
+            <div v-if="emailForm.email_verification_enabled" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t dark:border-gray-700/60 animate-in fade-in">
+                <div>
+                    <label class="label text-xs font-bold">Code Expiry Time (Minutes)</label>
+                    <input 
+                        v-model.number="emailForm.email_verification_code_expiry_minutes" 
+                        type="number" 
+                        min="1" 
+                        max="60" 
+                        class="input-field mt-1"
+                    />
+                    <p class="text-[10px] text-gray-400 mt-1">Duration before the 6-digit code becomes invalid (default: 10m).</p>
+                </div>
+
+                <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
+                    <span class="flex flex-col pr-2">
+                        <span class="text-xs font-bold">Bypass for Admins</span>
+                        <span class="text-[10px] text-gray-400">Permit admin password login without email code if mail services fail.</span>
+                    </span>
+                    <button 
+                        @click="emailForm.email_verification_bypass_admins = !emailForm.email_verification_bypass_admins" 
+                        type="button" 
+                        :class="[emailForm.email_verification_bypass_admins ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors']"
+                    >
+                        <span :class="[emailForm.email_verification_bypass_admins ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition']"></span>
                     </button>
                 </div>
             </div>
-        </form>
-         <div v-else class="p-6 text-center">
-            <p class="text-gray-500">
-                {{ adminStore.isLoadingSettings ? 'Loading settings...' : 'Could not load email settings.' }}
-            </p>
         </div>
-    </div>
+      </div>
+
+      <!-- ── SECTION 2: OUTBOUND TRANSPORT MODE ── -->
+      <div class="space-y-4 pt-6 border-t dark:border-gray-700">
+        <h4 class="text-base font-bold text-gray-900 dark:text-white">Email Dispatch Method</h4>
+        
+        <div>
+          <label class="label">Mail Transport System</label>
+          <select v-model="emailForm.password_recovery_mode" class="input-field mt-1">
+            <option value="manual">Manual / Disabled (No outbound email)</option>
+            <option value="system_mail">System Mail Command (sendmail / mailx / mail)</option>
+            <option value="smtp">Custom SMTP Server</option>
+            <option value="gmail">Gmail Service</option>
+            <option value="outlook">Outlook (Windows Only)</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">
+            <span v-if="emailForm.password_recovery_mode === 'system_mail'" class="text-blue-600 dark:text-blue-400 font-bold">
+              ✓ Uses local system binary (sendmail/mailx). No external credentials required.
+            </span>
+            <span v-else-if="emailForm.password_recovery_mode === 'smtp'">
+              Requires valid SMTP credentials and host configuration below.
+            </span>
+            <span v-else-if="emailForm.password_recovery_mode === 'gmail'">
+              Uses Google SMTP servers with your Gmail address and App Password.
+            </span>
+          </p>
+        </div>
+
+        <!-- SMTP & Gmail Parameters -->
+        <div v-if="['smtp', 'gmail'].includes(emailForm.password_recovery_mode)" class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border dark:border-gray-700 space-y-4 animate-in fade-in">
+          <div v-if="emailForm.password_recovery_mode === 'smtp'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="label text-xs">SMTP Host</label>
+              <input v-model="emailForm.smtp_host" type="text" class="input-field mt-1" placeholder="smtp.example.com" />
+            </div>
+            <div>
+              <label class="label text-xs">SMTP Port</label>
+              <input v-model.number="emailForm.smtp_port" type="number" class="input-field mt-1" placeholder="587" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="label text-xs">User / Email</label>
+              <input v-model="emailForm.smtp_user" type="text" class="input-field mt-1" placeholder="user@example.com" />
+            </div>
+            <div>
+              <label class="label text-xs">Password / App Password</label>
+              <input v-model="emailForm.smtp_password" type="password" class="input-field mt-1" placeholder="••••••••" />
+            </div>
+          </div>
+
+          <div v-if="emailForm.password_recovery_mode === 'smtp'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="label text-xs">From Address</label>
+              <input v-model="emailForm.smtp_from_email" type="text" class="input-field mt-1" placeholder="noreply@example.com" />
+            </div>
+            <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 self-end h-[42px]">
+              <span class="text-xs font-bold">Use TLS Encryption</span>
+              <button 
+                @click="emailForm.smtp_use_tls = !emailForm.smtp_use_tls" 
+                type="button" 
+                :class="[emailForm.smtp_use_tls ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors']"
+              >
+                <span :class="[emailForm.smtp_use_tls ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition']"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── SECTION 3: TEST EMAIL DIAGNOSTICS ── -->
+      <div v-if="emailForm.password_recovery_mode !== 'manual'" class="space-y-3 pt-6 border-t dark:border-gray-700 animate-in fade-in">
+        <h4 class="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+          <span>🧪</span> Live Delivery Diagnostic
+        </h4>
+        <div class="flex flex-col sm:flex-row gap-3 items-center">
+          <input 
+            v-model="testRecipient" 
+            type="email" 
+            placeholder="test-recipient@example.com" 
+            class="input-field grow"
+          />
+          <button 
+            type="button" 
+            @click="handleTestEmail" 
+            class="btn btn-secondary flex items-center gap-2 shrink-0 w-full sm:w-auto"
+            :disabled="isTestingEmail || !testRecipient.trim()"
+          >
+            <IconAnimateSpin v-if="isTestingEmail" class="w-4 h-4 animate-spin" />
+            <IconSend v-else class="w-4 h-4" />
+            <span>{{ isTestingEmail ? 'Sending Test...' : 'Send Test Email' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Save Actions -->
+      <div class="flex justify-end gap-3 pt-6 border-t dark:border-gray-700">
+        <button type="submit" class="btn btn-primary px-8 flex items-center gap-2" :disabled="isSaving || !isDirty">
+          <IconAnimateSpin v-if="isSaving" class="w-4 h-4 animate-spin" />
+          <span>{{ isSaving ? 'Saving Settings...' : 'Save Email Settings' }}</span>
+        </button>
+      </div>
+    </form>
+  </div>
 </template>

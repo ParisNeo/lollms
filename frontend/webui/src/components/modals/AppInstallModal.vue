@@ -3,7 +3,6 @@ import { ref, computed, watch } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useAdminStore } from '../../stores/admin';
 import GenericModal from './GenericModal.vue';
-import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
@@ -38,12 +37,12 @@ watch(app, async (newApp) => {
             port.value = nextPort;
             portStatus.value = 'available';
         } catch (error) {
-            port.value = 9601; // Fallback
+            port.value = 9601;
         } finally {
             isVerifyingPort.value = false;
         }
     }
-});
+}, { immediate: true });
 
 watch(port, () => {
     portStatus.value = 'unchecked';
@@ -94,12 +93,12 @@ async function handleInstall() {
         }
 
         if (authentication_type.value === 'lollms_sso') {
-            uiStore.addNotification('SSO enabled for new app. A server reboot is required for it to work correctly.', 'warning', 15000);
+            uiStore.addNotification('SSO enabled. A server reboot is recommended after configuring SSO endpoints.', 'warning', 12000);
         }
 
         uiStore.closeModal('appInstall');
     } catch (error) {
-        // Error is handled globally
+        // Error handled globally
     } finally {
         isLoading.value = false;
     }
@@ -109,17 +108,21 @@ async function handleInstall() {
 <template>
     <GenericModal
         modal-name="appInstall"
-        :title="app ? `Install ${installType === 'mcps' ? 'MCP' : 'App'}: ${app.name}` : 'Install'"
+        :title="app ? `Install ${installType === 'mcps' ? 'MCP Service' : 'App'}: ${app.name}` : 'Install Item'"
         max-width-class="max-w-lg"
     >
         <template #body>
-            <form v-if="app" @submit.prevent="handleInstall" class="space-y-6">
-                <p class="text-sm text-gray-600 dark:text-gray-300">
-                    Configure the installation settings for <span class="font-semibold text-gray-900 dark:text-white">{{ app.name }}</span>.
+            <form v-if="app" @submit.prevent="handleInstall" class="space-y-5">
+                <p class="text-xs text-gray-600 dark:text-gray-400">
+                    Configure port allocation, autostart behavior, and security access for <span class="font-bold text-gray-900 dark:text-white">{{ app.name }}</span>.
                 </p>
-                <div>
-                    <label for="app-port" class="block text-sm font-medium">Port Number</label>
-                    <div class="mt-1 flex gap-2">
+
+                <!-- Port Configuration -->
+                <div class="space-y-1.5">
+                    <label for="app-port" class="block text-xs font-bold text-gray-700 dark:text-gray-300">
+                        Network Port Number
+                    </label>
+                    <div class="flex gap-2">
                         <input
                             id="app-port"
                             v-model.number="port"
@@ -127,58 +130,72 @@ async function handleInstall() {
                             min="1025"
                             max="65535"
                             required
-                            class="input-field grow"
+                            class="input-field grow font-mono text-sm py-2 rounded-xl"
                             placeholder="e.g., 9601"
                         />
-                        <button @click="verifyPort" type="button" class="btn btn-secondary w-28" :disabled="isVerifyingPort">
-                            <IconAnimateSpin v-if="isVerifyingPort" class="w-5 h-5 animate-spin" />
-                            <span v-else>Verify</span>
+                        <button 
+                            @click="verifyPort" 
+                            type="button" 
+                            class="btn btn-secondary btn-sm px-4 rounded-xl shrink-0" 
+                            :disabled="isVerifyingPort"
+                        >
+                            <IconAnimateSpin v-if="isVerifyingPort" class="w-4 h-4 animate-spin" />
+                            <span v-else>Check Port</span>
                         </button>
                     </div>
-                     <div v-if="portStatus !== 'unchecked'" class="mt-2 text-sm flex items-center gap-1.5"
-                         :class="portStatus === 'available' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+
+                    <!-- Port Verification Banner -->
+                    <div 
+                        v-if="portStatus !== 'unchecked'" 
+                        class="text-xs flex items-center gap-1.5 mt-1 font-medium"
+                        :class="portStatus === 'available' ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'"
+                    >
                         <IconCheckCircle v-if="portStatus === 'available'" class="w-4 h-4" />
                         <IconXMark v-else class="w-4 h-4" />
-                        <span>Port {{ port }} is {{ portStatus }}.</span>
+                        <span>Port {{ port }} is {{ portStatus === 'available' ? 'free and available' : 'already in use' }}.</span>
                     </div>
                 </div>
                 
-                <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <span class="grow flex flex-col">
-                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Start on System Startup</span>
-                        <span class="text-sm text-gray-500 dark:text-gray-400">Automatically launch this item when the main server starts.</span>
+                <!-- Autostart Toggle -->
+                <div class="flex items-center justify-between p-3.5 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-gray-200/80 dark:border-gray-700/60">
+                    <span class="grow flex flex-col pr-3">
+                        <span class="text-xs font-bold text-gray-900 dark:text-gray-100">Launch on System Startup</span>
+                        <span class="text-[11px] text-gray-500 dark:text-gray-400">Automatically boot this service when the LoLLMs server starts.</span>
                     </span>
-                    <button @click="autostart = !autostart" type="button" :class="[autostart ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800']">
+                    <button 
+                        @click="autostart = !autostart" 
+                        type="button" 
+                        :class="[autostart ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden']"
+                    >
                         <span :class="[autostart ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                     </button>
                 </div>
 
-                <div class="pt-4 mt-4 border-t dark:border-gray-600">
-                    <h4 class="font-semibold text-lg">Authentication</h4>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mb-4">
-                        Configure how users will access this app. These settings can be changed later.
-                    </p>
+                <!-- Authentication Section -->
+                <div class="pt-4 border-t border-gray-100 dark:border-gray-750 space-y-3">
+                    <h4 class="font-bold text-xs uppercase tracking-wider text-gray-700 dark:text-gray-300">Access & Authentication</h4>
                     <div>
-                        <label for="install-auth-type" class="block text-sm font-medium">Authentication Type</label>
-                        <select id="install-auth-type" v-model="authentication_type" class="input-field mt-1">
-                            <option value="none">None</option>
-                            <option value="bearer">Bearer Token (managed later in config)</option>
-                            <option value="lollms_sso">LoLLMs SSO</option>
+                        <label for="install-auth-type" class="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">Auth Standard</label>
+                        <select id="install-auth-type" v-model="authentication_type" class="input-field text-xs py-2 rounded-xl">
+                            <option value="none">None (Open Local Access)</option>
+                            <option value="bearer">Bearer Token Protection</option>
+                            <option value="lollms_sso">LoLLMs SSO (Single Sign-On)</option>
                         </select>
                     </div>
-                    <div v-if="authentication_type === 'lollms_sso'" class="mt-4">
-                        <label for="install-sso-redirect-uri" class="block text-sm font-medium">Redirect URI</label>
-                        <input id="install-sso-redirect-uri" v-model="sso_redirect_uri" type="url" class="input-field mt-1" placeholder="e.g., https://myapp.com/callback">
-                        <p class="text-xs text-gray-500 mt-1">The callback URL registered with the app. A server reboot is required after enabling SSO.</p>
+
+                    <div v-if="authentication_type === 'lollms_sso'" class="space-y-1">
+                        <label for="install-sso-redirect-uri" class="block text-xs font-medium text-gray-700 dark:text-gray-300">SSO Callback URI</label>
+                        <input id="install-sso-redirect-uri" v-model="sso_redirect_uri" type="url" class="input-field text-xs py-2 rounded-xl" placeholder="e.g. http://localhost:9601/auth/callback">
+                        <p class="text-[10px] text-gray-400 mt-1">Authorized redirect endpoint registered with the application.</p>
                     </div>
                 </div>
             </form>
         </template>
         <template #footer>
-            <div class="flex justify-end gap-3">
-                <button @click="uiStore.closeModal('appInstall')" type="button" class="btn btn-secondary">Cancel</button>
-                <button @click="handleInstall" type="button" class="btn btn-primary" :disabled="isLoading || portStatus !== 'available'">
-                    <IconAnimateSpin v-if="isLoading" class="w-5 h-5 mr-2 animate-spin" />
+            <div class="flex justify-end gap-2">
+                <button @click="uiStore.closeModal('appInstall')" type="button" class="btn btn-secondary btn-sm">Cancel</button>
+                <button @click="handleInstall" type="button" class="btn btn-primary btn-sm font-semibold" :disabled="isLoading || portStatus !== 'available'">
+                    <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-1.5 animate-spin" />
                     {{ isLoading ? 'Installing...' : 'Confirm & Install' }}
                 </button>
             </div>

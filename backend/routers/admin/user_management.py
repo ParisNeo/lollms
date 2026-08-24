@@ -85,13 +85,15 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
     total_users = db.query(DBUser).count()
     active_24h = db.query(DBUser).filter(DBUser.last_activity_at > now - timedelta(hours=24)).count()
     new_7d = db.query(DBUser).filter(DBUser.created_at > now - timedelta(days=7)).count()
-    
-    # Updated logic for pending users based on new status field
-    if settings.get("registration_mode") == "admin_approval":
-        pending_approval = db.query(DBUser).filter(DBUser.status == "pending_admin_validation").count()
-    else:
-        pending_approval = 0
-        
+
+    # Accurate count of all users requiring admin validation
+    pending_approval = db.query(DBUser).filter(
+        or_(
+            DBUser.status == "pending_admin_validation",
+            and_(DBUser.is_active == False, DBUser.status == "pending")
+        )
+    ).count()
+
     pending_resets = db.query(DBUser).filter(DBUser.password_reset_token.isnot(None), DBUser.reset_token_expiry > now).count()
     return AdminDashboardStats(total_users=total_users, active_users_24h=active_24h, new_users_7d=new_7d, pending_approval=pending_approval, pending_password_resets=pending_resets)
 
@@ -130,7 +132,16 @@ async def admin_get_all_users(
             query = query.filter(~exists().where(OpenAIAPIKey.user_id == DBUser.id))
 
     if status_filter:
-        query = query.filter(DBUser.status == status_filter)
+        if status_filter in ["pending_admin_validation", "pending", "pending_approval"]:
+            query = query.filter(
+                or_(
+                    DBUser.status == "pending_admin_validation",
+                    DBUser.status == "pending",
+                    and_(DBUser.is_active == False, DBUser.status.notin_(["inactivated_by_admin", "blocked_by_lollms"]))
+                )
+            )
+        else:
+            query = query.filter(DBUser.status == status_filter)
 
     # Sorting logic
     sort_column = getattr(DBUser, sort_by) if hasattr(DBUser, sort_by) else literal_column(sort_by)
