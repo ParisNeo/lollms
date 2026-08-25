@@ -294,6 +294,11 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    async function fetchDataLakeData(storeId, method = 'pca') {
+        const response = await apiClient.get(`/api/store/${storeId}/data-lake`, { params: { method } });
+        return response.data;
+    }
+
     async function fetchDataStoreDetails(storeId) {
         try {
             const response = await apiClient.get(`/api/store/${storeId}/details`);
@@ -305,26 +310,50 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
-    async function generateDataStoreGraph({ storeId, graphData }) {
+    async function generateDataStoreGraph({ storeId, graphData = {} }) {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
-        const response = await apiClient.post(`/api/store/${storeId}/graph/generate`, graphData);
+        const payload = graphData || {};
+        const response = await apiClient.post(`/api/store/${storeId}/graph/generate`, payload);
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
         tasksStore.addTask(task);
     }
 
-    async function updateDataStoreGraph({ storeId, graphData }) {
+    async function updateDataStoreGraph({ storeId, graphData = {} }) {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
-        const response = await apiClient.post(`/api/store/${storeId}/graph/update`, graphData);
+        const payload = graphData || {};
+        const response = await apiClient.post(`/api/store/${storeId}/graph/update`, payload);
         const task = response.data;
         uiStore.addNotification(`Task '${task.name}' started.`, 'info', { duration: 7000 });
         tasksStore.addTask(task);
     }
 
-    async function fetchDataStoreGraph(storeId) {
-        const response = await apiClient.get(`/api/store/${storeId}/graph`);
+    async function extractStoreOntology(storeId) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/extract-ontology`);
+        return response.data;
+    }
+
+    async function fetchDataStoreGraph(storeId, mode = 'tbox_summary') {
+        const response = await apiClient.get(`/api/store/${storeId}/graph`, { params: { mode } });
+        return response.data;
+    }
+
+    async function expandClassInstances({ storeId, classUri, offset = 0, limit = 150 }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/expand`, {
+            class_uri: classUri,
+            offset,
+            limit
+        });
+        return response.data;
+    }
+
+    async function findGraphPath({ storeId, sourceUri, targetUri }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/path`, {
+            source_uri: sourceUri,
+            target_uri: targetUri
+        });
         return response.data;
     }
 
@@ -333,12 +362,58 @@ export const useDataStore = defineStore('data', () => {
         return response.data;
     }
 
-    async function queryDataStore({ storeId, query, top_k, min_similarity_percent }) {
+    async function querySparqlGraph({ storeId, query }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/sparql`, { query });
+        return response.data;
+    }
+
+    async function queryDataStoreGraphHybrid({ storeId, query, top_k = 5, dense_weight = 0.4, bm25_weight = 0.3, graph_weight = 0.3 }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/query-hybrid`, {
+            query,
+            top_k,
+            dense_weight,
+            bm25_weight,
+            graph_weight
+        });
+        return response.data;
+    }
+
+    async function queryDataStore({ storeId, query, top_k, min_similarity_percent, mode = "dense", dense_weight = 0.5, bm25_weight = 0.5, rrf_k = 60 }) {
         try {
-            const response = await apiClient.post(`/api/store/${storeId}/query`, { query, top_k, min_similarity_percent });
+            const response = await apiClient.post(`/api/store/${storeId}/query`, { 
+                query, 
+                top_k, 
+                min_similarity_percent,
+                mode,
+                dense_weight,
+                bm25_weight,
+                rrf_k
+            });
             return response.data;
         } catch (error) {
             return [];
+        }
+    }
+
+    async function queryDataStoreAndAnswer({ storeId, query, top_k = 10, min_similarity_percent = 50.0, mode = "hybrid", dense_weight = 0.5, bm25_weight = 0.5, rrf_k = 60, system_prompt = null, max_tokens = 2048, temperature = 0.2 }) {
+        try {
+            const response = await apiClient.post(`/api/store/${storeId}/query-answer`, {
+                query,
+                top_k,
+                min_similarity_percent,
+                mode,
+                dense_weight,
+                bm25_weight,
+                rrf_k,
+                system_prompt,
+                max_tokens,
+                temperature
+            });
+            return response.data;
+        } catch (error) {
+            const uiStore = useUiStore();
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to synthesize answer from DataStore.', 'error');
+            throw error;
         }
     }
 
@@ -658,7 +733,8 @@ export const useDataStore = defineStore('data', () => {
             fetchAvailableTtiModels(),
             fetchAvailableTtsModels(),
             fetchAvailableSttModels(),
-            fetchUserVoices()
+            fetchUserVoices(),
+            fetchPersonalities()
         ]);
     }
 
@@ -873,11 +949,17 @@ export const useDataStore = defineStore('data', () => {
         fetchStoreFiles, uploadFilesToStore,
         deleteFileFromStore, deleteFilesFromStore,
         fetchFileContent,
+        fetchDataLakeData,
         fetchDataStoreDetails,
         generateDataStoreGraph,
         updateDataStoreGraph,
+        extractStoreOntology,
         fetchDataStoreGraph,
+        expandClassInstances,
+        findGraphPath,
         queryDataStoreGraph,
+        querySparqlGraph,
+        queryDataStoreGraphHybrid,
         queryDataStore,
         wipeDataStoreGraph,
         addGraphNode,

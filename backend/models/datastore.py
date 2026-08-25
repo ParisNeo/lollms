@@ -1,6 +1,6 @@
 # backend/models/datastore.py
 from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 class DataStoreBase(BaseModel):
@@ -12,9 +12,12 @@ class DataStoreCreate(DataStoreBase):
     vectorizer_config: Dict[str, Any] = Field(default_factory=dict)
     chunk_size: Optional[int] = None
     chunk_overlap: Optional[int] = None
+    chunking_strategy: Optional[str] = "recursive"
+    chunking_kwargs: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class DataStoreEdit(DataStoreBase):
-    pass
+    chunking_strategy: Optional[str] = None
+    chunking_kwargs: Optional[Dict[str, Any]] = None
 
 class DataStorePublic(DataStoreBase):
     model_config = ConfigDict(from_attributes=True)
@@ -25,6 +28,8 @@ class DataStorePublic(DataStoreBase):
     vectorizer_config: Dict[str, Any]
     chunk_size: int
     chunk_overlap: int
+    chunking_strategy: str = "recursive"
+    chunking_kwargs: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -40,7 +45,38 @@ class SharedWithUserPublic(BaseModel):
 
 class SafeStoreDocumentInfo(BaseModel):
     filename: str
+    metadata: Optional[Dict[str, Any]] = None
 
 class ScrapeRequest(BaseModel):
     url: str
     depth: int = 0
+
+class DataStoreQueryRequest(BaseModel):
+    query: str
+    top_k: int = 10
+    min_similarity_percent: float = 50.0
+    mode: str = "dense"  # "dense" | "hybrid"
+    dense_weight: float = 0.5
+    bm25_weight: float = 0.5
+    rrf_k: int = 60
+
+class DataStoreAnswerRequest(DataStoreQueryRequest):
+    system_prompt: Optional[str] = None
+    max_tokens: Optional[int] = 2048
+    temperature: Optional[float] = 0.2
+
+class DataStoreAnswerResponse(BaseModel):
+    answer: str
+    chunks: List[Dict[str, Any]]
+    model_name: Optional[str] = None
+
+class SparqlQueryRequest(BaseModel):
+    query: str
+
+
+class GraphHybridQueryRequest(BaseModel):
+    query: str
+    top_k: int = 5
+    dense_weight: float = 0.4
+    bm25_weight: float = 0.3
+    graph_weight: float = 0.3

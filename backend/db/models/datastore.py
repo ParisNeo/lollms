@@ -22,6 +22,8 @@ class DataStore(Base):
     vectorizer_config: Mapped[Dict[str, Any]] = mapped_column(JSON, default=lambda: {})
     chunk_size: Mapped[int] = mapped_column(Integer, default=2048)
     chunk_overlap: Mapped[int] = mapped_column(Integer, default=256)
+    chunking_strategy: Mapped[str] = mapped_column(String, default="recursive")
+    chunking_kwargs: Mapped[Dict[str, Any]] = mapped_column(JSON, default=lambda: {})
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), onupdate=func.now())

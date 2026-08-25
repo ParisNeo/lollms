@@ -198,8 +198,13 @@ function selectTtmModel(id) { activeTtmModelName.value = id; }
 async function handleRefreshModels() {
     isRefreshingModels.value = true;
     try {
-        await dataStore.refreshAllModels();
-        uiStore.addNotification('Model lists refreshed.', 'success');
+        await Promise.allSettled([
+            dataStore.refreshAllModels(),
+            dataStore.fetchPersonalities()
+        ]);
+        uiStore.addNotification('Models, bindings, and personalities refreshed.', 'success');
+    } catch (e) {
+        uiStore.addNotification('Failed to refresh models.', 'error');
     } finally {
         isRefreshingModels.value = false;
     }

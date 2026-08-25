@@ -26,16 +26,31 @@ import IconCog from '../../../assets/icons/IconCog.vue';
 import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
 import DropdownMenu from '../DropdownMenu/DropdownMenu.vue';
 
+import { useDataStore } from '../../../stores/data';
+import IconDatabase from '../../../assets/icons/IconDatabase.vue';
+
 const props = defineProps({
-  artefactGroup: { type: Object, required: true },
-  isStarred: { type: Boolean, default: false },
-  selectionMode: { type: Boolean, default: false },
-  isSelected: { type: Boolean, default: false }
+    artefactGroup: { type: Object, required: true },
+    isStarred: { type: Boolean, default: false },
+    selectionMode: { type: Boolean, default: false },
+    isSelected: { type: Boolean, default: false }
 });
 
-const emit = defineEmits(['star', 'share', 'import', 'toggle-select']);
+const emit = defineEmits(['toggle-select', 'star', 'share', 'import', 'send-to-datastore']);
 
+const dataStore = useDataStore();
 const discussionsStore = useDiscussionsStore();
+
+const activeLoadedRagStores = computed(() => {
+    const loadedIds = discussionsStore.activeDiscussion?.rag_datastore_ids || [];
+    const all = [...(dataStore.ownedDataStores || []), ...(dataStore.sharedDataStores || [])];
+    if (loadedIds.length > 0) {
+        return loadedIds.map(id => all.find(s => s.id === id) || { id, name: `DataStore (${id.substring(0, 8)})` });
+    }
+    return all;
+});
+
+
 const uiStore = useUiStore();
 const pyodideStore = usePyodideStore();
 
@@ -376,7 +391,11 @@ async function handleExportArchive() {
 </script>
 
 <template>
-  <div class="artefact-list-item group" :class="{
+  <div 
+    draggable="true"
+    @dragstart="$event.dataTransfer.setData('text/lollms-artefact-title', artefactGroup.title)"
+    class="artefact-list-item group cursor-grab active:cursor-grabbing" 
+    :class="{
         'is-active border-blue-500 bg-blue-50/10 dark:bg-blue-950/20': currentVisibility === 'FULL',
         'border-sky-300 bg-sky-50/10 dark:bg-sky-950/10': currentVisibility === 'METADATA',
         'opacity-50': currentVisibility === 'LOCKED' || currentVisibility === 'HIDDEN'
@@ -541,6 +560,18 @@ async function handleExportArchive() {
                 <span>Rename</span>
             </button>
             <div class="menu-divider"></div>
+
+            <!-- Send to Loaded RAG DataStore -->
+            <template v-if="activeLoadedRagStores.length > 0">
+                <div class="px-4 py-1 text-[9px] font-black uppercase text-gray-400 tracking-widest">Vectorize to RAG</div>
+                <button v-for="store in activeLoadedRagStores" :key="`card-rag-${store.id}`" 
+                        @click.stop="emit('send-to-datastore', store.id, store.name)" class="menu-item text-xs">
+                    <IconDatabase class="w-4 h-4 mr-2 text-green-500 shrink-0" />
+                    <span class="truncate">Vectorize into {{ store.name }}</span>
+                </button>
+                <div class="menu-divider"></div>
+            </template>
+
             <!-- Case 1: Saved Library Item (Viewing global library) -->
             <button v-if="isSavedLibraryItem" @click="handleDelete" class="menu-item text-red-500 font-semibold">
                 <IconTrash class="w-4 h-4 mr-3" />

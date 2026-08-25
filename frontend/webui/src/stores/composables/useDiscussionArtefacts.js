@@ -65,7 +65,97 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function addArtefact({ discussionId, file, extractImages, auto_load = true, pdfMode = 'text_images' }) {
+    async function sendArtefactToDataStore({ discussionId, artefactTitle, datastoreId }) {
+        try {
+            const response = await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/${encodeURIComponent(artefactTitle)}/send-to-datastore`,
+                { datastore_id: datastoreId }
+            );
+            const task = response.data;
+            tasksStore.addTask(task);
+            uiStore.addNotification(`Vectorizing "${artefactTitle}" into DataStore.`, 'success');
+
+            if (uiStore.activeSplitArtefactTitle === artefactTitle) {
+                uiStore.activeSplitArtefactTitle = null;
+            }
+
+            await fetchArtefacts(discussionId);
+            const actions = getActions();
+            if (typeof actions.fetchContextStatus === 'function') {
+                await actions.fetchContextStatus(discussionId);
+            }
+            return task;
+        } catch (error) {
+            console.error('Failed to send artefact to datastore:', error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to send artefact to DataStore.', 'error');
+            throw error;
+        }
+    }
+
+    async function batchSendArtefactsToDataStore({ discussionId, artefactTitles, datastoreId }) {
+        try {
+            const response = await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/batch-send-to-datastore`,
+                { artefact_titles: artefactTitles, datastore_id: datastoreId, remove_from_discussion: true }
+            );
+            const task = response.data;
+            tasksStore.addTask(task);
+            uiStore.addNotification(`Started vectorizing ${artefactTitles.length} file(s).`, 'success');
+
+            if (artefactTitles.includes(uiStore.activeSplitArtefactTitle)) {
+                uiStore.activeSplitArtefactTitle = null;
+            }
+
+            await fetchArtefacts(discussionId);
+            const actions = getActions();
+            if (typeof actions.fetchContextStatus === 'function') {
+                await actions.fetchContextStatus(discussionId);
+            }
+            return task;
+        } catch (error) {
+            console.error('Failed to batch send artefacts:', error);
+            uiStore.addNotification(error.response?.data?.detail || 'Batch vectorization failed.', 'error');
+            throw error;
+        }
+    }
+
+    async function createDataStoreFromArtefacts({ discussionId, name, description, vectorizerName, vectorizerConfig, chunkSize, chunkOverlap, chunkingStrategy = 'recursive', chunkingKwargs = {}, artefactTitles, linkToDiscussion = true }) {
+        try {
+            const response = await apiClient.post(
+                `/api/discussions/${discussionId}/artefacts/create-datastore-and-vectorize`,
+                {
+                    name,
+                    description,
+                    vectorizer_name: vectorizerName,
+                    vectorizer_config: vectorizerConfig,
+                    chunk_size: chunkSize,
+                    chunk_overlap: chunkOverlap,
+                    chunking_strategy: chunkingStrategy,
+                    chunking_kwargs: chunkingKwargs,
+                    artefact_titles: artefactTitles,
+                    remove_from_discussion: true,
+                    link_to_discussion: linkToDiscussion
+                }
+            );
+
+            uiStore.addNotification(`DataStore '${name}' created and linked to discussion.`, 'success');
+            await fetchArtefacts(discussionId);
+            const actions = getActions();
+            if (typeof actions.fetchContextStatus === 'function') {
+                await actions.fetchContextStatus(discussionId);
+            }
+            if (typeof actions.loadDiscussions === 'function') {
+                await actions.loadDiscussions();
+            }
+            return response.data;
+        } catch (error) {
+            console.error('Failed to create datastore from artefacts:', error);
+            uiStore.addNotification(error.response?.data?.detail || 'Failed to create DataStore.', 'error');
+            throw error;
+        }
+    }
+
+    async function addArtefact({ discussionId, file, extractImages = true, pdfMode = 'text_and_embedded_images', auto_load = false }) {
         if (!discussionId) return;
         const formData = new FormData();
         formData.append('file', file);
@@ -781,6 +871,9 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         fetchArtefacts,
         fetchAllUserArtefacts,
         addArtefact,
+        sendArtefactToDataStore,
+        batchSendArtefactsToDataStore,
+        createDataStoreFromArtefacts,
         createManualArtefact,
         updateArtefact,
         deleteArtefact,

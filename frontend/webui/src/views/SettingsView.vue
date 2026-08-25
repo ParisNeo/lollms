@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/views/SettingsView.vue -->
 <script setup>
 import { computed, defineAsyncComponent, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -19,25 +18,25 @@ import IconFingerPrint from '../assets/icons/IconFingerPrint.vue';
 const route = useRoute();
 const router = useRouter();
 
-// Define components for async loading
-const AccountSettings = defineAsyncComponent(() => import('../components/settings/AccountSettings.vue'));
-const GeneralSettings = defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue'));
-const UserContextSettings = defineAsyncComponent(() => import('../components/settings/UserContextSettings.vue'));
-const LLMSettings = defineAsyncComponent(() => import('../components/settings/LLMSettings.vue'));
-const RAGSettings = defineAsyncComponent(() => import('../components/settings/RAGSettings.vue'));
-const TTISettings = defineAsyncComponent(() => import('../components/settings/TTISettings.vue'));
-const TTSSettings = defineAsyncComponent(() => import('../components/settings/TTSSettings.vue'));
-const STTSettings = defineAsyncComponent(() => import('../components/settings/STTSettings.vue'));
-const ApiKeysSettings = defineAsyncComponent(() => import('../components/settings/ApiKeysSettings.vue'));
-const PersonalitiesSettings = defineAsyncComponent(() => import('../components/settings/PersonalitiesSettings.vue'));
-const PromptsSettings = defineAsyncComponent(() => import('../components/settings/PromptsSettings.vue'));
-const McpsSettings = defineAsyncComponent(() => import('../components/settings/McpsSettings.vue'));
-const AppsSettings = defineAsyncComponent(() => import('../components/settings/AppsSettings.vue'));
+// Define components for async loading wrapped in markRaw
+const AccountSettings = markRaw(defineAsyncComponent(() => import('../components/settings/AccountSettings.vue')));
+const GeneralSettings = markRaw(defineAsyncComponent(() => import('../components/settings/GeneralSettings.vue')));
+const UserContextSettings = markRaw(defineAsyncComponent(() => import('../components/settings/UserContextSettings.vue')));
+const LLMSettings = markRaw(defineAsyncComponent(() => import('../components/settings/LLMSettings.vue')));
+const RAGSettings = markRaw(defineAsyncComponent(() => import('../components/settings/RAGSettings.vue')));
+const TTISettings = markRaw(defineAsyncComponent(() => import('../components/settings/TTISettings.vue')));
+const TTSSettings = markRaw(defineAsyncComponent(() => import('../components/settings/TTSSettings.vue')));
+const STTSettings = markRaw(defineAsyncComponent(() => import('../components/settings/STTSettings.vue')));
+const ApiKeysSettings = markRaw(defineAsyncComponent(() => import('../components/settings/ApiKeysSettings.vue')));
+const PersonalitiesSettings = markRaw(defineAsyncComponent(() => import('../components/settings/PersonalitiesSettings.vue')));
+const PromptsSettings = markRaw(defineAsyncComponent(() => import('../components/settings/PromptsSettings.vue')));
+const McpsSettings = markRaw(defineAsyncComponent(() => import('../components/settings/McpsSettings.vue')));
+const AppsSettings = markRaw(defineAsyncComponent(() => import('../components/settings/AppsSettings.vue')));
 
 const sections = [
     { id: 'account', name: 'Account', icon: markRaw(IconUserCircle), component: AccountSettings },
     { id: 'general', name: 'General', icon: markRaw(IconCog), component: GeneralSettings },
-    { id: 'context', name: 'User Context', icon: markRaw(IconFingerPrint), component: UserContextSettings }, // Added new section
+    { id: 'context', name: 'User Context', icon: markRaw(IconFingerPrint), component: UserContextSettings },
     { type: 'divider' },
     { id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles), component: PromptsSettings },
     { id: 'mcps', name: 'MCPs', icon: markRaw(IconMcp), component: McpsSettings },

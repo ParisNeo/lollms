@@ -11,7 +11,7 @@ import IconArrowUp from '../../../assets/icons/IconArrowUp.vue';
 import IconArrowDown from '../../../assets/icons/IconArrowDown.vue';
 import IconPlus from '../../../assets/icons/IconPlus.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
-import AppCard from '../../ui/Cards/AppCard.vue';
+import PersonalityZooCard from '../../ui/Cards/PersonalityZooCard.vue';
 import AppCardSkeleton from '../../ui/Cards/AppCardSkeleton.vue';
 
 const adminStore = useAdminStore();
@@ -179,6 +179,10 @@ async function handleDeleteRepository(repo) {
 
 async function handleInstallItem(item) { 
     await adminStore.installZooPersonality({ repository: item.repository, folder_name: item.folder_name }); 
+}
+
+async function handleUpdateItem(item) {
+    await adminStore.installZooPersonality({ repository: item.repository, folder_name: item.folder_name });
 }
 
 async function handleUninstallItem(personality) {
@@ -372,15 +376,15 @@ async function handleRefreshCache() {
 
             <div v-else class="space-y-6">
                 <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-5">
-                    <AppCard 
+                    <PersonalityZooCard 
                         v-for="item in itemsWithTaskStatus" 
                         :key="`${item.repository}/${item.folder_name}`" 
-                        :app="item" 
+                        :personality="item" 
                         :task="item.task" 
                         :is-starred="starredItems.includes(item.name)" 
-                        item-type-name="Personality" 
                         @star="handleStarToggle(item.name)" 
                         @install="handleInstallItem" 
+                        @update="handleUpdateItem"
                         @uninstall="handleUninstallItem" 
                         @help="showItemHelp" 
                     />

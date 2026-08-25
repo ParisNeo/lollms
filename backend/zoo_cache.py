@@ -65,6 +65,10 @@ def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any
         if desc_path.exists():
             with open(desc_path, 'r', encoding='utf-8') as f:
                 metadata = yaml.safe_load(f) or {}
+            if 'description' not in metadata and 'personality_description' in metadata:
+                metadata['description'] = metadata['personality_description']
+            if 'prompt_text' not in metadata and 'personality_conditioning' in metadata:
+                metadata['prompt_text'] = metadata['personality_conditioning']
         elif conf_path.exists():
             with open(conf_path, 'r', encoding='utf-8') as f:
                 legacy_data = yaml.safe_load(f) or {}
@@ -72,8 +76,8 @@ def parse_item_metadata(item_path: Path, item_type: ITEM_TYPES) -> Dict[str, Any
             metadata = {
                 'name': legacy_data.get('name'), 'version': str(legacy_data.get('version', 'N/A')),
                 'author': legacy_data.get('author'), 'category': legacy_data.get('category'),
-                'description': legacy_data.get('personality_description'),
-                'prompt_text': legacy_data.get('personality_conditioning'),
+                'description': legacy_data.get('personality_description') or legacy_data.get('description'),
+                'prompt_text': legacy_data.get('personality_conditioning') or legacy_data.get('prompt_text'),
                 'disclaimer': legacy_data.get('disclaimer'), 'tools': legacy_data.get('dependencies', [])
             }
     else: # app, mcp, prompt

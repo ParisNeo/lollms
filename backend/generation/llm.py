@@ -31,6 +31,10 @@ from fastapi.responses import (FileResponse, HTMLResponse, JSONResponse,
                                PlainTextResponse, StreamingResponse)
 from lollms_client import (LollmsClient, LollmsDiscussion, LollmsMessage,
                            LollmsPersonality, MSG_TYPE)
+try:
+    from lollms_client.lollms_personality import RAGDataSource
+except ImportError:
+    RAGDataSource = None
 from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -95,100 +99,150 @@ def build_rag_tool(
     current_user               # Fallback user for default settings
 ):
     """
-    Builds a RAG tool for the chat() function.
-    
-    Args:
-        safe_store_instance: The initialized semantic search/RAG instance
-        owner_db_user: User object containing rag_top_k and rag_min_sim_percent
-        current_user: Fallback user for default RAG settings
-    
-    Returns:
-        Dict tool definition compatible with the chat() tools parameter
+    Builds a RAG tool for the chat() function using SafeStore 3.5+.
+    Supports Dense, Tri-Modal Hybrid (Dense + BM25 + RRF), and Knowledge Graph Hybrid retrieval.
     """
-    
-    def query_rag_callback(query: str, ss, rag_top_k=None, rag_min_similarity_percent=None) -> list:
+    def query_rag_callback(query: str, ss, rag_top_k=None, rag_min_similarity_percent=None, mode=None) -> list:
         if not ss:
             return []
         try:
-            # Apply defaults from users if not provided
-            if rag_top_k is None:
-                rag_top_k = owner_db_user.rag_top_k if owner_db_user.rag_top_k is not None else \
-                           (current_user.rag_top_k if current_user.rag_top_k is not None else 5)
-            if rag_min_similarity_percent is None:
-                rag_min_similarity_percent = owner_db_user.rag_min_sim_percent if owner_db_user.rag_min_sim_percent is not None else \
-                                            (current_user.rag_min_sim_percent if current_user.rag_min_sim_percent is not None else 50)
-            
-            retrieved_chunks = ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_similarity_percent)
+            from backend.settings import settings
+            force_rag = settings.get("force_rag_settings_mode") == "force_always"
+
+            effective_top_k = (
+                int(settings.get("force_rag_top_k", 10)) if force_rag else
+                (rag_top_k if rag_top_k is not None else
+                 (owner_db_user.rag_top_k if getattr(owner_db_user, 'rag_top_k', None) is not None else
+                  (getattr(current_user, 'rag_top_k', None) if getattr(current_user, 'rag_top_k', None) is not None else 5)))
+            )
+
+            effective_min_sim = (
+                float(settings.get("force_rag_min_sim_percent", 50.0)) if force_rag else
+                (rag_min_similarity_percent if rag_min_similarity_percent is not None else
+                 (owner_db_user.rag_min_sim_percent if getattr(owner_db_user, 'rag_min_sim_percent', None) is not None else
+                  (getattr(current_user, 'rag_min_sim_percent', None) if getattr(current_user, 'rag_min_sim_percent', None) is not None else 50.0)))
+            )
+
+            effective_mode = (
+                settings.get("force_rag_retrieval_mode", "hybrid") if force_rag else
+                (mode or getattr(owner_db_user, 'rag_retrieval_mode', None) or getattr(current_user, 'rag_retrieval_mode', None) or settings.get("default_rag_retrieval_mode", "hybrid"))
+            )
+
+            dense_weight = float(settings.get("force_rag_dense_weight", 0.5)) if force_rag else float(getattr(owner_db_user, 'rag_dense_weight', 0.5) if getattr(owner_db_user, 'rag_dense_weight', None) is not None else (getattr(current_user, 'rag_dense_weight', 0.5) if getattr(current_user, 'rag_dense_weight', None) is not None else settings.get("default_rag_dense_weight", 0.5)))
+            bm25_weight = float(settings.get("force_rag_bm25_weight", 0.5)) if force_rag else float(getattr(owner_db_user, 'rag_bm25_weight', 0.5) if getattr(owner_db_user, 'rag_bm25_weight', None) is not None else (getattr(current_user, 'rag_bm25_weight', 0.5) if getattr(current_user, 'rag_bm25_weight', None) is not None else settings.get("default_rag_bm25_weight", 0.5)))
+            rrf_k = int(settings.get("force_rag_rrf_k", 60)) if force_rag else int(getattr(owner_db_user, 'rag_rrf_k', 60) if getattr(owner_db_user, 'rag_rrf_k', None) is not None else (getattr(current_user, 'rag_rrf_k', 60) if getattr(current_user, 'rag_rrf_k', None) is not None else settings.get("default_rag_rrf_k", 60)))
+            graph_weight = float(getattr(owner_db_user, 'rag_graph_weight', 0.3) if getattr(owner_db_user, 'rag_graph_weight', None) is not None else 0.3)
+            use_graph = (
+                bool(settings.get("force_rag_use_graph", False)) if force_rag else
+                bool(getattr(owner_db_user, 'rag_use_graph', False) or getattr(current_user, 'rag_use_graph', False))
+            )
+
+            retrieved_chunks = []
+            with ss:
+                if (effective_mode == "graph_hybrid" or use_graph) and safe_store and hasattr(safe_store, 'GraphStore'):
+                    try:
+                        gs = safe_store.GraphStore(store=ss)
+                        if hasattr(gs, "query_graph_hybrid"):
+                            hybrid_res = gs.query_graph_hybrid(
+                                query_text=query,
+                                top_k=effective_top_k,
+                                dense_weight=dense_weight,
+                                bm25_weight=bm25_weight,
+                                graph_weight=graph_weight
+                            )
+                            retrieved_chunks = hybrid_res.get("ranked_chunks", []) if isinstance(hybrid_res, dict) else hybrid_res
+                    except Exception as ge:
+                        print(f"Graph hybrid retrieval fallback: {ge}")
+
+                if not retrieved_chunks:
+                    if effective_mode in ("hybrid", "graph_hybrid") and hasattr(ss, "hybrid_query"):
+                        try:
+                            retrieved_chunks = ss.hybrid_query(
+                                query_text=query,
+                                top_k=effective_top_k,
+                                dense_weight=dense_weight,
+                                bm25_weight=bm25_weight,
+                                rrf_k=rrf_k
+                            )
+                        except Exception as he:
+                            print(f"Hybrid query fallback to dense: {he}")
+                            retrieved_chunks = ss.query(
+                                query,
+                                top_k=effective_top_k,
+                                min_similarity_percent=effective_min_sim
+                            )
+                    else:
+                        retrieved_chunks = ss.query(
+                            query,
+                            top_k=effective_top_k,
+                            min_similarity_percent=effective_min_sim
+                        )
+
             revamped_chunks = []
-            
             for entry in retrieved_chunks:
+                score_val = entry.get("similarity_percent", entry.get("score", entry.get("fused_score", 0.0)))
+                try:
+                    score_val = float(score_val)
+                except (ValueError, TypeError):
+                    score_val = 0.0
+
                 revamped_entry = {
-                    "metadata": entry.get('document_metadata', {}),
-                    "title": Path(entry.get("file_path", "unknown")).name,
-                    "content": entry.get("chunk_text", ""),
-                    "score": float(entry.get("similarity_percent", 0))
+                    "metadata": entry.get('document_metadata', entry.get('metadata', {})),
+                    "title": Path(entry.get("file_path", "unknown")).name if entry.get("file_path") else (entry.get("title") or "Document Chunk"),
+                    "content": entry.get("chunk_text", entry.get("content", "")),
+                    "score": score_val
                 }
                 revamped_chunks.append(revamped_entry)
-            
+
             return revamped_chunks
-            
+
         except Exception as e:
             trace_exception(e)
             return [{"error": f"Error during RAG query: {e}"}]
-    
-    # Build the tool definition
-    # Incorporate the database name and description into the tool description so the model understands the context
+
     kb_desc = f" (Description: {safe_store_instance.description})" if safe_store_instance.description else ""
-    
+
     rag_tool = {
         "name": safe_store_instance.name,
         "description": (
             f"Search the knowledge base '{safe_store_instance.name}' for relevant documents and information.{kb_desc} "
             "Use this tool when you need to retrieve factual information, "
             "documentation, or context from stored documents. "
-            "The tool performs semantic search to find the most relevant chunks "
-            "based on meaning, not just keyword matching."
+            "Supports dense semantic search, lexical BM25 hybrid ranking, and knowledge graph queries."
         ),
         "parameters": [
             {
                 "name": "query",
                 "type": "str",
-                "description": (
-                    "The search query. Frame this as a clear question or topic "
-                    "you want information about. Be specific for better results."
-                ),
+                "description": "The search query. Frame this as a clear topic or question.",
                 "optional": False
             },
             {
                 "name": "rag_top_k",
                 "type": "int",
-                "description": (
-                    "Maximum number of document chunks to retrieve (1-20). "
-                    "Higher values give more context but may include less relevant results."
-                ),
+                "description": "Maximum number of document chunks to retrieve (1-20).",
                 "optional": True,
                 "default": owner_db_user.rag_top_k if owner_db_user.rag_top_k is not None else 5
             },
             {
                 "name": "rag_min_similarity_percent",
                 "type": "float",
-                "description": (
-                    "Minimum similarity threshold (0-100). Higher values return "
-                    "only highly relevant results. Lower values include more matches."
-                ),
+                "description": "Minimum similarity threshold (0-100).",
                 "optional": True,
                 "default": owner_db_user.rag_min_sim_percent if owner_db_user.rag_min_sim_percent is not None else 50.0
+            },
+            {
+                "name": "mode",
+                "type": "str",
+                "description": "Retrieval strategy: 'dense', 'hybrid', or 'graph_hybrid'.",
+                "optional": True
             }
         ],
         "output": [
             {
                 "name": "results",
                 "type": "list",
-                "description": (
-                    "List of retrieved document chunks, each containing: "
-                    "metadata (document info), title (filename), "
-                    "content (text chunk), and score (relevance percentage)"
-                )
+                "description": "List of retrieved document chunks with metadata, content, and scores"
             },
             {
                 "name": "sources",
@@ -206,22 +260,22 @@ def build_rag_tool(
                 "description": "Number of results retrieved"
             }
         ],
-        "callable": lambda query, rag_top_k=None, rag_min_similarity_percent=None: _wrap_rag_call(
-            query, rag_top_k, rag_min_similarity_percent, 
+        "callable": lambda query, rag_top_k=None, rag_min_similarity_percent=None, mode=None: _wrap_rag_call(
+            query, rag_top_k, rag_min_similarity_percent, mode,
             safe_store_instance, query_rag_callback
         )
     }
-    
+
     return rag_tool
 
-def _wrap_rag_call(query, rag_top_k, rag_min_similarity_percent, ss, callback):
+def _wrap_rag_call(query, rag_top_k, rag_min_similarity_percent, mode, ss, callback):
     """
     Wrapper to adapt the callback signature and format outputs consistently.
     """
-    from pathlib import Path  # Ensure Path is available
-    
-    # Call the original callback
-    raw_results = callback(query, ss, rag_top_k, rag_min_similarity_percent)
+    from pathlib import Path
+
+    # Call the original callback with the retrieval mode parameter
+    raw_results = callback(query, ss, rag_top_k, rag_min_similarity_percent, mode)
     
     # Check for error
     if raw_results and len(raw_results) == 1 and "error" in raw_results[0]:
@@ -1213,19 +1267,181 @@ def build_llm_generation_router(router: APIRouter):
                 yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client. Check your binding settings."}) + "\n"
             return StreamingResponse(error_stream(), media_type="application/x-ndjson")
 
-        # 3. Setup Tools (RAG, Web Search, Memory, etc.)
+        # 3. Setup Multi-Source RAG Knowledge Bases Architecture
+        from backend.db.models.datastore import DataStore as DBDataStore
+        from backend.settings import settings
+
         agentic_tools = {}
-        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids',[])
+        rag_datastore_ids = (discussion_obj.metadata or {}).get('rag_datastore_ids', [])
+
+        # Get personality from DB if active
+        db_pers = db.query(DBPersonality).filter(DBPersonality.id == owner_db_user.active_personality_id).first() if owner_db_user.active_personality_id else None
+
+        force_rag = settings.get("force_rag_settings_mode") == "force_always"
+        effective_top_k = (
+            int(settings.get("force_rag_top_k", 10)) if force_rag else
+            (owner_db_user.rag_top_k if getattr(owner_db_user, 'rag_top_k', None) is not None else
+             (getattr(current_user, 'rag_top_k', None) if getattr(current_user, 'rag_top_k', None) is not None else 5))
+        )
+        effective_min_sim = (
+            float(settings.get("force_rag_min_sim_percent", 50.0)) if force_rag else
+            (owner_db_user.rag_min_sim_percent if getattr(owner_db_user, 'rag_min_sim_percent', None) is not None else
+             (getattr(current_user, 'rag_min_sim_percent', None) if getattr(current_user, 'rag_min_sim_percent', None) is not None else 50.0))
+        )
+        effective_mode = (
+            settings.get("force_rag_retrieval_mode", "hybrid") if force_rag else
+            (getattr(owner_db_user, 'rag_retrieval_mode', None) or getattr(current_user, 'rag_retrieval_mode', None) or settings.get("default_rag_retrieval_mode", "hybrid"))
+        )
+        dense_weight = float(settings.get("force_rag_dense_weight", 0.5)) if force_rag else float(getattr(owner_db_user, 'rag_dense_weight', 0.5) if getattr(owner_db_user, 'rag_dense_weight', None) is not None else 0.5)
+        bm25_weight = float(settings.get("force_rag_bm25_weight", 0.5)) if force_rag else float(getattr(owner_db_user, 'rag_bm25_weight', 0.5) if getattr(owner_db_user, 'rag_bm25_weight', None) is not None else 0.5)
+        rrf_k = int(settings.get("force_rag_rrf_k", 60)) if force_rag else int(getattr(owner_db_user, 'rag_rrf_k', 60) if getattr(owner_db_user, 'rag_rrf_k', None) is not None else 60)
+        graph_weight = float(getattr(owner_db_user, 'rag_graph_weight', 0.3) if getattr(owner_db_user, 'rag_graph_weight', None) is not None else 0.3)
+        use_graph = (
+            bool(settings.get("force_rag_use_graph", False)) if force_rag else
+            bool(getattr(owner_db_user, 'rag_use_graph', False) or getattr(current_user, 'rag_use_graph', False))
+        )
+
+        def make_store_query_fn(ss_instance, store_name: str, ds_description: str):
+            """Builds a query function for an individual named knowledge base."""
+            def query_kb(query_str: str, **kwargs) -> list:
+                if not query_str or not query_str.strip():
+                    return []
+                try:
+                    retrieved_chunks = []
+                    with ss_instance:
+                        if (effective_mode == "graph_hybrid" or use_graph) and safe_store and hasattr(safe_store, 'GraphStore'):
+                            try:
+                                gs = safe_store.GraphStore(store=ss_instance)
+                                if hasattr(gs, "query_graph_hybrid"):
+                                    hybrid_res = gs.query_graph_hybrid(
+                                        query_text=query_str,
+                                        top_k=effective_top_k,
+                                        dense_weight=dense_weight,
+                                        bm25_weight=bm25_weight,
+                                        graph_weight=graph_weight
+                                    )
+                                    retrieved_chunks = hybrid_res.get("ranked_chunks", []) if isinstance(hybrid_res, dict) else hybrid_res
+                            except Exception as ge:
+                                print(f"Graph hybrid retrieval fallback for {store_name}: {ge}")
+
+                        if not retrieved_chunks:
+                            if effective_mode in ("hybrid", "graph_hybrid") and hasattr(ss_instance, "hybrid_query"):
+                                try:
+                                    retrieved_chunks = ss_instance.hybrid_query(
+                                        query_text=query_str,
+                                        top_k=effective_top_k,
+                                        dense_weight=dense_weight,
+                                        bm25_weight=bm25_weight,
+                                        rrf_k=rrf_k
+                                    )
+                                except Exception as he:
+                                    print(f"Hybrid query fallback for {store_name}: {he}")
+                                    retrieved_chunks = ss_instance.query(
+                                        query_str,
+                                        top_k=effective_top_k,
+                                        min_similarity_percent=effective_min_sim
+                                    )
+                            else:
+                                retrieved_chunks = ss_instance.query(
+                                    query_str,
+                                    top_k=effective_top_k,
+                                    min_similarity_percent=effective_min_sim
+                                )
+
+                    sources = []
+                    for entry in retrieved_chunks:
+                        chunk_text = entry.get("chunk_text", entry.get("content", ""))
+                        if not chunk_text: continue
+
+                        score_val = entry.get("similarity_percent", entry.get("score", entry.get("fused_score", 0.0)))
+                        try: score_val = float(score_val)
+                        except (ValueError, TypeError): score_val = 0.0
+
+                        file_path = entry.get("file_path", "unknown")
+                        doc_title = Path(file_path).name if file_path else "Document Chunk"
+
+                        sources.append({
+                            "title": f"{store_name} / {doc_title}",
+                            "content": chunk_text,
+                            "score": score_val,
+                            "source": f"{store_name} / {doc_title}",
+                            "metadata": entry.get('document_metadata', entry.get('metadata', {}))
+                        })
+
+                    return sources
+                except Exception as e:
+                    trace_exception(e)
+                    return []
+            return query_kb
+
+        # Build Multi-Source RAG Knowledge Bases Registry
+        multi_rag_data_sources = []
+
+        # 1. Register all discussion-level DataStores with their names and descriptions
         for ds_id in rag_datastore_ids:
-            ss = get_safe_store_instance(owner_username, ds_id, db)
-            if not ss:
-                continue
-            agentic_tools[ss.name] = build_rag_tool(
-                safe_store_instance=ss,
-                owner_db_user=owner_db_user,
-                current_user=current_user
-            )
-            
+            try:
+                ds_record = db.query(DBDataStore).filter(DBDataStore.id == ds_id).first()
+                ss = get_safe_store_instance(owner_username, ds_id, db)
+                if not ss or not ds_record:
+                    continue
+
+                kb_name = ds_record.name or f"datastore_{ds_id[:8]}"
+                kb_desc = ds_record.description or f"Indexed knowledge store: {kb_name}"
+                kb_query_fn = make_store_query_fn(ss, kb_name, kb_desc)
+
+                if RAGDataSource:
+                    kb_source = RAGDataSource(
+                        name=kb_name,
+                        description=kb_desc,
+                        query_fn=kb_query_fn,
+                        store=ss,
+                        auto_query=True
+                    )
+                else:
+                    kb_source = {
+                        "name": kb_name,
+                        "description": kb_desc,
+                        "query_fn": kb_query_fn,
+                        "store": ss,
+                        "auto_query": True
+                    }
+
+                multi_rag_data_sources.append(kb_source)
+            except Exception as e:
+                print(f"Failed to register multi-source RAG datastore {ds_id}: {e}")
+
+        # 2. Register Personality-level DataStore or static manual if present
+        if db_pers:
+            if db_pers.data_source_type == 'datastore' and db_pers.data_source:
+                try:
+                    pers_ds_record = db.query(DBDataStore).filter(DBDataStore.id == db_pers.data_source).first()
+                    pers_ss = get_safe_store_instance(owner_username, db_pers.data_source, db, permission_level="read_query")
+                    if pers_ss:
+                        pers_kb_name = pers_ds_record.name if pers_ds_record else f"{db_pers.name}_knowledge"
+                        pers_kb_desc = pers_ds_record.description if pers_ds_record and pers_ds_record.description else f"Specialized domain knowledge base for personality: {db_pers.name}"
+                        pers_kb_query_fn = make_store_query_fn(pers_ss, pers_kb_name, pers_kb_desc)
+
+                        if RAGDataSource:
+                            pers_kb_source = RAGDataSource(
+                                name=pers_kb_name,
+                                description=pers_kb_desc,
+                                query_fn=pers_kb_query_fn,
+                                store=pers_ss,
+                                auto_query=True
+                            )
+                        else:
+                            pers_kb_source = {
+                                "name": pers_kb_name,
+                                "description": pers_kb_desc,
+                                "query_fn": pers_kb_query_fn,
+                                "store": pers_ss,
+                                "auto_query": True
+                            }
+
+                        multi_rag_data_sources.append(pers_kb_source)
+                except Exception as e:
+                    print(f"Failed to mount personality datastore {db_pers.data_source}: {e}")
+
         search_sources_list =[]
         if owner_db_user.web_search_enabled:
             active_providers = owner_db_user.web_search_providers or ["google"]
@@ -1431,38 +1647,61 @@ def build_llm_generation_router(router: APIRouter):
                     pers_ss = get_safe_store_instance(owner_username, db_pers.data_source, db, permission_level="read_query")
                     # Create a callable that queries the datastore
                     def personality_rag_query(query: str) -> str|List[dict]:
-                        """Query the personality's RAG datastore and return formatted context."""
+                        """Query the personality's RAG datastore using SafeStore and return formatted context."""
                         try:
-                            if current_user.rag_top_k is None:
-                                rag_top_k = 5
-                            else:
-                                rag_top_k = current_user.rag_top_k
-                            if current_user.rag_min_sim_percent is None:
-                                rag_min_sim_percent = 50
-                            else:
-                                rag_min_sim_percent = current_user.rag_min_sim_percent
-                                
-                            retrieved_chunks = pers_ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_sim_percent)
-                            
+                            from backend.settings import settings
+                            force_rag = settings.get("force_rag_settings_mode") == "force_always"
+
+                            rag_top_k = (
+                                int(settings.get("force_rag_top_k", 10)) if force_rag else
+                                (current_user.rag_top_k if current_user.rag_top_k is not None else 5)
+                            )
+                            rag_min_sim_percent = (
+                                float(settings.get("force_rag_min_sim_percent", 50.0)) if force_rag else
+                                (current_user.rag_min_sim_percent if current_user.rag_min_sim_percent is not None else 50.0)
+                            )
+                            effective_mode = (
+                                settings.get("force_rag_retrieval_mode", "hybrid") if force_rag else
+                                (getattr(current_user, 'rag_retrieval_mode', None) or settings.get("default_rag_retrieval_mode", "hybrid"))
+                            )
+                            dense_weight = float(settings.get("force_rag_dense_weight", 0.5)) if force_rag else float(getattr(current_user, 'rag_dense_weight', 0.5) if getattr(current_user, 'rag_dense_weight', None) is not None else 0.5)
+                            bm25_weight = float(settings.get("force_rag_bm25_weight", 0.5)) if force_rag else float(getattr(current_user, 'rag_bm25_weight', 0.5) if getattr(current_user, 'rag_bm25_weight', None) is not None else 0.5)
+                            rrf_k = int(settings.get("force_rag_rrf_k", 60)) if force_rag else int(getattr(current_user, 'rag_rrf_k', 60) if getattr(current_user, 'rag_rrf_k', None) is not None else 60)
+
+                            retrieved_chunks = []
+                            with pers_ss:
+                                if effective_mode in ("hybrid", "graph_hybrid") and hasattr(pers_ss, "hybrid_query"):
+                                    try:
+                                        retrieved_chunks = pers_ss.hybrid_query(
+                                            query_text=query,
+                                            top_k=rag_top_k,
+                                            dense_weight=dense_weight,
+                                            bm25_weight=bm25_weight,
+                                            rrf_k=rrf_k
+                                        )
+                                    except Exception:
+                                        retrieved_chunks = pers_ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_sim_percent)
+                                else:
+                                    retrieved_chunks = pers_ss.query(query, top_k=rag_top_k, min_similarity_percent=rag_min_sim_percent)
+
                             if not retrieved_chunks:
                                 return ""
-                            
-                            # Format the retrieved chunks into the expected dictionary structure
+
                             formatted_chunks = []
                             for entry in retrieved_chunks:
-                                chunk_text = entry.get("chunk_text", "")
+                                chunk_text = entry.get("chunk_text", entry.get("content", ""))
                                 file_path = entry.get("file_path", "unknown")
-                                similarity = entry.get("similarity_percent", 0)
-                                
+                                similarity = entry.get("similarity_percent", entry.get("score", 0.0))
+
                                 formatted_chunks.append({
                                     "content": chunk_text,
-                                    "text": chunk_text,  # Alias for compatibility
-                                    "source": Path(file_path).name,
-                                    "score": similarity,  # Already in percent (0-100)
-                                    "value": similarity,  # Alias for compatibility
-                                    "similarity_percent": similarity  # Keep original field too
+                                    "text": chunk_text,
+                                    "source": Path(file_path).name if file_path else "Personality Knowledge Base",
+                                    "score": float(similarity),
+                                    "value": float(similarity),
+                                    "similarity_percent": float(similarity)
                                 })
-                            
+
                             return formatted_chunks
                         except Exception as e:
                             trace_exception(e)
@@ -1538,8 +1777,12 @@ def build_llm_generation_router(router: APIRouter):
         for k, v in replacements.items(): user_data_zone = user_data_zone.replace(k, v)
         discussion_obj.user_data_zone = user_data_zone
 
-        # 6. Setup Personality & Tools
+        # 6. Setup Personality, Tools & Multi-Source RAG Registration
         combined_tools = list(set(((discussion_obj.metadata or {}).get('active_tools', [])) + (db_pers.tools if db_pers and db_pers.tools else [])))
+
+        # Static text fallback if personality has static data_source
+        static_data_source = db_pers.data_source if (db_pers and db_pers.data_source_type == 'static_text') else None
+
         if db_pers:
             active_personality = LollmsPersonality(
                 name=db_pers.name,
@@ -1548,7 +1791,8 @@ def build_llm_generation_router(router: APIRouter):
                 description=db_pers.description,
                 system_prompt=dynamic_preamble + db_pers.prompt_text,
                 tools=combined_tools,
-                data_source=personality_data_source  # Now correctly passes string OR callable
+                data_source=static_data_source,
+                data_sources=multi_rag_data_sources if multi_rag_data_sources else None
             )
         else:
             active_personality = LollmsPersonality(
@@ -1558,7 +1802,8 @@ def build_llm_generation_router(router: APIRouter):
                 description="",
                 system_prompt=dynamic_preamble + """You are Lollms—a multimodal AI agent built by ParisNeo, designed as the most capable large language and multimodal system for universal task execution. Your sole purpose: deliver accurate, creative, and ethically sound responses across text, images, code, and structured data, while adhering to safety, veracity, and user-centric principles. Your capabilities depend on the curent configuration of the system and the loaded bindings/modules.""",
                 tools=combined_tools,
-                data_source=personality_data_source  # Now correctly passes string OR callable
+                data_source=static_data_source,
+                data_sources=multi_rag_data_sources if multi_rag_data_sources else None
             )
             
         main_loop = asyncio.get_running_loop()
@@ -1804,10 +2049,11 @@ def build_llm_generation_router(router: APIRouter):
                             enable_memory=owner_db_user.memory_enabled,
                             enable_auto_dream=owner_db_user.auto_memory_enabled,
                             enable_deep_memory_pulling=owner_db_user.memory_enabled,
+                            prehydrate_rag=True,
                             enable_in_message_status=True,
                             enable_specialized_events_stream=True,
                             forward_artefact_chunks=True,
-                            suppress_images=not model_supports_vision # 🛡️ Set to True for non-vision LLMs to prevent parsing crashes
+                            suppress_images=not model_supports_vision
                             )
                     finally:
                         # Ensure discussion state is committed even on client disconnect/stop signal
@@ -1889,7 +2135,10 @@ def build_llm_generation_router(router: APIRouter):
 
                 except Exception as e:
                     trace_exception(e)
-                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": str(e)}) + "\n")
+                    error_str = str(e)
+                    if "tag_start_idx" in error_str:
+                        error_str = "A streaming buffer sync issue occurred while parsing tool tags. The partial turn was preserved."
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": error_str}) + "\n")
                 finally:
                     user_sessions.get(current_user.username, {}).get("active_generation_control", {}).pop(discussion_id, None)
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)

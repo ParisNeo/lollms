@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch, defineAsyncComponent, Teleport, nextTick  } from 'vue';
 import { useRouter } from 'vue-router';
 import { storeToRefs } from 'pinia';
+import { marked } from 'marked';
 import { useDataStore } from '../stores/data';
 import { useUiStore } from '../stores/ui';
 import { useTasksStore } from '../stores/tasks';
@@ -11,14 +12,15 @@ import apiClient from '../services/api';
 import UserAvatar from '../components/ui/Cards/UserAvatar.vue';
 import JsonRenderer from '../components/ui/JsonRenderer.vue';
 import GenericModal from '../components/modals/GenericModal.vue';
-// Async import for graph manager
-const DataStoreGraphManager = defineAsyncComponent({
-  loader: () => import('../components/datastores/DataStoreGraphManager.vue'),
-  loadingComponent: null,
-  delay: 200,
-  errorComponent: null,
-  timeout: 3000
-});
+
+import IconInfo from '../assets/icons/IconInfo.vue';
+import IconFileText from '../assets/icons/IconFileText.vue';
+import IconSparkles from '../assets/icons/IconSparkles.vue';
+import IconCpuChip from '../assets/icons/IconCpuChip.vue';
+import MessageContentRenderer from '../components/ui/MessageContentRenderer/MessageContentRenderer.vue';
+
+import DataStoreGraphManager from '../components/datastores/DataStoreGraphManager.vue';
+import DataLakeViewer from '../components/datastores/DataLakeViewer.vue';
 
 // Icons
 import IconDatabase from '../assets/icons/IconDatabase.vue';
@@ -34,8 +36,6 @@ import IconEyeOff from '../assets/icons/IconEyeOff.vue';
 import IconMagnifyingGlass from '../assets/icons/IconMagnifyingGlass.vue';
 import IconCopy from '../assets/icons/IconCopy.vue';
 import IconGlobeAlt from '../assets/icons/IconGlobeAlt.vue';
-import IconInfo from '../assets/icons/IconInfo.vue';
-import IconFileText from '../assets/icons/IconFileText.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -53,7 +53,27 @@ const isLoadingAction = ref(null);
 const activeTab = ref('documents');
 const isAddFormVisible = ref(false);
 const showStoreInfo = ref(false); // Controls the Info Modal
-const newStoreForm = ref({ name: '', description: '', selectedVectorizerKey: null, config: {}, chunk_size: 2048, chunk_overlap: 256 });
+const CHUNKING_STRATEGIES = [
+    { value: 'recursive', label: 'Recursive Tree (Recommended)', desc: 'Hierarchically splits by paragraphs -> markdown headers -> sentences -> words. Best all-around balance.' },
+    { value: 'structure', label: 'Structure-Aware (Markdown)', desc: 'Parses Markdown # H1 -> ## H2 stacks, attaching lineage breadcrumbs [H1 > H2].' },
+    { value: 'token', label: 'Token Window', desc: 'Slices by tokenizer limits (tiktoken/HF) preserving newline structure.' },
+    { value: 'semantic', label: 'Semantic Valley', desc: 'Cuts at cosine similarity valleys when topic shifts across sentences.' },
+    { value: 'contextual', label: 'Contextual Retrieval (Anthropic)', desc: 'Injects full-document situating summaries before storage.' },
+    { value: 'late', label: 'Late Chunking (Jina AI)', desc: 'Passes full document through transformer first, then mean-pools representations.' },
+    { value: 'paragraph', label: 'Paragraph Blocks', desc: 'Groups double-newline paragraph blocks up to chunk size without mid-thought cuts.' },
+    { value: 'character', label: 'Fixed Character', desc: 'Fast raw character sliding window for log streams and raw dumps.' }
+];
+
+const newStoreForm = ref({
+    name: '',
+    description: '',
+    selectedVectorizerKey: null,
+    config: {},
+    chunk_size: 2048,
+    chunk_overlap: 256,
+    chunking_strategy: 'recursive',
+    chunking_kwargs: {}
+});
 const isKeyVisible = ref({});
 const filesInSelectedStore = ref([]);
 const filesLoading = ref(false);
@@ -89,9 +109,16 @@ onMounted(async () => {
         isHeaderReady.value = true;
     }
 
-    dataStore.fetchDataStores();
+    await dataStore.fetchDataStores();
     dataStore.fetchAvailableVectorizers();
     tasksStore.fetchTasks();
+
+    const queryStoreId = router.currentRoute.value.query.storeId;
+    if (queryStoreId) {
+        selectedStoreId.value = queryStoreId;
+        fetchFilesInStore(queryStoreId);
+    }
+
     window.addEventListener('lollms:open-new-datastore', handleAddStoreClick);
 });
 
@@ -103,12 +130,20 @@ onBeforeUnmount(() => {
 const queryText = ref('')
 const queryTopK = ref(10);
 const queryMinSim = ref(50.0);
+const queryMode = ref('dense'); // 'dense' or 'hybrid'
+const denseWeight = ref(0.5);
+const bm25Weight = ref(0.5);
+const rrfK = ref(60);
 const queryResults = ref([]);
 const isQuerying = ref(false);
+const isAnswering = ref(false);
+const answerModelName = ref('');
 const queryError = ref('');
 const searchInChunks = ref('');
 const searchMatches = ref([]);
 const currentMatchIndex = ref(-1);
+
+const aiAnswer = ref('');
 
 const viewingFile = ref(null); 
 const loadingFileContent = ref(null); 
@@ -177,14 +212,74 @@ const allDataStores = computed(() => [...ownedDataStores.value, ...sharedDataSto
 const currentSelectedStore = computed(() => allDataStores.value.find(s => s.id === selectedStoreId.value));
 const isAnyTaskRunningForSelectedStore = computed(() => !!currentUploadTask.value || !!currentGraphTask.value || !!currentScrapeTask.value);
 
-function highlightedChunk(text) {
-    if (!text) return '';
-    if (!searchInChunks.value || searchMatches.value.length === 0) {
-        return text;
+function parseChunk(rawText) {
+    if (!rawText) return { metadata: null, content: '' };
+
+    // Detect and extract Document Context / Metadata block
+    const metaBlockRegex = /^---\s*(?:Document Context|Metadata|Context)\s*---([\s\S]*?)(?:---[-]*|\n\n)/i;
+    const match = rawText.match(metaBlockRegex);
+
+    if (match) {
+        const rawMeta = match[1].trim();
+        const metaEntries = [];
+        const lines = rawMeta.split('\n');
+
+        for (const line of lines) {
+            const colonIdx = line.indexOf(':');
+            if (colonIdx > -1) {
+                const key = line.substring(0, colonIdx).trim();
+                let val = line.substring(colonIdx + 1).trim();
+
+                // Format array-like string e.g. ['ParisNeo'] -> 'ParisNeo'
+                if (val.startsWith('[') && val.endsWith(']')) {
+                    try {
+                        const parsed = JSON.parse(val.replace(/'/g, '"'));
+                        if (Array.isArray(parsed)) val = parsed.join(', ');
+                    } catch (e) {
+                        val = val.slice(1, -1).replace(/'/g, '').trim();
+                    }
+                }
+                metaEntries.push({ key, value: val });
+            }
+        }
+
+        let content = rawText.slice(match[0].length).trim();
+        content = content.replace(/^[-=\s]{3,}\n*/, '').trim();
+
+        return {
+            metadata: metaEntries.length > 0 ? metaEntries : null,
+            content: content
+        };
     }
-    const searchTerm = searchInChunks.value;
-    const regex = new RegExp(`(${searchTerm.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return text.replace(regex, '<mark class="bg-yellow-200 dark:bg-yellow-700 rounded">$1</mark>');
+
+    return { metadata: null, content: rawText };
+}
+
+function highlightSearchTerms(html, term) {
+    if (!html || !term || !term.trim()) return html;
+    const cleanTerm = term.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?![^<]*>)(${cleanTerm})`, 'gi');
+    return html.replace(regex, '<mark class="bg-yellow-300 dark:bg-yellow-600 rounded px-0.5">$1</mark>');
+}
+
+function renderChunkContent(rawText) {
+    const parsed = parseChunk(rawText);
+    const content = parsed.content || '';
+    let html = '';
+    try {
+        html = marked.parse(content, { gfm: true, breaks: true, mangle: false, headerIds: false });
+    } catch (e) {
+        html = `<p>${content}</p>`;
+    }
+    if (searchInChunks.value) {
+        html = highlightSearchTerms(html, searchInChunks.value);
+    }
+    return html;
+}
+
+function copyChunkText(text) {
+    navigator.clipboard.writeText(text);
+    uiStore.addNotification("Chunk content copied to clipboard.", "success");
 }
 
 onMounted(() => {
@@ -230,21 +325,23 @@ const storeSpecificTasks = computed(() => {
 });
 
 watch(storeSpecificTasks, (newStoreTasks) => {
-    const findLatest = (prefix) => newStoreTasks
-        .filter(t => t.name.startsWith(prefix) && (t.status === 'running' || t.status === 'pending'))
+    const findLatest = (filterFn) => newStoreTasks
+        .filter(t => filterFn(t) && (t.status === 'running' || t.status === 'pending'))
         .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0] || null;
 
-    const latestUpload = findLatest('Add files to DataStore:');
-    const latestGraph = findLatest('Generate Graph for:') || findLatest('Update Graph for:');
-    const latestScrape = findLatest('Scrape URL to DataStore:');
+    const latestUpload = findLatest(t => t.name.includes('Add files to DataStore:') || t.name.includes('to DataStore:'));
+    const latestGraph = findLatest(t => t.name.startsWith('Generate Graph for:') || t.name.startsWith('Update Graph for:'));
+    const latestScrape = findLatest(t => t.name.startsWith('Scrape URL to DataStore:'));
 
     // Detect task completion to refresh file list
     const uploadFinished = currentUploadTask.value && !latestUpload;
     const scrapeFinished = currentScrapeTask.value && !latestScrape;
 
     if ((uploadFinished || scrapeFinished) && selectedStoreId.value) {
-        // Use a timeout to de-prioritize the refresh and prevent UI blocking loops
-        setTimeout(() => fetchFilesInStore(selectedStoreId.value), 500);
+        setTimeout(() => {
+            fetchFilesInStore(selectedStoreId.value);
+            dataStore.fetchDataStores();
+        }, 500);
     }
 
     currentUploadTask.value = latestUpload;
@@ -261,6 +358,8 @@ watch(selectedStoreId, (newId) => {
         queryText.value = '';
         queryResults.value = [];
         queryError.value = '';
+        aiAnswer.value = '';
+        answerModelName.value = '';
     } else {
         filesInSelectedStore.value = [];
     }
@@ -291,8 +390,10 @@ function handleAddStoreClick() {
         description: '', 
         selectedVectorizerKey: null, 
         config: {},
-        chunk_size: user.value?.default_chunk_size || 1024,
-        chunk_overlap: user.value?.default_chunk_overlap || 256
+        chunk_size: user.value?.default_chunk_size || 2048,
+        chunk_overlap: user.value?.default_chunk_overlap || 256,
+        chunking_strategy: 'recursive',
+        chunking_kwargs: {}
     };
 }
 async function handleAddStore() {
@@ -305,7 +406,9 @@ async function handleAddStore() {
             vectorizer_name: selectedVectorizerDetails.value.vectorizer_name, 
             vectorizer_config: newStoreForm.value.config || {},
             chunk_size: newStoreForm.value.chunk_size,
-            chunk_overlap: newStoreForm.value.chunk_overlap
+            chunk_overlap: newStoreForm.value.chunk_overlap,
+            chunking_strategy: newStoreForm.value.chunking_strategy || 'recursive',
+            chunking_kwargs: newStoreForm.value.chunking_kwargs || {}
         };
         const newStore = await dataStore.addDataStore(payload);
         newStoreForm.value = { name: '', description: '', selectedVectorizerKey: null, config: {}, chunk_size: 1024, chunk_overlap: 256 };
@@ -438,17 +541,16 @@ function removeFileFromSelection(index) {
     }
 }
 async function fetchFilesInStore(storeId) { 
-    if (!isComponentMounted.value) return;
+    if (!storeId) return;
     filesLoading.value = true; 
     try { 
         const result = await dataStore.fetchStoreFiles(storeId); 
-        if (isComponentMounted.value) {
-            filesInSelectedStore.value = result; 
-        }
+        filesInSelectedStore.value = result || []; 
+    } catch (e) {
+        console.error("Failed to fetch store files:", e);
+        filesInSelectedStore.value = [];
     } finally { 
-        if (isComponentMounted.value) {
-            filesLoading.value = false; 
-        }
+        filesLoading.value = false; 
     } 
 }
 
@@ -579,6 +681,8 @@ async function handleDeleteSelectedFiles() {
 async function handleQueryStore() {
     if (!queryText.value.trim() || !currentSelectedStore.value) return;
     isQuerying.value = true;
+    aiAnswer.value = '';
+    answerModelName.value = '';
     queryError.value = '';
     queryResults.value = [];
     try {
@@ -586,13 +690,45 @@ async function handleQueryStore() {
             storeId: currentSelectedStore.value.id,
             query: queryText.value,
             top_k: queryTopK.value,
-            min_similarity_percent: queryMinSim.value
+            min_similarity_percent: queryMinSim.value,
+            mode: queryMode.value,
+            dense_weight: denseWeight.value,
+            bm25_weight: bm25Weight.value,
+            rrf_k: rrfK.value
         });
         queryResults.value = results;
     } catch (error) {
-        queryError.value = 'An error occurred during the query.';
+        queryError.value = 'An error occurred during retrieval.';
     } finally {
         isQuerying.value = false;
+    }
+}
+
+async function handleAskAiWithEvidence() {
+    if (!queryText.value.trim() || !currentSelectedStore.value) return;
+    isAnswering.value = true;
+    aiAnswer.value = '';
+    answerModelName.value = '';
+    queryError.value = '';
+    queryResults.value = [];
+    try {
+        const response = await dataStore.queryDataStoreAndAnswer({
+            storeId: currentSelectedStore.value.id,
+            query: queryText.value,
+            top_k: queryTopK.value,
+            min_similarity_percent: queryMinSim.value,
+            mode: queryMode.value,
+            dense_weight: denseWeight.value,
+            bm25_weight: bm25Weight.value,
+            rrf_k: rrfK.value
+        });
+        aiAnswer.value = response.answer;
+        queryResults.value = response.chunks || [];
+        answerModelName.value = response.model_name || 'LLM';
+    } catch (error) {
+        queryError.value = error.response?.data?.detail || 'Failed to synthesize answer from DataStore.';
+    } finally {
+        isAnswering.value = false;
     }
 }
 
@@ -822,6 +958,7 @@ async function handleImportStore() {
                         <button @click="activeTab = 'documents'" :class="['px-3 py-1 text-xs font-medium rounded-md transition-all', activeTab === 'documents' ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-100' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700']">Documents</button>
                         <button @click="activeTab = 'query'" :class="['px-3 py-1 text-xs font-medium rounded-md transition-all', activeTab === 'query' ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-100' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700']">Query</button>
                         <button @click="activeTab = 'graph'" :class="['px-3 py-1 text-xs font-medium rounded-md transition-all', activeTab === 'graph' ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-100' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700']">Graph</button>
+                        <button @click="activeTab = 'datalake'" :class="['px-3 py-1 text-xs font-medium rounded-md transition-all', activeTab === 'datalake' ? 'bg-white dark:bg-gray-600 shadow text-blue-600 dark:text-blue-100' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700']">Data Lake</button>
                     </nav>
                 </div>
             </Teleport>
@@ -856,16 +993,31 @@ async function handleImportStore() {
                         <textarea id="new-ds-desc" v-model="newStoreForm.description" rows="2" class="input-field mt-1"></textarea>
                     </div>
 
-                    <div v-if="user && user.allow_user_chunking_config" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label for="new-ds-chunk-size" class="block text-sm font-medium">Chunk Size</label>
-                            <input id="new-ds-chunk-size" v-model.number="newStoreForm.chunk_size" type="number" min="1" class="input-field mt-1">
-                            <p class="text-xs text-gray-500 mt-1">Number of characters per data chunk.</p>
+                    <!-- Chunking Strategy & Windows -->
+                    <div class="space-y-4 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-xl border dark:border-gray-700">
+                        <div class="flex items-center justify-between">
+                            <label for="new-ds-strategy" class="block text-xs font-black uppercase tracking-wider text-gray-700 dark:text-gray-300">Chunking Strategy (safe_store)</label>
+                            <span class="text-[10px] font-mono font-bold text-blue-500 uppercase">{{ newStoreForm.chunking_strategy }}</span>
                         </div>
-                        <div>
-                            <label for="new-ds-chunk-overlap" class="block text-sm font-medium">Chunk Overlap</label>
-                            <input id="new-ds-chunk-overlap" v-model.number="newStoreForm.chunk_overlap" type="number" min="0" class="input-field mt-1">
-                            <p class="text-xs text-gray-500 mt-1">Number of overlapping characters between chunks.</p>
+
+                        <select id="new-ds-strategy" v-model="newStoreForm.chunking_strategy" class="input-field text-xs">
+                            <option v-for="strat in CHUNKING_STRATEGIES" :key="strat.value" :value="strat.value">
+                                {{ strat.label }}
+                            </option>
+                        </select>
+                        <p class="text-xs text-gray-500 italic">
+                            {{ CHUNKING_STRATEGIES.find(s => s.value === newStoreForm.chunking_strategy)?.desc }}
+                        </p>
+
+                        <div v-if="user && user.allow_user_chunking_config" class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                            <div>
+                                <label for="new-ds-chunk-size" class="block text-xs font-bold uppercase text-gray-500">Chunk Size (chars)</label>
+                                <input id="new-ds-chunk-size" v-model.number="newStoreForm.chunk_size" type="number" min="10" max="64000" class="input-field text-xs mt-1">
+                            </div>
+                            <div>
+                                <label for="new-ds-chunk-overlap" class="block text-xs font-bold uppercase text-gray-500">Chunk Overlap (chars)</label>
+                                <input id="new-ds-chunk-overlap" v-model.number="newStoreForm.chunk_overlap" type="number" min="0" max="16000" class="input-field text-xs mt-1">
+                            </div>
                         </div>
                     </div>
 
@@ -946,7 +1098,13 @@ async function handleImportStore() {
                             </span>
                         </div>
                         <div class="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
-                            <span class="font-black uppercase tracking-wider text-[9px] opacity-70">Chunking:</span>
+                            <span class="font-black uppercase tracking-wider text-[9px] opacity-70">Strategy:</span>
+                            <span class="px-2 py-0.5 rounded bg-purple-500/10 text-purple-600 dark:text-purple-400 font-bold uppercase font-mono text-[10px]">
+                                {{ currentSelectedStore.chunking_strategy || 'recursive' }}
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-1.5 text-gray-500 dark:text-gray-400">
+                            <span class="font-black uppercase tracking-wider text-[9px] opacity-70">Window:</span>
                             <span class="font-semibold text-gray-700 dark:text-gray-300">
                                 {{ currentSelectedStore.chunk_size }} chars <span class="opacity-50">/</span> {{ currentSelectedStore.chunk_overlap }} overlap
                             </span>
@@ -1173,69 +1331,191 @@ async function handleImportStore() {
                 </div>
                 <div v-if="activeTab === 'query'" class="p-6 grow overflow-y-auto flex flex-col">
                     <div class="shrink-0 space-y-4">
-                        <h3 class="text-xl font-semibold">Query Data Store</h3>
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h3 class="text-xl font-bold text-gray-900 dark:text-white">Knowledge Studio Query & Synthesis</h3>
+                                <p class="text-xs text-gray-500 mt-0.5">Search semantic document vectors or synthesize grounded answers using the LLM.</p>
+                            </div>
+                        </div>
+
                         <form @submit.prevent="handleQueryStore" class="space-y-4">
                             <div>
-                                <label for="query-text" class="block text-sm font-medium">Query Text</label>
-                                <textarea id="query-text" v-model="queryText" rows="3" class="input-field mt-1" placeholder="Enter your question..."></textarea>
+                                <label for="query-text" class="block text-xs font-bold uppercase text-gray-500 mb-1">Question or Search Query</label>
+                                <textarea id="query-text" v-model="queryText" rows="3" class="input-field text-sm" placeholder="Ask a question or search for technical concepts..."></textarea>
                             </div>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                                 <div>
-                                    <label for="query-topk" class="block text-sm font-medium">Top K</label>
-                                    <input id="query-topk" v-model.number="queryTopK" type="number" min="1" class="input-field mt-1">
+                                    <label for="query-mode" class="block text-xs font-bold uppercase text-gray-500 mb-1">Search Strategy</label>
+                                    <select id="query-mode" v-model="queryMode" class="input-field text-xs">
+                                        <option value="hybrid">Tri-Modal Hybrid (Dense + BM25 + RRF)</option>
+                                        <option value="dense">Dense Semantic Vectors Only</option>
+                                    </select>
                                 </div>
                                 <div>
-                                    <label for="query-minsim" class="block text-sm font-medium">Min Similarity %</label>
-                                    <input id="query-minsim" v-model.number="queryMinSim" type="number" min="0" max="100" step="0.1" class="input-field mt-1">
+                                    <label for="query-topk" class="block text-xs font-bold uppercase text-gray-500 mb-1">Top K</label>
+                                    <input id="query-topk" v-model.number="queryTopK" type="number" min="1" max="50" class="input-field text-xs">
                                 </div>
-                                <div class="self-end">
-                                    <button type="submit" class="btn btn-primary w-full" :disabled="isQuerying || !queryText.trim()">
-                                        <IconAnimateSpin v-if="isQuerying" class="w-5 h-5 mr-2 animate-spin" />
-                                        {{ isQuerying ? 'Querying...' : 'Query' }}
+                                <div v-if="queryMode === 'dense'">
+                                    <label for="query-minsim" class="block text-xs font-bold uppercase text-gray-500 mb-1">Min Similarity %</label>
+                                    <input id="query-minsim" v-model.number="queryMinSim" type="number" min="0" max="100" step="1" class="input-field text-xs">
+                                </div>
+                                <div v-else class="flex items-center gap-2">
+                                    <div class="grow">
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">Dense Weight: {{ denseWeight }}</label>
+                                        <input type="range" v-model.number="denseWeight" min="0" max="1" step="0.1" class="w-full mt-1 accent-blue-600">
+                                    </div>
+                                    <div class="grow">
+                                        <label class="block text-[10px] font-bold text-gray-500 uppercase">BM25 Weight: {{ bm25Weight }}</label>
+                                        <input type="range" v-model.number="bm25Weight" min="0" max="1" step="0.1" class="w-full mt-1 accent-purple-600">
+                                    </div>
+                                </div>
+                                <div class="self-end flex gap-2">
+                                    <button type="submit" class="btn btn-secondary flex-1 text-xs font-bold h-10" :disabled="isQuerying || isAnswering || !queryText.trim()">
+                                        <IconAnimateSpin v-if="isQuerying" class="w-4 h-4 mr-1.5 animate-spin" />
+                                        <span>Search Chunks</span>
+                                    </button>
+                                    <button type="button" @click="handleAskAiWithEvidence" class="btn btn-primary flex-1 text-xs font-bold h-10 flex items-center justify-center gap-1.5 shadow-md shadow-blue-500/10" :disabled="isQuerying || isAnswering || !queryText.trim()">
+                                        <IconAnimateSpin v-if="isAnswering" class="w-4 h-4 animate-spin" />
+                                        <IconSparkles v-else class="w-4 h-4 text-amber-300" />
+                                        <span>Ask AI (Grounded)</span>
                                     </button>
                                 </div>
                             </div>
                         </form>
                     </div>
-                    <div class="grow min-h-0 mt-6 border-t dark:border-gray-700 pt-6">
-                        <div class="flex justify-between items-center mb-4">
-                            <h4 class="text-lg font-semibold">Results ({{ queryResults.length }})</h4>
+
+                    <!-- Answer & Results Area -->
+                    <div class="grow min-h-0 mt-6 border-t dark:border-gray-700/80 pt-6 space-y-6">
+                        
+                        <!-- ── [NEW] Grounded AI Answer Section ── -->
+                        <div v-if="isAnswering" class="p-6 rounded-2xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/40 dark:bg-blue-950/20 flex flex-col items-center justify-center gap-3 animate-pulse">
+                            <IconAnimateSpin class="w-8 h-8 text-blue-600 dark:text-blue-400 animate-spin" />
+                            <span class="text-xs font-bold text-blue-900 dark:text-blue-200 uppercase tracking-widest">Synthesizing Answer with Grounded Evidence...</span>
+                        </div>
+
+                        <div v-else-if="aiAnswer" class="p-6 rounded-3xl border border-blue-200/80 dark:border-blue-900/60 bg-gradient-to-br from-blue-50/60 via-white to-indigo-50/30 dark:from-blue-950/30 dark:via-gray-900/80 dark:to-indigo-950/20 shadow-xl space-y-4 animate-in fade-in slide-in-from-top-2">
+                            <div class="flex items-center justify-between border-b border-blue-100 dark:border-blue-900/40 pb-3">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="p-1.5 rounded-lg bg-blue-600 text-white shadow-md shadow-blue-500/20">
+                                        <IconSparkles class="w-4 h-4" />
+                                    </div>
+                                    <div>
+                                        <h4 class="text-sm font-black text-gray-900 dark:text-white uppercase tracking-tight">AI Synthesized Response</h4>
+                                        <p class="text-[10px] text-gray-500">Grounded exclusively using retrieved evidence from {{ currentSelectedStore.name }}.</p>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <span v-if="answerModelName" class="text-[9px] font-mono font-bold bg-white dark:bg-gray-800 px-2.5 py-1 rounded-full border dark:border-gray-700 text-blue-600 dark:text-blue-400">
+                                        {{ answerModelName }}
+                                    </span>
+                                    <button @click="copyChunkText(aiAnswer)" class="p-1.5 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-white dark:hover:bg-gray-800 transition-colors" title="Copy Answer">
+                                        <IconCopy class="w-4 h-4" />
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Markdown Body -->
+                            <div class="prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200 leading-relaxed font-sans" v-html="renderChunkContent(aiAnswer)"></div>
+                        </div>
+
+                        <!-- Chunks Header & Filter Controls -->
+                        <div class="flex justify-between items-center mb-2">
+                            <div class="flex items-center gap-2">
+                                <h4 class="text-base font-bold text-gray-900 dark:text-white">Evidence Chunks ({{ queryResults.length }})</h4>
+                                <span v-if="queryResults.length > 0" class="text-[10px] text-gray-400 font-mono">Retrieved via {{ queryMode }} mode</span>
+                            </div>
+
                             <div v-if="queryResults.length > 0" class="flex items-center gap-2">
-                                <input type="text" v-model="searchInChunks" @keyup.enter="handleInChunkSearch" placeholder="Search in results..." class="input-field !py-1.5 !text-sm">
+                                <input type="text" v-model="searchInChunks" @keyup.enter="handleInChunkSearch" placeholder="Search in results..." class="input-field !py-1.5 !text-xs w-44 sm:w-56">
                                 <button @click="handleInChunkSearch" class="btn btn-secondary btn-sm p-2"><IconMagnifyingGlass class="w-4 h-4" /></button>
                                 <template v-if="searchMatches.length > 0">
                                     <button @click="navigateMatch(-1)" class="btn btn-secondary btn-sm p-2" title="Previous match">‹</button>
-                                    <span class="text-sm text-gray-500 font-mono">{{ currentMatchIndex + 1 }} / {{ searchMatches.length }}</span>
+                                    <span class="text-xs text-gray-500 font-mono">{{ currentMatchIndex + 1 }} / {{ searchMatches.length }}</span>
                                     <button @click="navigateMatch(1)" class="btn btn-secondary btn-sm p-2" title="Next match">›</button>
                                 </template>
                             </div>
                         </div>
-                        <div v-if="isQuerying" class="text-center p-6 text-gray-500">
-                            <IconAnimateSpin class="w-8 h-8 mx-auto animate-spin" />
-                            <p class="mt-2">Fetching results...</p>
+
+                        <div v-if="isQuerying" class="text-center p-8 text-gray-500">
+                            <IconAnimateSpin class="w-8 h-8 mx-auto animate-spin text-blue-500" />
+                            <p class="mt-2 text-xs font-bold uppercase tracking-wider">Retrieving relevant chunks...</p>
                         </div>
-                        <div v-else-if="queryError" class="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-md">
+                        <div v-else-if="queryError" class="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded-xl border border-red-200 dark:border-red-800 text-xs">
                             {{ queryError }}
                         </div>
-                        <div v-else-if="queryResults.length === 0" class="text-center p-6 text-gray-500">
-                            No results to display. Run a query to see matching text chunks.
+                        <div v-else-if="queryResults.length === 0 && !isAnswering" class="text-center py-12 bg-gray-50 dark:bg-gray-900/30 rounded-2xl border border-dashed dark:border-gray-800">
+                            <IconDatabase class="w-8 h-8 text-gray-400 mx-auto opacity-40 mb-2" />
+                            <p class="text-xs text-gray-500">No results to display. Type a question and click <b>Ask AI</b> or <b>Search Chunks</b>.</p>
                         </div>
-                        <div v-else-if="searchInChunks && searchMatches.length === 0" class="text-center p-6 text-gray-500">
+                        <div v-else-if="searchInChunks && searchMatches.length === 0" class="text-center py-6 text-xs text-gray-400">
                             No chunks match your search term.
                         </div>
-                        <div v-else class="space-y-4 overflow-y-auto custom-scrollbar h-full pb-10">
-                            <div v-for="(chunk, index) in queryResults" :key="index" :id="`chunk-${index}`" class="p-4 border rounded-lg dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50">
-                                <div class="flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 mb-2">
-                                    <span class="font-mono truncate" :title="chunk.file_path">.../{{ chunk.file_path.split(/[/\\]/).pop() }}</span>
-                                    <span class="font-semibold" :title="`Similarity: ${chunk.similarity_percent}`">{{ chunk.similarity_percent.toFixed(2) }}%</span>
+                        <div v-else class="space-y-5 overflow-y-auto custom-scrollbar h-full pb-10">
+                            <div v-for="(chunk, index) in queryResults" :key="index" :id="`chunk-${index}`" 
+                                 class="p-5 border border-gray-200 dark:border-gray-700/80 rounded-2xl bg-white dark:bg-gray-900/70 shadow-sm hover:shadow-md transition-all duration-200 space-y-3.5">
+
+                                <!-- Chunk Header -->
+                                <div class="flex flex-wrap justify-between items-center gap-2 pb-3 border-b border-gray-100 dark:border-gray-800">
+                                    <div class="flex items-center gap-2 min-w-0">
+                                        <div class="p-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
+                                            <IconFileText class="w-4 h-4 shrink-0" />
+                                        </div>
+                                        <span class="font-bold text-xs text-gray-800 dark:text-gray-200 truncate" :title="chunk.file_path">
+                                            {{ (chunk.file_path || '').split(/[/\\]/).pop() || 'Document Chunk' }}
+                                        </span>
+                                    </div>
+
+                                    <div class="flex items-center gap-2">
+                                        <span v-if="chunk.fused_score !== undefined" 
+                                              class="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-purple-50 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 border border-purple-200 dark:border-purple-800/40">
+                                            RRF Score: {{ chunk.fused_score.toFixed(4) }}
+                                        </span>
+                                        <span v-else-if="chunk.similarity_percent !== undefined" 
+                                              class="text-[10px] font-mono font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40">
+                                            {{ chunk.similarity_percent.toFixed(1) }}% Match
+                                        </span>
+
+                                        <button @click="copyChunkText(chunk.chunk_text)" class="p-1.5 text-gray-400 hover:text-blue-500 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors" title="Copy text">
+                                            <IconCopy class="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
                                 </div>
-                                <pre class="whitespace-pre-wrap font-sans text-sm" v-html="highlightedChunk(chunk.chunk_text)"></pre>
+
+                                <!-- Styled Metadata Card (if present) -->
+                                <div v-if="parseChunk(chunk.chunk_text).metadata" 
+                                     class="p-3.5 rounded-xl bg-gradient-to-br from-blue-50/60 to-indigo-50/30 dark:from-blue-950/20 dark:to-indigo-950/10 border border-blue-100 dark:border-blue-900/40 space-y-2">
+
+                                    <div class="flex items-center gap-1.5 text-[9px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                                        <IconInfo class="w-3.5 h-3.5" />
+                                        <span>Document Metadata</span>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                                        <div v-for="(meta, mIdx) in parseChunk(chunk.chunk_text).metadata" :key="mIdx" 
+                                             :class="meta.key.toLowerCase() === 'title' ? 'sm:col-span-2' : ''"
+                                             class="flex flex-col gap-0.5">
+                                            <span class="text-[10px] font-bold uppercase text-gray-400 dark:text-gray-500">{{ meta.key }}</span>
+                                            <span class="font-medium text-gray-800 dark:text-gray-200 leading-snug" 
+                                                  :class="meta.key.toLowerCase() === 'title' ? 'font-bold text-gray-900 dark:text-white' : ''">
+                                                {{ meta.value }}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Chunk Body Markdown Content -->
+                                <div class="prose prose-sm dark:prose-invert max-w-none text-xs text-gray-800 dark:text-gray-200 leading-relaxed font-sans break-words selection:bg-blue-100 dark:selection:bg-blue-900"
+                                     v-html="renderChunkContent(chunk.chunk_text)">
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div v-if="activeTab === 'graph'" class="p-6 grow overflow-y-auto">
                     <DataStoreGraphManager :store="currentSelectedStore" :task="currentGraphTask" />
+                </div>
+                <div v-if="activeTab === 'datalake'" class="grow overflow-hidden h-full">
+                    <DataLakeViewer :store="currentSelectedStore" />
                 </div>
             </div>
 

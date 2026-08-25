@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
+import { marked } from 'marked';
 import GenericModal from './GenericModal.vue';
 import { useUiStore } from '../../stores/ui';
 import JsonRenderer from '../ui/JsonRenderer.vue';
@@ -24,11 +25,60 @@ const scoreColor = computed(() => {
     return 'bg-green-500';
 });
 
-const highlightedContent = computed(() => {
-    if (!content.value) return '';
-    if (!searchTerm.value) return content.value;
-    const regex = new RegExp(`(${searchTerm.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
-    return content.value.replace(regex, '<mark class="bg-yellow-300 dark:bg-yellow-600 rounded">$1</mark>');
+const parsedSource = computed(() => {
+    const raw = content.value || '';
+    const metaBlockRegex = /^---\s*(?:Document Context|Metadata|Context)\s*---([\s\S]*?)(?:---[-]*|\n\n)/i;
+    const match = raw.match(metaBlockRegex);
+
+    if (match) {
+        const rawMeta = match[1].trim();
+        const metaEntries = [];
+        const lines = rawMeta.split('\n');
+
+        for (const line of lines) {
+            const colonIdx = line.indexOf(':');
+            if (colonIdx > -1) {
+                const key = line.substring(0, colonIdx).trim();
+                let val = line.substring(colonIdx + 1).trim();
+                if (val.startsWith('[') && val.endsWith(']')) {
+                    try {
+                        const parsed = JSON.parse(val.replace(/'/g, '"'));
+                        if (Array.isArray(parsed)) val = parsed.join(', ');
+                    } catch (e) {
+                        val = val.slice(1, -1).replace(/'/g, '').trim();
+                    }
+                }
+                metaEntries.push({ key, value: val });
+            }
+        }
+        return {
+            extractedMetadata: metaEntries.length > 0 ? metaEntries : null,
+            bodyContent: raw.slice(match[0].length).trim()
+        };
+    }
+    return { extractedMetadata: null, bodyContent: raw };
+});
+
+function highlightSearchTerms(html, term) {
+    if (!html || !term || !term.trim()) return html;
+    const cleanTerm = term.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(`(?![^<]*>)(${cleanTerm})`, 'gi');
+    return html.replace(regex, '<mark class="bg-yellow-300 dark:bg-yellow-600 rounded px-0.5">$1</mark>');
+}
+
+const renderedMarkdownContent = computed(() => {
+    const text = parsedSource.value.bodyContent || '';
+    if (!text) return '';
+    let html = '';
+    try {
+        html = marked.parse(text, { gfm: true, breaks: true, mangle: false, headerIds: false });
+    } catch (e) {
+        html = `<p>${text}</p>`;
+    }
+    if (searchTerm.value) {
+        html = highlightSearchTerms(html, searchTerm.value);
+    }
+    return html;
 });
 
 watch(searchTerm, (newTerm) => {
@@ -82,15 +132,36 @@ function navigateSearch(direction) {
                     </div>
                 </div>
 
-                <details v-if="metadata" class="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg border dark:border-gray-700" open>
-                    <summary class="font-semibold cursor-pointer">Metadata</summary>
+                <!-- Structured Embedded Metadata Banner (if present in chunk) -->
+                <div v-if="parsedSource.extractedMetadata" 
+                     class="p-4 rounded-xl bg-gradient-to-br from-blue-50/80 to-indigo-50/40 dark:from-blue-950/30 dark:to-indigo-950/20 border border-blue-100 dark:border-blue-900/50 space-y-2.5">
+
+                    <div class="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                        <span>Document Context Header</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div v-for="(meta, mIdx) in parsedSource.extractedMetadata" :key="mIdx" 
+                             :class="meta.key.toLowerCase() === 'title' ? 'sm:col-span-2' : ''"
+                             class="flex flex-col gap-0.5">
+                            <span class="text-[10px] font-bold uppercase text-gray-400 dark:text-gray-500">{{ meta.key }}</span>
+                            <span class="font-medium text-gray-800 dark:text-gray-200" 
+                                  :class="meta.key.toLowerCase() === 'title' ? 'font-bold text-gray-900 dark:text-white' : ''">
+                                {{ meta.value }}
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <details v-if="metadata" class="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl border dark:border-gray-700">
+                    <summary class="font-semibold cursor-pointer text-xs uppercase tracking-wider text-gray-500">Raw JSON Metadata</summary>
                     <div class="mt-2">
                         <JsonRenderer :json="metadata" />
                     </div>
                 </details>
 
                 <div>
-                    <h4 class="font-semibold mb-2">Content</h4>
+                    <h4 class="font-semibold mb-2 text-sm text-gray-700 dark:text-gray-300">Document Chunk Text</h4>
                     <div class="relative">
                         <input type="text" v-model="searchTerm" placeholder="Search in content..." class="input-field w-full pr-32" />
                         <div v-if="searchTerm" class="absolute inset-y-0 right-0 flex items-center pr-3 text-sm">
@@ -99,8 +170,8 @@ function navigateSearch(direction) {
                             <button @click="navigateSearch(1)" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600" :disabled="searchResults.count === 0"><IconChevronRight class="w-4 h-4" /></button>
                         </div>
                     </div>
-                    <div ref="contentRef" class="mt-2 p-3 bg-gray-100 dark:bg-gray-900 rounded-md max-h-96 overflow-y-auto whitespace-pre-wrap break-words">
-                        <span v-html="highlightedContent"></span>
+                    <div ref="contentRef" class="mt-2 p-4 bg-gray-50 dark:bg-gray-900/60 rounded-xl border dark:border-gray-800 max-h-96 overflow-y-auto break-words prose prose-sm dark:prose-invert max-w-none text-xs">
+                        <div v-html="renderedMarkdownContent"></div>
                     </div>
                 </div>
             </div>

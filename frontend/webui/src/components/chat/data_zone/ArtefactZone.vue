@@ -143,6 +143,49 @@ function handleStarToggle(title) {
     discussionsStore.toggleStarArtefact(title);
 }
 
+const activeLoadedRagStores = computed(() => {
+    const loadedIds = discussionsStore.activeDiscussion?.rag_datastore_ids || [];
+    const all = [...(discussionsStore.dataStore?.ownedDataStores || []), ...(discussionsStore.dataStore?.sharedDataStores || [])];
+    if (loadedIds.length > 0) {
+        return loadedIds.map(id => all.find(s => s.id === id) || { id, name: `DataStore (${id.substring(0, 8)})` });
+    }
+    return all;
+});
+
+function handleOpenMakeRagStore(titlesArray = null) {
+    const targetTitles = titlesArray || Array.from(selectedTitles.value);
+    if (!targetTitles.length && !idToUse.value) return;
+
+    uiStore.openModal('createDataStoreFromArtefacts', {
+        discussionId: idToUse.value,
+        titles: targetTitles,
+        initialMode: 'create'
+    });
+}
+
+function handleOpenBatchVectorizeExisting(datastoreId) {
+    const targetTitles = Array.from(selectedTitles.value);
+    if (!targetTitles.length || !idToUse.value) return;
+
+    uiStore.openModal('createDataStoreFromArtefacts', {
+        discussionId: idToUse.value,
+        titles: targetTitles,
+        initialMode: 'existing',
+        targetDatastoreId: datastoreId
+    });
+}
+
+async function handleSendToDataStore(title, datastoreId, datastoreName) {
+    if (!title || !idToUse.value) return;
+
+    uiStore.openModal('createDataStoreFromArtefacts', {
+        discussionId: idToUse.value,
+        titles: [title],
+        initialMode: 'existing',
+        targetDatastoreId: datastoreId
+    });
+}
+
 function handleShareArtefact(group) {
     const latest = group.versions[0];
     if (!latest) return;
@@ -338,12 +381,14 @@ function toggleSelectionMode() {
                         <IconPlus class="w-4.5 h-4.5 text-emerald-500" />
                     </template>
                     <DropdownSubmenu title="Add Document" icon="file-text" collection="ui">
-                        <div class="p-1 min-w-[250px]">
-                            <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text</span></button>
+                        <div class="p-1 min-w-[260px]">
+                            <button @click="triggerArtefactFileUpload('as_is')" class="menu-item"><IconFolder class="w-4 h-4 mr-3 text-emerald-500" /> <span>Native File (as-is)</span></button>
+                            <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
                             <button @click="triggerArtefactFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
                             <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
-                            <button @click="triggerArtefactFileUpload('ocr')" class="menu-item"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR</span></button>
-                            <button @click="triggerArtefactFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images</span></button>
+                            <button @click="triggerArtefactFileUpload('ocr')" class="menu-item"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR (Vision LLM)</span></button>
+                            <button @click="triggerArtefactFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images Only</span></button>
+                            <button @click="triggerArtefactFileUpload('audio_stt')" class="menu-item"><IconMicrophone class="w-4 h-4 mr-3 text-cyan-500" /> <span>Transcribe Audio (STT)</span></button>
                         </div>
                     </DropdownSubmenu>
                     <DropdownSubmenu title="Add Data" icon="database" collection="ui">
@@ -424,6 +469,7 @@ function toggleSelectionMode() {
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"
+                        @send-to-datastore="(dsId, dsName) => handleSendToDataStore(group.title, dsId, dsName)"
                     />
                 </div>
             </div>
@@ -445,6 +491,21 @@ function toggleSelectionMode() {
                 </div>
                 
                 <div class="flex items-center gap-1.5">
+                    <!-- Make RAG Store (Direct Action) -->
+                    <button @click="handleOpenMakeRagStore()" class="px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95" title="Create a new DataStore from selected documents and link it to this chat">
+                        <IconDatabase class="w-3.5 h-3.5" />
+                        <span>Make RAG Store</span>
+                    </button>
+
+                    <!-- Vectorize to Existing DataStore Dropdown -->
+                    <DropdownMenu v-if="activeLoadedRagStores.length > 0" icon="database" buttonClass="p-2 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-lg" title="Vectorize into Existing DataStore">
+                        <div class="px-3 py-1 text-[9px] font-black uppercase text-gray-400 tracking-wider">Target DataStore</div>
+                        <button v-for="store in activeLoadedRagStores" :key="`batch-ds-${store.id}`" @click="handleOpenBatchVectorizeExisting(store.id)" class="menu-item text-xs">
+                            <IconDatabase class="w-4 h-4 mr-2 text-green-500 shrink-0" />
+                            <span class="truncate">{{ store.name }}</span>
+                        </button>
+                    </DropdownMenu>
+
                     <!-- Batch Visibility Dropdown -->
                     <DropdownMenu icon="eye" buttonClass="p-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 rounded-lg text-gray-600 dark:text-gray-300" title="Set Attention">
                         <button @click="handleBatchVisibility('FULL')" class="menu-item gap-2">

@@ -106,6 +106,7 @@ const isWebSearchActive = ref(false);
 const stagedImages = ref([]); 
 const user = computed(() => authStore.user);
 const isSavedLibraryItem = computed(() => discussionsStore.currentDiscussionId === 'saved');
+const hoveredRagStoreId = ref(null);
 
 
 const providerNames = {
@@ -281,6 +282,20 @@ const ragStoreSelection = computed({
     set: (newIds) => { if (activeDiscussion.value) discussionsStore.updateDiscussionRagStores({ discussionId: activeDiscussion.value.id, ragDatastoreIds: newIds }); }
 });
 
+const activeRagStoresInfo = computed(() => {
+    const ids = ragStoreSelection.value || [];
+    if (!ids.length) return [];
+    const allStores = [...(dataStore.ownedDataStores || []), ...(dataStore.sharedDataStores || [])];
+    return ids.map(id => {
+        const found = allStores.find(s => s.id === id);
+        return {
+            id,
+            name: found ? found.name : `DataStore (${id.substring(0, 8)})`,
+            mode: user.value?.rag_retrieval_mode || 'hybrid'
+        };
+    });
+});
+
 const mcpToolSelection = computed({
     get: () => activeDiscussion.value?.active_tools || [],
     set: (newIds) => { if (activeDiscussion.value) discussionsStore.updateDiscussionMcps({ discussionId: activeDiscussion.value.id, mcp_tool_ids: newIds }); }
@@ -352,7 +367,50 @@ function navigateToContextSettings() {
     router.push('/settings?section=context');
 }
 
+function handleOpenCreateDatastoreModal() {
+    uiStore.openModal('createDataStoreFromArtefacts', {
+        discussionId: activeDiscussion.value?.id,
+        initialMode: 'create',
+        titles: []
+    });
+}
+
+function handleDragEnterRagChip(storeId) {
+    hoveredRagStoreId.value = storeId;
+}
+
+function handleDragLeaveRagChip(storeId) {
+    if (hoveredRagStoreId.value === storeId) {
+        hoveredRagStoreId.value = null;
+    }
+}
+
+function handleDropOnRagChip(event, targetStoreId, targetStoreName) {
+    event.preventDefault();
+    event.stopPropagation();
+    hoveredRagStoreId.value = null;
+    const artefactTitle = event.dataTransfer.getData('text/lollms-artefact-title');
+    if (artefactTitle && activeDiscussion.value) {
+        uiStore.openModal('createDataStoreFromArtefacts', {
+            discussionId: activeDiscussion.value.id,
+            titles: [artefactTitle],
+            initialMode: 'existing',
+            targetDatastoreId: targetStoreId,
+            defaultName: targetStoreName
+        });
+    }
+}
+
 function showFeatureInfo(feature) {
+    if (feature.id === 'rag') {
+        if (ragStoreSelection.value.length > 0) {
+            router.push({ path: '/datastores', query: { storeId: ragStoreSelection.value[0] } });
+            return;
+        } else {
+            router.push('/datastores');
+            return;
+        }
+    }
     // We now use a dedicated modal for a richer editorial experience
     uiStore.openModal('featureInfo', feature);
 }
@@ -392,14 +450,18 @@ const activeFeatures = computed(() => {
         });
     }
     if (ragStoreSelection.value.length > 0) {
+        const storeNames = activeRagStoresInfo.value.map(s => s.name);
+        const labelText = storeNames.length === 1 
+            ? `RAG: ${storeNames[0]}` 
+            : `RAG: ${storeNames.length} DBs (${storeNames.join(', ')})`;
         features.push({ 
             id: 'rag', 
             icon: IconDatabase, 
-            label: 'RAG', 
+            label: labelText, 
             colorClass: 'text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800', 
-            title: `${ragStoreSelection.value.length} Data Store(s) Active`,
-            modalTitle: 'RAG (Retrieval Augmented Generation)',
-            modalDescription: `Active Data Stores: ${ragStoreSelection.value.length}. Retrieves relevant text chunks from your documents to ground the AI's response in facts.`,
+            title: `Active Knowledge Bases: ${storeNames.join(', ')}`,
+            modalTitle: 'RAG (Retrieval-Augmented Generation)',
+            modalDescription: `Active Knowledge Bases: ${storeNames.join(', ')}. Strategy: ${user.value?.rag_retrieval_mode || 'hybrid'}. Retrieves relevant document chunks to ground the AI in factual data.`,
             systemPrompt: '## Context from Data Stores\n[Chunk 1] content...\n[Chunk 2] content...'
         });
     }
@@ -1040,7 +1102,30 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 
         <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
             <!-- SPECIAL SELECTION ZONE -->
-            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0 || attachedSkills.length > 0 || loadedContextItems.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
+            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0 || attachedSkills.length > 0 || loadedContextItems.length > 0 || activeRagStoresInfo.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
+
+                <!-- Active RAG Database Indicators (Drop Target) -->
+                <div v-for="ragStore in activeRagStoresInfo" :key="`rag-chip-${ragStore.id}`"
+                     @dragover.prevent
+                     @dragenter="handleDragEnterRagChip(ragStore.id)"
+                     @dragleave="handleDragLeaveRagChip(ragStore.id)"
+                     @drop="handleDropOnRagChip($event, ragStore.id, ragStore.name)"
+                     @click="router.push({ path: '/datastores', query: { storeId: ragStore.id } })"
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold border-2 border-green-500/80 bg-green-50 text-green-800 dark:bg-green-950/40 dark:border-green-800 dark:text-green-300 shadow-sm hover:shadow-md hover:border-green-600 hover:scale-[1.02] cursor-pointer transition-all group/rag"
+                     :class="{
+                        'ring-4 ring-green-400 scale-105 bg-green-100 dark:bg-green-900/80 border-green-600 animate-pulse': hoveredRagStoreId === ragStore.id
+                     }"
+                     :title="`Drop artefact here to vectorize into '${ragStore.name}', or click to inspect in Data Studio`">
+                    <IconDatabase class="w-4 h-4 text-green-600 dark:text-green-400 shrink-0 group-hover/rag:scale-110 transition-transform" />
+                    <span class="truncate max-w-[180px] underline-offset-2 group-hover/rag:underline">
+                        {{ ragStore.name }}
+                    </span>
+                    <span class="text-[9px] font-mono opacity-60 uppercase">({{ ragStore.mode }})</span>
+                    <button @click.stop="toggleRagStore(ragStore.id)" class="cursor-pointer text-green-600 hover:text-red-500 dark:text-green-400 dark:hover:text-red-400 transition-colors ml-1 p-0.5 rounded-full hover:bg-green-100 dark:hover:bg-green-900/60" title="Detach database from chat">
+                        <IconXMark class="w-3.5 h-3.5" />
+                    </button>
+                </div>
+
                 <div v-for="(img, index) in stagedImages" :key="`staged-img-${index}`" 
                      @click="openStagedImageViewer(index)"
                      class="relative w-16 h-16 group rounded-lg overflow-hidden border-2 transition-all shadow-sm cursor-pointer border-blue-500 hover:scale-105"
@@ -1051,16 +1136,19 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     </div>
                 </div>
 
-                <!-- Unified Artefact Chips (Grouped by Title with Version Selector) -->
-                <div v-for="group in groupedAttachedFiles" :key="group.title" 
-                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold border-2 transition-all duration-200 shadow-sm group/file"
+                <!-- Unified Artefact Chips (Grouped by Title with Version Selector, Draggable to RAG) -->
+                <div v-for="group in groupedAttachedFiles" :key="group.title"
+                     draggable="true"
+                     @dragstart="$event.dataTransfer.setData('text/lollms-artefact-title', group.title)"
+                     class="flex items-center gap-2 px-3 py-1.5 rounded-full text-[11px] font-bold border-2 transition-all duration-200 shadow-sm group/file cursor-grab active:cursor-grabbing hover:scale-[1.02]"
                      :class="[
                         group.isAnyLoaded
                             ? (group.artefact_type === 'note' ? 'border-amber-500 bg-amber-50 text-amber-700 dark:border-amber-900/30' : 
                                group.artefact_type === 'skill' ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:border-emerald-900/30' :
                                'border-blue-500 bg-blue-50 text-blue-700 dark:border-blue-900/30')
                             : 'border-gray-300 bg-gray-50 dark:bg-gray-800 text-gray-400 opacity-50'
-                     ]">
+                     ]"
+                     :title="`Drag to green RAG database chip to vectorize, or click title to open workspace`">
                     
                     <!-- Icon based on registered custom types -->
                     <IconPencil v-if="group.artefact_type === 'note'" class="w-4 h-4 text-amber-600" />
@@ -1372,7 +1460,11 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                         
                         <!-- RAG, Tools, Prompts Submenus -->
                         <DropdownSubmenu title="RAG Context" icon="database">
-                             <div class="p-1 max-h-64 overflow-y-auto min-w-[200px]">
+                             <div class="p-1 max-h-64 overflow-y-auto min-w-[220px]">
+                                <button @click.stop="handleOpenCreateDatastoreModal" class="menu-item text-green-600 dark:text-green-400 font-bold flex items-center gap-2 border-b dark:border-gray-700/60 pb-1 mb-1">
+                                    <IconPlus class="w-4 h-4" />
+                                    <span>+ New DataStore & Link</span>
+                                </button>
                                 <div v-if="availableRagStores.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No stores available.</div>
                                 <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="menu-item flex justify-between items-center group/item"><span class="truncate pr-4" :class="{'font-bold text-green-600': ragStoreSelection.includes(store.id)}">{{ store.name }}</span><IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 shrink-0" /></button>
                              </div>

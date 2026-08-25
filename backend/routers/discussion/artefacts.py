@@ -113,6 +113,27 @@ class ArtefactCleanupRequest(BaseModel):
     keep_count: int = 5
     min_age_hours: Optional[float] = None
 
+class SendArtefactToDatastoreRequest(BaseModel):
+    datastore_id: str
+
+class BatchSendArtefactsToDatastoreRequest(BaseModel):
+    artefact_titles: List[str]
+    datastore_id: str
+    remove_from_discussion: bool = True
+
+class CreateDataStoreFromArtefactsRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    vectorizer_name: Optional[str] = None
+    vectorizer_config: Optional[Dict[str, Any]] = None
+    chunk_size: Optional[int] = None
+    chunk_overlap: Optional[int] = None
+    chunking_strategy: Optional[str] = "recursive"
+    chunking_kwargs: Optional[Dict[str, Any]] = None
+    artefact_titles: List[str] = []
+    remove_from_discussion: bool = True
+    link_to_discussion: bool = True
+
 class AudioExportRequest(BaseModel):
     title: str
     content: str
@@ -339,6 +360,8 @@ def build_artefacts_router(router: APIRouter):
         extract_images: bool = Form(True),
         pdf_mode: str = Form("text_images"),
         auto_load: bool = Form(True),
+        on_conflict: str = Form("suffix"),
+        artefact_type: Optional[str] = Query(None),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db) 
     ):
@@ -359,7 +382,7 @@ def build_artefacts_router(router: APIRouter):
         task = task_manager.submit_task(
             name=f"Importing document: {file.filename or 'unnamed'}",
             target=_import_artefact_task,
-            args=(owner_username, discussion_id, str(temp_file_path.resolve()), file.filename or 'unnamed', pdf_mode, auto_load),
+            args=(owner_username, discussion_id, str(temp_file_path.resolve()), file.filename or 'unnamed', pdf_mode, auto_load, on_conflict),
             description=f"AI is ingesting '{file.filename or 'unnamed'}' (mode: {pdf_mode}) and building workspace context...",
             owner_username=current_user.username
         )
@@ -1388,15 +1411,271 @@ def build_artefacts_router(router: APIRouter):
             target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.TREE_UNLOCKABLE)
         else:
             target_discussion.artefacts.set_visibility(decoded_title, ArtefactVisibility.FULL)
-            
+
         target_discussion.commit()
-        raw_artefacts = target_discussion.list_artefacts()
-        all_images_info = target_discussion.get_discussion_images()
+
+    @router.post("/{discussion_id}/artefacts/{artefact_title:path}/send-to-datastore", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+    async def send_artefact_to_datastore(
+        discussion_id: str,
+        artefact_title: str,
+        payload: SendArtefactToDatastoreRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Sends an artefact from the discussion to a RAG datastore for vectorization,
+        and upon queuing vectorization, removes the artefact from the active discussion.
+        """
+        from sqlalchemy.orm import joinedload
+        from backend.db.models.datastore import DataStore as DBDataStore
+        from backend.session import get_user_datastore_root_path, get_safe_store_instance
+        from werkzeug.utils import secure_filename
+        from backend.routers.stores import _upload_rag_files_task
+
+        decoded_title = unquote(artefact_title)
+        try:
+            if "%" in decoded_title:
+                decoded_title = unquote(decoded_title)
+        except Exception:
+            pass
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+
+        # Verify read/write permission to the destination datastore
+        get_safe_store_instance(current_user.username, payload.datastore_id, db, permission_level="read_write")
+
+        datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == payload.datastore_id).first()
+        if not datastore_record:
+            raise HTTPException(status_code=404, detail="Target datastore not found.")
+
+        artefact = discussion.get_artefact(title=decoded_title)
+        if not artefact:
+            raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found in discussion.")
+
+        content = artefact.get('content', '')
+        if not content or not content.strip():
+            raise HTTPException(status_code=400, detail="Artefact content is empty, cannot vectorize into DataStore.")
+
+        safe_name = secure_filename(decoded_title)
+        if not safe_name.endswith(('.txt', '.md', '.py', '.json', '.html', '.css', '.js', '.csv', '.xml')):
+            safe_name = f"{safe_name}.md"
+
+        datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / payload.datastore_id
+        datastore_docs_path.mkdir(parents=True, exist_ok=True)
+
+        target_file_path = datastore_docs_path / safe_name
+        target_file_path.write_text(content, encoding="utf-8")
+
+        db_task = task_manager.submit_task(
+            name=f"Add files to DataStore: {datastore_record.name}",
+            target=_upload_rag_files_task,
+            args=(current_user.username, payload.datastore_id, [str(target_file_path)], "none", "null", True),
+            description=f"Vectorizing artefact '{decoded_title}' into DataStore '{datastore_record.name}'.",
+            owner_username=current_user.username
+        )
+
+        try:
+            workspace_data_dir = Path(discussion.workspace_data_path).resolve() if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path else None
+            if workspace_data_dir and workspace_data_dir.exists():
+                possible_extensions = [".md", ".py", ".txt", ".csv", ".db", ".sqlite", ".json", ".yaml", ".yml", ".html", ".css", ".js", ".ts", ""]
+                for ext in possible_extensions:
+                    fpath = (workspace_data_dir / f"{decoded_title}{ext}").resolve()
+                    if fpath.is_relative_to(workspace_data_dir) and fpath.exists() and fpath.is_file():
+                        try:
+                            os.remove(fpath)
+                        except Exception:
+                            pass
+
+            discussion.artefacts.remove(decoded_title)
+            discussion.artefacts.remove(f"{decoded_title}::images")
+            discussion.commit()
+        except Exception as e:
+            print(f"Warning: Cleaned artefact from discussion with note: {e}")
+
+        return db_task
+
+    @router.post("/{discussion_id}/artefacts/batch-send-to-datastore", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+    async def batch_send_artefacts_to_datastore(
+        discussion_id: str,
+        payload: BatchSendArtefactsToDatastoreRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Batches multiple artefacts and sends them to a DataStore for indexing.
+        """
+        from sqlalchemy.orm import joinedload
+        from backend.db.models.datastore import DataStore as DBDataStore
+        from backend.session import get_user_datastore_root_path, get_safe_store_instance
+        from werkzeug.utils import secure_filename
+        from backend.routers.stores import _upload_rag_files_task
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        get_safe_store_instance(current_user.username, payload.datastore_id, db, permission_level="read_write")
+
+        datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == payload.datastore_id).first()
+        if not datastore_record:
+            raise HTTPException(status_code=404, detail="Target datastore not found.")
+
+        datastore_docs_path = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / payload.datastore_id
+        datastore_docs_path.mkdir(parents=True, exist_ok=True)
+
+        target_file_paths = []
+        workspace_data_dir = Path(discussion.workspace_data_path).resolve() if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path else None
+
+        for title_raw in payload.artefact_titles:
+            decoded_title = unquote(title_raw)
+            artefact = discussion.get_artefact(title=decoded_title)
+            if not artefact:
+                continue
+
+            content = artefact.get('content', '')
+            if not content or not content.strip():
+                continue
+
+            safe_name = secure_filename(decoded_title)
+            if not safe_name.endswith(('.txt', '.md', '.py', '.json', '.html', '.css', '.js', '.csv', '.xml')):
+                safe_name = f"{safe_name}.md"
+
+            target_file_path = datastore_docs_path / safe_name
+            target_file_path.write_text(content, encoding="utf-8")
+            target_file_paths.append(str(target_file_path))
+
+            if payload.remove_from_discussion:
+                if workspace_data_dir and workspace_data_dir.exists():
+                    possible_extensions = [".md", ".py", ".txt", ".csv", ".db", ".sqlite", ".json", ".yaml", ".yml", ".html", ".css", ".js", ".ts", ""]
+                    for ext in possible_extensions:
+                        fpath = (workspace_data_dir / f"{decoded_title}{ext}").resolve()
+                        if fpath.is_relative_to(workspace_data_dir) and fpath.exists() and fpath.is_file():
+                            try: os.remove(fpath)
+                            except Exception: pass
+
+                discussion.artefacts.remove(decoded_title)
+                discussion.artefacts.remove(f"{decoded_title}::images")
+
+        if payload.remove_from_discussion:
+            discussion.commit()
+
+        if not target_file_paths:
+            raise HTTPException(status_code=400, detail="No valid artefacts found to vectorize.")
+
+        db_task = task_manager.submit_task(
+            name=f"Add files to DataStore: {datastore_record.name}",
+            target=_upload_rag_files_task,
+            args=(current_user.username, payload.datastore_id, target_file_paths, "none", "null", True),
+            description=f"Vectorizing {len(target_file_paths)} file(s) into DataStore '{datastore_record.name}'.",
+            owner_username=current_user.username
+        )
+        return db_task
+
+    @router.post("/{discussion_id}/artefacts/create-datastore-and-vectorize", status_code=status.HTTP_201_CREATED)
+    async def create_datastore_from_artefacts(
+        discussion_id: str,
+        payload: CreateDataStoreFromArtefactsRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Creates a new DataStore, optionally links it instantly to the current discussion,
+        and queues vectorization of the provided artefacts.
+        """
+        from backend.db.models.datastore import DataStore as DBDataStore
+        from backend.session import get_user_datastore_root_path, get_safe_store_instance, settings
+        from werkzeug.utils import secure_filename
+        from backend.routers.stores import _upload_rag_files_task
+
+        discussion, owner_username, _, owner_user_db = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+        user_db_record = db.query(DBUser).filter(DBUser.username == current_user.username).first()
+
+        if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=payload.name).first():
+            raise HTTPException(status_code=400, detail=f"DataStore '{payload.name}' already exists.")
+
+        new_ds = DBDataStore(
+            owner_user_id=user_db_record.id,
+            name=payload.name,
+            description=payload.description,
+            vectorizer_name=payload.vectorizer_name or settings.get("default_safe_store_vectorizer", "default_st"),
+            vectorizer_config=payload.vectorizer_config or {},
+            chunk_size=payload.chunk_size if payload.chunk_size is not None else settings.get("default_chunk_size", 2048),
+            chunk_overlap=payload.chunk_overlap if payload.chunk_overlap is not None else settings.get("default_chunk_overlap", 256),
+            chunking_strategy=payload.chunking_strategy or "recursive",
+            chunking_kwargs=payload.chunking_kwargs or {}
+        )
+        db.add(new_ds)
+        db.commit()
+        db.refresh(new_ds)
+
+        # Initialize SafeStore instance
+        get_safe_store_instance(current_user.username, new_ds.id, db)
+
+        # Link to current discussion if requested
+        if payload.link_to_discussion:
+            existing_rag_ids = list((discussion.metadata or {}).get('rag_datastore_ids', []))
+            if new_ds.id not in existing_rag_ids:
+                existing_rag_ids.append(new_ds.id)
+                discussion.set_metadata_item('rag_datastore_ids', existing_rag_ids)
+                discussion.commit()
+
+        task_id = None
+        if payload.artefact_titles:
+            datastore_docs_path = get_user_datastore_root_path(current_user.username) / "safestore_docs" / new_ds.id
+            datastore_docs_path.mkdir(parents=True, exist_ok=True)
+
+            target_file_paths = []
+            workspace_data_dir = Path(discussion.workspace_data_path).resolve() if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path else None
+
+            for title_raw in payload.artefact_titles:
+                decoded_title = unquote(title_raw)
+                artefact = discussion.get_artefact(title=decoded_title)
+                if not artefact: continue
+                content = artefact.get('content', '')
+                if not content or not content.strip(): continue
+
+                safe_name = secure_filename(decoded_title)
+                if not safe_name.endswith(('.txt', '.md', '.py', '.json', '.html', '.css', '.js', '.csv', '.xml')):
+                    safe_name = f"{safe_name}.md"
+
+                target_file_path = datastore_docs_path / safe_name
+                target_file_path.write_text(content, encoding="utf-8")
+                target_file_paths.append(str(target_file_path))
+
+                if payload.remove_from_discussion:
+                    if workspace_data_dir and workspace_data_dir.exists():
+                        for ext in [".md", ".py", ".txt", ".csv", ".db", ".sqlite", ".json", ".yaml", ".yml", ".html", ".css", ".js", ".ts", ""]:
+                            fpath = (workspace_data_dir / f"{decoded_title}{ext}").resolve()
+                            if fpath.is_relative_to(workspace_data_dir) and fpath.exists() and fpath.is_file():
+                                try: os.remove(fpath)
+                                except Exception: pass
+                    discussion.artefacts.remove(decoded_title)
+                    discussion.artefacts.remove(f"{decoded_title}::images")
+
+            if payload.remove_from_discussion:
+                discussion.commit()
+
+            if target_file_paths:
+                db_task = task_manager.submit_task(
+                    name=f"Add files to DataStore: {new_ds.name}",
+                    target=_upload_rag_files_task,
+                    args=(current_user.username, new_ds.id, target_file_paths, "none", "null", True),
+                    description=f"Vectorizing {len(target_file_paths)} artefact(s) into new DataStore '{new_ds.name}'.",
+                    owner_username=current_user.username
+                )
+                task_id = db_task.id
 
         return {
-            "artefacts": [_map_artefact_for_ui(art, discussion_id) for art in raw_artefacts],
-            "discussion_images": [img['data'] for img in all_images_info],
-            "active_discussion_images": [img['active'] for img in all_images_info]
+            "datastore": {
+                "id": new_ds.id,
+                "name": new_ds.name,
+                "description": new_ds.description,
+                "owner_username": current_user.username,
+                "permission_level": "owner",
+                "vectorizer_name": new_ds.vectorizer_name,
+                "vectorizer_config": new_ds.vectorizer_config or {},
+                "chunk_size": new_ds.chunk_size,
+                "chunk_overlap": new_ds.chunk_overlap
+            },
+            "task_id": task_id,
+            "linked_to_discussion": payload.link_to_discussion
         }
 
     @router.post("/{discussion_id}/artefacts/{artefact_title:path}/share", status_code=status.HTTP_200_OK)

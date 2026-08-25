@@ -28,9 +28,10 @@ from backend.models import (UserAuthDetails, DiscussionBranchSwitchRequest,
 from backend.session import (get_current_active_user,
                              get_user_discussion_assets_path,
                             )
-
-# safe_store is needed for RAG callbacks
-def 
 message_grade_lock = threading.Lock()
 
+# safe_store is needed for RAG callbacks
+def build_core_router(router: APIRouter):
+    """Placeholder for discussion core lifecycle router bindings."""
+    pass
 

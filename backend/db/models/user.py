@@ -172,7 +172,12 @@ class User(Base):
     rag_min_sim_percent = Column(Float, nullable=True)
     rag_use_graph = Column(Boolean, default=False, nullable=True, server_default='0')
     rag_graph_response_type = Column(String, default="chunks_summary", nullable=True, server_default='chunks_summary')
-    
+    rag_retrieval_mode = Column(String, default="hybrid", nullable=True, server_default="'hybrid'")
+    rag_dense_weight = Column(Float, default=0.5, nullable=True, server_default='0.5')
+    rag_bm25_weight = Column(Float, default=0.5, nullable=True, server_default='0.5')
+    rag_graph_weight = Column(Float, default=0.3, nullable=True, server_default='0.3')
+    rag_rrf_k = Column(Integer, default=60, nullable=True, server_default='60')
+
     default_rag_chunk_size = Column(Integer, default=2048, nullable=True, server_default='2048')
     default_rag_chunk_overlap = Column(Integer, default=256, nullable=True, server_default='256')
     default_rag_metadata_mode = Column(String, default="none", nullable=True, server_default="'none'")

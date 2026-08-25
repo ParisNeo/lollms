@@ -1,6 +1,8 @@
 <script setup>
 import { computed, defineAsyncComponent } from 'vue';
 import { useUiStore } from '../../stores/ui';
+import CreateDataStoreFromArtefactsModal from './CreateDataStoreFromArtefactsModal.vue';
+
 
 const uiStore = useUiStore();
 const activeModal = computed(() => uiStore.activeModal);
@@ -114,6 +116,7 @@ const EmailNotesModal = defineAsyncComponent(() => import('./EmailNotesModal.vue
     <InsertImageModal v-if="activeModal === 'insertImage'" />
     <NewApiKeyModal v-if="activeModal === 'newApiKey'" /> 
     <WhatsNextModal v-if="activeModal === 'whatsNext'" />
+    <CreateDataStoreFromArtefactsModal />
     <AppInstallModal v-if="activeModal === 'appInstall'" />
     <AppDetailsModal v-if="activeModal === 'appDetails'" />
     <AppConfigModal v-if="activeModal === 'appConfig'" />

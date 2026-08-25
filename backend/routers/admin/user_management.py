@@ -28,6 +28,8 @@ from backend.config import INITIAL_ADMIN_USER_CONFIG
 from backend.task_manager import task_manager, Task, TaskInfo
 from ascii_colors import trace_exception
 
+from sqlalchemy import func, desc, or_, and_
+
 user_management_router = APIRouter()
 
 def safe_datetime(value: Any) -> datetime:

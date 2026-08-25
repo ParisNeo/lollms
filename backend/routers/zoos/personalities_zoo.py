@@ -68,16 +68,29 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
         }
 
     with task.db_session_factory() as db:
-        if db.query(DBPersonality).filter(DBPersonality.name == config['name'], DBPersonality.owner_user_id.is_(None)).first():
-            task.log(f"Personality '{config['name']}' is already installed.", "WARNING")
-            return {"message": "Personality already installed."}
-        
         icon_path = next((p for p in [source_path / "icon.png", source_path / "assets" / "logo.png"] if p.exists()), None)
         icon_b64 = None
         if icon_path:
             with open(icon_path, 'rb') as f:
                 icon_b64 = f"data:image/png;base64,{base64.b64encode(f.read()).decode('utf-8')}"
-        
+
+        existing = db.query(DBPersonality).filter(DBPersonality.name == config['name'], DBPersonality.owner_user_id.is_(None)).first()
+        if existing:
+            existing.author = config.get('author') or existing.author
+            existing.category = config.get('category') or existing.category
+            existing.description = config.get('description') or existing.description
+            existing.prompt_text = config.get('prompt_text', '') or existing.prompt_text
+            existing.disclaimer = config.get('disclaimer')
+            if icon_b64:
+                existing.icon_base64 = icon_b64
+            existing.tools = config.get('tools')
+            existing.version = str(config.get('version', existing.version or '1.0'))
+            existing.repository = repo_name
+            existing.folder_name = folder_name
+            db.commit()
+            task.log(f"Personality '{config['name']}' updated to version {existing.version}.", "INFO")
+            return {"message": "Personality updated."}
+
         new_personality = DBPersonality(
             name=config.get('name'), author=config.get('author'), category=config.get('category'),
             description=config.get('description'), prompt_text=config.get('prompt_text', ''),
@@ -87,7 +100,7 @@ def _install_personality_task(task, repo_name: str, folder_name: str):
         )
         db.add(new_personality)
         db.commit()
-    
+
     task.log(f"Personality '{config['name']}' installed successfully.", "INFO")
     return {"message": "Personality installed."}
 

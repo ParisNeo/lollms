@@ -270,6 +270,49 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         default_chunk_size = settings.get("default_chunk_size", 2048)
         default_chunk_overlap = settings.get("default_chunk_overlap", 256)
 
+        # --- ADMIN RAG GOD MODE / OVERRIDE ENFORCEMENT ---
+        force_rag_mode = settings.get("force_rag_settings_mode", "disabled")
+        rag_settings_forced = False
+
+        effective_rag_top_k = db_user.rag_top_k
+        effective_max_rag_len = db_user.max_rag_len
+        effective_rag_n_hops = db_user.rag_n_hops
+        effective_rag_min_sim_percent = db_user.rag_min_sim_percent
+        effective_rag_use_graph = db_user.rag_use_graph
+        effective_rag_graph_response_type = db_user.rag_graph_response_type
+        effective_rag_retrieval_mode = db_user.rag_retrieval_mode or "hybrid"
+        effective_rag_dense_weight = db_user.rag_dense_weight if db_user.rag_dense_weight is not None else 0.5
+        effective_rag_bm25_weight = db_user.rag_bm25_weight if db_user.rag_bm25_weight is not None else 0.5
+        effective_rag_graph_weight = db_user.rag_graph_weight if db_user.rag_graph_weight is not None else 0.3
+        effective_rag_rrf_k = db_user.rag_rrf_k or 60
+        effective_default_rag_chunk_size = db_user.default_rag_chunk_size
+        effective_default_rag_chunk_overlap = db_user.default_rag_chunk_overlap
+        effective_safe_store_vectorizer = user_sessions[username].get("active_vectorizer")
+
+        if force_rag_mode == "force_always":
+            rag_settings_forced = True
+            allow_user_chunking_config = False
+
+            forced_vec = settings.get("force_rag_vectorizer")
+            if forced_vec:
+                effective_safe_store_vectorizer = forced_vec
+
+            effective_default_rag_chunk_size = settings.get("force_rag_chunk_size", 2048)
+            effective_default_rag_chunk_overlap = settings.get("force_rag_chunk_overlap", 256)
+            default_chunk_size = effective_default_rag_chunk_size
+            default_chunk_overlap = effective_default_rag_chunk_overlap
+
+            effective_rag_top_k = settings.get("force_rag_top_k", 10)
+            effective_max_rag_len = settings.get("force_rag_max_rag_len", 80000)
+            effective_rag_n_hops = settings.get("force_rag_n_hops", 0)
+            effective_rag_min_sim_percent = float(settings.get("force_rag_min_sim_percent", 50.0))
+            effective_rag_retrieval_mode = settings.get("force_rag_retrieval_mode", "hybrid")
+            effective_rag_dense_weight = float(settings.get("force_rag_dense_weight", 0.5))
+            effective_rag_bm25_weight = float(settings.get("force_rag_bm25_weight", 0.5))
+            effective_rag_rrf_k = int(settings.get("force_rag_rrf_k", 60))
+            effective_rag_use_graph = ensure_bool(settings.get("force_rag_use_graph", False), False)
+            effective_rag_graph_response_type = settings.get("force_rag_graph_response_type", "chunks_summary")
+
         return UserAuthDetails(
             id=db_user.id, username=username, is_admin=db_user.is_admin, is_moderator=(db_user.is_admin or db_user.is_moderator), is_active=db_user.is_active,
             icon=db_user.icon, first_name=db_user.first_name, family_name=db_user.family_name, email=db_user.email,
@@ -284,21 +327,27 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             tts_models_config=db_user.tts_models_config,
             stt_binding_model_name=db_user.stt_binding_model_name,
             stt_models_config=db_user.stt_models_config,
-            safe_store_vectorizer=user_sessions[username].get("active_vectorizer"),
+            safe_store_vectorizer=effective_safe_store_vectorizer,
             active_personality_id=user_sessions[username].get("active_personality_id"),
             active_voice_id=db_user.active_voice_id,
             last_discussion_id=db_user.last_discussion_id,
             lollms_client_ai_name=ai_name_for_user,
             **effective_llm_params,
-            rag_top_k=db_user.rag_top_k, 
-            max_rag_len=db_user.max_rag_len, 
-            rag_n_hops=db_user.rag_n_hops,
-            rag_min_sim_percent=db_user.rag_min_sim_percent, 
-            rag_use_graph=db_user.rag_use_graph,
-            rag_graph_response_type=db_user.rag_graph_response_type, 
-            default_rag_chunk_size=db_user.default_rag_chunk_size,
-            default_rag_chunk_overlap=db_user.default_rag_chunk_overlap,
+            rag_top_k=effective_rag_top_k, 
+            max_rag_len=effective_max_rag_len, 
+            rag_n_hops=effective_rag_n_hops,
+            rag_min_sim_percent=effective_rag_min_sim_percent, 
+            rag_use_graph=effective_rag_use_graph,
+            rag_graph_response_type=effective_rag_graph_response_type, 
+            rag_retrieval_mode=effective_rag_retrieval_mode,
+            rag_dense_weight=effective_rag_dense_weight,
+            rag_bm25_weight=effective_rag_bm25_weight,
+            rag_graph_weight=effective_rag_graph_weight,
+            rag_rrf_k=effective_rag_rrf_k,
+            default_rag_chunk_size=effective_default_rag_chunk_size,
+            default_rag_chunk_overlap=effective_default_rag_chunk_overlap,
             default_rag_metadata_mode=db_user.default_rag_metadata_mode,
+            rag_settings_forced=rag_settings_forced,
             auto_title=db_user.auto_title,
             user_ui_level=session_ui_level if isinstance(session_ui_level, int) else int(session_ui_level) if isinstance(session_ui_level, str) else 0, chat_active=db_user.chat_active, first_page=db_user.first_page,
             ai_response_language=db_user.ai_response_language,
@@ -941,6 +990,46 @@ def build_lollms_client_from_params(
         db.close()
         
 
+def _migrate_datastore_sqlite_schema(db_path: Path):
+    """
+    Self-healing migration for DataStore SQLite databases.
+    Ensures modern safe_store columns (e.g. full_text, metadata) exist on legacy store files.
+    """
+    if not db_path.exists() or db_path.is_dir():
+        return
+    import sqlite3
+    try:
+        conn = sqlite3.connect(str(db_path))
+        cursor = conn.cursor()
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        tables = {row[0] for row in cursor.fetchall()}
+
+        if "documents" in tables:
+            cursor.execute("PRAGMA table_info(documents)")
+            doc_cols = {row[1] for row in cursor.fetchall()}
+            if "full_text" not in doc_cols:
+                cursor.execute("ALTER TABLE documents ADD COLUMN full_text TEXT")
+            if "metadata" not in doc_cols:
+                cursor.execute("ALTER TABLE documents ADD COLUMN metadata TEXT")
+            if "created_at" not in doc_cols:
+                cursor.execute("ALTER TABLE documents ADD COLUMN created_at DATETIME")
+            if "updated_at" not in doc_cols:
+                cursor.execute("ALTER TABLE documents ADD COLUMN updated_at DATETIME")
+            conn.commit()
+
+        if "chunks" in tables:
+            cursor.execute("PRAGMA table_info(chunks)")
+            chunk_cols = {row[1] for row in cursor.fetchall()}
+            if "metadata" not in chunk_cols:
+                cursor.execute("ALTER TABLE chunks ADD COLUMN metadata TEXT")
+            if "chunk_index" not in chunk_cols:
+                cursor.execute("ALTER TABLE chunks ADD COLUMN chunk_index INTEGER")
+            conn.commit()
+
+        conn.close()
+    except Exception as e:
+        print(f"Warning: Failed to auto-migrate SQLite schema for {db_path.name}: {e}")
+
 def get_safe_store_instance(
     requesting_user_username: str,
     datastore_id: str,
@@ -990,6 +1079,7 @@ def get_safe_store_instance(
     
     if datastore_id not in session.get("safe_store_instances", {}):
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
+        _migrate_datastore_sqlite_schema(ss_db_path)
         # ASCIIColors.info(f"Recovering vectorizer:{datastore_record.vectorizer_name}")
         try:
             # FIX: Ensure 'model' key exists if 'model_name' is present, required for some vectorizers like ollama
@@ -1006,6 +1096,9 @@ def get_safe_store_instance(
             if 'model_name' in v_config and 'model' not in v_config:
                 v_config['model'] = v_config['model_name']
 
+            strategy = getattr(datastore_record, "chunking_strategy", "recursive") or "recursive"
+            strategy_kwargs = getattr(datastore_record, "chunking_kwargs", {}) or {}
+
             ss_instance = safe_store.SafeStore(
                 name=datastore_record.name,
                 description=datastore_record.description,
@@ -1016,7 +1109,8 @@ def get_safe_store_instance(
                 chunk_overlap=datastore_record.chunk_overlap,
                 expand_before=10,
                 expand_after=10,
-                chunking_strategy="token"
+                chunking_strategy=strategy,
+                chunking_kwargs=strategy_kwargs if isinstance(strategy_kwargs, dict) else {}
             )
             ss_instance.name = datastore_record.name
             ss_instance.description = datastore_record.description

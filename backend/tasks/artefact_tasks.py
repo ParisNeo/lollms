@@ -49,80 +49,87 @@ def _map_artefact_for_ui_local(art: dict, discussion_id: str = None) -> dict:
             
     return mapped
 
-def _import_artefact_task(task: Task, username: str, discussion_id: str, file_path_str: str, filename: str, pdf_mode: str, auto_load: bool):
-    task.log(f"Starting file import task for '{filename}'...")
+def _import_artefact_task(
+    task: Task, 
+    username: str, 
+    discussion_id: str, 
+    file_path_str: str, 
+    filename: str, 
+    pdf_mode: str, 
+    auto_load: bool = True,
+    on_conflict: str = "suffix"
+):
+    task.log(f"Importing artefact '{filename}' (Mode: {pdf_mode}, Conflict: {on_conflict})...")
     task.set_progress(10)
     
-    tmp_path = Path(file_path_str)
-    
+    file_path = Path(file_path_str)
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path_str}")
+
     try:
         discussion = get_user_discussion(username, discussion_id)
         if not discussion:
-            raise ValueError("Discussion not found.")
+            raise ValueError(f"Discussion '{discussion_id}' not found.")
 
-        # Map frontend modes directly to lollms_client modes
-        mode_map = {
-            "text_images": "text_images",
-            "text_embedded_images": "text_embedded_images",
-            "text": "text",
-            "images_only": "images_only",
-            "ocr": "ocr",
-            "data": "data"
+        # Map UI and API modes to native lollms_client import_file modes
+        mode_mapping = {
+            'as_is': 'as_is',
+            'text': 'text',
+            'text_images': 'text_images',
+            'text_embedded_images': 'text_embedded_images',
+            'images_only': 'images_only',
+            'ocr': 'ocr',
+            'data': 'data',
+            'data_bundle': 'data_bundle',
+            'audio_stt': 'audio_stt'
         }
-        import_mode = mode_map.get(pdf_mode, "text_images")
-
-        def progress_callback(msg: str):
-            task.log(msg)
-            match = re.search(r'page\s+(\d+)\s+of\s+(\d+)', msg, re.I)
-            if match:
-                current_page, total_pages = map(int, match.groups())
-                progress_val = 10 + int(80 * (current_page / total_pages))
-                task.set_progress(progress_val)
-            else:
-                if "loading" in msg.lower(): task.set_progress(15)
-                elif "extracting" in msg.lower(): task.set_progress(45)
-                elif "images" in msg.lower(): task.set_progress(80)
-
-        # Delegate to library's integrated import_file
+        import_mode = mode_mapping.get(pdf_mode, 'as_is' if file_path.suffix.lower() in ['.docx', '.pdf', '.xlsx', '.pptx'] and pdf_mode == 'as_is' else 'text_images')
+        
+        task.set_progress(30)
+        task.log(f"Processing '{filename}' using mode '{import_mode}'...")
+        
+        # Native library method handles ingestion and artefact creation
         result = discussion.import_file(
-            path=tmp_path,
+            path=str(file_path.resolve()),
             mode=import_mode,
             title=filename,
-            activate=auto_load,
-            progress_cb=progress_callback
+            auto_load=auto_load,
+            on_conflict=on_conflict
         )
         
+        task.set_progress(90)
         discussion.commit()
+        
+        # Fetch updated artefacts list for task result
+        artefacts = [
+            {
+                "title": a["title"],
+                "version": a["version"],
+                "artefact_type": a.get("type", "document"),
+                "is_loaded": a.get("active", False)
+            }
+            for a in discussion.list_artefacts()
+        ]
+        
         task.set_progress(100)
-        task.log(f"File '{filename}' successfully imported into workspace.")
-        
-        text_art = result.get("text_artefact")
-        img_art = result.get("image_artefact")
-        primary_art = text_art or img_art
-
-        if not primary_art:
-            raise RuntimeError("Library failed to create any artefacts from the provided file.")
-
-        mapped_info = _map_artefact_for_ui_local(primary_art, discussion_id)
-
-        all_images_info = discussion.get_discussion_images()
-
+        task.log(f"Successfully imported '{filename}'.")
         return {
-            "new_artefact_info": mapped_info,
-            "discussion_images": [img['data'] for img in all_images_info],
-            "active_discussion_images": [img['active'] for img in all_images_info]
+            "message": f"Successfully imported '{filename}'",
+            "artefacts": artefacts,
+            "filename": filename,
+            "import_mode": import_mode
         }
-        
     except Exception as e:
-        task.log(f"Import failed: {e}", "ERROR")
+        task.log(f"Failed to import '{filename}': {e}", "ERROR")
         trace_exception(e)
         raise e
     finally:
-        if tmp_path.exists():
-            try:
-                tmp_path.unlink()
-            except Exception:
-                pass
+        # Clean up temporary upload file
+        try:
+            if file_path.exists():
+                file_path.unlink()
+        except Exception as ex:
+            print(f"Warning: Could not remove temp file {file_path}: {ex}")
 
 def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str, url: str, depth: int = 0, process_with_ai: bool = False):
     if ScrapeMaster is None:

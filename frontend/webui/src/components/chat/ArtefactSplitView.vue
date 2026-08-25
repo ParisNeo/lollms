@@ -7,6 +7,10 @@ import { useSkillsStore } from '../../stores/skills';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
+
+import IconDatabase from '../../assets/icons/IconDatabase.vue';
+import IconScissors from '../../assets/icons/IconScissors.vue';
+
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconArrowPath from '../../assets/icons/IconArrowPath.vue';
@@ -103,7 +107,14 @@ const artefactGroup = computed(() => {
     console.log('[ArtefactSplitView] Found versions:', versions.length, versions.map(v => ({v: v.version, is_loaded: v.is_loaded, size: v.content_size})));
     return versions.length > 0 ? { title: title.value, versions } : null;
 });
-
+const activeLoadedRagStores = computed(() => {
+    const loadedIds = discussionsStore.activeDiscussion?.rag_datastore_ids || [];
+    const all = [...(dataStore.ownedDataStores || []), ...(dataStore.sharedDataStores || [])];
+    if (loadedIds.length > 0) {
+        return loadedIds.map(id => all.find(s => s.id === id) || { id, name: `DataStore (${id.substring(0, 8)})` });
+    }
+    return all;
+});
 const dataZoneWidth = ref(600);
 const isResizing = ref(false);
 
@@ -471,7 +482,26 @@ async function handleCreateDiscussionFromVersion() {
     }
 }
 
+async function handleSendToDataStore(datastoreId, datastoreName) {
+    if (!title.value || !discussionsStore.currentDiscussionId) return;
+
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Vectorize into DataStore',
+        message: `Send "${title.value}" to DataStore "${datastoreName}" for vector indexing? It will be removed from this discussion.`,
+        confirmText: 'Vectorize & Remove'
+    });
+
+    if (confirmed.confirmed) {
+        await discussionsStore.sendArtefactToDataStore({
+            discussionId: discussionsStore.currentDiscussionId,
+            artefactTitle: title.value,
+            datastoreId: datastoreId
+        });
+    }
+}
+
 async function handlePushToLibrary(type) {
+
     // FIX: Reference dbContent.value instead of content.value
     if (!dbContent.value) {
         uiStore.addNotification("Document is empty.", "warning");
@@ -661,8 +691,26 @@ function download() {
                 </button>
 
                 <div class="menu-divider"></div>
-                
+
+                <!-- RAG DATASTORE VECTORIZATION -->
+                <div class="px-4 py-1 text-[9px] font-black uppercase text-gray-400 tracking-widest">RAG Knowledge Base</div>
+                <template v-if="activeLoadedRagStores.length > 0">
+                    <button v-for="store in activeLoadedRagStores" :key="`send-rag-${store.id}`" @click="handleSendToDataStore(store.id, store.name)" class="menu-item">
+                        <IconDatabase class="w-4 h-4 mr-3 text-green-500 shrink-0" />
+                        <div class="flex flex-col truncate">
+                            <span class="font-bold truncate">Vectorize into {{ store.name }}</span>
+                            <span class="text-[10px] opacity-60 text-gray-500">Vectorize & purge from chat</span>
+                        </div>
+                    </button>
+                </template>
+                <div v-else class="px-4 py-2 text-xs text-gray-400 italic">
+                    No DataStores available.
+                </div>
+
+                <div class="menu-divider"></div>
+
                 <!-- CONVERSIONS: Change behavior in current chat -->
+
                 <div class="px-4 py-1 text-[9px] font-black uppercase text-gray-400 tracking-widest">Re-categorize in Chat</div>
                 
                 <button v-if="['note', 'skill'].includes(artefactGroup?.versions[0]?.artefact_type)" @click="handleSave('document')" class="menu-item">

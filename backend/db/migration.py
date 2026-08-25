@@ -99,7 +99,26 @@ def _bootstrap_global_settings(connection):
         "restrict_vectorizers_to_aliases": { "value": False, "type": "boolean", "description": "If enabled, users can only choose from the admin-defined RAG Bindings when creating a new Data Store.", "category": "RAG" },
         "default_chunk_size": { "value": 2048, "type": "integer", "description": "The default number of characters per text chunk for RAG indexing.", "category": "RAG" },
         "default_chunk_overlap": { "value": 256, "type": "integer", "description": "The default number of overlapping characters between adjacent text chunks.", "category": "RAG" },
-        "allow_user_chunking_config": { "value": True, "type": "boolean", "description": "If enabled, users can specify their own chunk size and overlap when creating a Data Store.", "category": "RAG" },
+        "default_rag_chunking_strategy": { "value": "recursive", "type": "string", "description": "Default chunking strategy for new DataStores ('recursive', 'structure', 'token', 'semantic', 'contextual', 'late', 'paragraph', 'character').", "category": "RAG" },
+        "allow_user_chunking_config": { "value": True, "type": "boolean", "description": "If enabled, users can specify their own chunk size, overlap, and strategy when creating a Data Store.", "category": "RAG" },
+        "default_rag_retrieval_mode": { "value": "hybrid", "type": "string", "description": "Default RAG retrieval mode ('dense', 'hybrid', or 'graph_hybrid').", "category": "RAG" },
+        "default_rag_dense_weight": { "value": 0.5, "type": "float", "description": "Default weight for dense semantic embeddings in hybrid retrieval.", "category": "RAG" },
+        "default_rag_bm25_weight": { "value": 0.5, "type": "float", "description": "Default weight for BM25 lexical search in hybrid retrieval.", "category": "RAG" },
+        "default_rag_rrf_k": { "value": 60, "type": "integer", "description": "Default Reciprocal Rank Fusion constant k.", "category": "RAG" },
+        "force_rag_settings_mode": { "value": "disabled", "type": "string", "description": "Global RAG override mode: 'disabled' or 'force_always' (locks all RAG settings for users).", "category": "RAG" },
+        "force_rag_vectorizer": { "value": "", "type": "string", "description": "The vectorizer alias/name to enforce on all users when God Mode is enabled.", "category": "RAG" },
+        "force_rag_chunk_size": { "value": 2048, "type": "integer", "description": "Forced chunk size in characters.", "category": "RAG" },
+        "force_rag_chunk_overlap": { "value": 256, "type": "integer", "description": "Forced chunk overlap in characters.", "category": "RAG" },
+        "force_rag_top_k": { "value": 10, "type": "integer", "description": "Forced top-k chunks retrieved.", "category": "RAG" },
+        "force_rag_max_rag_len": { "value": 80000, "type": "integer", "description": "Forced maximum total RAG context length.", "category": "RAG" },
+        "force_rag_n_hops": { "value": 0, "type": "integer", "description": "Forced expansion hops for RAG chunks.", "category": "RAG" },
+        "force_rag_min_sim_percent": { "value": 50.0, "type": "float", "description": "Forced minimum similarity percentage.", "category": "RAG" },
+        "force_rag_retrieval_mode": { "value": "hybrid", "type": "string", "description": "Forced retrieval mode strategy.", "category": "RAG" },
+        "force_rag_dense_weight": { "value": 0.5, "type": "float", "description": "Forced dense semantic vector weight.", "category": "RAG" },
+        "force_rag_bm25_weight": { "value": 0.5, "type": "float", "description": "Forced BM25 lexical sparse weight.", "category": "RAG" },
+        "force_rag_rrf_k": { "value": 60, "type": "integer", "description": "Forced RRF constant k.", "category": "RAG" },
+        "force_rag_use_graph": { "value": False, "type": "boolean", "description": "Forced knowledge graph inclusion.", "category": "RAG" },
+        "force_rag_graph_response_type": { "value": "chunks_summary", "type": "string", "description": "Forced knowledge graph response type.", "category": "RAG" },
         "force_model_mode": { "value": "disabled", "type": "string", "description": "Global model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global LLM Overrides" },
         "force_model_name": { "value": "", "type": "string", "description": "The model name to force on all users. (e.g., 'ollama/llama3').", "category": "Global LLM Overrides" },
         "force_tti_model_mode": { "value": "disabled", "type": "string", "description": "Global TTI model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global TTI Overrides" },
@@ -742,9 +761,14 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         new_rag_cols = {
             "default_rag_chunk_size": "INTEGER DEFAULT 1024",
             "default_rag_chunk_overlap": "INTEGER DEFAULT 256",
-            "default_rag_metadata_mode": "VARCHAR DEFAULT 'none'"
+            "default_rag_metadata_mode": "VARCHAR DEFAULT 'none'",
+            "rag_retrieval_mode": "VARCHAR DEFAULT 'hybrid'",
+            "rag_dense_weight": "FLOAT DEFAULT 0.5",
+            "rag_bm25_weight": "FLOAT DEFAULT 0.5",
+            "rag_graph_weight": "FLOAT DEFAULT 0.3",
+            "rag_rrf_k": "INTEGER DEFAULT 60"
         }
-        
+
         for col_name, col_sql_def in new_rag_cols.items():
             if col_name not in user_columns_db:
                 try:
@@ -1280,11 +1304,26 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         if 'vectorizer_config' not in datastore_columns_db: connection.execute(text("ALTER TABLE datastores ADD COLUMN vectorizer_config JSON"))
         if 'chunk_size' not in datastore_columns_db: connection.execute(text("ALTER TABLE datastores ADD COLUMN chunk_size INTEGER"))
         if 'chunk_overlap' not in datastore_columns_db: connection.execute(text("ALTER TABLE datastores ADD COLUMN chunk_overlap INTEGER"))
+        if 'chunking_strategy' not in datastore_columns_db: connection.execute(text("ALTER TABLE datastores ADD COLUMN chunking_strategy VARCHAR DEFAULT 'recursive'"))
+        if 'chunking_kwargs' not in datastore_columns_db: connection.execute(text("ALTER TABLE datastores ADD COLUMN chunking_kwargs JSON DEFAULT '{}'"))
         connection.execute(text("UPDATE datastores SET vectorizer_name = 'st' WHERE vectorizer_name IS NULL"))
         connection.execute(text("UPDATE datastores SET vectorizer_config = '{}' WHERE vectorizer_config IS NULL"))
+        connection.execute(text("UPDATE datastores SET chunking_strategy = 'recursive' WHERE chunking_strategy IS NULL"))
+        connection.execute(text("UPDATE datastores SET chunking_kwargs = '{}' WHERE chunking_kwargs IS NULL"))
         connection.execute(text(f"UPDATE datastores SET chunk_size = {SAFE_STORE_DEFAULTS.get('default_chunk_size', 2048)} WHERE chunk_size IS NULL"))
         connection.execute(text(f"UPDATE datastores SET chunk_overlap = {SAFE_STORE_DEFAULTS.get('default_chunk_overlap', 256)} WHERE chunk_overlap IS NULL"))
         connection.commit()
+
+        # Migrate all existing SQLite database files for all user DataStores
+        from backend.session import _migrate_datastore_sqlite_schema
+        users_dir = APP_DATA_DIR / USERS_DIR_NAME
+        if users_dir.exists() and users_dir.is_dir():
+            for user_folder in users_dir.iterdir():
+                if user_folder.is_dir():
+                    stores_folder = user_folder / "safestores"
+                    if stores_folder.exists() and stores_folder.is_dir():
+                        for db_file in stores_folder.glob("*.db"):
+                            _migrate_datastore_sqlite_schema(db_file)
         
     if not inspector.has_table("conversations"):
         Conversation.__table__.create(connection)

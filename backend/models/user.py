@@ -31,6 +31,11 @@ class UserCreateAdmin(BaseModel):
     rag_min_sim_percent: Optional[float] = None
     rag_use_graph: Optional[bool] = None
     rag_graph_response_type: Optional[str] = None
+    rag_retrieval_mode: Optional[str] = "hybrid"
+    rag_dense_weight: Optional[float] = 0.5
+    rag_bm25_weight: Optional[float] = 0.5
+    rag_graph_weight: Optional[float] = 0.3
+    rag_rrf_k: Optional[int] = 60
     user_ui_level: int = 0
     first_page: str = "feed"
     message_font_size: int = 14
@@ -204,6 +209,11 @@ class UserAuthDetails(BaseModel):
     rag_min_sim_percent: Optional[float] = 50.0
     rag_use_graph: bool = False
     rag_graph_response_type: Optional[str] = 'chunks_summary'
+    rag_retrieval_mode: Optional[str] = 'hybrid'
+    rag_dense_weight: Optional[float] = 0.5
+    rag_bm25_weight: Optional[float] = 0.5
+    rag_graph_weight: Optional[float] = 0.3
+    rag_rrf_k: Optional[int] = 60
     default_rag_chunk_size: Optional[int] = 1024
     default_rag_chunk_overlap: Optional[int] = 256
     default_rag_metadata_mode: Optional[str] = "none"
@@ -223,6 +233,7 @@ class UserAuthDetails(BaseModel):
     ollama_require_key: bool = True
     include_memory_date_in_context: bool = False
     llm_settings_overridden: bool = False
+    rag_settings_forced: bool = False
     tti_model_forced: bool = False
     iti_model_forced: bool = False
     latex_builder_enabled: bool = False
@@ -308,6 +319,11 @@ class UserUpdate(BaseModel):
     rag_min_sim_percent: Optional[float] = None
     rag_use_graph: Optional[bool] = None
     rag_graph_response_type: Optional[str] = None
+    rag_retrieval_mode: Optional[str] = None
+    rag_dense_weight: Optional[float] = None
+    rag_bm25_weight: Optional[float] = None
+    rag_graph_weight: Optional[float] = None
+    rag_rrf_k: Optional[int] = None
     default_rag_chunk_size: Optional[int] = None
     default_rag_chunk_overlap: Optional[int] = None
     default_rag_metadata_mode: Optional[str] = None
