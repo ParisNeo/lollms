@@ -1414,6 +1414,18 @@ def build_artefacts_router(router: APIRouter):
 
         target_discussion.commit()
 
+        artefacts = [
+            _map_artefact_for_ui(art, discussion_id)
+            for art in target_discussion.list_artefacts()
+        ]
+        all_images_info = target_discussion.get_discussion_images()
+
+        return {
+            "artefacts": artefacts,
+            "discussion_images": [img['data'] for img in all_images_info],
+            "active_discussion_images": [img['active'] for img in all_images_info]
+        }
+
     @router.post("/{discussion_id}/artefacts/{artefact_title:path}/send-to-datastore", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
     async def send_artefact_to_datastore(
         discussion_id: str,

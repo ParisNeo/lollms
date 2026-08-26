@@ -103,14 +103,15 @@ async def get_current_db_user_from_token(
         if token in _token_user_cache:
             cached_user, expiry = _token_user_cache[token]
             if now < expiry:
+                merged_user = db.merge(cached_user, load=False)
                 token_iat = payload.get("iat")
-                pwd_changed = cached_user.password_changed_at
+                pwd_changed = merged_user.password_changed_at
                 if pwd_changed and token_iat is not None:
                     pwd_changed_ts = pwd_changed.replace(tzinfo=datetime.timezone.utc).timestamp() if pwd_changed.tzinfo is None else pwd_changed.timestamp()
                     if (token_iat + 1) < pwd_changed_ts:
                         del _token_user_cache[token]
                         raise credentials_exception
-                return db.merge(cached_user, load=False)
+                return merged_user
             else:
                 del _token_user_cache[token]
 

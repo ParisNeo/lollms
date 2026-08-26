@@ -439,7 +439,7 @@ def build_message_router(router: APIRouter):
             image_references=[],
             user_grade=0,
             created_at=new_message.created_at,
-            border_id=discussion_obj.active_branch_id
+            branch_id=discussion_obj.active_branch_id
         )
 
     @router.post("/{discussion_id}/messages/{message_id}/generate_audio", response_model=TaskInfo, status_code=202)

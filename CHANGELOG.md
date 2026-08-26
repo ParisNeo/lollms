@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-26 15:35]
+
+- fix(backend): correct field name and cached user attribute access, return artefacts on commit
+
 ## [2026-08-23 22:29]
 
 - feat(auth): implement user registration and password reset functionality
