@@ -388,6 +388,25 @@ def build_artefacts_router(router: APIRouter):
         )
         return task
 
+    @router.post("/{discussion_id}/artefacts/import_url", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+    async def import_artefact_from_url(
+        discussion_id: str,
+        request: UrlImportRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """Scrapes a URL and imports it into the discussion workspace as an artefact."""
+        _, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
+
+        task = task_manager.submit_task(
+            name=f"Import from URL: {request.url[:40]}",
+            target=_import_artefact_from_url_task,
+            args=(owner_username, discussion_id, request.url, request.depth, request.process_with_ai),
+            description=f"Scraping {request.url} (depth={request.depth}) into workspace...",
+            owner_username=current_user.username
+        )
+        return task
+
     @router.post("/{discussion_id}/artefacts/wikipedia/search", response_model=List[Dict[str, str]])
     async def search_wikipedia(
         discussion_id: str,
@@ -671,7 +690,12 @@ def build_artefacts_router(router: APIRouter):
             else:
                 raise HTTPException(status_code=400, detail="Not a valid GitHub URL.")
 
-            art = discussion.import_github(request.url, request.auto_load)
+            clean_title = _clean_url_to_title(url)
+            try:
+                art = discussion.import_github(request.url, auto_load=request.auto_load, title=clean_title)
+            except TypeError:
+                art = discussion.import_github(request.url, auto_load=request.auto_load)
+
             if not art:
                 raise HTTPException(status_code=400, detail="Failed to import GitHub content.")
 

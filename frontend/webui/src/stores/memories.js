@@ -22,10 +22,22 @@ export const useMemoriesStore = defineStore('memories', () => {
         }
     }
 
-    async function addMemory(content, importance = 0.9, tags = null) {
+    async function searchMemories(query, limit = 10) {
+        try {
+            const response = await apiClient.get('/api/memories/search', {
+                params: { q: query, limit }
+            });
+            return Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            console.error("Failed to search memories:", error);
+            return [];
+        }
+    }
+
+    async function addMemory(content, importance = 0.9, level = 1, tags = null) {
         const uiStore = useUiStore();
         try {
-            const response = await apiClient.post('/api/memories', { content, importance, tags });
+            const response = await apiClient.post('/api/memories', { content, importance, level, tags });
             memories.value.unshift(response.data);
             emit('memories:updated');
             uiStore.addNotification('Cognitive memory created successfully.', 'success');
@@ -61,6 +73,21 @@ export const useMemoriesStore = defineStore('memories', () => {
         }
     }
 
+    async function clearMemoriesByLevel(level) {
+        const uiStore = useUiStore();
+        try {
+            const response = await apiClient.delete(`/api/memories/tier/${level}`);
+            memories.value = memories.value.filter(m => m.level !== level);
+            emit('memories:updated');
+            uiStore.addNotification(response.data?.message || `Cleared Level ${level} memories.`, 'success');
+            await fetchMemories();
+        } catch (error) {
+            console.error("Failed to clear memory tier:", error);
+            uiStore.addNotification(`Failed to clear Level ${level} memories.`, 'error');
+            await fetchMemories();
+        }
+    }
+
     async function triggerDream() {
         const uiStore = useUiStore();
         uiStore.addNotification('Consolidating memories & Dreaming...', 'info');
@@ -85,9 +112,11 @@ export const useMemoriesStore = defineStore('memories', () => {
         memories,
         isLoading,
         fetchMemories,
+        searchMemories,
         addMemory,
         updateMemory,
         deleteMemory,
+        clearMemoriesByLevel,
         triggerDream,
         $reset
     };

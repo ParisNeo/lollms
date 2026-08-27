@@ -467,16 +467,24 @@ const senderName = computed(() => {
     return props.message.sender || 'System';
 });
 
-const hasEvents = computed(() => props.message.events && props.message.events.length > 0);
-const hasSources = computed(() => props.message.sources && props.message.sources.length > 0);
+const hasEvents = computed(() => (props.message.events && props.message.events.length > 0) || (props.message.metadata?.events && props.message.metadata.events.length > 0));
+const hasSources = computed(() => {
+    const s = props.message.sources || props.message.metadata?.sources;
+    return Array.isArray(s) && s.length > 0;
+});
+
 const sortedSources = computed(() => {
-    if (!hasSources.value) return [];
-    // If index property is present, sort by index first, then score
-    return [...props.message.sources].sort((a, b) => {
+    const raw = props.message.sources || props.message.metadata?.sources;
+    if (!Array.isArray(raw) || !raw.length) return [];
+    return [...raw].sort((a, b) => {
         if (a.index && b.index) return a.index - b.index;
         return (b.score || 0) - (a.score || 0);
     });
 });
+
+watch(hasSources, (has) => {
+    if (has) isSourcesVisible.value = true;
+}, { immediate: true });
 
 const lastEventSummary = computed(() => {
     if (!hasEvents.value) return '';

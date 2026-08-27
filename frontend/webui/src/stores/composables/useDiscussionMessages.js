@@ -130,37 +130,62 @@ export function useDiscussionMessages(state, stores, getActions) {
         }
     }
 
-    async function saveMessageChanges({ messageId, newContent, keptImagesB64, newImageFiles }) {
+    async function saveMessageChanges({ messageId, newContent, keptImagesB64 = [], newImageFiles = [] }) {
         if (!currentDiscussionId.value) return;
 
-        try {
-            const newImagesAsBase64 = await Promise.all((newImageFiles || []).map(file => fileToBase64(file)));
-            const payload = { 
-                content: newContent, 
-                kept_images_b64: keptImagesB64 || [], 
-                new_images_b64: newImagesAsBase64 
-            };
+        let targetMessageId = messageId;
 
-            const response = await apiClient.put(`/api/discussions/${currentDiscussionId.value}/messages/${messageId}`, payload);
-
-            // Process the message. If this fails, the catch block will handle it
-            const processed = processSingleMessage(response.data);
-
-            const index = messages.value.findIndex(m => m.id === messageId);
-            if (index !== -1) {
-                messages.value.splice(index, 1, processed);
+        // If target ID is a temporary client-side ID from an interrupted/cancelled generation
+        if (typeof targetMessageId === 'string' && targetMessageId.startsWith('temp-')) {
+            // Re-fetch real backend messages to resolve actual persisted ID
+            await fetchMessages(currentDiscussionId.value);
+            
+            // Find the corresponding message in the refreshed list
+            const foundMsg = messages.value.find(m => m.id === targetMessageId);
+            if (!foundMsg && messages.value.length > 0) {
+                // If temporary ID is gone because real messages were loaded, pick the last user message
+                const lastUserMsg = [...messages.value].reverse().find(m => m.sender_type === 'user');
+                if (lastUserMsg) {
+                    targetMessageId = lastUserMsg.id;
+                }
             }
+        }
 
+        const payload = {
+            content: newContent,
+            kept_images_b64: keptImagesB64,
+            new_images_b64: []
+        };
+
+        // Convert any new image files to base64 if provided
+        if (newImageFiles && newImageFiles.length > 0) {
+            for (const file of newImageFiles) {
+                const b64 = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+                payload.new_images_b64.push(b64);
+            }
+        }
+
+        try {
+            const response = await apiClient.put(
+                `/api/discussions/${currentDiscussionId.value}/messages/${targetMessageId}`,
+                payload
+            );
+
+            const index = messages.value.findIndex(m => m.id === messageId || m.id === targetMessageId);
+            if (index !== -1) {
+                messages.value[index] = response.data;
+            }
             uiStore.addNotification('Message updated.', 'success');
-
-            // Refresh context status in background
-            getActions().fetchContextStatus(currentDiscussionId.value);
-
-            return true; // Success
+            return response.data;
         } catch (error) {
-            console.error("Save message failed:", error);
+            console.error('Failed to save message changes:', error);
             uiStore.addNotification('Failed to save message changes.', 'error');
-            throw error; // Re-throw to keep isEditing = true in the component
+            throw error;
         }
     }
 

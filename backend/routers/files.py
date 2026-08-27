@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Tuple, Optional
 
 from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, Form
 from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 from werkzeug.utils import secure_filename
 import markdown2 
 from bs4 import BeautifulSoup 
@@ -60,7 +61,6 @@ except ImportError:
     md_to_pptx_parse = None
     create_ppt = None
 
-
 from backend.session import (
     get_current_active_user, get_user_temp_uploads_path
 )
@@ -74,6 +74,34 @@ from backend.settings import settings
 files_router = APIRouter(prefix="/api/files", tags=["Files"])
 upload_router = APIRouter(prefix="/api/upload", tags=["Files"])
 assets_router = APIRouter(prefix="/assets", tags=["Files"])
+
+# --- Request / Response Models ---
+
+class ExtractTextResponse(BaseModel):
+    text_content: str
+
+class FetchWebContentRequest(BaseModel):
+    url: str
+    depth: int = 0
+
+class FetchYoutubeRequest(BaseModel):
+    video_url: str
+    language: str = "en"
+
+class FetchWikipediaRequest(BaseModel):
+    title: str
+    url: Optional[str] = None
+
+class FetchArxivRequest(BaseModel):
+    id: str
+    title: Optional[str] = None
+    mode: str = "abstract"
+
+class StagedContentResponse(BaseModel):
+    title: str
+    filename: str
+    content: str
+
 
 @assets_router.post("/fun-facts/upload")
 async def upload_fun_fact_asset(
@@ -295,7 +323,7 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str, extract_image
             
     return extracted_text, images
 
-@files_router.post("/extract-text")
+@files_router.post("/extract-text", response_model=ExtractTextResponse)
 async def extract_text_from_file(
     file: UploadFile = File(...),
     current_user: UserAuthDetails = Depends(get_current_active_user)
@@ -311,6 +339,156 @@ async def extract_text_from_file(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Failed to extract text from file: {str(e)}")
+
+# --- Content Fetching Endpoints for Multi-Source Ingestion Staging ---
+
+@files_router.post("/fetch-youtube-transcript", response_model=StagedContentResponse)
+async def fetch_youtube_transcript_for_staging(
+    payload: FetchYoutubeRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Fetches YouTube video transcript and returns markdown for staging."""
+    import pipmaster as pm
+    pm.ensure_packages(["youtube-transcript-api"])
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    video_id_match = re.search(r'(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})', payload.video_url)
+    if not video_id_match:
+        raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
+    video_id = video_id_match.group(1)
+
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = None
+        try:
+            transcript = transcript_list.find_transcript([payload.language])
+        except Exception:
+            try:
+                transcript = transcript_list.find_generated_transcript([payload.language])
+            except Exception:
+                for t in transcript_list:
+                    transcript = t.translate(payload.language)
+                    break
+
+        if not transcript:
+            raise HTTPException(status_code=404, detail="No suitable transcript found for this video.")
+
+        data = transcript.fetch()
+        lines = []
+        for entry in data:
+            start = int(entry.get('start', 0))
+            minutes = start // 60
+            seconds = start % 60
+            lines.append(f"[{minutes:02d}:{seconds:02d}] {entry.get('text', '')}")
+
+        full_text = "\n".join(lines)
+        title_clean = f"YouTube_Transcript_{video_id}"
+        content_md = f"# YouTube Transcript ({video_id})\nSource: {payload.video_url}\n\n{full_text}"
+
+        return StagedContentResponse(
+            title=title_clean,
+            filename=f"{title_clean}.md",
+            content=content_md
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch YouTube transcript: {str(e)}")
+
+@files_router.post("/fetch-web-content", response_model=StagedContentResponse)
+async def fetch_web_content_for_staging(
+    payload: FetchWebContentRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Scrapes a web page URL and returns clean markdown for staging."""
+    _validate_url(payload.url)
+    try:
+        from scrapemaster import ScrapeMaster
+    except ImportError:
+        import pipmaster as pm
+        pm.install("ScrapeMaster")
+        from scrapemaster import ScrapeMaster
+
+    try:
+        scraper = ScrapeMaster(payload.url, strategy=["selenium", "beautifulsoup"], headless=True)
+        results = scraper.scrape_all(max_depth=payload.depth, convert_to_markdown=True)
+        markdown_content = results.get('markdown') or "\n\n".join(results.get('texts', []))
+        if not markdown_content:
+            raise HTTPException(status_code=404, detail="No readable text extracted from URL.")
+
+        safe_url_name = "".join(c for c in payload.url if c.isalnum() or c in ('-', '_')).rstrip()[:40]
+        title_clean = f"Web_Scrape_{safe_url_name}"
+        content_md = f"# Web Scrape from {payload.url}\n\n{markdown_content}"
+
+        return StagedContentResponse(
+            title=title_clean,
+            filename=f"{title_clean}.md",
+            content=content_md
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Scraping failed: {str(e)}")
+
+@files_router.post("/fetch-wikipedia-content", response_model=StagedContentResponse)
+async def fetch_wikipedia_content_for_staging(
+    payload: FetchWikipediaRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Fetches Wikipedia article and returns markdown for staging."""
+    import pipmaster as pm
+    pm.ensure_packages(["wikipedia"])
+    import wikipedia
+
+    try:
+        page = wikipedia.page(payload.title, auto_suggest=False)
+        content_md = f"# Wikipedia: {page.title}\nSource: {page.url}\n\n{page.content}"
+        safe_title = "".join(c for c in page.title if c.isalnum() or c in ('-', '_', ' ')).rstrip()
+        clean_name = f"Wikipedia_{safe_title.replace(' ', '_')}"
+
+        return StagedContentResponse(
+            title=clean_name,
+            filename=f"{clean_name}.md",
+            content=content_md
+        )
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch Wikipedia page: {str(e)}")
+
+@files_router.post("/fetch-arxiv-content", response_model=StagedContentResponse)
+async def fetch_arxiv_content_for_staging(
+    payload: FetchArxivRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """Fetches ArXiv paper abstract or text and returns markdown for staging."""
+    import pipmaster as pm
+    pm.ensure_packages(["arxiv"])
+    import arxiv
+
+    try:
+        client = arxiv.Client()
+        search = arxiv.Search(id_list=[payload.id])
+        paper = next(client.results(search), None)
+        if not paper:
+            raise HTTPException(status_code=404, detail="ArXiv paper not found.")
+
+        title_clean = f"ArXiv_{payload.id}_{paper.title[:30]}".replace(' ', '_')
+        authors_str = ", ".join(a.name for a in paper.authors)
+        content_md = f"# {paper.title}\n**Authors**: {authors_str}\n**Published**: {paper.published}\n**ArXiv ID**: {payload.id}\n**PDF**: {paper.pdf_url}\n\n## Abstract\n{paper.summary}"
+
+        return StagedContentResponse(
+            title=title_clean,
+            filename=f"{title_clean}.md",
+            content=content_md
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to fetch ArXiv paper: {str(e)}")
+
 
 @files_router.post("/export-markdown")
 async def export_as_markdown(
@@ -330,10 +508,7 @@ async def export_as_markdown(
     }
     return Response(content=content, media_type='text/markdown', headers=headers)
 
-# Assume 'settings' and 'ContentExportRequest' and trace_exception exist in your module
-
 def md2_to_html(md_text: str) -> str:
-    # Configure markdown2 extras to cover requested features
     extras = [
         "fenced-code-blocks",
         "tables",
@@ -369,8 +544,6 @@ def _download_image_to_temp(src: str) -> str:
         _validate_url(src)
     except ValueError as e:
         print(f"SSRF Protection prevented access to: {src}. Reason: {e}")
-        # Return a placeholder or fail gracefully?
-        # Creating a dummy text file or raising exception is safer
         raise e
 
     r = requests.get(src, timeout=10)
@@ -387,7 +560,6 @@ def _insert_math(p, latex):
         return
     try:
         mathml = latex2mathml(latex)
-        # Replace MathML namespace for Office Math
         omath_xml = (
             f'<m:oMathPara xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math">'
             f'<m:oMath>'
@@ -395,7 +567,6 @@ def _insert_math(p, latex):
             f'</m:oMath>'
             f'</m:oMathPara>'
         )
-        # Attach OMML to paragraph
         omath_element = parse_xml(omath_xml)
         p._p.append(omath_element)
     except Exception:
@@ -408,7 +579,6 @@ def html_to_docx_bytes(html: str) -> bytes:
     def add_inline_runs(p, node):
         for child in node.children:
             if isinstance(child, str):
-                # Detect and handle inline math: \( ... \)
                 parts = re.split(r'(\\\(.+?\\\)|\\\[.+?\\\])', child)
                 for part in parts:
                     if part.startswith(r'\(') and part.endswith(r'\)'):
@@ -474,10 +644,7 @@ def html_to_docx_bytes(html: str) -> bytes:
             alt = el.get("alt") or "[image]"
             tmp = None
             try:
-                # Check for SVG (Common with Mermaid exports)
                 if src.startswith("data:image/svg+xml"):
-                    # Word doesn't like SVGs. We need to convert to PNG.
-                    # We'll use a library if available, else skip to prevent crash.
                     try:
                         import cairosvg
                         header, b64data = src.split(",", 1)
@@ -489,13 +656,10 @@ def html_to_docx_bytes(html: str) -> bytes:
                         print("cairosvg not installed, skipping SVG embedding in DOCX")
                         doc.add_paragraph(f"[Diagram: {alt} - Static rendering requires cairosvg on server]")
                 else:
-                    # Standard PNG/JPG base64 or URL
                     tmp = _download_image_to_temp(src)
-                    # Check image size to ensure "Good Resizing"
                     img = Image.open(tmp)
                     width, height = img.size
-                    # If image is smaller than page width, use its natural size, else fit to page
-                    pixel_width_in_inches = width / 96.0 # Assume 96 DPI
+                    pixel_width_in_inches = width / 96.0
                     use_width = min(Inches(5.5), Inches(pixel_width_in_inches))
                     doc.add_picture(tmp, width=use_width)
             except Exception as e:
@@ -508,7 +672,6 @@ def html_to_docx_bytes(html: str) -> bytes:
                     pass
             return
 
-        # Recurse into generic containers
         for child in el.children:
             handle_block(child)
 
@@ -519,20 +682,11 @@ def html_to_docx_bytes(html: str) -> bytes:
     bio = io.BytesIO(); doc.save(bio); return bio.getvalue()
 
 def _save_pdf(pdf: MarkdownPdf, out_path: str) -> None:
-    """
-    Helper that saves the PDF and removes the temporary file.
-    """
     try:
         pdf.save(out_path)
     except ValueError as exc:
-        # Hierarchy error – retry without TOC
         if "hierarchy level of item 0 must be 1" in str(exc):
             pdf = MarkdownPdf(toc_level=0)
-            # Re‑add the original section(s).  The caller must
-            # keep a reference to the Markdown text used.
-            # In this helper we simply re‑raise to let the caller
-            # rebuild the PDF.  For simplicity we assume the caller
-            # will call this helper again with toc_level=0.
             raise RuntimeError(
                 "PDF generation failed due to invalid TOC hierarchy. "
                 "Retry with toc_level=0."
@@ -540,11 +694,9 @@ def _save_pdf(pdf: MarkdownPdf, out_path: str) -> None:
         else:
             raise
 
-    # Read the PDF data
     with open(out_path, "rb") as f:
         pdf_bytes = f.read()
 
-    # Clean up temporary file
     try:
         os.unlink(out_path)
     except Exception:
@@ -559,7 +711,6 @@ def html_to_pdf_bytes(html_content: str) -> bytes:
         pm.ensure_package("weasyprint")
         from weasyprint import HTML
         
-        # Wrap in basic document if it's just a fragment
         if "<html>" not in html_content.lower():
             html_content = f"<html><body>{html_content}</body></html>"
             
@@ -582,32 +733,11 @@ def md_to_pdf_bytes(
     toc_level: int = 3,
     extra_images: Optional[List[str]] = None,
 ) -> bytes:
-    """
-    Convert Markdown (with optional base64 images) to a PDF byte stream.
-
-    Parameters
-    ----------
-    md_text : str
-        Markdown source.  Can be empty or only whitespace.
-    toc_level : int, default 3
-        Maximum heading level to include in the TOC.
-        Set to 0 to disable the TOC.
-    extra_images : list[str] | None, default None
-        List of base64‑encoded PNG images (data‑URI or raw string).
-        If `md_text` is empty, each image will be placed on its own page.
-        Otherwise, images are appended at the end of the markdown.
-
-    Returns
-    -------
-    bytes
-        PDF document as a byte string.
-    """
     if extra_images is None:
         extra_images = []
 
-    # ---------- 1️⃣  Image‑only PDF ----------
     if not md_text.strip() and extra_images:
-        pdf = MarkdownPdf(toc_level=0)  # no TOC for a slideshow
+        pdf = MarkdownPdf(toc_level=0)
         for img_b64 in extra_images:
             if "base64," in img_b64:
                 img_b64 = img_b64.split("base64,")[1]
@@ -618,14 +748,12 @@ def md_to_pdf_bytes(
             out_path = tf.name
         return _save_pdf(pdf, out_path)
 
-    # ---------- 2️⃣  Append images at the end ----------
     if extra_images:
         for img_b64 in extra_images:
             if "base64," in img_b64:
                 img_b64 = img_b64.split("base64,")[1]
             md_text += f"\n\n![](data:image/png;base64,{img_b64})\n"
 
-    # ---------- 3️⃣  Normal PDF generation ----------
     pdf = MarkdownPdf(toc_level=toc_level)
     pdf.add_section(Section(md_text))
 
@@ -635,7 +763,6 @@ def md_to_pdf_bytes(
     try:
         pdf.save(out_path)
     except ValueError as exc:
-        # Hierarchy error – retry with no TOC
         if "hierarchy level of item 0 must be 1" in str(exc):
             pdf = MarkdownPdf(toc_level=0)
             pdf.add_section(Section(md_text))
@@ -643,11 +770,9 @@ def md_to_pdf_bytes(
         else:
             raise
 
-    # Read the PDF data
     with open(out_path, "rb") as f:
         pdf_bytes = f.read()
 
-    # Clean up temporary file
     try:
         os.unlink(out_path)
     except Exception:
@@ -656,72 +781,46 @@ def md_to_pdf_bytes(
     return pdf_bytes
 
 def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
-    """
-    Robust Markdown to PowerPoint converter with improved text chunking and image support.
-    
-    SPECIAL MODE: If md_text is empty and extra_images are provided (e.g. Generated Slideshow), 
-    create a pure image slide deck.
-    """
     prs = Presentation()
-    # Set to 16:9
     prs.slide_width = PptxInches(13.3333)
     prs.slide_height = PptxInches(7.5)
 
-    # --- Helper: Add Title Slide ---
     def add_title_slide(title, subtitle=""):
-        slide_layout = prs.slide_layouts[0] # Title Slide
+        slide_layout = prs.slide_layouts[0]
         slide = prs.slides.add_slide(slide_layout)
         slide.shapes.title.text = title if title else "Presentation"
         if subtitle and len(slide.placeholders) > 1:
             slide.placeholders[1].text = subtitle
 
-    # --- Helper: Add Content Slide ---
     def add_content_slide(title, body_text):
-        slide_layout = prs.slide_layouts[1] # Title and Content
+        slide_layout = prs.slide_layouts[1]
         slide = prs.slides.add_slide(slide_layout)
         slide.shapes.title.text = title
-        
-        # Basic markdown cleanup for body
         clean_body = body_text.replace('* ', '• ').replace('- ', '• ')
-        
         tf = slide.placeholders[1].text_frame
         tf.text = clean_body
 
-    # --- Helper: Add Image Slide ---
     def add_image_slide(image_src):
-        # Blank layout for images to maximize space
         slide_layout = prs.slide_layouts[6] 
         slide = prs.slides.add_slide(slide_layout)
         
         tmp_path = None
         try:
             tmp_path = _download_image_to_temp(image_src)
-            
-            # Add picture
-            # Center and fit logic
-            slide_width = prs.slide_width
-            slide_height = prs.slide_height
-            
-            # We add it first to get dimensions, then adjust
             pic = slide.shapes.add_picture(tmp_path, 0, 0)
-            
-            # Scale to fit within slide
-            # Calculate ratios
             image_ratio = pic.width / pic.height
-            slide_ratio = slide_width / slide_height
+            slide_ratio = prs.slide_width / prs.slide_height
             
             if image_ratio > slide_ratio:
-                # Image is wider relative to slide -> fit width
-                pic.width = slide_width
-                pic.height = int(slide_width / image_ratio)
+                pic.width = prs.slide_width
+                pic.height = int(prs.slide_width / image_ratio)
                 pic.left = 0
-                pic.top = int((slide_height - pic.height) / 2)
+                pic.top = int((prs.slide_height - pic.height) / 2)
             else:
-                # Image is taller relative to slide -> fit height
-                pic.height = slide_height
-                pic.width = int(slide_height * image_ratio)
+                pic.height = prs.slide_height
+                pic.width = int(prs.slide_height * image_ratio)
                 pic.top = 0
-                pic.left = int((slide_width - pic.width) / 2)
+                pic.left = int((prs.slide_width - pic.width) / 2)
 
         except Exception as e:
             print(f"Failed to add image to slide: {e}")
@@ -733,13 +832,11 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
                 try: os.unlink(tmp_path)
                 except: pass
 
-    # --- Check for Image-Only Mode (Slideshow Generation) ---
     is_image_only_mode = (not md_text or not md_text.strip()) and extra_images and len(extra_images) > 0
 
     if is_image_only_mode:
         add_title_slide("Generated Slideshow", "AI Generated Presentation")
         for img_b64 in extra_images:
-            # Ensure proper data URI format
             if "base64," in img_b64:
                 src = img_b64
             else:
@@ -750,49 +847,28 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
         prs.save(bio)
         return bio.getvalue()
 
-    # --- Standard Markdown Processing ---
-    
-    # 1. Extract Images
     image_pattern = re.compile(r'!\[.*?\]\((.*?)\)')
     found_images = image_pattern.findall(md_text)
-    
-    # 2. Clean Text
     clean_text = image_pattern.sub('', md_text).strip()
-    
-    # 3. Intelligent Text Chunking
     chunks = []
-    
-    # Split by explicit horizontal rules first
     segments = re.split(r'\n---\n', clean_text)
     
     for segment in segments:
         if not segment.strip(): continue
-        
-        # Split by Headers (#)
         header_parts = re.split(r'\n(#+ )', '\n' + segment)
-        
         current_title = "Slide"
         current_body = ""
-        
-        # Iterate and reconstruct
         i = 0
         while i < len(header_parts):
             part = header_parts[i]
-            
             if part.strip().startswith('#'):
-                # It's a header marker, next part is the content line
                 if i + 1 < len(header_parts):
-                    # Extract title line
                     full_line = header_parts[i+1].split('\n', 1)
                     current_title = full_line[0].strip()
-                    
-                    # Any content after the title on the same chunk
                     rest_of_section = full_line[1] if len(full_line) > 1 else ""
-                    
                     if current_body.strip():
                         chunks.append({'title': "Content", 'body': current_body.strip()})
                         current_body = ""
-                    
                     current_body = rest_of_section
                     i += 2
                 else:
@@ -802,10 +878,8 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
                 i += 1
         
         if current_body.strip():
-            # Check length of body
             MAX_CHARS = 700
             if len(current_body) > MAX_CHARS:
-                # Split by paragraphs
                 paras = current_body.split('\n\n')
                 temp_chunk = ""
                 for para in paras:
@@ -819,15 +893,12 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
             else:
                 chunks.append({'title': current_title, 'body': current_body.strip()})
 
-    # Add Text Slides
     for chunk in chunks:
         add_content_slide(chunk['title'], chunk['body'])
 
-    # Add Image Slides (from Markdown)
     for img_src in found_images:
         add_image_slide(img_src)
     
-    # Add Extra Images as Slides (from generated/uploaded packs) - APPENDED
     if extra_images:
         for img_b64 in extra_images:
             if "base64," in img_b64:
@@ -836,11 +907,9 @@ def md_to_pptx_bytes(md_text: str, extra_images: List[str] = None) -> bytes:
                 src = f"data:image/png;base64,{img_b64}"
             add_image_slide(src)
 
-    # If no content at all, add a placeholder
     if len(prs.slides) == 0:
         add_title_slide("Empty Presentation")
 
-    # Output
     bio = io.BytesIO()
     prs.save(bio)
     return bio.getvalue()
@@ -862,7 +931,6 @@ async def export_content(
 
     content = payload.content
 
-    # Resolve and sanitize the filename using the payload filename stem and target extension
     base_filename = "export"
     if getattr(payload, 'filename', None):
         base_filename = Path(payload.filename).stem
@@ -883,24 +951,23 @@ async def export_content(
             file_content = content.encode('utf-8')
 
         elif export_format == 'html':
-            html_content = md2_to_html(content)  # markdown2
+            html_content = md2_to_html(content)
             media_type = "text/html"
-            file_content = html_wrapper(html_content, title="Export")  # consistent HTML shell
+            file_content = html_wrapper(html_content, title="Export")
 
         elif export_format == 'pdf':
             media_type = "application/pdf"
-            # Ensure we handle potential None content from workspace safely
             safe_content = content if content else f"# {payload.filename or 'Export'}\n(No content)"
-            file_content = md_to_pdf_bytes(safe_content)  # preserves headings/lists/code/images/tables
+            file_content = md_to_pdf_bytes(safe_content)
 
         elif export_format == 'docx':
             media_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            html_content = md2_to_html(content)  # markdown2
-            file_content = html_to_docx_bytes(html_content)  # map HTML → Word
+            html_content = md2_to_html(content)
+            file_content = html_to_docx_bytes(html_content)
 
         elif export_format == 'pptx':
             media_type = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            file_content = md_to_pptx_bytes(content)  # Markdown slides via custom logic
+            file_content = md_to_pptx_bytes(content)
 
         elif export_format == 'xlsx':
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -938,12 +1005,12 @@ async def export_content(
         elif export_format == 'epub':
             media_type = "application/epub+zip"
             html_content = md2_to_html(content)
-            file_content = html_wrapper(html_content, title="Export")  # placeholder xhtml; replace with proper EPUB packaging
+            file_content = html_wrapper(html_content, title="Export")
 
         elif export_format == 'odt':
             media_type = "application/vnd.oasis.opendocument.text"
             html_content = md2_to_html(content)
-            file_content = html_wrapper(html_content, title="Export")  # placeholder
+            file_content = html_wrapper(html_content, title="Export")
 
         elif export_format == 'rtf':
             media_type = "application/rtf"
@@ -987,7 +1054,6 @@ async def extract_and_embed_files(
 
     all_extracted_text = ""
 
-    # Map frontend modes directly to lollms_client modes
     mode_map = {
         "text_images": "text_images",
         "text_embedded_images": "text_embedded_images",
@@ -999,7 +1065,6 @@ async def extract_and_embed_files(
     import_mode = mode_map.get(pdf_mode, "text_images" if extract_images else "text")
 
     for file in files:
-        # Save to temporary file so the library can read it via path
         suffix = Path(file.filename).suffix
         with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
             content = await file.read()
@@ -1007,7 +1072,6 @@ async def extract_and_embed_files(
             tmp_path = Path(tmp.name)
 
         try:
-            # Delegate to library's integrated import_file
             result = discussion.import_file(
                 path=tmp_path,
                 mode=import_mode,
@@ -1055,37 +1119,31 @@ async def upload_chat_image(
     temp_path = get_user_temp_uploads_path(current_user.username)
     uploaded_files = []
     
-    # Allowed mime types set for quick lookup
     ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp", "image/bmp", "image/tiff"}
 
     for file in files:
-        # 1. Content-Type Header Check
         if file.content_type not in ALLOWED_MIME_TYPES:
              raise HTTPException(status_code=400, detail=f"Invalid file type: {file.content_type}. Only images are allowed.")
         
-        # 1.1 Size Limit check
         file.file.seek(0, os.SEEK_END)
         size = file.file.tell()
         file.file.seek(0)
-        if size > 10 * 1024 * 1024:  # 10MB limit
+        if size > 10 * 1024 * 1024:
             raise HTTPException(status_code=400, detail=f"File {file.filename} is too large (max 10MB).")
 
-        # 2. Content Verification using PIL
         try:
             file.file.seek(0)
             img = Image.open(file.file)
-            img.verify() # Verify integrity
+            img.verify()
             
-            # Check format (normalize to upper case)
             if img.format.upper() not in ["JPEG", "PNG", "GIF", "WEBP", "BMP", "TIFF"]:
                  raise HTTPException(status_code=400, detail="Unsupported image format.")
                  
-            file.file.seek(0) # Reset pointer
+            file.file.seek(0)
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid or corrupted image file.")
 
         s_filename = secure_filename(file.filename)
-        # Use a more unique name to avoid collisions
         unique_filename = f"{uuid.uuid4().hex[:8]}_{s_filename}"
         file_path = temp_path / unique_filename
         
@@ -1095,4 +1153,3 @@ async def upload_chat_image(
         uploaded_files.append({"filename": s_filename, "server_path": unique_filename})
         
     return uploaded_files
-

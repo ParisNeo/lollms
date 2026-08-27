@@ -77,6 +77,7 @@ from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.tasks.image_generation_tasks import _generate_slides_task
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from lollms_client.lollms_types import MSG_TYPE, EventMode
 # Google Search Tools
 try:
     from googleapiclient.discovery import build as google_build
@@ -396,83 +397,9 @@ def process_skill_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool,
     return text, False, []
 
 
-def process_memory_tags(text: str, user_id: int, db: Session) -> Tuple[str, bool]:
-    """
-    Parses memory tags from the AI output, executes the corresponding DB operations,
-    and returns the cleaned text (with tags removed) and a boolean indicating if any memory action was taken.
-    """
-    if not text:
-        return text, False
-
-    actions_performed = False
-
-    # Regex for tags
-    new_mem_pattern = re.compile(r'<new_memory>(.*?)</new_memory>', re.DOTALL | re.IGNORECASE)
-    update_mem_pattern = re.compile(r'<update_memory:(\d+)>(.*?)</update_memory:\1>', re.DOTALL | re.IGNORECASE)
-    delete_mem_pattern = re.compile(r'<delete_memory:(\d+)>(.*?)</delete_memory:\1>', re.DOTALL | re.IGNORECASE)
-    
-    # Process New Memories
-    for match in new_mem_pattern.finditer(text):
-        content = match.group(1).strip()
-        if content:
-            title = content[:30] + "..." if len(content) > 30 else content
-            try:
-                new_memory = UserMemory(owner_user_id=user_id, title=title, content=content)
-                db.add(new_memory)
-                db.commit()
-                actions_performed = True
-                print(f"INFO: New memory added for user {user_id}: {title}")
-            except Exception as e:
-                print(f"ERROR: Failed to add memory: {e}")
-                db.rollback()
-
-    # Pre-fetch memories to resolve indices for Update/Delete
-    current_memories = db.query(UserMemory).filter(UserMemory.owner_user_id == user_id).order_by(UserMemory.created_at.asc()).all()
-
-    # Process Updates
-    for match in update_mem_pattern.finditer(text):
-        try:
-            index = int(match.group(1)) - 1
-            new_content = match.group(2).strip()
-            
-            if 0 <= index < len(current_memories) and new_content:
-                memory_to_update = current_memories[index]
-                memory = db.query(UserMemory).filter(UserMemory.id == memory_to_update.id).first()
-                if memory:
-                    memory.content = new_content
-                    memory.updated_at = func.now()
-                    db.commit()
-                    actions_performed = True
-                    print(f"INFO: Memory #{index+1} (ID: {memory.id}) updated for user {user_id}")
-            else:
-                print(f"WARNING: Invalid memory index {index+1} for update.")
-        except Exception as e:
-            print(f"ERROR: Failed to update memory: {e}")
-            db.rollback()
-
-    # Process Deletes
-    for match in delete_mem_pattern.finditer(text):
-        try:
-            index = int(match.group(1)) - 1
-            if 0 <= index < len(current_memories):
-                memory_to_delete = current_memories[index]
-                db.query(UserMemory).filter(UserMemory.id == memory_to_delete.id).delete()
-                db.commit()
-                actions_performed = True
-                print(f"INFO: Memory #{index+1} (ID: {memory_to_delete.id}) deleted for user {user_id}")
-            else:
-                print(f"WARNING: Invalid memory index {index+1} for deletion.")
-        except Exception as e:
-            print(f"ERROR: Failed to delete memory: {e}")
-            db.rollback()
-    
-    # Strip tags from output
-    cleaned_text = text
-    cleaned_text = new_mem_pattern.sub('', cleaned_text)
-    cleaned_text = update_mem_pattern.sub('', cleaned_text)
-    cleaned_text = delete_mem_pattern.sub('', cleaned_text)
-    
-    return cleaned_text, actions_performed
+# Redundant manual episodic memory parser purged.
+# LollmsDiscussion.chat() natively manages episodic logging, deep memory retrieval,
+# and cognitive graph traversals via LollmsMemoryManager.
 
 def process_image_generation_tags(text: str, user: DBUser, db: Session, discussion_obj: LollmsDiscussion, main_loop=None, stream_queue=None) -> Tuple[str, List[str], List[Dict], List[Dict]]:
     """
@@ -1360,6 +1287,11 @@ def build_llm_generation_router(router: APIRouter):
                         file_path = entry.get("file_path", "unknown")
                         doc_title = Path(file_path).name if file_path else "Document Chunk"
 
+                        # Strictly enforce relevance threshold
+                        sim_val = entry.get("similarity_percent", score_val if score_val > 1.0 else score_val * 100.0)
+                        if sim_val < effective_min_sim:
+                            continue
+
                         sources.append({
                             "title": f"{store_name} / {doc_title}",
                             "content": chunk_text,
@@ -1493,7 +1425,7 @@ def build_llm_generation_router(router: APIRouter):
                     mm = get_user_memory_manager(owner_username)
                     # We combine title and content or store content directly as specified by the advanced memory system
                     combined_content = f"{title}: {content}" if title else content
-                    mm.add(content=combined_content, importance=0.95)
+                    mm.add(content=combined_content, importance=0.95, level=3)
                     manager.send_personal_message_sync({"type": "data_zone_processed", "data": {"zone": "memory", "discussion_id": discussion_id}}, current_user.id)
                     return {"success": True, "message": "Memory successfully recorded in multi-layer cognitive store."}
                 except Exception as e:
@@ -2017,8 +1949,6 @@ def build_llm_generation_router(router: APIRouter):
 
                     result = {}
                     try:
-                        # Call the library's native chat method. 
-                        # This now handles orchestration, tool execution, and artifact post-processing internally.
                         result = discussion_obj.chat(
                             user_message=final_prompt, 
                             personality=active_personality,
@@ -2027,8 +1957,8 @@ def build_llm_generation_router(router: APIRouter):
                             streaming_callback=llm_callback, 
                             think=owner_db_user.reasoning_activation,
                             reasoning_effort=owner_db_user.reasoning_effort,
-                            reasoning_summary=owner_db_user.reasoning_summary, # Added discrepancy fix
-                            add_user_message=False, # We added it ourselves manually above to keep prompt clean
+                            reasoning_summary=owner_db_user.reasoning_summary,
+                            add_user_message=False,
                             tools=agentic_tools,
                             enable_image_generation=owner_db_user.image_generation_enabled,
                             enable_image_editing=owner_db_user.image_editing_enabled,
@@ -2043,7 +1973,7 @@ def build_llm_generation_router(router: APIRouter):
                             enable_forms=owner_db_user.form_building_enabled,
                             enable_books=enable_books if enable_books is not None else owner_db_user.book_generation_enabled,
                             enable_presentations=owner_db_user.slide_maker_enabled,
-                            enable_silent_artefact_explanation=True, # Library handles explanation if only XML was emitted
+                            enable_silent_artefact_explanation=True,
                             enable_artefacts=owner_db_user.artefacts_enabled,
                             memory_manager=mm_instance,
                             enable_memory=owner_db_user.memory_enabled,
@@ -2053,51 +1983,61 @@ def build_llm_generation_router(router: APIRouter):
                             enable_in_message_status=True,
                             enable_specialized_events_stream=True,
                             forward_artefact_chunks=True,
-                            suppress_images=not model_supports_vision
-                            )
+                            suppress_images=not model_supports_vision,
+                            event_mode=EventMode.PROCESSING_TAG_MODE
+                        )
                     finally:
-                        # Ensure discussion state is committed even on client disconnect/stop signal
                         discussion_obj.commit()
 
                     ai_msg = result.get('ai_message')
                     if ai_msg:
-                        # Calculated Turn-Specific Stats
                         ttft = (first_chunk_time - start_time) * 1000 if first_chunk_time else 0
                         if ai_msg.tokens:
                             tps = (ai_msg.tokens - 1) / (time.time() - first_chunk_time) if first_chunk_time and ai_msg.tokens > 1 else 0
                         else:
                             tps = -1
 
-                        # Apply turn-specific metadata to the proxied message object
                         ai_msg.set_metadata_item('ttft', round(ttft, 2), discussion_obj)
                         ai_msg.set_metadata_item('tps', round(tps, 2), discussion_obj)
 
-                        # Sync events from BOTH Herd Mode (if run) and the library's agentic loop
                         lib_events = ai_msg.metadata.get('events', [])
                         combined_events = all_events + lib_events
                         ai_msg.set_metadata_item('events', combined_events, discussion_obj)
 
-                        # Sources are handled by the library in agentic mode, but for non-agentic search 
-                        # we merge the local collected_sources.
-                        lib_sources = ai_msg.metadata.get('sources', [])
+                        # Merge sources from:
+                        # 1. result["sources"] (pre-hydrated RAG sources)
+                        # 2. ai_msg.metadata["sources"] (agentic RAG tool sources)
+                        # 3. collected_sources (stream callback sources)
+                        result_sources = result.get('sources', []) if isinstance(result.get('sources'), list) else []
+                        lib_sources = ai_msg.metadata.get('sources', []) if isinstance(ai_msg.metadata.get('sources'), list) else []
+
                         unique_sources = []
                         seen_sources = set()
-                        for s in collected_sources + lib_sources:
-                            key = s.get('source') or s.get('title')
-                            if key not in seen_sources:
+                        for s in result_sources + collected_sources + lib_sources:
+                            key = s.get('source') or s.get('title') or s.get('content', '')[:30]
+                            if key and key not in seen_sources:
                                 unique_sources.append(s)
                                 seen_sources.add(key)
+
                         ai_msg.set_metadata_item('sources', unique_sources, discussion_obj)
 
-                    # Finalization payload construction with synchronized artefacts
+                        # Emit sources list to frontend stream if available
+                        if unique_sources:
+                            main_loop.call_soon_threadsafe(
+                                stream_queue.put_nowait,
+                                json.dumps(jsonable_encoder({"type": "sources", "content": unique_sources})) + "\n"
+                            )
+
                     def msg_to_out(m): 
                         if not m: return None
-                        # Convert LollmsMessage to UI format
+                        meta = m.metadata or {}
                         return {
                             "id": m.id, 
                             "sender": m.sender, 
                             "content": m.content, 
-                            "metadata": m.metadata, 
+                            "metadata": meta, 
+                            "sources": meta.get('sources', []),
+                            "events": meta.get('events', []),
                             "sender_type": m.sender_type, 
                             "image_references": [f"data:image/png;base64,{i}" for i in (m.images or [])]
                         }

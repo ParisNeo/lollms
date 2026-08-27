@@ -9,6 +9,7 @@ import IconMaximize from '../../assets/icons/IconMaximize.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
+import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import JsonRenderer from '../ui/JsonRenderer.vue';
 
 const props = defineProps({
@@ -269,6 +270,12 @@ function toggleDocumentSolo(docId) {
     renderCanvas();
 }
 
+function openStandaloneVisualizer() {
+    if (!props.store?.id) return;
+    const url = `/api/store/${props.store.id}/data-lake/export-html?method=${reductionMethod.value}`;
+    window.open(url, '_blank');
+}
+
 function copyText(text) {
     navigator.clipboard.writeText(text);
     uiStore.addNotification("Chunk text copied.", "success");
@@ -330,13 +337,17 @@ onUnmounted(() => {
                     </button>
                 </div>
             </div>
-
             <div class="flex items-center gap-2">
-                <button @click="loadDataLake" class="btn btn-secondary btn-sm h-8" title="Reload Embedding Map">
+                <button @click="openStandaloneVisualizer" class="btn btn-secondary btn-sm h-8 flex items-center gap-1 text-blue-600 dark:text-blue-400" title="Open Standalone Interactive Visualizer">
+                    <IconGlobeAlt class="w-3.5 h-3.5" />
+                    <span class="hidden sm:inline">Interactive HTML</span>
+                </button>
+                <button @click="loadDataLake(true)" class="btn btn-secondary btn-sm h-8" title="Force Recompute 2D Vectors">
                     <IconRefresh class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoading }" />
+                    <span class="hidden sm:inline">Refresh</span>
                 </button>
                 <button @click="resetView" class="btn btn-secondary btn-sm h-8" title="Center View">
-                    <IconMaximize class="w-3.5 h-3.5 mr-1" />
+                    <IconMaximize class="w-3.5 h-3.5" />
                     <span>Fit</span>
                 </button>
             </div>

@@ -1036,7 +1036,7 @@ def get_safe_store_instance(
     datastore_id: str,
     db: Session,
     permission_level: str = "read_query"
-) -> safe_store.SafeStore:
+) -> Any:
     if safe_store is None:
         raise HTTPException(status_code=501, detail="SafeStore library not installed. RAG is disabled.")
     
@@ -1119,8 +1119,8 @@ def get_safe_store_instance(
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Could not initialize SafeStore for {datastore_id}: {str(e)}")
-            
-    return cast(safe_store.SafeStore, session["safe_store_instances"][datastore_id])
+
+    return session["safe_store_instances"][datastore_id]
 
 
 def get_user_data_root(username: str) -> Path:

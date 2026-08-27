@@ -17,6 +17,7 @@ const authStore = useAuthStore();
 
 const modalData = computed(() => uiStore.modalData('scrapeUrl'));
 const discussionId = computed(() => modalData.value?.discussionId);
+const datastoreId = computed(() => modalData.value?.datastoreId);
 
 const url = ref('');
 const depth = ref(0);
@@ -62,22 +63,22 @@ const commonLanguages =[
     { value: 'tr', label: 'Turkish' }
 ];
 
-watch(() => uiStore.isModalOpen('scrapeUrl'), async (isOpen) => {
-    if (isOpen) {
+// Deep watcher on modalProps ensures mode switches instantly to 'youtube', 'arxiv', etc.
+watch(() => uiStore.modalProps.scrapeUrl, (props) => {
+    if (props) {
+        if (props.mode) {
+            mode.value = props.mode;
+        }
         url.value = '';
         depth.value = 0;
         processWithAi.value = false;
         searchQuery.value = '';
         youtubeUrl.value = '';
         youtubeLanguage.value = 'en';
-        searchResults.value =[];
+        searchResults.value = [];
         selectedIndices.value.clear();
-        
-        await nextTick();
-        const data = uiStore.modalData('scrapeUrl');
-        mode.value = data?.mode || 'url';
     }
-});
+}, { immediate: true, deep: true });
 
 async function handleSearch() {
     isSearching.value = true;
@@ -127,6 +128,99 @@ function isUrl(str) {
 }
 
 async function handleSubmit() {
+    const onStagedCallback = modalData.value?.onStaged;
+
+    // 1. STAGING PIPELINE (When called from DataStoresView or onStaged handler)
+    if (onStagedCallback || datastoreId.value) {
+        isLoading.value = true;
+        const stagedFiles = [];
+
+        try {
+            if (mode.value === 'youtube') {
+                if (!youtubeUrl.value.trim()) { uiStore.addNotification('YouTube URL is required.', 'warning'); return; }
+                const res = await apiClient.post('/api/files/fetch-youtube-transcript', { video_url: youtubeUrl.value.trim(), language: youtubeLanguage.value.trim() });
+                const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                stagedFiles.push(file);
+            } else if (mode.value === 'url') {
+                if (!url.value.trim()) { uiStore.addNotification('URL is required.', 'warning'); return; }
+                const res = await apiClient.post('/api/files/fetch-web-content', { url: url.value.trim(), depth: depth.value });
+                const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                stagedFiles.push(file);
+            } else if (['duckduckgo', 'google'].includes(mode.value)) {
+                if (selectedIndices.value.size === 0) return;
+                const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+                for (const item of items) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-web-content', { url: item.url, depth: 0 });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {
+                        console.warn(`Failed to scrape ${item.url}:`, err);
+                    }
+                }
+            } else if (mode.value === 'wikipedia') {
+                if (selectedIndices.value.size === 0) return;
+                const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+                for (const item of items) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-wikipedia-content', { title: item.title, url: item.url });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {
+                        console.warn(`Failed to fetch Wikipedia ${item.title}:`, err);
+                    }
+                }
+            } else if (mode.value === 'arxiv') {
+                if (selectedIndices.value.size === 0) return;
+                const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+                for (const item of items) {
+                    try {
+                        const paperMode = arxivModes.value[item.id] || 'abstract';
+                        const res = await apiClient.post('/api/files/fetch-arxiv-content', { id: item.id, title: item.title, mode: paperMode });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {
+                        console.warn(`Failed to fetch Arxiv ${item.id}:`, err);
+                    }
+                }
+            } else if (mode.value === 'github') {
+                let urlsToImport = selectedIndices.value.size > 0 ? Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url) : (isUrl(searchQuery.value) ? [searchQuery.value.trim()] : []);
+                for (const u of urlsToImport) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-web-content', { url: u, depth: 0 });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {}
+                }
+            } else if (mode.value === 'stackoverflow') {
+                let urlsToImport = selectedIndices.value.size > 0 ? Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url) : (isUrl(searchQuery.value) ? [searchQuery.value.trim()] : []);
+                for (const u of urlsToImport) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-web-content', { url: u, depth: 0 });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {}
+                }
+            }
+
+            if (stagedFiles.length > 0) {
+                if (typeof onStagedCallback === 'function') {
+                    onStagedCallback(stagedFiles);
+                }
+                uiStore.addNotification(`${stagedFiles.length} file(s) staged successfully.`, 'success');
+                uiStore.closeModal('scrapeUrl');
+            } else {
+                uiStore.addNotification('No readable content was extracted to stage.', 'warning');
+            }
+        } catch (e) {
+            uiStore.addNotification('Extraction failed.', 'error');
+        } finally {
+            isLoading.value = false;
+        }
+        return;
+    }
+
+    // 2. DISCUSSION INGESTION TARGET
     if (!discussionId.value) return;
 
     if (mode.value === 'url') {
@@ -201,7 +295,7 @@ async function handleSubmit() {
             await discussionsStore.importYoutubeTranscript(
                 discussionId.value,
                 youtubeUrl.value.trim(),
-                youtubeLanguage.value.trim() // Pass language code
+                youtubeLanguage.value.trim()
             );
             uiStore.closeModal('scrapeUrl');
         } finally {
@@ -214,9 +308,9 @@ async function handleSubmit() {
         } else if (isUrl(searchQuery.value)) {
             urlsToImport = [searchQuery.value.trim()];
         }
-        
+
         if (urlsToImport.length === 0) return;
-        
+
         isLoading.value = true;
         try {
             for (const url of urlsToImport) {
@@ -233,9 +327,9 @@ async function handleSubmit() {
         } else if (isUrl(searchQuery.value)) {
             urlsToImport =[searchQuery.value.trim()];
         }
-        
+
         if (urlsToImport.length === 0) return;
-        
+
         isLoading.value = true;
         try {
             for (const url of urlsToImport) {
@@ -548,7 +642,7 @@ async function handleSubmit() {
                               (mode === 'youtube' && !youtubeUrl.trim()) ||
                               (['github', 'stackoverflow'].includes(mode) && selectedIndices.size === 0 && !isUrl(searchQuery))">
                     <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
-                    {{ isLoading ? 'Importing...' : 'Import' }}
+                    {{ isLoading ? 'Fetching...' : (datastoreId || modalData?.onStaged ? 'Stage for Review' : 'Import') }}
                 </button>
             </div>
         </template>

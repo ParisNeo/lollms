@@ -131,69 +131,76 @@ def _import_artefact_task(
         except Exception as ex:
             print(f"Warning: Could not remove temp file {file_path}: {ex}")
 
+def _clean_url_to_title(url: str) -> str:
+    """Generates a clean, deterministic title from a URL without ugly slashes or duplicate schemas."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    netloc = parsed.netloc.replace('www.', '')
+    path_clean = parsed.path.strip('/').replace('/', '_')
+
+    if 'github.com' in netloc:
+        parts = [p for p in parsed.path.strip('/').split('/') if p]
+        if len(parts) >= 2:
+            return f"GitHub_{parts[0]}_{parts[1]}.md"
+        elif len(parts) == 1:
+            return f"GitHub_{parts[0]}.md"
+
+    if path_clean:
+        return f"{netloc}_{path_clean[:40]}.md"
+    return f"{netloc}.md"
+
 def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str, url: str, depth: int = 0, process_with_ai: bool = False):
-    if ScrapeMaster is None:
-        raise ImportError("ScrapeMaster library is not installed and could not be installed automatically.")
-    
-    task.log(f"Starting URL import task. URL: {url}, Depth: {depth}, AI Processing: {process_with_ai}")
-    task.set_progress(5)
-    
+    task.log(f"Importing from URL: {url} (Depth: {depth})...")
+    task.set_progress(10)
+
     try:
-        task.log(f"Scraping URL hierarchy...")
-        from backend.security import validate_url
-        validate_url(url)
-        scraper = ScrapeMaster(url)
-        # ScrapeMaster supports depth for crawling
-        markdown_content = scraper.scrape_markdown(max_depth = depth) # TODO add depth when scrapemaster is updated 
-        task.set_progress(50)
-
-        if not markdown_content or not markdown_content.strip():
-            task.log("No main content could be extracted from the URL.", "WARNING")
-            raise ValueError("No main content found at the provided URL.")
-
-        final_content = markdown_content.strip()
-
-        if process_with_ai:
-            task.log("AI Processing enabled. Cleaning and structuring content...")
-            task.set_description("AI is processing the scraped content...")
-            lc = get_user_lollms_client(username)
-            
-            prompt = f"Scraped content from {url}:\n\n{final_content}\n\n"
-            prompt += "--- Task ---\n"
-            prompt += "Analyze the scraped markdown above. Clean up boilerplate, navigation menus, and footers. "
-            prompt += "Structure the core information clearly. Ensure all relevant knowledge is preserved. "
-            prompt += "Format the result as clean markdown."
-            
-            def ai_callback(chunk, msg_type, params=None):
-                if task.cancellation_event.is_set(): return False
-                return True
-
-            final_content = lc.generate_text(prompt, streaming_callback=ai_callback)
-            task.log("AI processing finished.")
-
-        task.set_progress(90)
         discussion = get_user_discussion(username, discussion_id)
         if not discussion:
-            raise ValueError("Discussion not found after scraping.")
+            raise ValueError(f"Discussion '{discussion_id}' not found.")
 
-        # Use positional arguments for required fields (title, content)
-        artefact_info = discussion.add_artefact(
-            url,
-            final_content,
-            author=username
-        )
+        task.set_progress(30)
+        task.log(f"Scraping content from '{url}'...")
+
+        clean_title = _clean_url_to_title(url)
+
+        # Native lollms_client method handles scraping and artefact creation
+        try:
+            result = discussion.import_url(
+                url=url,
+                depth=depth,
+                process_with_ai=process_with_ai,
+                title=clean_title,
+                auto_load=True
+            )
+        except TypeError:
+            result = discussion.import_url(
+                url=url,
+                depth=depth,
+                process_with_ai=process_with_ai,
+                auto_load=True
+            )
+
+        task.set_progress(90)
         discussion.commit()
+
+        # Fetch updated artefacts list for task result
+        artefacts = [
+            {
+                "title": a["title"],
+                "version": a["version"],
+                "artefact_type": a.get("type", "document"),
+                "is_loaded": a.get("active", False)
+            }
+            for a in discussion.list_artefacts()
+        ]
+        
         task.set_progress(100)
-        
-        task.log(f"Artefact '{url}' imported successfully.")
-        
-        # Clean up timestamps for JSON serialization
-        if isinstance(artefact_info.get('created_at'), datetime):
-            artefact_info['created_at'] = artefact_info['created_at'].isoformat()
-        if isinstance(artefact_info.get('updated_at'), datetime):
-            artefact_info['updated_at'] = artefact_info['updated_at'].isoformat()
-        
-        return artefact_info
+        task.log(f"Successfully imported from '{url}'.")
+        return {
+            "message": f"Successfully imported content from {url}", 
+            "url": url,
+            "artefacts": artefacts
+        }
     except Exception as e:
         task.log(f"Failed to import from URL: {e}", "ERROR")
         trace_exception(e)

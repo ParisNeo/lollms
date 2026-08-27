@@ -161,6 +161,11 @@ def build_message_router(router: APIRouter):
             raise HTTPException(status_code=404, detail="Discussion not found.")
         
         target_message = discussion_obj.get_message(message_id)
+        if not target_message and message_id.startswith('temp-'):
+            # Fallback to active branch leaf or last user message
+            if discussion_obj.messages:
+                target_message = next((m for m in reversed(discussion_obj.messages) if m.sender_type == 'user'), discussion_obj.messages[-1])
+
         if not target_message:
             raise HTTPException(status_code=404, detail="Message not found in discussion.")
 

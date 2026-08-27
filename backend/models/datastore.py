@@ -55,7 +55,10 @@ class DataStoreQueryRequest(BaseModel):
     query: str
     top_k: int = 10
     min_similarity_percent: float = 50.0
-    mode: str = "dense"  # "dense" | "hybrid"
+    mode: str = "hybrid"  # "dense" | "hybrid"
+    retrieval_target: str = "chunks"  # "chunks" | "window" | "full_documents"
+    window_before: int = 1
+    window_after: int = 1
     dense_weight: float = 0.5
     bm25_weight: float = 0.5
     rrf_k: int = 60
@@ -64,6 +67,26 @@ class DataStoreAnswerRequest(DataStoreQueryRequest):
     system_prompt: Optional[str] = None
     max_tokens: Optional[int] = 2048
     temperature: Optional[float] = 0.2
+
+class FullDocumentQueryRequest(BaseModel):
+    query: str
+    top_k_docs: int = 2
+    search_mode: str = "hybrid"
+
+class DocumentWindowQueryRequest(BaseModel):
+    query: str
+    top_k_hits: int = 3
+    window_before: int = 1
+    window_after: int = 1
+
+class DocumentChunksPaginatedResponse(BaseModel):
+    document_id: str
+    page: int
+    page_size: int
+    total_pages: int
+    total_chunks: int
+    chunks: List[Dict[str, Any]]
+
 
 class DataStoreAnswerResponse(BaseModel):
     answer: str

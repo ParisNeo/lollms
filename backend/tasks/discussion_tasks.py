@@ -193,7 +193,7 @@ If no important information is found based on these strict criteria, return {"me
                     content = mem.get("content")
                     if title and content:
                         combined_content = f"{title}: {content}"
-                        mm.add(content=combined_content, importance=0.85)
+                        mm.add(content=combined_content, importance=0.85, level=3)
                         count += 1
                         task.log(f"Extracted: {title}")
 

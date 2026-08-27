@@ -15,6 +15,7 @@ from backend.db.models.user import User as DBUser
 from backend.models import UserAuthDetails
 from backend.session import get_current_active_user, get_current_db_user_from_token, get_user_data_root
 from lollms_client.lollms_memory import LollmsMemoryManager, MemoryConfig
+from ascii_colors import trace_exception
 
 memories_router = APIRouter(prefix="/api/memories", tags=["Cognitive Memories"])
 
@@ -27,12 +28,10 @@ def get_user_memory_manager(username: str) -> LollmsMemoryManager:
     Retrieves or creates a cached LollmsMemoryManager instance for a given user.
     This ensures we do not spawn hundreds of SQLite connections on parallel API calls.
     """
-    # Fast path: return existing instance without locking if already created
     if username in _memory_manager_cache:
         return _memory_manager_cache[username]
     
     with _memory_manager_lock:
-        # Double-check lock in case another thread created it while we waited
         if username in _memory_manager_cache:
             return _memory_manager_cache[username]
         
@@ -55,7 +54,6 @@ async def get_user_memories(
     current_user: DBUser = Depends(get_current_db_user_from_token)
 ):
     mm = get_user_memory_manager(current_user.username)
-    # Return all level 1, 2, and 3 records for interactive UI representation
     with mm._session() as s:
         from lollms_client.lollms_memory import _MemoryRecord
         records = mm._q(s).order_by(_MemoryRecord.level.asc(), _MemoryRecord.importance.desc()).all()
@@ -75,17 +73,54 @@ async def get_user_memories(
             for r in records
         ]
 
+@memories_router.get("/search")
+async def search_memories(
+    q: str = Query("", description="Search query string"),
+    limit: int = Query(10, description="Maximum number of results to return"),
+    current_user: DBUser = Depends(get_current_db_user_from_token)
+):
+    mm = get_user_memory_manager(current_user.username)
+    with mm._session() as s:
+        from lollms_client.lollms_memory import _MemoryRecord
+        results = mm.search(q, session=s, limit=limit)
+
+        # Promote found memories up one level (L3->L2, L2->L1)
+        for r in results:
+            if r.level == 3:
+                r.level = 2
+            elif r.level == 2:
+                r.level = 1
+            r.last_used_at = datetime.now(timezone.utc)
+        s.commit()
+
+        return [
+            {
+                "id": r.id,
+                "content": r.content,
+                "summary": r.summary or r.content[:60],
+                "level": r.level,
+                "importance": r.importance,
+                "use_count": r.use_count,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+                "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+                "tags": r.tags
+            }
+            for r in results
+        ]
+
 @memories_router.post("", status_code=status.HTTP_201_CREATED)
 async def create_memory(
     content: str = Body(..., embed=True),
     importance: float = Body(0.9, embed=True),
+    level: int = Body(1, embed=True),
     tags: Optional[List[str]] = Body(None, embed=True),
     current_user: DBUser = Depends(get_current_db_user_from_token)
 ):
     if not content.strip():
         raise HTTPException(status_code=400, detail="Memory content cannot be empty.")
     mm = get_user_memory_manager(current_user.username)
-    record = mm.add(content=content.strip(), importance=importance, tags=tags)
+    record = mm.add(content=content.strip(), importance=importance, level=level, tags=tags)
     return {
         "id": record.id,
         "content": record.content,
@@ -130,6 +165,32 @@ async def update_memory(
             "use_count": record.use_count
         }
 
+@memories_router.delete("/tier/{level}", status_code=status.HTTP_200_OK)
+async def clear_memories_by_tier(
+    level: int,
+    current_user: DBUser = Depends(get_current_db_user_from_token)
+):
+    """
+    Bulk deletes all memories in a specific cognitive tier (1=Working, 2=Deep, 3=Archived).
+    """
+    if level not in [1, 2, 3]:
+        raise HTTPException(status_code=400, detail="Invalid memory tier level (must be 1, 2, or 3).")
+
+    mm = get_user_memory_manager(current_user.username)
+    try:
+        with mm._session() as s:
+            from lollms_client.lollms_memory import _MemoryRecord
+            records = mm._q(s).filter(_MemoryRecord.level == level).all()
+            deleted_count = len(records)
+            for r in records:
+                s.delete(r)
+            s.commit()
+
+        return {"message": f"Successfully cleared {deleted_count} memories from Level {level}.", "deleted_count": deleted_count, "level": level}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to clear memory tier: {str(e)}")
+
 @memories_router.delete("/{memory_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_memory(
     memory_id: str,
@@ -150,7 +211,6 @@ async def trigger_dream_consolidation(
 ):
     """Manually triggers the Level 3 Auto-Dreaming Consolidation Process."""
     mm = get_user_memory_manager(current_user.username)
-    # Set dreamer parameters through memory_manager.dream()
     report = mm.dream()
     return {"status": "success", "report": report}
 
@@ -203,6 +263,7 @@ async def import_memories(
             mm.add(
                 content=content.strip(),
                 importance=mem_data.get("importance", 0.9),
+                level=mem_data.get("level", 1),
                 tags=mem_data.get("tags")
             )
             imported_count += 1

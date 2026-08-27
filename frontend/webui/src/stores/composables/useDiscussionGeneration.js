@@ -176,22 +176,28 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         uiStore.addNotification(`💤 Dream: Reinforced ${rep.reinforced || 0} memories, Demoted ${rep.decayed || 0}`, 'info', 5000);
                     }
                     break;
-
-                case 'finalize':
-                    const finalData = data.data;
-                    const aiIdx = messages.value.findIndex(m => m.id === tempAiMessage.id || m.id === finalData.ai_message?.id);
-                    if (aiIdx !== -1 && finalData.ai_message) {
-                        messages.value[aiIdx] = processSingleMessage(finalData.ai_message);
-                        if (state.activeDiscussion.value) state.activeDiscussion.value.active_branch_id = messages.value[aiIdx].id;
-                    }
-                    // Clean up buffers explicitly on finalize to prevent stale state
-                    if (state.liveArtefactBuffers?.value) state.liveArtefactBuffers.value = {};
-
-                    if (data.discussion && data.discussion.artefacts) {
-                        state.activeDiscussionArtefacts.value = data.discussion.artefacts;
-                    }
+                case 'sources':
+                    currentAiMessage.sources = Array.isArray(data.content) ? data.content : [data.content];
+                    if (!currentAiMessage.metadata) currentAiMessage.metadata = {};
+                    currentAiMessage.metadata.sources = currentAiMessage.sources;
                     break;
 
+                case 'finalize':
+                    if (data.data && data.data.ai_message) {
+                        const finalAi = data.data.ai_message;
+                        currentAiMessage.id = finalAi.id;
+                        currentAiMessage.tokens = finalAi.tokens || finalAi.token_count || 0;
+                        currentAiMessage.metadata = finalAi.metadata || {};
+                        if (finalAi.sources && finalAi.sources.length > 0) {
+                            currentAiMessage.sources = finalAi.sources;
+                        } else if (finalAi.metadata?.sources) {
+                            currentAiMessage.sources = finalAi.metadata.sources;
+                        }
+                        if (finalAi.events && finalAi.events.length > 0) {
+                            currentAiMessage.events = finalAi.events;
+                        }
+                    }
+                    
                 default:
                     // Log tools/steps in background events
                     if (['tool_call', 'tool_output', 'step_start', 'step_end', 'info', 'warning', 'error'].includes(data.type)) {

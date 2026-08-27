@@ -14,6 +14,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import joinedload
 import json
 import time
+import asyncio
+import sqlite3
 
 # Third-Party Imports
 from fastapi import (
@@ -24,10 +26,12 @@ from fastapi import (
     Form,
     APIRouter,
     status,
-    Body
+    Body,
+    Query
 )
 from fastapi.responses import (
-    Response
+    Response,
+    HTMLResponse
 )
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -53,7 +57,10 @@ from backend.models.datastore import (
     SparqlQueryRequest,
     GraphHybridQueryRequest,
     DataStoreAnswerRequest,
-    DataStoreAnswerResponse    
+    DataStoreAnswerResponse,
+    FullDocumentQueryRequest,
+    DocumentWindowQueryRequest,
+    DocumentChunksPaginatedResponse
 )
 
 from backend.session import get_datastore_db_path, build_lollms_client_from_params
@@ -119,8 +126,163 @@ class EdgeData(BaseModel):
     label: str
     properties: Dict[str, Any] = {}
 
+_data_lake_cache: Dict[str, Dict[str, Any]] = {}
+
+DOCUMENT_PALETTE = [
+    "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444",
+    "#06b6d4", "#ec4899", "#14b8a6", "#f97316", "#6366f1",
+    "#84cc16", "#a855f7", "#0ea5e9", "#eab308", "#d946ef"
+]
+
+def _decode_single_vector(raw_vec: Any, fallback_text: str) -> np.ndarray:
+    """Bulletproof vector deserializer handling numpy arrays, pickle, JSON, float32/float64 buffers, and hash fallbacks."""
+    if raw_vec is not None:
+        if isinstance(raw_vec, np.ndarray):
+            return raw_vec.astype(np.float32)
+
+        if isinstance(raw_vec, (list, tuple)):
+            try:
+                return np.array(raw_vec, dtype=np.float32)
+            except Exception:
+                pass
+
+        if isinstance(raw_vec, str):
+            try:
+                parsed = json.loads(raw_vec)
+                if isinstance(parsed, (list, tuple)):
+                    return np.array(parsed, dtype=np.float32)
+            except Exception:
+                pass
+
+        if isinstance(raw_vec, (bytes, bytearray, memoryview)):
+            raw_bytes = bytes(raw_vec)
+            if raw_bytes.startswith(b'\x80'):
+                try:
+                    import pickle
+                    deserialized = pickle.loads(raw_bytes)
+                    if isinstance(deserialized, np.ndarray):
+                        return deserialized.astype(np.float32)
+                    if isinstance(deserialized, (list, tuple)):
+                        return np.array(deserialized, dtype=np.float32)
+                except Exception:
+                    pass
+
+            if len(raw_bytes) >= 4 and len(raw_bytes) % 4 == 0:
+                try:
+                    arr = np.frombuffer(raw_bytes, dtype=np.float32)
+                    if len(arr) > 0 and not np.isnan(arr).any() and not np.isinf(arr).any():
+                        return arr.copy()
+                except Exception:
+                    pass
+
+            if len(raw_bytes) >= 8 and len(raw_bytes) % 8 == 0:
+                try:
+                    arr = np.frombuffer(raw_bytes, dtype=np.float64)
+                    if len(arr) > 0 and not np.isnan(arr).any() and not np.isinf(arr).any():
+                        return arr.astype(np.float32)
+                except Exception:
+                    pass
+
+    import hashlib
+    h = hashlib.sha256((fallback_text or "").encode('utf-8')).digest()
+    return np.frombuffer(h[:32], dtype=np.float32).copy()
+
+def _project_vectors_to_2d(vectors: np.ndarray, method: str = "pca") -> np.ndarray:
+    """Zero-alloc robust 2D dimensional reduction using standard SVD."""
+    n_samples = len(vectors)
+    if n_samples == 0:
+        return np.zeros((0, 2), dtype=np.float32)
+    if n_samples == 1:
+        return np.zeros((1, 2), dtype=np.float32)
+    if n_samples == 2:
+        return np.array([[-0.5, 0.0], [0.5, 0.0]], dtype=np.float32)
+
+    mean_vec = np.mean(vectors, axis=0)
+    centered = vectors - mean_vec
+
+    if method == "tsne" and n_samples >= 5:
+        try:
+            from sklearn.manifold import TSNE
+            perplexity = min(30.0, max(2.0, float(n_samples - 1) / 3.0))
+            tsne = TSNE(n_components=2, perplexity=perplexity, random_state=42, init='pca', learning_rate='auto')
+            projected = tsne.fit_transform(centered)
+            max_abs = np.max(np.abs(projected))
+            if max_abs > 0:
+                projected = projected / max_abs
+            return projected.astype(np.float32)
+        except Exception:
+            pass
+
+    try:
+        _, _, vt = np.linalg.svd(centered, full_matrices=False)
+        projected = centered @ vt[:2].T
+        max_abs = np.max(np.abs(projected))
+        if max_abs > 0:
+            projected = projected / max_abs
+        return projected.astype(np.float32)
+    except Exception as e:
+        n_features = vectors.shape[1]
+        rng = np.random.default_rng(42)
+        proj_matrix = rng.standard_normal((n_features, 2), dtype=np.float32)
+        projected = centered @ proj_matrix
+        max_abs = np.max(np.abs(projected))
+        if max_abs > 0:
+            projected = projected / max_abs
+        return projected.astype(np.float32)
+
+class StackOverflowImportStoreRequest(BaseModel):
+    url: str
+
+
+class DataStoreDetails(BaseModel):
+    size_bytes: int
+    chunk_count: int
+    graph_nodes_count: int
+    graph_edges_count: int
+    
+class GraphGenerationRequest(BaseModel):
+    graph_type: str = "knowledge_graph"
+    model_binding: Optional[str] = None
+    model_name: Optional[str] = None
+    chunk_size: int = 2048
+    overlap_size: int = 256
+    ontology: Optional[str] = None
+
+class GraphQueryRequest(BaseModel):
+    query: str
+    max_k: int = 10
+
+class NodeData(BaseModel):
+    label: str
+    properties: Dict[str, Any] = {}
+
+class EdgeData(BaseModel):
+    source_id: int
+    target_id: int
+    label: str
+    properties: Dict[str, Any] = {}
+
+_data_lake_cache: Dict[str, Dict[str, Any]] = {}
+
 class DeleteFilesRequest(BaseModel):
     filenames: List[str]
+
+class YoutubeImportRequest(BaseModel):
+    video_url: str
+    language: str = "en"
+
+class WikipediaImportStoreRequest(BaseModel):
+    title: str
+    url: str
+
+class ArxivImportStoreRequest(BaseModel):
+    id: str
+    title: str
+    mode: str = "abstract"
+
+class GithubImportStoreRequest(BaseModel):
+    url: str
+
 
 class DataLakeChunkPoint(BaseModel):
     id: str
@@ -669,6 +831,75 @@ async def upload_rag_documents_to_datastore(
     )
     return db_task
 
+def _import_youtube_datastore_task(task: Task, username: str, datastore_id: str, video_url: str, language: str):
+    task.log(f"Fetching YouTube transcript for {video_url} (Language: {language})...")
+    task.set_progress(15)
+
+    pm.ensure_packages(["youtube-transcript-api", "pytube", "yt-dlp"])
+    from youtube_transcript_api import YouTubeTranscriptApi
+
+    video_id_match = re.search(r'(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})', video_url)
+    if not video_id_match:
+        raise ValueError("Invalid YouTube URL.")
+    video_id = video_id_match.group(1)
+
+    try:
+        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+        transcript = None
+        try:
+            transcript = transcript_list.find_transcript([language])
+        except Exception:
+            try:
+                transcript = transcript_list.find_generated_transcript([language])
+            except Exception:
+                for t in transcript_list:
+                    transcript = t.translate(language)
+                    break
+
+        if not transcript:
+            raise Exception("No suitable transcript found.")
+
+        data = transcript.fetch()
+        lines = []
+        for entry in data:
+            start = int(entry.get('start', 0))
+            minutes = start // 60
+            seconds = start % 60
+            time_str = f"[{minutes:02d}:{seconds:02d}]"
+            lines.append(f"{time_str} {entry.get('text', '')}")
+
+        full_transcript = "\n".join(lines)
+        task.set_progress(50)
+
+        # Save to datastore_docs
+        db = next(get_db())
+        try:
+            datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+            docs_dir = get_user_datastore_root_path(datastore_record.owner.username) / "safestore_docs" / datastore_id
+            docs_dir.mkdir(parents=True, exist_ok=True)
+
+            safe_filename_val = f"YouTube_Transcript_{video_id}.md"
+            file_path = docs_dir / safe_filename_val
+            file_path.write_text(f"# YouTube Transcript ({video_id})\nSource: {video_url}\n\n{full_transcript}", encoding="utf-8")
+
+            task.log(f"Saved transcript to {safe_filename_val}. Vectorizing...")
+            task.set_progress(70)
+
+            ss = get_safe_store_instance(username, datastore_id, db, permission_level="read_write")
+            with ss:
+                ss.add_document(str(file_path))
+
+            task.set_progress(100)
+            task.log(f"Successfully vectorized YouTube transcript into '{datastore_record.name}'.")
+            task.result = {"message": f"Successfully indexed YouTube transcript ({video_id})."}
+        finally:
+            db.close()
+
+    except Exception as e:
+        task.log(f"YouTube transcript ingestion failed: {e}", "ERROR")
+        trace_exception(e)
+        raise e
+
 @store_files_router.post("/scrape-url", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def scrape_url_to_datastore(
     datastore_id: str,
@@ -684,10 +915,30 @@ async def scrape_url_to_datastore(
     if not datastore_record: raise HTTPException(status_code=404, detail="Datastore not found.")
 
     db_task = task_manager.submit_task(
-        name=f"Scrape URL to DataStore: {datastore_record.name}",
+        name=f"Add files to DataStore: {datastore_record.name}",
         target=_scrape_url_task,
         args=(current_user.username, datastore_id, request.url, request.depth),
         description=f"Scraping {request.url} (Depth: {request.depth}) into '{datastore_record.name}'.",
+        owner_username=current_user.username
+    )
+    return db_task
+
+@store_files_router.post("/import-youtube", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
+async def import_youtube_to_datastore(
+    datastore_id: str,
+    request: YoutubeImportRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> TaskInfo:
+    get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_write")
+    datastore_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
+    if not datastore_record: raise HTTPException(status_code=404, detail="Datastore not found.")
+
+    db_task = task_manager.submit_task(
+        name=f"Add files to DataStore: {datastore_record.name}",
+        target=_import_youtube_datastore_task,
+        args=(current_user.username, datastore_id, request.video_url, request.language),
+        description=f"Fetching & vectorizing YouTube transcript ({request.video_url}) into '{datastore_record.name}'.",
         owner_username=current_user.username
     )
     return db_task
@@ -811,12 +1062,13 @@ DOCUMENT_PALETTE = [
 async def get_datastore_data_lake_projection(
     datastore_id: str,
     method: str = "pca",
+    dimensions: int = 2,
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """
-    Computes 2D vector embedding projections for all chunks in the DataStore,
-    colored and grouped by source document.
+    Retrieves the 2D/3D Data Lake point cloud projection using safe_store's native engine
+    with persistent mtime caching and resilient SQLite fallback.
     """
     if not safe_store:
         raise HTTPException(status_code=501, detail="SafeStore not available.")
@@ -826,16 +1078,59 @@ async def get_datastore_data_lake_projection(
     if not datastore_record:
         raise HTTPException(status_code=404, detail="Datastore not found")
 
-    import sqlite3
-    db_path = get_datastore_db_path(datastore_record.owner.username, datastore_id)
+    owner_username = datastore_record.owner.username
+    db_path = get_datastore_db_path(owner_username, datastore_id)
     if not db_path.exists():
         return DataLakeResponse(points=[], documents=[], total_chunks=0, reduction_method=method)
 
-    conn = sqlite3.connect(str(db_path))
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
+    mtime = db_path.stat().st_mtime
+    cache_key = f"{datastore_id}_{method.lower()}_{dimensions}d"
 
+    # 1. Instant Cache Return
+    if cache_key in _data_lake_cache and _data_lake_cache[cache_key]["mtime"] == mtime:
+        return _data_lake_cache[cache_key]["response"]
+
+    # 2. Try safe_store native DataLake / Point Cloud engine
+    with ss:
+        native_result = None
+        if hasattr(ss, "get_datalake_projection"):
+            try:
+                native_result = ss.get_datalake_projection(method=method, dimensions=dimensions)
+            except Exception as ex:
+                print(f"SafeStore native get_datalake_projection exception: {ex}")
+        elif hasattr(ss, "get_point_cloud"):
+            try:
+                native_result = ss.get_point_cloud(method=method, dimensions=dimensions)
+            except Exception as ex:
+                print(f"SafeStore native get_point_cloud exception: {ex}")
+        elif hasattr(safe_store, "DataLake"):
+            try:
+                dl_engine = safe_store.DataLake(store=ss)
+                if hasattr(dl_engine, "get_projection"):
+                    native_result = dl_engine.get_projection(method=method, dimensions=dimensions)
+            except Exception as ex:
+                print(f"safe_store.DataLake engine exception: {ex}")
+
+        if native_result and isinstance(native_result, dict) and "points" in native_result:
+            sanitized = _sanitize_numpy(native_result)
+            response_obj = DataLakeResponse(
+                points=sanitized["points"],
+                documents=sanitized.get("documents", []),
+                total_chunks=sanitized.get("total_chunks", len(sanitized["points"])),
+                dimensions=dimensions,
+                reduction_method=method.upper()
+            )
+            _data_lake_cache[cache_key] = {"mtime": mtime, "response": response_obj}
+            return response_obj
+
+    # 3. Resilient direct SQLite extraction fallback
+    import sqlite3
+    conn = None
     try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = {row[0] for row in cursor.fetchall()}
 
@@ -843,39 +1138,20 @@ async def get_datastore_data_lake_projection(
             conn.close()
             return DataLakeResponse(points=[], documents=[], total_chunks=0, reduction_method=method)
 
-        # Inspect chunks table columns
-        cursor.execute("PRAGMA table_info(chunks)")
-        chunk_cols = {row[1] for row in cursor.fetchall()}
-
-        doc_col = "document_id" if "document_id" in chunk_cols else ("doc_id" if "doc_id" in chunk_cols else "file_path")
-        text_col = "chunk_text" if "chunk_text" in chunk_cols else ("text" if "text" in chunk_cols else "content")
-        idx_col = "chunk_index" if "chunk_index" in chunk_cols else "id"
-        vec_col = "vector" if "vector" in chunk_cols else ("embedding" if "embedding" in chunk_cols else ("embeddings" if "embeddings" in chunk_cols else None))
-        meta_col = "metadata" if "metadata" in chunk_cols else None
-
-        # Build Document map
+        # Build Document Title Map
         doc_titles = {}
         if "documents" in tables:
-            cursor.execute("PRAGMA table_info(documents)")
-            d_cols = {row[1] for row in cursor.fetchall()}
-            d_id_col = "id" if "id" in d_cols else "file_path"
-            d_path_col = "file_path" if "file_path" in d_cols else "title"
+            cursor.execute("SELECT rowid AS row_id, * FROM documents")
+            for doc_row in [dict(r) for r in cursor.fetchall()]:
+                did = str(doc_row.get("id") or doc_row.get("doc_id") or doc_row.get("file_path") or doc_row.get("row_id") or "")
+                raw_path = str(doc_row.get("file_path") or doc_row.get("title") or doc_row.get("name") or doc_row.get("filename") or f"Doc {did}")
+                if did:
+                    doc_titles[did] = Path(raw_path).name
 
-            cursor.execute(f"SELECT {d_id_col}, {d_path_col} FROM documents")
-            for r in cursor.fetchall():
-                doc_id_val = str(r[0])
-                raw_path = str(r[1] or f"Doc {doc_id_val}")
-                doc_titles[doc_id_val] = Path(raw_path).name
-
-        select_cols = [f"id", f"{doc_col} AS doc_id", f"{text_col} AS text", f"{idx_col} AS chunk_idx"]
-        if vec_col:
-            select_cols.append(f"{vec_col} AS vector_data")
-        if meta_col:
-            select_cols.append(f"{meta_col} AS metadata_data")
-
-        cursor.execute(f"SELECT {', '.join(select_cols)} FROM chunks")
-        raw_rows = cursor.fetchall()
+        cursor.execute("SELECT rowid AS row_id, * FROM chunks")
+        raw_rows = [dict(r) for r in cursor.fetchall()]
         conn.close()
+        conn = None
 
         if not raw_rows:
             return DataLakeResponse(points=[], documents=[], total_chunks=0, reduction_method=method)
@@ -884,49 +1160,32 @@ async def get_datastore_data_lake_projection(
         chunk_records = []
         document_chunks_count = {}
 
-        for row in raw_rows:
-            cid = str(row["id"])
-            doc_id = str(row["doc_id"] or "default_doc")
-            text_content = str(row["text"] or "")
-            c_idx = int(row["chunk_idx"]) if isinstance(row["chunk_idx"], (int, float)) else 0
-            doc_name = doc_titles.get(doc_id) or Path(doc_id).name or f"Document {doc_id[:8]}"
+        for idx, row in enumerate(raw_rows):
+            cid = str(row.get("id") or row.get("chunk_id") or row.get("row_id") or f"c_{idx}")
+            doc_id = str(row.get("document_id") or row.get("doc_id") or row.get("file_path") or row.get("document_path") or "default_doc")
+            text_content = str(row.get("chunk_text") or row.get("text") or row.get("content") or row.get("full_text") or "")
+            
+            raw_idx = row.get("chunk_index", row.get("index", row.get("idx", idx)))
+            try:
+                c_idx = int(raw_idx)
+            except (ValueError, TypeError):
+                c_idx = idx
 
+            doc_name = doc_titles.get(doc_id) or Path(doc_id).name or f"Document {doc_id[:8]}"
             document_chunks_count[doc_id] = document_chunks_count.get(doc_id, 0) + 1
 
             meta = {}
-            if meta_col and row["metadata_data"]:
+            raw_meta = row.get("metadata") or row.get("meta") or row.get("document_metadata")
+            if raw_meta:
                 try:
-                    meta = json.loads(row["metadata_data"]) if isinstance(row["metadata_data"], str) else dict(row["metadata_data"])
+                    meta = json.loads(raw_meta) if isinstance(raw_meta, str) else dict(raw_meta)
                 except Exception:
                     pass
 
-            vec = None
-            if vec_col and row["vector_data"] is not None:
-                raw_vec = row["vector_data"]
-                if isinstance(raw_vec, bytes):
-                    # Check if float32 or float64
-                    if len(raw_vec) % 4 == 0:
-                        vec = np.frombuffer(raw_vec, dtype=np.float32)
-                    elif len(raw_vec) % 8 == 0:
-                        vec = np.frombuffer(raw_vec, dtype=np.float64)
-                elif isinstance(raw_vec, str):
-                    try:
-                        parsed_v = json.loads(raw_vec)
-                        if isinstance(parsed_v, list):
-                            vec = np.array(parsed_v, dtype=np.float32)
-                    except Exception:
-                        pass
-                elif isinstance(raw_vec, (list, np.ndarray)):
-                    vec = np.array(raw_vec, dtype=np.float32)
-
-            if vec is None or len(vec) == 0:
-                # Deterministic TF-IDF / Hash projection for unvectorized text
-                import hashlib
-                h = hashlib.sha256(text_content.encode('utf-8')).digest()
-                pseudo_vec = np.frombuffer(h[:32], dtype=np.float32)
-                vec = pseudo_vec
-
+            raw_vec = row.get("vector") or row.get("embedding") or row.get("embeddings") or row.get("vec")
+            vec = _decode_single_vector(raw_vec, text_content)
             extracted_vectors.append(vec)
+
             chunk_records.append({
                 "id": cid,
                 "document_id": doc_id,
@@ -937,7 +1196,6 @@ async def get_datastore_data_lake_projection(
                 "metadata": meta
             })
 
-        # Ensure all vectors match the maximum dimension
         if extracted_vectors:
             max_dim = max(len(v) for v in extracted_vectors)
             padded_vectors = []
@@ -951,7 +1209,6 @@ async def get_datastore_data_lake_projection(
         else:
             vector_matrix = np.zeros((len(chunk_records), 2), dtype=np.float32)
 
-        # Compute 2D coordinates
         coords_2d = _project_vectors_to_2d(vector_matrix, method=method.lower())
 
         # Map document colors
@@ -966,6 +1223,10 @@ async def get_datastore_data_lake_projection(
         for idx, item in enumerate(chunk_records):
             x_val = float(coords_2d[idx, 0])
             y_val = float(coords_2d[idx, 1])
+
+            if np.isnan(x_val) or np.isinf(x_val): x_val = 0.0
+            if np.isnan(y_val) or np.isinf(y_val): y_val = 0.0
+
             doc_id = item["document_id"]
             color = doc_color_map.get(doc_id, "#3b82f6")
 
@@ -976,8 +1237,8 @@ async def get_datastore_data_lake_projection(
                 chunk_index=item["chunk_index"],
                 text_snippet=item["text_snippet"],
                 full_text=item["full_text"],
-                x=x_val,
-                y=y_val,
+                x=round(x_val, 5),
+                y=round(y_val, 5),
                 metadata=item["metadata"],
                 color=color
             ))
@@ -992,15 +1253,18 @@ async def get_datastore_data_lake_projection(
             c_x = float(np.mean([pt[0] for pt in d_coords]))
             c_y = float(np.mean([pt[1] for pt in d_coords]))
 
+            if np.isnan(c_x) or np.isinf(c_x): c_x = 0.0
+            if np.isnan(c_y) or np.isinf(c_y): c_y = 0.0
+
             doc_legends.append(DataLakeDocumentLegend(
                 id=doc_id,
                 name=d_name,
                 chunk_count=document_chunks_count.get(doc_id, 0),
                 color=doc_color_map.get(doc_id, "#3b82f6"),
-                centroid={"x": c_x, "y": c_y}
+                centroid={"x": round(c_x, 5), "y": round(c_y, 5)}
             ))
 
-        return DataLakeResponse(
+        response_obj = DataLakeResponse(
             points=points,
             documents=doc_legends,
             total_chunks=len(points),
@@ -1008,11 +1272,108 @@ async def get_datastore_data_lake_projection(
             reduction_method=method.upper()
         )
 
+        _data_lake_cache[cache_key] = {
+            "mtime": mtime,
+            "response": response_obj
+        }
+
+        return response_obj
+
     except Exception as e:
         trace_exception(e)
         if conn:
-            conn.close()
+            try: conn.close()
+            except Exception: pass
         raise HTTPException(status_code=500, detail=f"Error generating data lake visualization: {str(e)}")
+@store_files_router.get("/data-lake/export-html", response_class=HTMLResponse)
+async def export_datastore_datalake_html(
+    datastore_id: str,
+    method: str = "pca",
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Exports or serves the interactive standalone HTML visualizer generated by safe_store.
+    """
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_query")
+    datastore_record = db.query(DBDataStore).options(joinedload(DBDataStore.owner)).filter(DBDataStore.id == datastore_id).first()
+    if not datastore_record:
+        raise HTTPException(status_code=404, detail="Datastore not found")
+
+    with ss:
+        if hasattr(ss, "export_datalake_html"):
+            try:
+                html_content = ss.export_datalake_html(method=method)
+                return HTMLResponse(content=html_content)
+            except Exception as e:
+                trace_exception(e)
+
+        if hasattr(safe_store, "DataLake"):
+            try:
+                dl = safe_store.DataLake(store=ss)
+                if hasattr(dl, "export_html"):
+                    return HTMLResponse(content=dl.export_html(method=method))
+            except Exception:
+                pass
+
+    # Fallback to rich embedded HTML shell
+    projection = await get_datastore_data_lake_projection(datastore_id, method=method, current_user=current_user, db=db)
+    points_json = json.dumps([p.model_dump() for p in projection.points])
+    docs_json = json.dumps([d.model_dump() for d in projection.documents])
+
+    html_page = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Data Lake: {datastore_record.name}</title>
+    <style>
+        body {{ margin: 0; background: #0b0f19; color: #f8fafc; font-family: -apple-system, sans-serif; overflow: hidden; }}
+        #header {{ position: absolute; top: 16px; left: 16px; z-index: 10; background: rgba(15,23,42,0.85); backdrop-filter: blur(8px); padding: 12px 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1); }}
+        h1 {{ margin: 0; font-size: 16px; font-weight: 800; text-transform: uppercase; letter-spacing: 1px; color: #38bdf8; }}
+        p {{ margin: 4px 0 0 0; font-size: 12px; color: #94a3b8; }}
+        canvas {{ width: 100vw; height: 100vh; display: block; cursor: crosshair; }}
+    </style>
+</head>
+<body>
+    <div id="header">
+        <h1>{datastore_record.name} · Data Lake</h1>
+        <p>{len(projection.points)} Chunks Projected ({projection.reduction_method})</p>
+    </div>
+    <canvas id="c"></canvas>
+    <script>
+        const points = {points_json};
+        const docs = {docs_json};
+        const canvas = document.getElementById('c');
+        const ctx = canvas.getContext('2d');
+        let width, height;
+        function resize() {{
+            width = canvas.width = window.innerWidth * window.devicePixelRatio;
+            height = canvas.height = window.innerHeight * window.devicePixelRatio;
+            render();
+        }}
+        function render() {{
+            ctx.clearRect(0, 0, width, height);
+            const cx = width / 2;
+            const cy = height / 2;
+            const scale = Math.min(width, height) * 0.42;
+            points.forEach(p => {{
+                const x = cx + p.x * scale;
+                const y = cy + p.y * scale;
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fillStyle = p.color || '#38bdf8';
+                ctx.fill();
+            }});
+        }}
+        window.addEventListener('resize', resize);
+        resize();
+    </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html_page)
 
 @store_files_router.post("/files/batch-delete")
 async def batch_delete_rag_documents_from_datastore(
@@ -1054,6 +1415,8 @@ async def batch_delete_rag_documents_from_datastore(
 
 def _generate_llm_answer(llm_client, full_prompt: str, max_tokens: int, temperature: float) -> str:
     """Invokes the LLM client defensively handling different lollms-client parameter signatures."""
+    if not llm_client:
+        raise ValueError("No active LLM client could be established.")
     try:
         return llm_client.generate_text(full_prompt, n_predict=max_tokens, temperature=temperature)
     except TypeError:
@@ -1077,20 +1440,32 @@ async def query_datastore_and_answer(
 
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        min_threshold = float(request_data.min_similarity_percent)
         with ss:
             if request_data.mode == "hybrid" and hasattr(ss, "hybrid_query"):
-                results = ss.hybrid_query(
-                    query_text=request_data.query,
-                    top_k=request_data.top_k,
-                    dense_weight=request_data.dense_weight,
-                    bm25_weight=request_data.bm25_weight,
-                    rrf_k=request_data.rrf_k
-                )
+                try:
+                    raw_hybrid = ss.hybrid_query(
+                        query_text=request_data.query,
+                        top_k=request_data.top_k,
+                        dense_weight=request_data.dense_weight,
+                        bm25_weight=request_data.bm25_weight,
+                        rrf_k=request_data.rrf_k,
+                        min_similarity_percent=min_threshold
+                    )
+                except TypeError:
+                    raw_hybrid = ss.hybrid_query(
+                        query_text=request_data.query,
+                        top_k=request_data.top_k,
+                        dense_weight=request_data.dense_weight,
+                        bm25_weight=request_data.bm25_weight,
+                        rrf_k=request_data.rrf_k
+                    )
+                results = [r for r in raw_hybrid if r.get("similarity_percent", 100.0) >= min_threshold]
             else:
                 results = ss.query(
                     request_data.query, 
                     top_k=request_data.top_k, 
-                    min_similarity_percent=request_data.min_similarity_percent
+                    min_similarity_percent=min_threshold
                 )
 
         sanitized_results = _sanitize_numpy(results)
@@ -1156,9 +1531,170 @@ async def query_datastore_and_answer(
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Error generating answer from datastore: {e}")
 
+@store_files_router.post("/query-full-documents", response_model=List[Dict])
+async def query_full_documents(
+    datastore_id: str,
+    request_data: FullDocumentQueryRequest,
+    min_relevance_percent: float = Query(50.0, ge=0.0, le=100.0),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> List[Dict]:
+    """Queries datastore and reconstructs entire documents containing the top matching chunks exceeding the relevance threshold."""
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        results = []
+        with ss:
+            if hasattr(ss, "query_full_documents"):
+                try:
+                    results = ss.query_full_documents(
+                        query_text=request_data.query,
+                        top_k_docs=request_data.top_k_docs,
+                        search_mode=request_data.search_mode,
+                        min_relevance_percent=min_relevance_percent
+                    )
+                except TypeError:
+                    results = ss.query_full_documents(
+                        query_text=request_data.query,
+                        top_k_docs=request_data.top_k_docs,
+                        search_mode=request_data.search_mode
+                    )
+            else:
+                raw = ss.query(request_data.query, top_k=request_data.top_k_docs, min_similarity_percent=min_relevance_percent)
+                seen = set()
+                for r in raw:
+                    fpath = r.get("file_path")
+                    if fpath and fpath not in seen:
+                        seen.add(fpath)
+                        txt = ss.reconstruct_document_text(fpath) if hasattr(ss, "reconstruct_document_text") else r.get("chunk_text", "")
+                        results.append({
+                            "document_title": Path(fpath).name,
+                            "file_path": fpath,
+                            "full_text": txt,
+                            "relevance_score": r.get("similarity_percent", 100.0),
+                            "metadata": r.get("document_metadata", {})
+                        })
+
+        # Defensively filter any document below the threshold
+        filtered = [
+            doc for doc in results
+            if doc.get("relevance_score", doc.get("score", 100.0)) >= min_relevance_percent
+        ]
+        return _sanitize_numpy(filtered)
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Error in full document retrieval: {e}")
+
+@store_files_router.post("/query-window", response_model=List[Dict])
+async def query_document_window(
+    datastore_id: str,
+    request_data: DocumentWindowQueryRequest,
+    min_relevance_percent: float = Query(50.0, ge=0.0, le=100.0),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> List[Dict]:
+    """Retrieves matching chunks exceeding the relevance threshold with surrounding context window stitched together."""
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        results = []
+        with ss:
+            if hasattr(ss, "query_document_content_window"):
+                try:
+                    results = ss.query_document_content_window(
+                        query_text=request_data.query,
+                        top_k_hits=request_data.top_k_hits,
+                        window_before=request_data.window_before,
+                        window_after=request_data.window_after,
+                        min_relevance_percent=min_relevance_percent
+                    )
+                except TypeError:
+                    results = ss.query_document_content_window(
+                        query_text=request_data.query,
+                        top_k_hits=request_data.top_k_hits,
+                        window_before=request_data.window_before,
+                        window_after=request_data.window_after
+                    )
+            else:
+                results = ss.query(request_data.query, top_k=request_data.top_k_hits, min_similarity_percent=min_relevance_percent)
+                for r in results:
+                    r["stitched_window_text"] = r.get("chunk_text", "")
+
+        filtered = [
+            w for w in results
+            if w.get("relevance_score", w.get("similarity_percent", w.get("score", 100.0))) >= min_relevance_percent
+        ]
+        return _sanitize_numpy(filtered)
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Error in window retrieval: {e}")
+
+@store_files_router.get("/documents/{document_identifier:path}/chunks-paginated", response_model=DocumentChunksPaginatedResponse)
+async def get_document_chunks_paginated(
+    datastore_id: str,
+    document_identifier: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Paginates through chunks of a specific document in the DataStore."""
+    if not safe_store:
+        raise HTTPException(status_code=501, detail="SafeStore not available.")
+    try:
+        ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        with ss:
+            if hasattr(ss, "get_document_content_paginated"):
+                res = ss.get_document_content_paginated(
+                    document_id=unquote(document_identifier),
+                    page=page,
+                    page_size=page_size
+                )
+                return _sanitize_numpy(res)
+
+        # SQLite direct pagination fallback
+        datastore_record = db.query(DBDataStore).filter(DBDataStore.id == datastore_id).first()
+        db_path = get_datastore_db_path(datastore_record.owner.username, datastore_id)
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        cur = conn.cursor()
+
+        decoded = unquote(document_identifier)
+        cur.execute("SELECT rowid, * FROM chunks WHERE document_id LIKE ? OR file_path LIKE ? ORDER BY chunk_index ASC", (f"%{decoded}%", f"%{decoded}%"))
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        total = len(rows)
+        total_pages = max(1, (total + page_size - 1) // page_size)
+        start = (page - 1) * page_size
+        paged = rows[start:start + page_size]
+
+        formatted = []
+        for r in paged:
+            formatted.append({
+                "id": str(r.get("id") or r.get("rowid") or r.get("chunk_id")),
+                "chunk_index": int(r.get("chunk_index") or 0),
+                "text": str(r.get("chunk_text") or r.get("text") or r.get("content") or ""),
+                "metadata": json.loads(r["metadata"]) if r.get("metadata") and isinstance(r["metadata"], str) else (r.get("metadata") or {})
+            })
+
+        return DocumentChunksPaginatedResponse(
+            document_id=decoded,
+            page=page,
+            page_size=page_size,
+            total_pages=total_pages,
+            total_chunks=total,
+            chunks=formatted
+        )
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Error paginating document chunks: {e}")
+
 @store_files_router.post("/query", response_model=List[Dict])
 async def query_datastore(
-
     datastore_id: str,
     request_data: DataStoreQueryRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user),
@@ -1166,29 +1702,84 @@ async def query_datastore(
 ) -> List[Dict]:
     if not safe_store:
         raise HTTPException(status_code=501, detail="SafeStore not available.")
-    
+
     try:
         ss = get_safe_store_instance(current_user.username, datastore_id, db)
+        min_threshold = float(request_data.min_similarity_percent)
+        results = []
         with ss:
-            if request_data.mode == "hybrid" and hasattr(ss, "hybrid_query"):
-                results = ss.hybrid_query(
-                    query_text=request_data.query,
-                    top_k=request_data.top_k,
-                    dense_weight=request_data.dense_weight,
-                    bm25_weight=request_data.bm25_weight,
-                    rrf_k=request_data.rrf_k
-                )
+            # 1. Full Document Retrieval
+            if request_data.retrieval_target == "full_documents" and hasattr(ss, "query_full_documents"):
+                try:
+                    results = ss.query_full_documents(
+                        query_text=request_data.query,
+                        top_k_docs=request_data.top_k,
+                        search_mode=request_data.mode,
+                        min_relevance_percent=min_threshold
+                    )
+                except TypeError:
+                    results = ss.query_full_documents(
+                        query_text=request_data.query,
+                        top_k_docs=request_data.top_k,
+                        search_mode=request_data.mode
+                    )
+                results = [r for r in results if r.get("relevance_score", r.get("score", 100.0)) >= min_threshold]
+
+            # 2. Window Expansion Retrieval
+            elif request_data.retrieval_target == "window" and hasattr(ss, "query_document_content_window"):
+                try:
+                    results = ss.query_document_content_window(
+                        query_text=request_data.query,
+                        top_k_hits=request_data.top_k,
+                        window_before=request_data.window_before,
+                        window_after=request_data.window_after,
+                        min_relevance_percent=min_threshold
+                    )
+                except TypeError:
+                    results = ss.query_document_content_window(
+                        query_text=request_data.query,
+                        top_k_hits=request_data.top_k,
+                        window_before=request_data.window_before,
+                        window_after=request_data.window_after
+                    )
+                results = [r for r in results if r.get("relevance_score", r.get("similarity_percent", r.get("score", 100.0))) >= min_threshold]
+
+            # 3. Standard Chunk Retrieval (Hybrid or Dense)
+            elif request_data.mode == "hybrid" and hasattr(ss, "hybrid_query"):
+                try:
+                    raw_hybrid = ss.hybrid_query(
+                        query_text=request_data.query,
+                        top_k=request_data.top_k,
+                        dense_weight=request_data.dense_weight,
+                        bm25_weight=request_data.bm25_weight,
+                        rrf_k=request_data.rrf_k,
+                        min_similarity_percent=min_threshold
+                    )
+                except TypeError:
+                    raw_hybrid = ss.hybrid_query(
+                        query_text=request_data.query,
+                        top_k=request_data.top_k,
+                        dense_weight=request_data.dense_weight,
+                        bm25_weight=request_data.bm25_weight,
+                        rrf_k=request_data.rrf_k
+                    )
+                # Filter out chunks where dense similarity was computed and fell below threshold
+                results = [
+                    r for r in raw_hybrid
+                    if r.get("similarity_percent", 100.0) >= min_threshold
+                ]
             else:
                 results = ss.query(
                     request_data.query, 
                     top_k=request_data.top_k, 
-                    min_similarity_percent=request_data.min_similarity_percent
+                    min_similarity_percent=min_threshold
                 )
         sanitized_results = _sanitize_numpy(results)
         return sanitized_results
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Error querying datastore: {e}")
+
 
 @store_files_router.post("/graph/generate", response_model=TaskInfo, status_code=status.HTTP_202_ACCEPTED)
 async def generate_datastore_graph(
@@ -1276,6 +1867,7 @@ class NodeRenamePayload(BaseModel):
     old_uri: str
     new_name: str
 
+# Clean duplicate removal
 @store_files_router.get("/graph", response_model=Dict)
 async def get_datastore_graph(
     datastore_id: str,

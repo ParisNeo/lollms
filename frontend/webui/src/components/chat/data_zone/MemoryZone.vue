@@ -9,6 +9,7 @@ import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 import IconPlus from '../../../assets/icons/IconPlus.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
+import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../../assets/icons/IconCircle.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
@@ -37,6 +38,40 @@ const activeMemories = computed(() => {
     }
     return list;
 });
+
+const currentTierLevel = computed(() => {
+    if (activeTab.value === 'deep') return 2;
+    if (activeTab.value === 'archived') return 3;
+    return 1;
+});
+
+const currentTierName = computed(() => {
+    if (activeTab.value === 'deep') return 'Deep Memory (L2)';
+    if (activeTab.value === 'archived') return 'Archived Memory (L3)';
+    return 'Working Memory (L1)';
+});
+
+async function handleRefreshMemories() {
+    await memoriesStore.fetchMemories();
+    uiStore.addNotification('Memories refreshed.', 'success');
+}
+
+async function handleClearCurrentTier() {
+    const level = currentTierLevel.value;
+    const count = activeMemories.value.length;
+    if (count === 0) return;
+
+    const confirmed = await uiStore.showConfirmation({
+        title: `Clear All ${currentTierName.value}?`,
+        message: `Are you sure you want to permanently delete all ${count} memory entries in this tier? This action cannot be undone.`,
+        confirmText: 'Delete All',
+        danger: true
+    });
+
+    if (confirmed.confirmed) {
+        await memoriesStore.clearMemoriesByLevel(level);
+    }
+}
 
 async function triggerDream() {
     if (isDreaming.value) return;
@@ -92,16 +127,19 @@ onMounted(() => {
 
 <template>
   <div class="flex flex-col h-full gap-3 overflow-hidden">
-    <!-- Header with Search & Dreaming -->
+    <!-- Header with Search, Refresh, Dreaming & Add -->
     <div class="flex items-center justify-between bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-2 rounded-lg shadow-sm shrink-0">
         <input v-model="memorySearchTerm" type="text" placeholder="Filter memories..." 
-               class="w-32 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border-none focus:ring-1 focus:ring-blue-500 rounded" />
-        <div class="flex gap-2">
-            <button @click="triggerDream" class="btn btn-secondary btn-xs py-1 px-3 shadow-sm flex items-center gap-1.5" :disabled="isDreaming">
+               class="w-28 sm:w-32 px-2 py-1 text-xs bg-gray-50 dark:bg-gray-900 border-none focus:ring-1 focus:ring-blue-500 rounded" />
+        <div class="flex items-center gap-1.5">
+            <button @click="handleRefreshMemories" class="btn btn-secondary btn-xs p-1.5 shadow-sm" title="Refresh Memories" :disabled="isLoadingMemories">
+                <IconRefresh class="w-3.5 h-3.5" :class="{'animate-spin': isLoadingMemories}" />
+            </button>
+            <button @click="triggerDream" class="btn btn-secondary btn-xs py-1 px-2.5 shadow-sm flex items-center gap-1" :disabled="isDreaming">
                 <IconAnimateSpin v-if="isDreaming" class="w-3.5 h-3.5 animate-spin" />
                 <span v-else>💤 Dream</span>
             </button>
-            <button @click="addManualFact" class="btn btn-primary btn-xs py-1 px-3 shadow-sm flex items-center gap-1.5">
+            <button @click="addManualFact" class="btn btn-primary btn-xs py-1 px-2.5 shadow-sm flex items-center gap-1">
                 <IconPlus class="w-3.5 h-3.5"/>
                 <span>Add Fact</span>
             </button>
@@ -124,6 +162,20 @@ onMounted(() => {
         </button>
     </div>
 
+    <!-- Tier Stats & Bulk Actions Bar -->
+    <div class="px-2 py-1 flex items-center justify-between text-[10px] text-gray-400 border-b dark:border-gray-800 shrink-0">
+        <div class="flex items-center gap-1.5">
+            <button @click="handleRefreshMemories" class="hover:text-blue-500 transition-colors" title="Sync this tier">
+                <IconRefresh class="w-3 h-3" :class="{'animate-spin': isLoadingMemories}" />
+            </button>
+            <span>{{ activeMemories.length }} fact{{ activeMemories.length !== 1 ? 's' : '' }} in {{ currentTierName }}</span>
+        </div>
+        <button v-if="activeMemories.length > 0" @click="handleClearCurrentTier" class="text-red-500 hover:text-red-600 font-bold uppercase tracking-wider text-[9px] flex items-center gap-1 hover:underline">
+            <IconTrash class="w-3 h-3" />
+            <span>Clear Tier</span>
+        </button>
+    </div>
+
     <!-- Active List -->
     <div class="flex-1 overflow-y-auto custom-scrollbar bg-white dark:bg-gray-950 rounded-lg p-2 border dark:border-gray-800">
         <div v-if="isLoadingMemories" class="flex justify-center items-center py-20">
@@ -131,7 +183,7 @@ onMounted(() => {
         </div>
         <div v-else-if="activeMemories.length === 0" class="flex flex-col items-center justify-center py-20 text-gray-400 italic">
             <IconThinking class="w-10 h-10 opacity-20 mb-2" />
-            <span class="text-[9px] font-black uppercase tracking-widest">No matching memories</span>
+            <span class="text-[9px] font-black uppercase tracking-widest">No matching memories in this tier</span>
         </div>
         <div v-else class="space-y-3">
             <div v-for="mem in activeMemories" :key="mem.id" class="p-3 rounded-xl border border-gray-150 dark:border-gray-800 bg-gray-50/30 dark:bg-gray-900/20 group/item relative">
