@@ -1979,6 +1979,7 @@ def build_llm_generation_router(router: APIRouter):
                             enable_memory=owner_db_user.memory_enabled,
                             enable_auto_dream=owner_db_user.auto_memory_enabled,
                             enable_deep_memory_pulling=owner_db_user.memory_enabled,
+                            enable_episodic_memory=False,
                             prehydrate_rag=True,
                             enable_in_message_status=True,
                             enable_specialized_events_stream=True,
