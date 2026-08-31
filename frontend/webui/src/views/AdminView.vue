@@ -100,31 +100,31 @@ function handleNavigateFromChild(payload) {
 </script>
 
 <template>
-    <PageViewLayout title="Admin Panel" :title-icon="IconCog">
+    <PageViewLayout title="Admin Control Center" :title-icon="IconCog">
         <template #sidebar>
-            <div class="p-3 mb-2 border-b dark:border-gray-700">
-                <div class="flex items-center gap-2 text-xs" :class="wsConnected ? 'text-green-500' : 'text-red-500'">
+            <div class="p-3 mb-2 border-b dark:border-gray-700/80">
+                <div class="flex items-center gap-2 text-xs" :class="wsConnected ? 'text-emerald-500' : 'text-rose-500'">
                     <IconServer class="w-4 h-4" />
-                    <span class="font-semibold">WebSocket: {{ wsConnected ? 'Connected' : 'Disconnected' }}</span>
+                    <span class="font-bold">WebSocket: {{ wsConnected ? 'Connected' : 'Disconnected' }}</span>
                 </div>
             </div>
             <template v-for="(section, index) in sections" :key="index">
-                <div v-if="section.type === 'divider'" class="px-3 pt-4 pb-2 text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+                <div v-if="section.type === 'divider'" class="px-3 pt-4 pb-2 text-[10px] font-black uppercase tracking-widest text-gray-400 dark:text-gray-500">
                     {{ section.label }}
                 </div>
                 <a v-else-if="section.type === 'link'"
                    href="#"
                    @click.prevent="activeSectionId = section.id"
-                   class="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors"
-                   :class="activeSectionId === section.id ? 'bg-blue-600 text-white font-bold shadow-sm' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50'"
+                   class="flex items-center gap-3 px-3 py-2 text-xs font-bold rounded-xl transition-all"
+                   :class="activeSectionId === section.id ? 'bg-blue-600 text-white shadow-sm' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800/60'"
                 >
-                    <component :is="section.icon" class="w-5 h-5 shrink-0" />
+                    <component :is="section.icon" class="w-4 h-4 shrink-0" />
                     <span class="truncate">{{ section.name }}</span>
                 </a>
             </template>
         </template>
         <template #main>
-            <div class="p-4 sm:p-6 h-full">
+            <div class="p-4 sm:p-6 h-full overflow-hidden">
                 <AdminPanel 
                     :active-tab="activeSectionId" 
                     @navigate="handleNavigateFromChild"

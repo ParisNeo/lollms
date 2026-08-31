@@ -1,11 +1,18 @@
+<!-- frontend/webui/src/views/ResetPasswordView.vue -->
 <script setup>
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useAuthStore } from '../stores/auth';
 import apiClient from '../services/api';
 import appLogo from '../assets/logo.png';
+import IconAnimateSpin from '../assets/icons/IconAnimateSpin.vue';
+import IconCheckCircle from '../assets/icons/IconCheckCircle.vue';
+import IconEye from '../assets/icons/IconEye.vue';
+import IconEyeOff from '../assets/icons/IconEyeOff.vue';
 
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
 
 const token = ref('');
 const newPassword = ref('');
@@ -13,115 +20,224 @@ const confirmPassword = ref('');
 const isLoading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
-const isPasswordVisible = ref(false);
+const isNewPasswordVisible = ref(false);
+const isConfirmPasswordVisible = ref(false);
+const countdown = ref(3);
 
 onMounted(() => {
-  token.value = route.query.token || '';
-  if (!token.value) {
-    errorMessage.value = 'No reset token provided. Please use the link sent to you.';
-  }
+    // Ensure any stale token from a previous session is removed so it cannot conflict
+    localStorage.removeItem('lollms-token');
+    authStore.token = null;
+    authStore.user = null;
+    authStore.disconnectWebSocket();
+
+    // Extract token from query parameters
+    token.value = (route.query.token || '').toString().trim();
+    if (!token.value) {
+        errorMessage.value = 'No reset token provided. Please click the exact link from your email.';
+    }
 });
 
-const togglePasswordVisibility = () => {
-  isPasswordVisible.value = !isPasswordVisible.value;
-};
+const passwordsMatch = computed(() => {
+    if (!newPassword.value || !confirmPassword.value) return true;
+    return newPassword.value === confirmPassword.value;
+});
+
+const isFormValid = computed(() => {
+    return token.value && 
+           newPassword.value.length >= 8 && 
+           newPassword.value === confirmPassword.value && 
+           !isLoading.value;
+});
 
 const handleReset = async () => {
-  errorMessage.value = '';
+    errorMessage.value = '';
 
-  if (newPassword.value.length < 8) {
-    errorMessage.value = 'Password must be at least 8 characters long.';
-    return;
-  }
-  if (newPassword.value !== confirmPassword.value) {
-    errorMessage.value = 'Passwords do not match.';
-    return;
-  }
+    if (!token.value) {
+        errorMessage.value = 'Reset token is missing.';
+        return;
+    }
 
-  isLoading.value = true;
-  try {
-    const response = await apiClient.post('/api/auth/reset-password', {
-      token: token.value,
-      new_password: newPassword.value,
-    });
-    successMessage.value = response.data.message;
-    setTimeout(() => {
-      router.push('/'); // Redirect to home/login after a short delay
-    }, 3000);
-  } catch (error) {
-    errorMessage.value = error.response?.data?.detail || 'An unexpected error occurred.';
-  } finally {
-    isLoading.value = false;
-  }
+    if (newPassword.value.length < 8) {
+        errorMessage.value = 'Password must be at least 8 characters long.';
+        return;
+    }
+
+    if (newPassword.value !== confirmPassword.value) {
+        errorMessage.value = 'Passwords do not match.';
+        return;
+    }
+
+    isLoading.value = true;
+    try {
+        const response = await apiClient.post('/api/auth/reset-password', {
+            token: token.value,
+            new_password: newPassword.value,
+        });
+
+        successMessage.value = response.data.message || 'Password successfully updated!';
+
+        // Smooth countdown redirect to clean home page
+        const timer = setInterval(() => {
+            countdown.value -= 1;
+            if (countdown.value <= 0) {
+                clearInterval(timer);
+                window.location.href = '/';
+            }
+        }, 1000);
+
+    } catch (error) {
+        errorMessage.value = error.response?.data?.detail || 'Invalid or expired password reset link. Please request a new one.';
+    } finally {
+        isLoading.value = false;
+    }
+};
+
+const goToLogin = () => {
+    window.location.href = '/';
 };
 </script>
 
 <template>
-  <div class="min-h-screen bg-gray-100 dark:bg-gray-900 flex flex-col justify-center items-center py-12 sm:px-6 lg:px-8">
-    <div class="sm:mx-auto sm:w-full sm:max-w-md">
-      <img :src="appLogo" alt="Application Logo" class="mx-auto h-20 w-auto" />
-      <h2 class="mt-6 text-center text-2xl font-bold tracking-tight text-gray-900 dark:text-white">
-        Reset Your Password
-      </h2>
+  <div class="min-h-screen bg-gray-50 dark:bg-gray-950 flex flex-col justify-center items-center py-12 px-4 sm:px-6 lg:px-8 relative selection:bg-blue-500 selection:text-white">
+    <!-- Ambient Background Lighting -->
+    <div class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+        <div class="absolute top-[-10%] left-[-10%] w-[80%] h-[60%] rounded-full bg-blue-500/10 dark:bg-blue-600/5 blur-[120px]"></div>
+        <div class="absolute bottom-[-10%] right-[-10%] w-[80%] h-[60%] rounded-full bg-purple-500/10 dark:bg-purple-600/5 blur-[120px]"></div>
     </div>
 
-    <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-      <div class="bg-white dark:bg-gray-800 py-8 px-4 shadow-lg sm:rounded-lg sm:px-10">
-        <div v-if="!token">
-          <p class="text-center text-red-500">{{ errorMessage }}</p>
+    <div class="sm:mx-auto sm:w-full sm:max-w-md relative z-10 text-center">
+      <div class="inline-block p-4 bg-white dark:bg-gray-900 rounded-3xl shadow-xl border border-gray-100 dark:border-gray-800 mb-6">
+        <img :src="appLogo" alt="LoLLMs Logo" class="h-16 w-auto object-contain mx-auto" />
+      </div>
+      <h2 class="text-2xl sm:text-3xl font-black tracking-tight text-gray-900 dark:text-white">
+        Reset Your Password
+      </h2>
+      <p class="mt-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+        Enter a strong, secure new password for your account.
+      </p>
+    </div>
+
+    <div class="mt-8 sm:mx-auto sm:w-full sm:max-w-md relative z-10 w-full">
+      <div class="bg-white dark:bg-gray-900 py-8 px-6 sm:px-10 shadow-2xl rounded-3xl border border-gray-150 dark:border-gray-800 backdrop-blur-xl">
+        
+        <!-- Missing Token Warning -->
+        <div v-if="!token && !successMessage" class="text-center space-y-4">
+          <div class="p-4 bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-300 rounded-2xl border border-rose-200 dark:border-rose-800/50 text-xs leading-relaxed font-semibold">
+            {{ errorMessage }}
+          </div>
+          <button @click="goToLogin" class="btn btn-secondary w-full py-3 text-xs uppercase tracking-wider font-bold">
+            Back to Home
+          </button>
         </div>
-        <div v-else-if="successMessage">
-          <p class="text-center text-green-600 dark:text-green-400">{{ successMessage }}</p>
-           <p class="text-center text-sm text-gray-500 mt-2">You will be redirected shortly.</p>
-        </div>
-        <form v-else @submit.prevent="handleReset" class="space-y-6">
+
+        <!-- Success State -->
+        <div v-else-if="successMessage" class="text-center space-y-5 animate-in fade-in zoom-in-95">
+          <div class="w-16 h-16 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 rounded-full flex items-center justify-center mx-auto border border-emerald-200 dark:border-emerald-800 shadow-lg shadow-emerald-500/10">
+            <IconCheckCircle class="w-10 h-10" />
+          </div>
           <div>
-            <label for="new-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">New Password</label>
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white">{{ successMessage }}</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+              Redirecting to sign in within <span class="font-mono font-bold text-blue-500">{{ countdown }}s</span>...
+            </p>
+          </div>
+          <button @click="goToLogin" class="btn btn-primary w-full py-3 text-xs uppercase tracking-widest font-black shadow-lg shadow-blue-500/20">
+            Sign In Now &rarr;
+          </button>
+        </div>
+
+        <!-- Password Entry Form -->
+        <form v-else @submit.prevent="handleReset" class="space-y-5">
+          <!-- New Password Input -->
+          <div>
+            <label for="new-password" class="block text-xs font-black uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-1">
+              New Password
+            </label>
             <div class="relative">
               <input
                 v-model="newPassword"
-                :type="isPasswordVisible ? 'text' : 'password'"
+                :type="isNewPasswordVisible ? 'text' : 'password'"
                 id="new-password"
                 required
                 minlength="8"
                 :disabled="isLoading"
-                class="input-field mt-1 w-full pr-10"
-                placeholder="Enter new password"
+                class="input-field w-full pr-10 text-sm py-2.5 rounded-xl"
+                placeholder="At least 8 characters"
+                autocomplete="new-password"
               />
               <button
                 type="button"
-                @click="togglePasswordVisibility"
-                class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-500 hover:text-gray-700"
+                @click="isNewPasswordVisible = !isNewPasswordVisible"
+                class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                tabindex="-1"
               >
-                <svg v-if="isPasswordVisible" xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a9.97 9.97 0 01-1.563 3.029m-2.135-2.135A6.978 6.978 0 0112 17c-1.855 0-3.56-.736-4.807-1.938" /></svg>
-                <svg v-else xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
+                <IconEyeOff v-if="isNewPasswordVisible" class="h-4 w-4" />
+                <IconEye v-else class="h-4 w-4" />
               </button>
             </div>
           </div>
+
+          <!-- Confirm Password Input -->
           <div>
-            <label for="confirm-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Confirm New Password</label>
-            <input
-              v-model="confirmPassword"
-              :type="isPasswordVisible ? 'text' : 'password'"
-              id="confirm-password"
-              required
-              :disabled="isLoading"
-              class="input-field mt-1 w-full"
-              placeholder="Confirm new password"
-            />
+            <label for="confirm-password" class="block text-xs font-black uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-1">
+              Confirm Password
+            </label>
+            <div class="relative">
+              <input
+                v-model="confirmPassword"
+                :type="isConfirmPasswordVisible ? 'text' : 'password'"
+                id="confirm-password"
+                required
+                :disabled="isLoading"
+                class="input-field w-full pr-10 text-sm py-2.5 rounded-xl"
+                :class="{'border-rose-500 focus:border-rose-500': !passwordsMatch}"
+                placeholder="Re-enter new password"
+                autocomplete="new-password"
+              />
+              <button
+                type="button"
+                @click="isConfirmPasswordVisible = !isConfirmPasswordVisible"
+                class="absolute inset-y-0 right-0 flex items-center px-3 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                tabindex="-1"
+              >
+                <IconEyeOff v-if="isConfirmPasswordVisible" class="h-4 w-4" />
+                <IconEye v-else class="h-4 w-4" />
+              </button>
+            </div>
+            <p v-if="!passwordsMatch" class="text-[11px] text-rose-500 font-medium mt-1">
+              Passwords do not match.
+            </p>
           </div>
 
-          <div v-if="errorMessage" class="text-red-600 text-sm p-2 bg-red-100 dark:bg-red-900/50 rounded-md" role="alert">
+          <!-- Error Alert Banner -->
+          <div v-if="errorMessage" class="p-3 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 rounded-xl border border-rose-200 dark:border-rose-800 text-xs font-medium" role="alert">
             {{ errorMessage }}
           </div>
 
-          <div>
-            <button type="submit" class="btn btn-primary w-full" :disabled="isLoading">
-              {{ isLoading ? 'Resetting...' : 'Set New Password' }}
+          <!-- Submit Button -->
+          <div class="pt-2">
+            <button
+              type="submit"
+              class="btn btn-primary w-full py-3 text-xs uppercase tracking-widest font-black shadow-xl shadow-blue-500/20"
+              :disabled="!isFormValid"
+            >
+              <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
+              <span>{{ isLoading ? 'Updating Password...' : 'Save New Password' }}</span>
             </button>
+          </div>
+
+          <div class="text-center pt-2">
+            <a href="/" class="text-xs font-semibold text-gray-500 hover:text-blue-600 dark:hover:text-blue-400 transition-colors">
+              Cancel & Return Home
+            </a>
           </div>
         </form>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+@reference "tailwindcss";
+</style>

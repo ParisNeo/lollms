@@ -14,6 +14,7 @@ from backend.db.models.user import User as DBUser, Friendship as DBFriendship
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.api_key import OpenAIAPIKey
 from backend.db.models.db_task import DBTask
+from backend.db.models.email_marketing import EmailProposal, EmailStatus
 from backend.db.base import FriendshipStatus
 from backend.models.user import (
     UserCreateAdmin, UserPasswordResetAdmin,
@@ -59,11 +60,12 @@ def _to_task_info(db_task) -> "TaskInfo":
         owner_username=db_task.owner.username if db_task.owner else "System"
     )
 
-def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, background_color: str, send_as_text: bool):
+def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, background_color: str, send_as_text: bool, proposal_id: Optional[int] = None):
     db_session_local = next(get_db())
     try:
         users = db_session_local.query(DBUser).filter(DBUser.id.in_(user_ids)).all()
         sent_count = 0
+        actual_recipients = []
         for i, user in enumerate(users):
             if task.cancellation_event.is_set():
                 task.log("Cancellation requested.", level="WARNING")
@@ -72,12 +74,23 @@ def _email_users_task(task: Task, user_ids: List[int], subject: str, body: str, 
                 try:
                     send_generic_email(user.email, subject, body, background_color, send_as_text)
                     sent_count += 1
+                    actual_recipients.append(user.id)
                     task.log(f"Email sent to {user.username}.")
                 except Exception as e:
                     task.log(f"Failed to send to {user.username}: {e}", level="ERROR")
-            task.set_progress(5 + int(90 * (i + 1) / len(users)))
+            task.set_progress(5 + int(90 * (i + 1) / max(len(users), 1)))
+
+        # Update archived campaign record in DB
+        if proposal_id:
+            proposal = db_session_local.query(EmailProposal).filter(EmailProposal.id == proposal_id).first()
+            if proposal:
+                proposal.status = EmailStatus.SENT
+                proposal.sent_at = datetime.now(timezone.utc)
+                proposal.recipients = actual_recipients
+                db_session_local.commit()
+
         task.set_progress(100)
-        return {"message": f"Emails sent to {sent_count} of {len(users)} users."}
+        return {"message": f"Emails sent to {sent_count} of {len(users)} users.", "proposal_id": proposal_id}
     finally:
         db_session_local.close()
 
@@ -88,7 +101,6 @@ async def get_dashboard_stats(db: Session = Depends(get_db)):
     active_24h = db.query(DBUser).filter(DBUser.last_activity_at > now - timedelta(hours=24)).count()
     new_7d = db.query(DBUser).filter(DBUser.created_at > now - timedelta(days=7)).count()
 
-    # Accurate count of all users requiring admin validation
     pending_approval = db.query(DBUser).filter(
         or_(
             DBUser.status == "pending_admin_validation",
@@ -145,7 +157,6 @@ async def admin_get_all_users(
         else:
             query = query.filter(DBUser.status == status_filter)
 
-    # Sorting logic
     sort_column = getattr(DBUser, sort_by) if hasattr(DBUser, sort_by) else literal_column(sort_by)
     if sort_order == 'desc':
         query = query.order_by(sort_column.desc())
@@ -165,7 +176,7 @@ async def admin_get_all_users(
                 "is_admin": getattr(user, "is_admin", False) or False,
                 "is_moderator": getattr(user, "is_moderator", False) or False,
                 "is_active": user.is_active,
-                "status": user.status, # NEW
+                "status": user.status,
                 "created_at": safe_datetime(user.created_at),
                 "last_activity_at": safe_datetime(user.last_activity_at),
                 "is_online": is_online,
@@ -181,11 +192,6 @@ async def admin_get_all_users(
     return users_for_panel
 
 def _project_user_public(user: DBUser) -> UserPublic:
-    """
-    Transforms a DBUser ORM object into a completely decoupled, flat UserPublic model.
-    This guarantees that the JSON serializer never accesses lazy-loaded ORM relationships
-    (discussions, notes, memories) that cause huge payload warning loops.
-    """
     return UserPublic(
         id=user.id,
         username=user.username,
@@ -206,10 +212,8 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
     if user_data.email and db.query(DBUser).filter(DBUser.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="Email already in use.")
 
-    # Prepare user data with defaults from settings
     user_dict = user_data.model_dump(exclude={'username', 'password'})
 
-    # Apply defaults from settings for None values
     defaults_map = {
         'lollms_model_name': 'default_lollms_model_name',
         'safe_store_vectorizer': 'default_safe_store_vectorizer',
@@ -227,17 +231,11 @@ async def admin_add_new_user(user_data: UserCreateAdmin, db: Session = Depends(g
         if user_dict.get(field) is None:
             user_dict[field] = settings.get(setting_key)
 
-    # For new beginner users, override with specific beginner model if set
     if user_dict.get('user_ui_level', 0) == 0:
         beginner_default = settings.get('default_lollms_model_name_beginner')
         if beginner_default:
             user_dict['lollms_model_name'] = beginner_default
 
-    # --- NEW LOGIC: Remove fields that may cause ORM init errors ---
-    # The ORM constructor can be sensitive to unexpected keyword arguments.
-    # `google_client_secret_json` is a valid column but may clash with internal
-    # SQLAlchemy handling during bulk creation. We omit it here and allow it
-    # to be set later via an explicit update if needed.
     user_dict.pop('google_client_secret_json', None)
 
     new_user = DBUser(
@@ -261,7 +259,6 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
 
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
-    # Get task stats
     task_stats_raw = db.query(
         func.date(DBTask.created_at),
         func.count(DBTask.id)
@@ -273,7 +270,6 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
     ).all()
     task_stats = [UserActivityStat(date=date, count=count) for date, count in task_stats_raw]
 
-    # Get message stats (generations)
     message_stats = []
     try:
         user_discussions_db_path = get_user_data_root(user.username) / "discussions.db"
@@ -295,8 +291,6 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
                 session.close()
     except Exception as e:
         trace_exception(e)
-        # Fail gracefully if discussion DB can't be read
-        print(f"Warning: Could not read discussion database for user {user.username}: {e}")
 
     return UserStats(tasks_per_day=task_stats, messages_per_day=message_stats)
 
@@ -310,34 +304,24 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
     if user.username == INITIAL_ADMIN_USER_CONFIG.get("username") and update_data.is_admin is False:
         raise HTTPException(status_code=403, detail="Cannot revoke initial superadmin status.")
 
-    # Log incoming payload for debugging
-    print(f"[ADMIN UPDATE] User ID {user_id} payload: {update_data.dict(exclude_unset=True)}")
-
     update_dict = update_data.model_dump(exclude_unset=True)
     if 'is_admin' in update_dict and update_dict['is_admin']:
         update_dict['is_moderator'] = True
 
-    # Sync is_active logic if status changed
     if 'status' in update_dict:
         if update_dict['status'] == 'active':
             update_dict['is_active'] = True
         else:
             update_dict['is_active'] = False
 
-    # *** NEW LOGIC: keep status in sync when is_active is changed ***
     if 'is_active' in update_dict:
-        # When the UI toggles activation we want the status column to reflect the same state.
         if update_dict['is_active']:
             update_dict['status'] = 'active'
         else:
             update_dict['status'] = 'inactivated_by_admin'
 
-    # Handle moderator logic: Admins are always moderators
     if update_dict.get('is_admin') is True:
         update_dict['is_moderator'] = True
-    elif update_dict.get('is_admin') is False:
-        # If losing admin, we don't necessarily strip moderator unless explicitly asked
-        pass
 
     for key, value in update_dict.items():
         setattr(user, key, value)
@@ -376,9 +360,6 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    # Log activation attempt
-    print(f"[ADMIN ACTIVATE] Activating user ID {user_id}")
-
     user.is_active = True
     user.status = "active"
     user.activation_token = user.password_reset_token = user.reset_token_expiry = None
@@ -388,16 +369,13 @@ async def admin_activate_user(user_id: int, db: Session = Depends(get_db)):
 
 @user_management_router.post("/users/{user_id}/disconnect", response_model=Dict[str, str])
 async def admin_disconnect_user(user_id: int, db: Session = Depends(get_db)):
-    """Forcefully clears a user's session and closes their WebSockets."""
     user = db.query(DBUser).filter(DBUser.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
 
-    # 1. Clear in-memory session
     if user.username in user_sessions:
         del user_sessions[user.username]
     
-    # 2. Close active WebSockets across the cluster
     from backend.ws_manager import manager
     manager.disconnect_user_sync(user_id)
     
@@ -410,9 +388,6 @@ async def admin_deactivate_user(user_id: int, db: Session = Depends(get_db), cur
         raise HTTPException(status_code=404, detail="User not found.")
     if user.id == current_admin.id:
         raise HTTPException(status_code=403, detail="Cannot deactivate own account.")
-
-    # Log deactivation attempt
-    print(f"[ADMIN DEACTIVATE] Deactivating user ID {user_id}")
 
     user.is_active = False
     user.status = "inactivated_by_admin"
@@ -475,16 +450,33 @@ async def admin_remove_user(user_id: int, db: Session = Depends(get_db), current
     return {"message": f"User '{user.username}' deleted. Data cleanup initiated."}
 
 @user_management_router.post("/email-users", response_model=TaskInfo, status_code=202)
-async def email_users(payload: EmailUsersRequest, current_admin: UserAuthDetails = Depends(get_current_admin_user)):
+async def email_users(
+    payload: EmailUsersRequest, 
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
+):
     if settings.get("password_recovery_mode") not in ["automatic", "gmail", "system_mail", "outlook"]:
-        raise HTTPException(status_code=412, detail="Email sending is not enabled.")
+        raise HTTPException(status_code=412, detail="Email dispatch is not configured. Please configure SMTP or system mail in Admin Settings.")
     if not payload.user_ids:
         raise HTTPException(status_code=400, detail="No users selected.")
     
+    # Auto-create an EmailProposal (Campaign) in DB to archive this targeted campaign
+    proposal = EmailProposal(
+        title=payload.subject,
+        content=payload.body,
+        source_topic=f"Targeted Campaign ({len(payload.user_ids)} recipients)",
+        status=EmailStatus.APPROVED,
+        recipients=payload.user_ids,
+        generated_by=current_admin.username
+    )
+    db.add(proposal)
+    db.commit()
+    db.refresh(proposal)
+    
     db_task = task_manager.submit_task(
-        name=f"Emailing {len(payload.user_ids)} users",
+        name=f"Targeted Campaign: {payload.subject[:30]}",
         target=_email_users_task,
-        args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text),
+        args=(payload.user_ids, payload.subject, payload.body, payload.background_color, payload.send_as_text, proposal.id),
         owner_username=current_admin.username
     )
     return db_task
@@ -513,7 +505,6 @@ Current Background: {payload.background_color or "#FFFFFF"}
 Instruction: {payload.prompt.strip() if payload.prompt else 'Enhance this email.'}
 """
 
-        # Use structured content generation which handles JSON parsing robustly
         enhanced_data = lc.generate_structured_content(prompt, system_prompt=system_prompt, schema=schema)
         
         if not enhanced_data or not isinstance(enhanced_data, dict):

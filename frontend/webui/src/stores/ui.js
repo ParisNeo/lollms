@@ -43,6 +43,7 @@ export const useUiStore = defineStore('ui', {
     emailModalBackgroundColor: '#f4f4f8',
     emailModalSendAsText: false,
     isSidebarOpen: true,
+    isSidebarPinned: localStorage.getItem('lollms-sidebar-pinned') === 'true',
     isChatSidebarOpen: false,
     keywords: [],
     isDataZoneVisible: false,
@@ -358,6 +359,17 @@ export const useUiStore = defineStore('ui', {
         this.emailModalSendAsText = sendAsText;
     },
 
+    toggleSidebarPin() {
+        this.isSidebarPinned = !this.isSidebarPinned;
+        localStorage.setItem('lollms-sidebar-pinned', this.isSidebarPinned ? 'true' : 'false');
+        if (this.isSidebarPinned) {
+            this.openSidebar();
+            this.addNotification('Sidebar pinned: auto-collapse disabled.', 'info', 2000);
+        } else {
+            this.addNotification('Sidebar unpinned: auto-collapses on inactivity.', 'info', 2000);
+        }
+    },
+
     toggleSidebar() {
         this.isSidebarOpen = !this.isSidebarOpen;
         localStorage.setItem('lollms-sidebar-open', this.isSidebarOpen);
@@ -368,7 +380,10 @@ export const useUiStore = defineStore('ui', {
         localStorage.setItem('lollms-sidebar-open', 'true');
     },
 
-    closeSidebar() {
+    closeSidebar(force = false) {
+        if (this.isSidebarPinned && !force) {
+            return;
+        }
         this.isSidebarOpen = false;
         localStorage.setItem('lollms-sidebar-open', 'false');
     },

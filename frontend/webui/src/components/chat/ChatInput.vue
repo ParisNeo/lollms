@@ -105,6 +105,16 @@ const textareaRef = ref(null);
 const isWebSearchActive = ref(false); 
 const stagedImages = ref([]); 
 const user = computed(() => authStore.user);
+
+async function handleCreateDiscussionWithAttachedArtefacts() {
+    if (!activeDiscussion.value) return;
+    const titles = groupedAttachedFiles.value.map(g => g.title);
+    if (!titles.length) return;
+    await discussionsStore.createDiscussionWithArtefacts({
+        sourceDiscussionId: activeDiscussion.value.id,
+        artefactTitles: titles
+    });
+}
 const isSavedLibraryItem = computed(() => discussionsStore.currentDiscussionId === 'saved');
 const hoveredRagStoreId = ref(null);
 
@@ -1194,6 +1204,17 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                         <IconXMark class="w-3.5 h-3.5" />
                     </button>
                 </div>
+
+                <!-- Fork / New Chat with Attached Artefacts Action Button -->
+                <button 
+                    v-if="groupedAttachedFiles.length > 0 && !isSavedLibraryItem"
+                    @click.stop="handleCreateDiscussionWithAttachedArtefacts"
+                    class="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-bold border-2 border-purple-400 dark:border-purple-800/80 bg-purple-50 text-purple-800 dark:bg-purple-950/40 dark:text-purple-300 shadow-xs hover:shadow-md hover:scale-105 transition-all cursor-pointer group/fork"
+                    title="Start a fresh conversation pre-loaded with all these active documents"
+                >
+                    <IconGitBranch class="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 group-hover/fork:rotate-45 transition-transform" />
+                    <span>New Chat with {{ groupedAttachedFiles.length }} File{{ groupedAttachedFiles.length > 1 ? 's' : '' }}</span>
+                </button>
 
                 <!-- Attached Skills (Staged) -->
                 <div v-for="skill in attachedSkills" :key="skill.id" 

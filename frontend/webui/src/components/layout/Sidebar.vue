@@ -1,3 +1,4 @@
+<!-- frontend/webui/src/components/layout/Sidebar.vue -->
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -22,7 +23,6 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
 
-// Async import for Flow Wizard
 const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
 
 const discussionsStore = useDiscussionsStore();
@@ -34,6 +34,7 @@ const router = useRouter();
 
 const user = computed(() => authStore.user);
 const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
+const isSidebarPinned = computed(() => uiStore.isSidebarPinned);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
 const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
@@ -53,16 +54,16 @@ async function goToFeed() {
 
 const resetActivityTimer = () => {
     clearTimeout(activityTimeout.value);
-    if (isSidebarOpen.value) {
+    // If the sidebar is pinned, never auto-collapse
+    if (isSidebarOpen.value && !isSidebarPinned.value) {
         activityTimeout.value = setTimeout(() => {
-            // Automatically collapse sidebar after inactivity
             uiStore.closeSidebar();
-        }, 30000); // 30 seconds
+        }, 30000); // 30 seconds inactivity
     }
 };
 
-watch(isSidebarOpen, (isOpen) => {
-    if (isOpen) {
+watch([isSidebarOpen, isSidebarPinned], ([isOpen, isPinned]) => {
+    if (isOpen && !isPinned) {
         resetActivityTimer();
     } else {
         clearTimeout(activityTimeout.value);
@@ -72,17 +73,12 @@ watch(isSidebarOpen, (isOpen) => {
 onMounted(() => {
     const sidebarElement = sidebarRef.value;
     if (sidebarElement) {
-        // Desktop interactions
         sidebarElement.addEventListener('mousemove', resetActivityTimer);
         sidebarElement.addEventListener('mousedown', resetActivityTimer);
         sidebarElement.addEventListener('wheel', resetActivityTimer, { passive: true });
-        
-        // Mobile interactions
         sidebarElement.addEventListener('touchstart', resetActivityTimer, { passive: true });
         sidebarElement.addEventListener('touchmove', resetActivityTimer, { passive: true });
         sidebarElement.addEventListener('scroll', resetActivityTimer, { passive: true });
-        
-        // Keyboard interactions
         sidebarElement.addEventListener('keydown', resetActivityTimer);
     }
     resetActivityTimer();
@@ -102,7 +98,6 @@ onUnmounted(() => {
     clearTimeout(activityTimeout.value);
 });
 
-// Context-aware logic for the Plus button in collapsed mode
 const currentContext = computed(() => {
     const path = route.path;
     if (path.startsWith('/notebooks') || path.startsWith('/notebook-studio')) return 'notebooks';
@@ -200,14 +195,14 @@ async function handlePlusClick() {
           <IconFileText class="w-5 h-5 text-blue-500" />
         </button>
 
-        <!-- ── [NEW] Unified Sovereign Studio Dock (Collapsed) ── -->
+        <!-- Sovereign Studio Dock (Collapsed) -->
         <div class="w-full flex flex-col items-center py-2 gap-2 border-t border-b border-gray-150 dark:border-gray-800">
             <span class="text-[8px] font-black tracking-widest text-gray-400 select-none uppercase mb-1">Studios</span>
 
             <router-link
               to="/"
               class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
-              title="Chat Studio (Conversations)"
+              title="Chat Studio"
               active-class="bg-blue-100/50 text-blue-600 dark:bg-blue-900/20"
               @click="uiStore.setMainView('chat')"
             >
@@ -244,7 +239,7 @@ async function handlePlusClick() {
             <router-link
               to="/image-studio"
               class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
-              title="Canvas / Image Studio"
+              title="Image Studio"
               active-class="bg-pink-100/50 text-pink-600 dark:bg-pink-900/20"
             >
                 <IconPhoto class="w-5 h-5 text-pink-500" />
@@ -272,7 +267,6 @@ async function handlePlusClick() {
             </router-link>
         </div>
 
-        <!-- Secondary Utilities -->
         <router-link
           to="/news"
           class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
@@ -302,7 +296,6 @@ async function handlePlusClick() {
       </div>
     </div>
 
-    <!-- Modals for Collapsed State -->
     <Teleport to="body">
         <FlowWizardModal v-if="isFlowWizardOpen" @close="isFlowWizardOpen = false" />
     </Teleport>

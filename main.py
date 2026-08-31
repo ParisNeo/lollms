@@ -22,7 +22,6 @@ FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-# from fastapi.middleware.gzip import GZipMiddleware # Disabled to improve streaming performance
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, inspect, desc
 
@@ -84,14 +83,10 @@ from backend.routers.notes import notes_router
 from backend.routers.notebooks import router as notebooks_router
 from backend.routers.public import public_router
 from backend.routers.flow_studio import router as flow_studio_router
-
 from backend.routers.services.lollms_v1 import lollms_v1_router
-
 from backend.tasks.email_tasks import _generate_email_proposal_task 
-
 from backend.routers.tasks import tasks_router
 from backend.routers.skills import skills_router
-
 from backend.task_manager import task_manager
 from backend.ws_manager import manager, listen_for_broadcasts
 from backend.routers.help import help_router
@@ -99,18 +94,13 @@ from backend.routers.prompts import prompts_router
 from backend.routers.memories import memories_router
 from backend.routers.news import news_router
 from backend.zoo_cache import load_cache
-
 from backend.routers.discussion import build_discussions_router
 
 import uvicorn
-from backend.settings import settings
-
-# --- System Tasks Imports ---
 from apscheduler.schedulers.background import BackgroundScheduler
 from backend.tasks.news_tasks import _scrape_rss_feeds_task, _cleanup_old_news_articles_task
 from backend.tasks.social_tasks import _generate_feed_post_task 
 from backend.tasks.system_tasks import _prune_old_tasks_task
-# --- End System Tasks Imports ---
 
 broadcast_listener_task = None
 rss_scheduler = None
@@ -119,7 +109,6 @@ startup_lock = Lock()
 def scheduled_rss_job():
     active_tasks = task_manager.get_all_tasks()
     if any(t.name == "Scheduled RSS Feed Scraping" and t.status in ['running', 'pending'] for t in active_tasks):
-        print("INFO: Scheduled RSS scraping skipped as a similar task is already running.")
         return
         
     task_manager.submit_task(
@@ -138,7 +127,6 @@ def scheduled_news_cleanup_job():
     )
 
 def scheduled_task_pruning_job():
-    """Daily job to clear out old background task records."""
     db = db_session_module.SessionLocal()
     try:
         settings.load_from_db(db)
@@ -177,7 +165,6 @@ def check_and_run_scheduled_posts():
         current_time_str = now.strftime("%H:%M")
         
         should_post = False
-        
         for time_slot in schedule:
             if current_time_str == time_slot:
                 if last_posted:
@@ -189,7 +176,6 @@ def check_and_run_scheduled_posts():
                 break
         
         if should_post:
-            print(f"INFO: Triggering scheduled post for slot {current_time_str}")
             task_manager.submit_task(
                 name="AI Bot Scheduled Post",
                 target=_generate_feed_post_task,
@@ -211,22 +197,15 @@ def scheduled_email_proposal_job():
         owner_username=None
     )
 
-# Global Thread Pool Executor for offloading all synchronous database/model initializations
 startup_executor = ThreadPoolExecutor(max_workers=10, thread_name_prefix="lollms_startup")
 
 def run_one_time_startup_tasks(lock: Lock):
-    """
-    Executes a series of one‑time initialization tasks.
-    The function now presents a live, rich progress panel that updates after
-    each major step, making the startup flow easier to follow.
-    """
     acquired = lock.acquire(blocking=False)
     if not acquired:
         return
 
     ASCIIColors.panel(f"ℹ️ Worker [bold]{os.getpid()}[/bold] acquired startup lock. Running one-time tasks... 🚀")
 
-    # Define the steps we want to visualise
     steps = [
         ("Database tables check/creation", False),
         ("Schema migration & bootstrap", False),
@@ -242,7 +221,6 @@ def run_one_time_startup_tasks(lock: Lock):
     ]
 
     def render_steps_panel():
-        """Render a Rich Panel showing a checklist of completed steps."""
         lines = []
         for description, done in steps:
             checkbox = "[green]✔[/green]" if done else "[red]✘[/red]"
@@ -250,13 +228,9 @@ def run_one_time_startup_tasks(lock: Lock):
         markdown = "\n".join(lines)
         return ASCIIColors.panel(markdown, title="🛠️ Startup Progress", border_style="cyan")
 
-    # ----------------------------------------------------------------------
-    # 1️⃣ Database tables check/creation
-    # ----------------------------------------------------------------------
     try:
         engine = db_session_module.engine
         Base.metadata.create_all(bind=engine)
-        #ASCIIColors.green("INFO: Database tables checked/created.")
         steps[0] = (steps[0][0], True)
         render_steps_panel()
     except Exception as e:
@@ -265,9 +239,6 @@ def run_one_time_startup_tasks(lock: Lock):
         lock.release()
         raise
 
-    # ----------------------------------------------------------------------
-    # 2️⃣ Schema migration & bootstrap
-    # ----------------------------------------------------------------------
     try:
         with engine.connect() as connection:
             inspector = inspect(connection)
@@ -282,9 +253,6 @@ def run_one_time_startup_tasks(lock: Lock):
         lock.release()
         raise
 
-    # ----------------------------------------------------------------------
-    # 3️⃣ Legacy discussion migration
-    # ----------------------------------------------------------------------
     try:
         if APP_SETTINGS.get("migrate"):
             db_session = None
@@ -296,7 +264,6 @@ def run_one_time_startup_tasks(lock: Lock):
                     old_discussion_path = get_user_discussion_path(username)
                     if not (old_discussion_path.exists() and old_discussion_path.is_dir()):
                         continue
-                    ASCIIColors.yellow(f"Found legacy discussion folder for '{username}'. Starting migration...")
                     if username not in user_sessions:
                         user_sessions[username] = {
                             "lollms_model_name": user.lollms_model_name,
@@ -341,29 +308,21 @@ def run_one_time_startup_tasks(lock: Lock):
                         except Exception as e:
                             if discussion_db_session:
                                 discussion_db_session.rollback()
-                            ASCIIColors.error(f"Failed to migrate {file_path.name}: {e}")
                         finally:
                             if discussion_db_session:
                                 discussion_db_session.close()
                     if migrated_count > 0:
                         backup_path = old_discussion_path.parent / f"{old_discussion_path.name}_migrated_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                         shutil.move(str(old_discussion_path), str(backup_path))
-                        ASCIIColors.green(f"Successfully migrated {migrated_count} discussions and backed up legacy folder.")
             finally:
                 if db_session:
                     db_session.close()
         steps[2] = (steps[2][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"Legacy discussion migration error: {e}")
         trace_exception(e)
-        # continue – not fatal for the rest of startup
 
-    # ----------------------------------------------------------------------
-    # 4️⃣ Default admin & DB entries verification
-    # ----------------------------------------------------------------------
     try:
-        db_for_defaults: Optional[Session] = None
         db_for_defaults = next(get_db())
         admin_username = INITIAL_ADMIN_USER_CONFIG.get("username", "admin")
         admin_password = INITIAL_ADMIN_USER_CONFIG.get("password", "admin")
@@ -375,7 +334,6 @@ def run_one_time_startup_tasks(lock: Lock):
                 existing_user.is_active = True
                 existing_user.status = "active"
                 db_for_defaults.commit()
-                ASCIIColors.green(f"Promoted existing user '{admin_username}' to admin.")
             else:
                 new_admin = DBUser(
                     username=admin_username, 
@@ -386,23 +344,15 @@ def run_one_time_startup_tasks(lock: Lock):
                 )
                 db_for_defaults.add(new_admin)
                 db_for_defaults.commit()
-                ASCIIColors.green(f"Initial admin user '{admin_username}' created.")
-        if not db_for_defaults.query(DBLLMBinding).first():
-            ASCIIColors.yellow("No LLM bindings found – you will need to add one via Settings.")
         steps[3] = (steps[3][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"Error during default DB entry check: {e}")
         trace_exception(e)
     finally:
         if db_for_defaults:
             db_for_defaults.close()
 
-    # ----------------------------------------------------------------------
-    # 5️⃣ App Zoo repository setup
-    # ----------------------------------------------------------------------
     try:
-        db_for_repos: Optional[Session] = None
         db_for_repos = next(get_db())
         app_zoo_name = "Official LoLLMs Apps Zoo"
         app_zoo_url = "https://github.com/ParisNeo/lollms_apps_zoo.git"
@@ -414,25 +364,17 @@ def run_one_time_startup_tasks(lock: Lock):
             default_repo = DBAppZooRepository(name=app_zoo_name, url=app_zoo_url, is_deletable=False)
             db_for_repos.add(default_repo)
             db_for_repos.commit()
-            ASCIIColors.green(f"Default App Zoo repo '{app_zoo_name}' added to DB.")
         if not app_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"Cloning App Zoo '{app_zoo_name}' (first run)...")
             subprocess.run(["git", "clone", app_zoo_url, str(app_zoo_repo_path)], check=True)
-            ASCIIColors.green("App Zoo cloned successfully.")
         steps[4] = (steps[4][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"App Zoo repository setup error: {e}")
         trace_exception(e)
     finally:
         if db_for_repos:
             db_for_repos.close()
 
-    # ----------------------------------------------------------------------
-    # 6️⃣ MCP Zoo repository setup
-    # ----------------------------------------------------------------------
     try:
-        db_for_mcps: Optional[Session] = None
         db_for_mcps = next(get_db())
         mcp_zoo_name = "lollms_mcps_zoo"
         mcp_zoo_url = "https://github.com/ParisNeo/lollms_mcps_zoo.git"
@@ -444,25 +386,17 @@ def run_one_time_startup_tasks(lock: Lock):
             default_mcp_repo = DBMCPZooRepository(name=mcp_zoo_name, url=mcp_zoo_url, is_deletable=False)
             db_for_mcps.add(default_mcp_repo)
             db_for_mcps.commit()
-            ASCIIColors.green(f"Default MCP Zoo repo '{mcp_zoo_name}' added to DB.")
         if not mcp_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"Cloning MCP Zoo '{mcp_zoo_name}' (first run)...")
             subprocess.run(["git", "clone", mcp_zoo_url, str(mcp_zoo_repo_path)], check=True)
-            ASCIIColors.green("MCP Zoo cloned successfully.")
         steps[5] = (steps[5][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"MCP Zoo repository setup error: {e}")
         trace_exception(e)
     finally:
         if db_for_mcps:
             db_for_mcps.close()
 
-    # ----------------------------------------------------------------------
-    # 7️⃣ Prompt Zoo repository setup
-    # ----------------------------------------------------------------------
     try:
-        db_for_prompts: Optional[Session] = None
         db_for_prompts = next(get_db())
         prompt_zoo_name = "lollms_prompts_zoo"
         prompt_zoo_url = "https://github.com/ParisNeo/lollms_prompts_zoo.git"
@@ -474,25 +408,17 @@ def run_one_time_startup_tasks(lock: Lock):
             default_prompt_repo = DBPromptZooRepository(name=prompt_zoo_name, url=prompt_zoo_url, is_deletable=False)
             db_for_prompts.add(default_prompt_repo)
             db_for_prompts.commit()
-            ASCIIColors.green(f"Default Prompt Zoo repo '{prompt_zoo_name}' added to DB.")
         if not prompt_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"Cloning Prompt Zoo '{prompt_zoo_name}' (first run)...")
             subprocess.run(["git", "clone", prompt_zoo_url, str(prompt_zoo_repo_path)], check=True)
-            ASCIIColors.green("Prompt Zoo cloned successfully.")
         steps[6] = (steps[6][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"Prompt Zoo repository setup error: {e}")
         trace_exception(e)
     finally:
         if db_for_prompts:
             db_for_prompts.close()
 
-    # ----------------------------------------------------------------------
-    # 8️⃣ Personality Zoo repository setup
-    # ----------------------------------------------------------------------
     try:
-        db_for_personalities: Optional[Session] = None
         db_for_personalities = next(get_db())
         personality_zoo_name = "lollms_personalities_zoo"
         personality_zoo_url = "https://github.com/ParisNeo/lollms_personalities_zoo.git"
@@ -504,76 +430,48 @@ def run_one_time_startup_tasks(lock: Lock):
             default_personality_repo = DBPersonalityZooRepository(name=personality_zoo_name, url=personality_zoo_url, is_deletable=False)
             db_for_personalities.add(default_personality_repo)
             db_for_personalities.commit()
-            ASCIIColors.green(f"Default Personality Zoo repo '{personality_zoo_name}' added to DB.")
         if not personality_zoo_repo_path.exists():
-            ASCIIColors.yellow(f"Cloning Personality Zoo '{personality_zoo_name}' (first run)...")
             subprocess.run(["git", "clone", personality_zoo_url, str(personality_zoo_repo_path)], check=True)
-            ASCIIColors.green("Personality Zoo cloned successfully.")
         steps[7] = (steps[7][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"Personality Zoo repository setup error: {e}")
         trace_exception(e)
     finally:
         if db_for_personalities:
             db_for_personalities.close()
 
-    # ----------------------------------------------------------------------
-    # 9️⃣ Filesystem‑DB synchronization
-    # ----------------------------------------------------------------------
     try:
-        db_for_sync: Optional[Session] = None
         db_for_sync = next(get_db())
         synchronize_filesystem_and_db(db_for_sync)
-        ASCIIColors.green("Filesystem‑DB synchronization completed.")
         steps[8] = (steps[8][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"Synchronization error: {e}")
         trace_exception(e)
     finally:
         if db_for_sync:
             db_for_sync.close()
 
-    # ----------------------------------------------------------------------
-    # 🔟 Cleanup stale connections & interrupted tasks
-    # ----------------------------------------------------------------------
     try:
-        db_for_cleanup: Optional[Session] = None
         db_for_cleanup = next(get_db())
-        # 1. Cleanup WebSocket connections
-        num_deleted_ws = db_for_cleanup.query(WebSocketConnection).delete()
-        # 2. Mark interrupted tasks as FAILED
+        db_for_cleanup.query(WebSocketConnection).delete()
         interrupted_tasks = db_for_cleanup.query(DBTask).filter(
             DBTask.status.in_([TaskStatus.RUNNING, TaskStatus.PENDING])
         ).all()
         if interrupted_tasks:
-            ASCIIColors.yellow(f"Cleaning up {len(interrupted_tasks)} interrupted tasks...")
             for task in interrupted_tasks:
                 task.status = TaskStatus.FAILED
                 task.error = "Task interrupted by server restart."
                 task.completed_at = datetime.datetime.now(datetime.timezone.utc)
-                # Avoid heavy log strings here to prevent DB/WS bloat
-                task.logs = [{"timestamp": datetime.datetime.now(timezone.utc).isoformat(), "message": "System Restart Recovery", "level": "ERROR"}]
-            # Single commit for all tasks to avoid triggering multiple DB change listeners
+                task.logs = [{"timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(), "message": "System Restart Recovery", "level": "ERROR"}]
             db_for_cleanup.commit()
-            ASCIIColors.green("Cleanup complete.")
-        # if num_deleted_ws > 0:
-        #     ASCIIColors.yellow(f"Cleared {num_deleted_ws} stale WebSocket entries.")
-        # if interrupted_tasks:
-        #     ASCIIColors.yellow(f"Marked {len(interrupted_tasks)} active tasks as FAILED.")
         steps[9] = (steps[9][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"Cleanup error: {e}")
         trace_exception(e)
     finally:
         if db_for_cleanup:
             db_for_cleanup.close()
 
-    # ----------------------------------------------------------------------
-    # 1️⃣1️⃣ Load cache, init task manager, and run autostart
-    # ----------------------------------------------------------------------
     try:
         load_cache()
         task_manager.init_app(db_session_module.SessionLocal)
@@ -581,19 +479,13 @@ def run_one_time_startup_tasks(lock: Lock):
         steps[10] = (steps[10][0], True)
         render_steps_panel()
     except Exception as e:
-        ASCIIColors.error(f"Autostart failure: {e}")
         trace_exception(e)
 
-    # ----------------------------------------------------------------------
-    # 1️⃣2️⃣ Pre-warm Active Bindings (The "lollms" user logic)
-    # ----------------------------------------------------------------------
     try:
         db_warmup = next(get_db())
         active_llm_bindings = db_warmup.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
         if active_llm_bindings:
-            ASCIIColors.info(f"Pre-warming {len(active_llm_bindings)} LLM bindings in background...")
             for binding in active_llm_bindings:
-                # Use executor thread pool to avoid blocking master process startup
                 startup_executor.submit(
                     build_lollms_client_from_params,
                     "lollms",
@@ -604,10 +496,9 @@ def run_one_time_startup_tasks(lock: Lock):
         db_warmup.close()
         steps.append(("Pre-warm Active Bindings", True))
     except Exception as e:
-        ASCIIColors.error(f"Pre-warming error: {e}")
+        trace_exception(e)
 
     lock.release()
-    ASCIIColors.green(f"Worker {os.getpid()} released startup lock.")
 
 async def startup_event():
     global broadcast_listener_task, rss_scheduler, startup_lock
@@ -619,12 +510,8 @@ async def startup_event():
     try:
         settings.load_from_db(db)
 
-        # --- NON-BLOCKING PER-WORKER PRE-WARMING ---
-        # We offload all synchronous model / personality bindings load to the background thread pool executor.
-        # This keeps the ASGI event loop completely free to route authentication, SSE, or parallel login requests immediately.
         active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
         if active_bindings:
-            ASCIIColors.info(f"Worker {os.getpid()}: Offloading pre-warming of {len(active_bindings)} active bindings to background...")
             loop = asyncio.get_running_loop()
             for b in active_bindings:
                 loop.run_in_executor(
@@ -639,7 +526,6 @@ async def startup_event():
     manager.set_loop(asyncio.get_running_loop())
     task_manager.init_app(db_session_module.SessionLocal)
 
-    # Only start listener if multiple workers to avoid overhead on single worker setups
     if SERVER_CONFIG.get("workers", 1) > 1:
         broadcast_listener_task = asyncio.create_task(listen_for_broadcasts())
 
@@ -654,16 +540,9 @@ async def startup_event():
             retention_days = settings.get("rss_news_retention_days", 1)
             if retention_days > 0:
                 rss_scheduler.add_job(scheduled_news_cleanup_job, 'cron', hour=3, minute=0)
-                print(f"INFO: Daily news cleanup scheduled.")
-
-            print(f"INFO: RSS feed checking scheduled to run every {interval} minutes.")
 
         rss_scheduler.add_job(check_and_run_scheduled_posts, 'interval', minutes=1)
-        print(f"INFO: Bot Auto-Posting schedule checker active.")
-
-        # Scheduled Task Pruning
         rss_scheduler.add_job(scheduled_task_pruning_job, 'cron', hour=4, minute=0)
-        print(f"INFO: Background task pruning scheduled (daily at 4:00 AM).")
 
         if settings.get("email_marketing_enabled", False):
             rss_scheduler.add_job(
@@ -676,9 +555,6 @@ async def startup_event():
         if not rss_scheduler.running:
             rss_scheduler.start()
 
-    hub_port = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
-    print(f"INFO: Worker {os.getpid()} configuration loaded. Hub Port: {hub_port}.")
-
 async def shutdown_event():
     ASCIIColors.info(f"--- Worker process (PID: {os.getpid()}) shutting down. ---")
     if broadcast_listener_task:
@@ -686,10 +562,9 @@ async def shutdown_event():
         try:
             await broadcast_listener_task
         except asyncio.CancelledError:
-            ASCIIColors.info(f"Broadcast listener task in worker {os.getpid()} cancelled successfully.")
+            pass
     if rss_scheduler and rss_scheduler.running:
         rss_scheduler.shutdown()
-        ASCIIColors.info("RSS feed scheduler shut down.")
 
 app = FastAPI(
     title="LoLLMs Platform", 
@@ -697,6 +572,15 @@ app = FastAPI(
     version=APP_VERSION,
     on_startup=[startup_event],
     on_shutdown=[shutdown_event]
+)
+
+# Robust, Top-Level CORS Middleware Setup (Universal for all workers and preflight OPTIONS requests)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex="https?://.*",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(auth_router)
@@ -744,9 +628,6 @@ app.include_router(public_router)
 app.include_router(lollms_v1_router) 
 app.include_router(flow_studio_router)
 app.include_router(skills_router)
-# Add GZip Middleware to improve asset loading speed while keeping streaming functional
-# minimum_size=1000 ensures small streaming chunks aren't buffered
-# app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 add_ui_routes(app)
 
@@ -769,7 +650,6 @@ if __name__ == "__main__":
     if is_first_run:
         wizard_script = Path(__file__).resolve().parent / "scripts" / "setup_wizard.py"
         if wizard_script.exists():
-            print("--- First time setup: launching setup wizard ---")
             python_executable = sys.executable
             env = os.environ.copy()
             project_root_path = str(Path(__file__).resolve().parent)
@@ -778,13 +658,8 @@ if __name__ == "__main__":
             env["PYTHONPATH"] = new_python_path
             
             result = subprocess.run([python_executable, str(wizard_script)], env=env)
-            
             if result.returncode != 0:
-                ASCIIColors.red("\n[ERROR] Setup wizard failed or was cancelled. Exiting application.")
                 sys.exit(1)
-        else:
-            print(ASCIIColors.yellow("[WARNING] Setup wizard script not found. Proceeding with default setup."))
-
 
     run_one_time_startup_tasks(startup_lock)
     
@@ -792,8 +667,6 @@ if __name__ == "__main__":
     try:
         settings.load_from_db(db)
 
-        # Start the Communication Hub server in a background thread of the master process
-        import threading
         from backend.com_hub import start_hub_server
         hub_port_val = settings.get("com_hub_port", SERVER_CONFIG.get("com_hub_port", 8042))
         threading.Thread(
@@ -801,67 +674,16 @@ if __name__ == "__main__":
             kwargs={"host": "127.0.0.1", "port": int(hub_port_val)}, 
             daemon=True
         ).start()
-        print(f"INFO: Master process started Communication Hub on port {hub_port_val}.")
 
         host_setting = settings.get("host", SERVER_CONFIG.get("host", "0.0.0.0"))
         port_setting = settings.get("port", SERVER_CONFIG.get("port", 9642))
         https_enabled = settings.get("https_enabled", False)
-
-        allowed_origins = [
-            "http://localhost:5173",
-            "http://127.0.0.1:5173",
-        ]
-
-        if host_setting == "0.0.0.0":
-            allowed_origins.extend([f"http://localhost:{port_setting}", f"http://127.0.0.1:{port_setting}"])
-            if https_enabled:
-                allowed_origins.extend([f"https://localhost:{port_setting}", f"https://127.0.0.1:{port_setting}"])
-        else:
-            allowed_origins.append(f"http://{host_setting}:{port_setting}")
-            if https_enabled:
-                allowed_origins.append(f"https://{host_setting}:{port_setting}")
-
-        cors_exceptions_setting = settings.get("cors_origins_exceptions", "")
-        cors_exceptions_str = cors_exceptions_setting if isinstance(cors_exceptions_setting, str) else ""
-
-        if cors_exceptions_str:
-            exceptions = [origin.strip() for origin in cors_exceptions_str.split(',') if origin.strip()]
-            for origin in exceptions:
-                if origin not in allowed_origins:
-                    allowed_origins.append(origin)
-                    ASCIIColors.green(f"CORS: Allowing exception origin: {origin}")
-
-        sso_apps = db.query(DBApp).filter(DBApp.active == True, DBApp.authentication_type == 'lollms_sso').all()
-        sso_mcps = db.query(DBMCP).filter(DBMCP.active == True, DBMCP.authentication_type == 'lollms_sso').all()
-        openai_apps = db.query(DBApp).filter(DBApp.is_installed == True, DBApp.allow_openai_api_access == True).all()
-        
-        sso_services = sso_apps + sso_mcps + openai_apps
-        for service in sso_services:
-            if service.url:
-                try:
-                    parsed_url = urlparse(service.url)
-                    origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
-                    if origin not in allowed_origins:
-                        allowed_origins.append(origin)
-                        ASCIIColors.green(f"CORS: Allowing authenticated app origin: {origin}")
-                except Exception as e:
-                    ASCIIColors.warning(f"CORS: Could not parse URL for service '{service.name}': {service.url}. Error: {e}")
-
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=allowed_origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
     finally:
         db.close()
    
-    data_dir = Path(settings.get("data_dir","data"))
-    mcp_dir = data_dir / "mcps"
-    apps_dir = data_dir / "apps"
-    mcp_dir.mkdir(parents=True, exist_ok=True)
-    apps_dir.mkdir(parents=True, exist_ok=True)
+    data_dir = Path(settings.get("data_dir", "data"))
+    (data_dir / "mcps").mkdir(parents=True, exist_ok=True)
+    (data_dir / "apps").mkdir(parents=True, exist_ok=True)
     
     workers = int(os.getenv("LOLLMS_WORKERS", SERVER_CONFIG.get("workers", 1)))
     
@@ -878,7 +700,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"WARNING: HTTPS config error: {e}. Server will start without HTTPS.")
 
-    print("")
     content = ""
     protocol = "https" if ssl_params else "http"
 
@@ -886,15 +707,14 @@ if __name__ == "__main__":
         from backend.utils import get_accessible_host
         accessible_host = get_accessible_host()
         if accessible_host != 'localhost':
-            content+=f"[magenta]Recommended public access URL:[/magenta] {protocol}://{accessible_host}:{port_setting}/\n"
-        content+=f"[magenta]Or access locally at:[/magenta] {protocol}://localhost:{port_setting}/\n"
+            content += f"[magenta]Recommended public access URL:[/magenta] {protocol}://{accessible_host}:{port_setting}/\n"
+        content += f"[magenta]Or access locally at:[/magenta] {protocol}://localhost:{port_setting}/\n"
     else:
-        content+=f"[magenta]Access UI at:[/magenta] {protocol}://{host_setting}:{port_setting}/\n"
+        content += f"[magenta]Access UI at:[/magenta] {protocol}://{host_setting}:{port_setting}/\n"
     
-    content+=f"[green]Using {workers} Workers[/green]"
-    ASCIIColors.panel(content,f"LoLLMs Plateform (v{APP_VERSION})", )
+    content += f"[green]Using {workers} Workers[/green]"
+    ASCIIColors.panel(content, f"LoLLMs Platform (v{APP_VERSION})")
 
-    # --- Dynamic Direct Generation Endpoint for AI Builder ---
     from pydantic import BaseModel, Field
     from backend.session import get_current_active_user, UserAuthDetails
 
@@ -923,7 +743,6 @@ if __name__ == "__main__":
                 load_llm=True
             )
 
-            # Use asyncio.to_thread to run the blocking generation thread-safely
             generated_text = await asyncio.to_thread(
                 lc.generate_text,
                 prompt=request.prompt,

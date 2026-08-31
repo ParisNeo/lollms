@@ -1,5 +1,5 @@
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, model_validator
 import datetime
 
 class ForceGlobalConfigPayload(BaseModel):
@@ -8,6 +8,12 @@ class ForceGlobalConfigPayload(BaseModel):
     tts_binding_model_name: Optional[str] = None
     stt_binding_model_name: Optional[str] = None
     iti_binding_model_name: Optional[str] = None
+    ttv_binding_model_name: Optional[str] = None
+    ttm_binding_model_name: Optional[str] = None
+
+class ForceSettingsPayload(BaseModel):
+    model_name: str
+    context_size: Optional[int] = None
 
 class RagVectorizerAlias(BaseModel):
     vectorizer_name: str
@@ -115,14 +121,55 @@ class STTBindingPublicAdmin(STTBindingCreate):
     id: int
     model_aliases: Optional[Dict[str, Any]] = None
 
+class TTVBindingCreate(BaseModel):
+    alias: str
+    name: str
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class TTVBindingUpdate(BaseModel):
+    alias: Optional[str] = None
+    name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class TTVBindingPublicAdmin(TTVBindingCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    model_aliases: Optional[Dict[str, Any]] = None
+
+class TTMBindingCreate(BaseModel):
+    alias: str
+    name: str
+    config: Dict[str, Any] = Field(default_factory=dict)
+    default_model_name: Optional[str] = None
+    is_active: bool = True
+
+class TTMBindingUpdate(BaseModel):
+    alias: Optional[str] = None
+    name: Optional[str] = None
+    config: Optional[Dict[str, Any]] = None
+    default_model_name: Optional[str] = None
+    is_active: Optional[bool] = None
+
+class TTMBindingPublicAdmin(TTMBindingCreate):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    model_aliases: Optional[Dict[str, Any]] = None
+
 class ModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
     title: Optional[str] = None
+    name: Optional[str] = None
     description: Optional[str] = None
     has_vision: bool = False
+    vision_enabled: Optional[bool] = None
     ctx_size_locked: bool = False
     allow_parameters_override: bool = True
     ctx_size: Optional[int] = None
+    forced_context_size: Optional[int] = None
     temperature: Optional[float] = None
     top_k: Optional[int] = None
     top_p: Optional[float] = None
@@ -132,6 +179,21 @@ class ModelAlias(BaseModel):
     reasoning_activation: Optional[bool] = False
     reasoning_effort: Optional[str] = None
     reasoning_summary: Optional[bool] = False
+    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+    vlm_model_profile: Optional[str] = None
+
+    @model_validator(mode='after')
+    def sync_universal_profile_fields(self):
+        if self.vision_enabled is not None:
+            self.has_vision = bool(self.vision_enabled)
+        else:
+            self.vision_enabled = bool(self.has_vision)
+
+        if self.forced_context_size is not None:
+            self.ctx_size = self.forced_context_size
+        elif self.ctx_size is not None:
+            self.forced_context_size = self.ctx_size
+        return self
 
 class TtiModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -139,6 +201,7 @@ class TtiModelAlias(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class TtsModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -146,6 +209,7 @@ class TtsModelAlias(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
 
 class SttModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -153,6 +217,23 @@ class SttModelAlias(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     allow_parameters_override: bool = True
+    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+class TtvModelAlias(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    title: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    allow_parameters_override: bool = True
+    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+class TtmModelAlias(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    title: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    allow_parameters_override: bool = True
+    routing_config: Optional[Dict[str, Any]] = Field(default_factory=dict)
     
 class RagModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
@@ -163,22 +244,37 @@ class RagModelAlias(BaseModel):
 
 class ModelAliasUpdate(BaseModel):
     original_model_name: str
+    new_model_name: Optional[str] = None
     alias: ModelAlias
 
 class TtiModelAliasUpdate(BaseModel):
     original_model_name: str
+    new_model_name: Optional[str] = None
     alias: TtiModelAlias
 
 class TtsModelAliasUpdate(BaseModel):
     original_model_name: str
+    new_model_name: Optional[str] = None
     alias: TtsModelAlias
 
 class SttModelAliasUpdate(BaseModel):
     original_model_name: str
+    new_model_name: Optional[str] = None
     alias: SttModelAlias
+
+class TtvModelAliasUpdate(BaseModel):
+    original_model_name: str
+    new_model_name: Optional[str] = None
+    alias: TtvModelAlias
+
+class TtmModelAliasUpdate(BaseModel):
+    original_model_name: str
+    new_model_name: Optional[str] = None
+    alias: TtmModelAlias
     
 class RagModelAliasUpdate(BaseModel):
     original_model_name: str
+    new_model_name: Optional[str] = None
     alias: RagModelAlias
 
 class ModelAliasDelete(BaseModel):

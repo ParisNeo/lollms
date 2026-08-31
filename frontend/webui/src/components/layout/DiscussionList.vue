@@ -475,9 +475,22 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                         <p class="text-xs text-slate-500 dark:text-gray-400 truncate" :title="welcomeSlogan">{{ welcomeSlogan }}</p>
                     </div>
                 </div>
-                <button @click="uiStore.toggleSidebar" class="btn-icon-flat hidden md:inline-flex ml-2" title="Collapse sidebar">
-                    <IconArrowLeft class="h-5 h-5" />
-                </button>
+                <div class="flex items-center gap-1 shrink-0">
+                    <button 
+                        @click="uiStore.toggleSidebarPin" 
+                        class="btn-icon-flat hidden md:inline-flex" 
+                        :class="{'!text-blue-600 !bg-blue-50 dark:!bg-blue-900/30': uiStore.isSidebarPinned}"
+                        :title="uiStore.isSidebarPinned ? 'Sidebar pinned: Auto-collapse disabled' : 'Pin sidebar: Keep open permanently'"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform duration-200" :class="{'rotate-45 opacity-60': !uiStore.isSidebarPinned}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="17" x2="12" y2="22"></line>
+                            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+                        </svg>
+                    </button>
+                    <button @click="uiStore.toggleSidebar" class="btn-icon-flat hidden md:inline-flex" title="Collapse sidebar">
+                        <IconArrowLeft class="h-5 h-5" />
+                    </button>
+                </div>
             </div>
 
             <!-- Tab Switcher -->

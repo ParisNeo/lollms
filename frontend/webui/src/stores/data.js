@@ -14,6 +14,8 @@ export const useDataStore = defineStore('data', () => {
     const availableTtiModels = ref([]);
     const availableTtsModels = ref([]);
     const availableSttModels = ref([]);
+    const availableTtvModels = ref([]);
+    const availableTtmModels = ref([]);
     const userVoices = ref([]);
     const ownedDataStores = ref([]);
     const sharedDataStores = ref([]);
@@ -28,6 +30,8 @@ export const useDataStore = defineStore('data', () => {
     const isLoadingTtiModels = ref(false);
     const isLoadingTtsModels = ref(false);
     const isLoadingSttModels = ref(false);
+    const isLoadingTtvModels = ref(false);
+    const isLoadingTtmModels = ref(false);
     const isLoadingUserVoices = ref(false);
     const _languages = ref([]);
     const isLoadingLanguages = ref(false);
@@ -59,7 +63,6 @@ export const useDataStore = defineStore('data', () => {
         { label: 'Arabic', value: 'ar' },
     ];
 
-    // --- ACTIONS & METHODS (Declared BEFORE computeds and event listeners) ---
     async function fetchLanguages() {
         if (_languages.value.length > 0 || isLoadingLanguages.value) return;
         isLoadingLanguages.value = true;
@@ -148,6 +151,30 @@ export const useDataStore = defineStore('data', () => {
             availableSttModels.value = [];
         } finally {
             isLoadingSttModels.value = false;
+        }
+    }
+
+    async function fetchAvailableTtvModels() {
+        isLoadingTtvModels.value = true;
+        try {
+            const response = await apiClient.get('/api/config/ttv-models');
+            availableTtvModels.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            availableTtvModels.value = [];
+        } finally {
+            isLoadingTtvModels.value = false;
+        }
+    }
+
+    async function fetchAvailableTtmModels() {
+        isLoadingTtmModels.value = true;
+        try {
+            const response = await apiClient.get('/api/config/ttm-models');
+            availableTtmModels.value = Array.isArray(response.data) ? response.data : [];
+        } catch (error) {
+            availableTtmModels.value = [];
+        } finally {
+            isLoadingTtmModels.value = false;
         }
     }
 
@@ -726,6 +753,8 @@ export const useDataStore = defineStore('data', () => {
             fetchAvailableTtiModels(),
             fetchAvailableTtsModels(),
             fetchAvailableSttModels(),
+            fetchAvailableTtvModels(),
+            fetchAvailableTtmModels(),
             fetchUserVoices(),
             fetchDataStores(),
             fetchPersonalities(),
@@ -744,6 +773,8 @@ export const useDataStore = defineStore('data', () => {
             fetchAvailableTtiModels(),
             fetchAvailableTtsModels(),
             fetchAvailableSttModels(),
+            fetchAvailableTtvModels(),
+            fetchAvailableTtmModels(),
             fetchUserVoices(),
             fetchPersonalities()
         ]);
@@ -762,11 +793,57 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    function _buildGroupedModels(rawList) {
+        if (!Array.isArray(rawList) || rawList.length === 0) {
+            return [];
+        }
+
+        const grouped = rawList.reduce((acc, model) => {
+            if (!model || typeof model.id !== 'string') return acc;
+            const [bindingAlias] = model.id.split('/');
+            if (!acc[bindingAlias]) {
+                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
+            }
+
+            const aliasObj = model.alias || {};
+            const isVision = Boolean(aliasObj.vision_enabled || aliasObj.has_vision);
+            const forcedCtx = aliasObj.forced_context_size || aliasObj.ctx_size;
+
+            acc[bindingAlias].items.push({ 
+                id: model.id, 
+                name: model.name || aliasObj.title || model.id,
+                icon_base64: aliasObj.icon,
+                description: aliasObj.description,
+                vision_enabled: isVision,
+                has_vision: isVision,
+                forced_context_size: forcedCtx,
+                ctx_size: forcedCtx,
+                routing_config: aliasObj.routing_config || {},
+                alias: {
+                    ...aliasObj,
+                    vision_enabled: isVision,
+                    has_vision: isVision,
+                    forced_context_size: forcedCtx,
+                    ctx_size: forcedCtx
+                }
+            });
+            return acc;
+        }, {});
+
+        Object.values(grouped).forEach(group => {
+            group.items.sort((a, b) => a.name.localeCompare(b.name));
+        });
+
+        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
+    }
+
     function $reset() {
         availableLollmsModels.value = [];
         availableTtiModels.value = [];
         availableTtsModels.value = [];
         availableSttModels.value = [];
+        availableTtvModels.value = [];
+        availableTtmModels.value = [];
         userVoices.value = [];
         ownedDataStores.value = [];
         sharedDataStores.value = [];
@@ -781,13 +858,14 @@ export const useDataStore = defineStore('data', () => {
         isLoadingTtiModels.value = false;
         isLoadingTtsModels.value = false;
         isLoadingSttModels.value = false;
+        isLoadingTtvModels.value = false;
+        isLoadingTtmModels.value = false;
         isLoadingUserVoices.value = false;
         _languages.value = [];
         isLoadingLanguages.value = false;
         apiKeys.value = [];
     }
 
-    // --- COMPUTEDS (Declared AFTER methods) ---
     const languages = computed(() => {
         return _languages.value.length > 0 ? _languages.value : defaultLanguages;
     });
@@ -816,96 +894,12 @@ export const useDataStore = defineStore('data', () => {
         return Object.entries(grouped).map(([mcpName, tools]) => ({ isGroup: true, label: mcpName, items: tools.sort((a, b) => a.name.localeCompare(b.name))})).sort((a,b) => a.label.localeCompare(b.label));
     });
 
-    const availableLLMModelsGrouped = computed(() => {
-        if (!Array.isArray(availableLollmsModels.value) || availableLollmsModels.value.length === 0) {
-            return [];
-        }
-
-        const grouped = availableLollmsModels.value.reduce((acc, model) => {
-            if (!model || typeof model.id !== 'string') return acc;
-            const [bindingAlias] = model.id.split('/');
-            if (!acc[bindingAlias]) {
-                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
-            }
-            acc[bindingAlias].items.push({ 
-                id: model.id, 
-                name: model.name,
-                icon_base64: model.alias?.icon,
-                description: model.alias?.description,
-                alias: model.alias
-            });
-            return acc;
-        }, {});
-
-        Object.values(grouped).forEach(group => {
-            group.items.sort((a, b) => a.name.localeCompare(b.name));
-        });
-
-        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
-    });
-
-    const availableTtiModelsGrouped = computed(() => {
-        if (!Array.isArray(availableTtiModels.value) || availableTtiModels.value.length === 0) return [];
-        const grouped = availableTtiModels.value.reduce((acc, model) => {
-            if (!model || typeof model.id !== 'string') return acc;
-            const [bindingAlias] = model.id.split('/');
-            if (!acc[bindingAlias]) {
-                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
-            }
-            acc[bindingAlias].items.push({ 
-                id: model.id, 
-                name: model.name,
-                icon_base64: model.alias?.icon,
-                description: model.alias?.description,
-                alias: model.alias
-            });
-            return acc;
-        }, {});
-        Object.values(grouped).forEach(group => group.items.sort((a, b) => a.name.localeCompare(b.name)));
-        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
-    });
-
-    const availableTtsModelsGrouped = computed(() => {
-        if (!Array.isArray(availableTtsModels.value) || availableTtsModels.value.length === 0) return [];
-        const grouped = availableTtsModels.value.reduce((acc, model) => {
-            if (!model || typeof model.id !== 'string') return acc;
-            const [bindingAlias] = model.id.split('/');
-            if (!acc[bindingAlias]) {
-                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
-            }
-            acc[bindingAlias].items.push({ 
-                id: model.id, 
-                name: model.name,
-                icon_base64: model.alias?.icon,
-                description: model.alias?.description,
-                alias: model.alias
-            });
-            return acc;
-        }, {});
-        Object.values(grouped).forEach(group => group.items.sort((a, b) => a.name.localeCompare(b.name)));
-        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
-    });
-
-    const availableSttModelsGrouped = computed(() => {
-        if (!Array.isArray(availableSttModels.value) || availableSttModels.value.length === 0) return [];
-        const grouped = availableSttModels.value.reduce((acc, model) => {
-            if (!model || typeof model.id !== 'string') return acc;
-            const [bindingAlias] = model.id.split('/');
-            if (!acc[bindingAlias]) {
-                acc[bindingAlias] = { isGroup: true, label: bindingAlias, items: [] };
-            }
-            acc[bindingAlias].items.push({ 
-                id: model.id, 
-                name: model.name,
-                icon_base64: model.alias?.icon,
-                description: model.alias?.description,
-                alias: model.alias
-            });
-            return acc;
-        }, {});
-        Object.values(grouped).forEach(group => group.items.sort((a, b) => a.name.localeCompare(b.name)));
-        return Object.values(grouped).filter(g => g.items.length > 0).sort((a, b) => a.label.localeCompare(b.label));
-    });
+    const availableLLMModelsGrouped = computed(() => _buildGroupedModels(availableLollmsModels.value));
+    const availableTtiModelsGrouped = computed(() => _buildGroupedModels(availableTtiModels.value));
+    const availableTtsModelsGrouped = computed(() => _buildGroupedModels(availableTtsModels.value));
+    const availableSttModelsGrouped = computed(() => _buildGroupedModels(availableSttModels.value));
+    const availableTtvModelsGrouped = computed(() => _buildGroupedModels(availableTtvModels.value));
+    const availableTtmModelsGrouped = computed(() => _buildGroupedModels(availableTtmModels.value));
 
     const allPersonalities = computed(() => [...userPersonalities.value, ...publicPersonalities.value]);
     
@@ -913,7 +907,6 @@ export const useDataStore = defineStore('data', () => {
         return allPersonalities.value.find(p => p.id === id);
     }
 
-    // --- EVENT LISTENERS (Attached at the very end) ---
     async function handleTaskCompletion(task) {
         if (!task || !['completed', 'failed', 'cancelled'].includes(task.status)) return;
         const taskName = task.name || '';
@@ -948,10 +941,14 @@ export const useDataStore = defineStore('data', () => {
         availableTtiModels, isLoadingTtiModels, availableTtiModelsGrouped,
         availableTtsModels, isLoadingTtsModels, availableTtsModelsGrouped,
         availableSttModels, isLoadingSttModels, availableSttModelsGrouped,
+        availableTtvModels, isLoadingTtvModels, availableTtvModelsGrouped,
+        availableTtmModels, isLoadingTtmModels, availableTtmModelsGrouped,
         userVoices, isLoadingUserVoices, fetchUserVoices,
         fetchAvailableTtiModels,
         fetchAvailableTtsModels,
         fetchAvailableSttModels,
+        fetchAvailableTtvModels,
+        fetchAvailableTtmModels,
 
         loadAllInitialData, refreshAllModels, fetchAvailableLollmsModels, fetchAdminAvailableLollmsModels, fetchDataStores,
         addDataStore, updateDataStore, deleteDataStore, leaveDataStore, shareDataStore,

@@ -568,6 +568,31 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
+    async function createDiscussionWithArtefacts({ sourceDiscussionId, artefactTitles, title = null }) {
+        if (!sourceDiscussionId || !artefactTitles || artefactTitles.length === 0) return;
+        uiStore.addNotification(`Creating new chat with ${artefactTitles.length} document(s)...`, 'info');
+        try {
+            const response = await apiClient.post(
+                `/api/discussions/${sourceDiscussionId}/artefacts/create-discussion-with-artefacts`,
+                { artefact_titles: artefactTitles, title }
+            );
+
+            const newDiscId = response.data.discussion_id;
+            if (typeof getActions().loadDiscussions === 'function') {
+                await getActions().loadDiscussions();
+            }
+            if (typeof getActions().selectDiscussion === 'function') {
+                await getActions().selectDiscussion(newDiscId);
+            }
+
+            uiStore.addNotification('New conversation ready with active documents!', 'success');
+            return response.data;
+        } catch (error) {
+            console.error("Failed to create discussion with artefacts:", error);
+            uiStore.addNotification('Failed to create new conversation with selected documents.', 'error');
+        }
+    }
+
     async function createDiscussionWithArtefactVersion({ discussionId, artefactTitle, version }) {
         uiStore.addNotification('Creating new chat with this document...', 'info');
         try {
@@ -858,6 +883,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
     }
 
     return {
+        createDiscussionWithArtefacts,
         saveRawArtefactToLibrary,
         saveArtefactToLibrary,
         shareArtefact,

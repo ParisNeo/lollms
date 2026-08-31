@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-08-31 22:43]
+
+- feat(admin): update user and bindings management with frontend assets and backend refinements
+
 ## [2026-08-27 02:44]
 
 - feat(generation): disable episodic memory by default in llm router

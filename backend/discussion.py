@@ -1,6 +1,7 @@
 # backend/discussion.py
 from pathlib import Path
 import platform
+import json
 from typing import List, Optional, Any, Dict
 from lollms_client import LollmsClient, LollmsDataManager, LollmsDiscussion
 from lollms_client.lollms_discussion import ArtefactType
@@ -16,11 +17,15 @@ ArtefactType.register_custom_type("skill", label="AI Capability")
 ArtefactType.register_custom_type("file", label="External Document")
 ArtefactType.register_custom_type("book", label="Digital Book")
 
-
-def get_user_discussion(username: str, discussion_id: str, create_if_missing: bool = False, lollms_client: Optional[LollmsClient] = None, load_memory: bool = True) -> Optional[LollmsDiscussion]:
+def get_user_discussion(
+    username: str, 
+    discussion_id: str, 
+    create_if_missing: bool = False, 
+    lollms_client: Optional[LollmsClient] = None, 
+    load_memory: bool = True
+) -> Optional[LollmsDiscussion]:
     """
-    Retrieves or creates a LollmsDiscussion object for a user.
-    This function now relies on the lollms-client's native LollmsDiscussion class.
+    Retrieves or creates a LollmsDiscussion object for a user using universal profiles.
     """
     lc = lollms_client
 
@@ -28,13 +33,11 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
         if username in user_sessions:
             lc = get_user_lollms_client(username)
         else:
-            # User is not logged in on this worker (e.g., owner of a shared discussion).
-            # We must build a temporary client from their DB settings.
             db = next(get_db())
             try:
                 owner_db = db.query(DBUser).filter(DBUser.username == username).first()
                 if not owner_db:
-                    return None  # Owner not found
+                    return None
 
                 binding_to_use = None
                 user_model_full = owner_db.lollms_model_name
@@ -47,18 +50,9 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
                     binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
 
                 if not binding_to_use:
-                    # No bindings available, cannot create a client.
                     return None
                 
-                # Simplified client build from DB user settings
-                lc = LollmsClient(
-                    llm_binding_name=binding_to_use.name,
-                    llm_binding_config={
-                        **binding_to_use.config,
-                        "model_name": owner_db.lollms_model_name.split('/')[-1] if user_model_full else binding_to_use.default_model_name
-                    }
-                )
-
+                lc = get_user_lollms_client(username)
             finally:
                 db.close()
 
@@ -67,37 +61,15 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
 
     dm = get_user_discussion_manager(username)
     
-    # Context size resolution
-    # 1. Try to get it from the client config (where admin overrides are injected)
-    # 2. Fallback to manual DB lookup using the user's selected model path (alias/model)
-    # 3. Fallback to model introspection or 4096
-    max_context_size = getattr(lc, 'llm_binding_config', {}).get('ctx_size')
-    
-    if not max_context_size:
-        db = next(get_db())
-        try:
-            user_db = db.query(DBUser).filter(DBUser.username == username).first()
-            user_model_full = user_db.lollms_model_name if user_db else None
-            
-            if user_model_full and '/' in user_model_full:
-                binding_alias_key, model_key = user_model_full.split('/', 1)
-                # Look for the binding record by alias to find the correct model definitions
-                binding_rec = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias_key).first()
-                if binding_rec and binding_rec.model_aliases:
-                    aliases = binding_rec.model_aliases
-                    if isinstance(aliases, str):
-                        aliases = json.loads(aliases)
-                    
-                    alias_info = aliases.get(model_key)
-                    if alias_info and alias_info.get('ctx_size'):
-                        max_context_size = int(alias_info['ctx_size'])
-        except Exception:
-            pass
-        finally:
-            db.close()
+    # Priority-based Context Size Resolution via Universal Profile Architecture
+    max_context_size = None
+    try:
+        max_context_size = lc.get_ctx_size()
+    except Exception:
+        pass
 
     if not max_context_size:
-        max_context_size = lc.get_ctx_size() or 4096
+        max_context_size = getattr(lc, 'llm_binding_config', {}).get('ctx_size') or 4096
 
     discussion = dm.get_discussion(
         lollms_client=lc,
@@ -107,33 +79,22 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
     )
 
     if discussion:
-        # CRITICAL FIX: Ensure the discussion object pulls messages from the DB
-        # Shared discussions often appear empty because the in-memory object 
-        # is fresh while the DB contains the history.
         if hasattr(discussion, 'load_messages'):
             discussion.load_messages()
 
         discussion.lollms_client = lc
         discussion.max_context_size = max_context_size
         
-        # --- NEW MEMORY & USER DATA ZONE LOGIC ---
         if load_memory:
             db = next(get_db())
             try:
                 user_db = db.query(DBUser).filter(DBUser.username == username).first()
                 if user_db:
-                    # Cognitive Three-Layer Memory Integration
                     from backend.routers.memories import get_user_memory_manager
                     mm = get_user_memory_manager(username)
-
-                    # Bind the instantiated memory manager directly to the discussion.
-                    # LollmsDiscussion uses `discussion.memory_manager` internally to manage context layers.
                     discussion.memory_manager = mm
-
-                    # Build the active working memory prompt dynamically
                     discussion.memory = mm.build_working_zone()
 
-                    # User Data Zone construction
                     preferences_lines = []
 
                 if user_db.share_dynamic_info_with_llm:
@@ -168,12 +129,11 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
                     discussion.user_data_zone = "\n".join(user_data_zone_parts)
             finally:
                 db.close()
-        # --- END NEW LOGIC ---
 
         try:
             discussion.get_discussion_images()
         except Exception as e:
-            print(f"Warning: A non-critical error occurred during discussion image check. Trusting library. Error: {e}")
+            print(f"Warning: Discussion image check: {e}")
 
         return discussion
     elif create_if_missing:
@@ -185,7 +145,6 @@ def get_user_discussion(username: str, discussion_id: str, create_if_missing: bo
             autosave=True,
             discussion_metadata={"title": f"New Discussion {discussion_id[:8]}"},
         )
-        # --- CONDITIONAL MEMORY LOADING FOR CREATION ---
         if load_memory:
             db = next(get_db())
             try:

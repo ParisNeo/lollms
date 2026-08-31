@@ -150,10 +150,16 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     function connectWebSocket() {
+        const path = window.location.pathname || '';
+        if (path.startsWith('/reset-password') || window.location.hash.includes('reset-password')) {
+            // Never open WebSocket on reset password page
+            return;
+        }
+
         if (!token.value || isTokenExpired(token.value)) {
             if (token.value) {
                 console.warn("[WebSocket] Token expired. Aborting connection loop.");
-                clearAuthData(); // Force logout to stop the loop
+                clearAuthData();
             }
             return;
         }
@@ -554,7 +560,20 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function attemptInitialAuth() {
-        if (window.location.pathname.startsWith('/app/') || window.location.pathname.startsWith('/reset-password')) {
+        const path = window.location.pathname || '';
+        const isResetPassword = path.startsWith('/reset-password') || window.location.hash.includes('reset-password');
+        const isAppSso = path.startsWith('/app/');
+
+        if (isResetPassword) {
+            // Isolate reset password page: clear any stale token and exit immediately without network calls
+            user.value = null;
+            token.value = null;
+            localStorage.removeItem('lollms-token');
+            isAuthenticating.value = false;
+            return;
+        }
+
+        if (isAppSso) {
             if (token.value) await refreshUser().catch(() => clearAuthData());
             isAuthenticating.value = false;
             return;

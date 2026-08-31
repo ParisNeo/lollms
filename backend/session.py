@@ -1,3 +1,4 @@
+# backend/session.py
 import os
 import json
 import traceback
@@ -17,7 +18,10 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.service import MCP as DBMCP, App as DBApp
 from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStoreLink as DBSharedDataStoreLink
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import GlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
+from backend.db.models.config import (
+    GlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding,
+    TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
+)
 from lollms_client import LollmsClient
 from backend.models.user import UserAuthDetails
 from backend.models.auth import TokenData
@@ -46,13 +50,11 @@ except ImportError:
 user_sessions: Dict[str, Dict[str, Any]] = {}
 
 # Authentication Cache to prevent DB bombardment during request bursts
-# Maps Token -> (UserObject, Expiry)
 _token_user_cache: Dict[str, tuple] = {}
 _token_cache_lock = threading.Lock()
 TOKEN_CACHE_TTL = 10 # seconds
 
 # Global Client Registry to prevent file descriptor exhaustion
-# Maps Hash(BindingName + Config) -> LollmsClient Instance
 _global_client_registry: Dict[str, LollmsClient] = {}
 _registry_lock = threading.Lock()
 
@@ -61,14 +63,13 @@ _session_init_lock = threading.Lock()
 _client_build_locks: Dict[str, threading.Lock] = {}
 _client_build_locks_lock = threading.Lock()
 
-# helper function
 def ensure_bool(value, default=False):
     if isinstance(value, bool):
         return value
     elif isinstance(value, str):
         try:
             return value.lower() in ("true", "yes", "1")
-        except:
+        except Exception:
             return default
     else:
         return default
@@ -90,15 +91,12 @@ async def get_current_db_user_from_token(
 
     payload = decode_main_access_token(token)
     if payload is None:
-        ASCIIColors.error(f"[Auth] Token decoding failed (SECRET_KEY mismatch or malformed). Token: ...{token[-10:]}")
         raise credentials_exception
 
     username: str = payload.get("sub")
     if username is None:
-        ASCIIColors.error(f"[Auth] Payload missing 'sub' (username).")
         raise credentials_exception
 
-    # 1. Check Cache First
     with _token_cache_lock:
         if token in _token_user_cache:
             cached_user, expiry = _token_user_cache[token]
@@ -116,22 +114,17 @@ async def get_current_db_user_from_token(
                 del _token_user_cache[token]
 
     try:
-        # 2. Perform DB Lookup
         user = db.query(DBUser).filter(DBUser.username == username).first()
         if user is None:
-            ASCIIColors.error(f"[Auth] User '{username}' not found in database.")
             raise credentials_exception
 
-        # 2.1 Validate Token Issuance vs Password Changed At
         token_iat = payload.get("iat")
         if user.password_changed_at is not None and token_iat is not None:
             pwd_changed = user.password_changed_at
             pwd_changed_ts = pwd_changed.replace(tzinfo=datetime.timezone.utc).timestamp() if pwd_changed.tzinfo is None else pwd_changed.timestamp()
             if (token_iat + 1) < pwd_changed_ts:
-                ASCIIColors.warning(f"[Auth] Stale token rejected for user '{username}': issued at {token_iat} prior to password change at {pwd_changed_ts}.")
                 raise credentials_exception
 
-        # 3. Update Last Activity (Throttled & Defensive)
         try:
             last_act = user.last_activity_at
             if last_act is None:
@@ -144,27 +137,19 @@ async def get_current_db_user_from_token(
                     user.last_activity_at = now
                     db.commit()
                     db.refresh(user)
-        except Exception as e:
-            # Telemetry update failure should NOT block the handshake
-            ASCIIColors.warning(f"[Auth] Throttled activity update failed (DB Busy?): {e}")
+        except Exception:
             db.rollback()
 
-        # 4. Update Cache
         with _token_cache_lock:
             _token_user_cache[token] = (user, now + datetime.timedelta(seconds=TOKEN_CACHE_TTL))
-
-            # Periodic cleanup of expired entries
             if len(_token_user_cache) > 1000:
                 _token_user_cache.clear()
 
         return user
 
     except HTTPException:
-        # Standard HTTP rejections (Expired, Invalid) should be silent
         raise
     except Exception as e:
-        # Only log full tracebacks for actual system failures (DB connection errors, etc.)
-        ASCIIColors.error(f"Authentication System Failure: {str(e)}")
         trace_exception(e)
         raise credentials_exception
 
@@ -172,8 +157,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
     if not db_user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="User account is inactive.")
 
-    # Maintenance Mode Check
-    # If maintenance is on AND the user is NOT an admin, block access.
     is_maintenance = settings.get("maintenance_mode", False)
     if is_maintenance and not db_user.is_admin:
         msg = settings.get("maintenance_message", "System under maintenance.")
@@ -191,8 +174,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         db_was_created = True
 
     try:
-        # Determine the user's UI level for this session without modifying the DB.
-        # Initializing here ensures the variable is always defined for the return statement.
         session_ui_level = db_user.user_ui_level
         if db_user.is_admin and session_ui_level != 4:
             session_ui_level = 4
@@ -222,7 +203,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             user_model_full = forced_model
 
         session = user_sessions[username]
-
         if session.get("lollms_model_name") != user_model_full:
             session["lollms_model_name"] = user_model_full
 
@@ -247,11 +227,9 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
                     try:
                         binding.model_aliases = json.loads(binding.model_aliases)
                     except Exception as e:
-                        trace_exception(e)
                         binding.model_aliases = {}
                 
                 alias_info = binding.model_aliases.get(model_name)
-                
                 if alias_info and not alias_info.get('allow_parameters_override', True):
                     llm_settings_overridden = True
                     param_map = {"temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n", "reasoning_activation": "reasoning_activation", "reasoning_effort": "reasoning_effort", "reasoning_summary": "reasoning_summary"}
@@ -271,7 +249,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
         default_chunk_size = settings.get("default_chunk_size", 2048)
         default_chunk_overlap = settings.get("default_chunk_overlap", 256)
 
-        # --- ADMIN RAG GOD MODE / OVERRIDE ENFORCEMENT ---
         force_rag_mode = settings.get("force_rag_settings_mode", "disabled")
         rag_settings_forced = False
 
@@ -399,7 +376,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             compress_images=db_user.compress_images,
             image_compression_quality=db_user.image_compression_quality,
 
-            # Herd Mode Settings
             herd_mode_enabled=db_user.herd_mode_enabled,
             herd_participants=db_user.herd_participants or [],
             herd_precode_participants=db_user.herd_precode_participants or [],
@@ -408,7 +384,6 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             herd_dynamic_mode=db_user.herd_dynamic_mode,
             herd_model_pool=db_user.herd_model_pool or [],
             
-            # Web Search & Tools Settings
             google_api_key=db_user.google_api_key,
             google_cse_id=db_user.google_cse_id,
             web_search_enabled=db_user.web_search_enabled,
@@ -461,14 +436,11 @@ def load_mcps(username):
                 mcp_base_url = mcp.url.rstrip('/')
                 parsed = urlparse(mcp_base_url)
                 
-                # Intelligent URL handling for external MCPs
                 if mcp_base_url.endswith('/mcp'):
                      mcp_full_url = mcp_base_url
                 elif parsed.path and parsed.path != '/':
-                     # If the user provided a specific path (e.g. /mcp-kb), respect it.
                      mcp_full_url = mcp_base_url
                 else:
-                     # Default to Lollms convention
                      mcp_full_url = f"{mcp_base_url}/mcp"
                 
                 server_info = {"server_url": mcp_full_url}
@@ -478,7 +450,6 @@ def load_mcps(username):
                 elif mcp.authentication_type == "bearer":
                     server_info["auth_config"] = { "type": "bearer", "token": mcp.authentication_key }
                 elif mcp.authentication_type == "api_key":
-                    # [FIX] Handle JSON-encoded key for header customization
                     key = mcp.authentication_key
                     header = "X-API-Key"
                     
@@ -489,8 +460,7 @@ def load_mcps(username):
                                 key = data.get("key", "")
                                 header = data.get("header_name", "X-API-Key")
                         except Exception as e:
-                            print(f"Warning: Failed to parse API key JSON for {mcp.name}, treating as raw key. Error: {e}")
-                            pass
+                            print(f"Warning: Failed to parse API key JSON for {mcp.name}: {e}")
                     
                     server_info["auth_config"] = { 
                         "type": "api_key", 
@@ -505,7 +475,6 @@ def load_mcps(username):
         db_for_mcp.close()
     return servers_infos
 
-
 def invalidate_user_mcp_cache(username: str):
     if username in user_sessions:
         session = user_sessions[username]
@@ -513,27 +482,15 @@ def invalidate_user_mcp_cache(username: str):
             del session['tools_cache']
         if 'servers_infos' in session:
             del session['servers_infos']
-        # Force client rebuild to pick up new MCPs
         session.pop("lollms_clients_cache", None)
         print(f"INFO: Fully invalidated MCP caches for user: {username}")
 
 def reload_lollms_client_mcp(username: str):
-    """
-    Clears all MCP-related caches to force a rebuild of the client and tool discovery
-    on the next request.
-    """
     invalidate_user_mcp_cache(username)
 
-
 def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None, load_mcp: bool = True) -> LollmsClient:
-    """
-    Retrieves a LollmsClient. Now uses global registry to share engine instances 
-    across users with identical configurations to prevent file handle exhaustion.
-    """
-    # Build the client - build_lollms_client_from_params now handles the global registry
     client = build_lollms_client_from_params(username, binding_alias_override, load_mcp=load_mcp)
     
-    # Store in session cache for legacy compatibility and quick access
     if username in user_sessions:
         clients_cache = user_sessions[username].setdefault("lollms_clients_cache", {})
         cache_key = binding_alias_override or "default"
@@ -542,6 +499,185 @@ def get_user_lollms_client(username: str, binding_alias_override: Optional[str] 
         clients_cache[cache_key] = client
         
     return client
+
+def _build_universal_profiles_for_modality(
+    db: Session,
+    binding_model_cls: Any,
+    active_binding_alias: Optional[str],
+    active_model_name: Optional[str],
+    user_overrides: Dict[str, Any],
+    forced_ctx_size: Optional[int] = None
+) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[str]]:
+    all_bindings = db.query(binding_model_cls).filter(binding_model_cls.is_active == True).all()
+    binding_profiles = {}
+    model_profiles = {}
+    default_model_profile_name = None
+
+    # First pass: Build concrete binding profiles & regular model profiles
+    for binding in all_bindings:
+        b_config = binding.config.copy() if binding.config else {}
+        is_binding_default = (binding.alias == active_binding_alias)
+
+        binding_profiles[binding.alias] = {
+            "binding_name": binding.name,
+            "binding_config": b_config,
+            "is_default": is_binding_default
+        }
+
+        aliases = binding.model_aliases or {}
+        if isinstance(aliases, str):
+            try: aliases = json.loads(aliases)
+            except Exception: aliases = {}
+
+        for orig_name, alias_data in aliases.items():
+            if not isinstance(alias_data, dict):
+                alias_data = {"title": str(alias_data)}
+            
+            cfg = alias_data.get('alias', {}) if 'alias' in alias_data else alias_data
+            prof_name = f"{binding.alias}/{orig_name}"
+            is_model_default = is_binding_default and (orig_name == active_model_name or cfg.get('title') == active_model_name)
+
+            if is_model_default:
+                default_model_profile_name = prof_name
+
+            profile_entry = {
+                "binding_profile_name": binding.alias,
+                "model_name": orig_name,
+                "title": cfg.get('title') or orig_name,
+                "description": cfg.get('description', ''),
+                "vision_enabled": cfg.get('vision_enabled', cfg.get('has_vision', False)),
+                "has_vision": cfg.get('has_vision', cfg.get('vision_enabled', False)),
+                "forced_context_size": forced_ctx_size or cfg.get('forced_context_size', cfg.get('ctx_size')),
+                "ctx_size": forced_ctx_size or cfg.get('ctx_size', cfg.get('forced_context_size')),
+                "temperature": cfg.get('temperature'),
+                "top_k": cfg.get('top_k'),
+                "top_p": cfg.get('top_p'),
+                "repeat_penalty": cfg.get('repeat_penalty'),
+                "repeat_last_n": cfg.get('repeat_last_n'),
+                "reasoning_activation": cfg.get('reasoning_activation', False),
+                "reasoning_effort": cfg.get('reasoning_effort'),
+                "reasoning_summary": cfg.get('reasoning_summary', False),
+                "allow_parameters_override": cfg.get('allow_parameters_override', True),
+                "icon": cfg.get('icon'),
+                "routing_config": cfg.get('routing_config', {
+                    "description": cfg.get('description') or cfg.get('title') or orig_name,
+                    "complexity_tier": 2,
+                    "cost_per_1k_tokens": 0.0,
+                    "avg_latency_ms": 200,
+                    "priority": 1
+                }),
+                "vlm_model_profile": cfg.get('vlm_model_profile'),
+                "selected_model_profiles": cfg.get('selected_model_profiles', []),
+                "routing_strategy": cfg.get('routing_strategy', 'balanced'),
+                "is_default": is_model_default
+            }
+
+            if profile_entry["allow_parameters_override"] and user_overrides:
+                for k, v in user_overrides.items():
+                    if v is not None:
+                        profile_entry[k] = v
+
+            model_profiles[prof_name] = profile_entry
+
+        default_model = binding.default_model_name
+        if default_model and f"{binding.alias}/{default_model}" not in model_profiles:
+            prof_name = f"{binding.alias}/{default_model}"
+            is_model_default = is_binding_default and (default_model == active_model_name or active_model_name is None)
+            if is_model_default:
+                default_model_profile_name = prof_name
+
+            model_profiles[prof_name] = {
+                "binding_profile_name": binding.alias,
+                "model_name": default_model,
+                "title": default_model,
+                "description": f"Default model for {binding.alias}",
+                "vision_enabled": False,
+                "has_vision": False,
+                "forced_context_size": forced_ctx_size,
+                "ctx_size": forced_ctx_size,
+                "routing_config": {
+                    "description": f"Default model {default_model}",
+                    "complexity_tier": 2,
+                    "cost_per_1k_tokens": 0.0,
+                    "avg_latency_ms": 200,
+                    "priority": 1
+                },
+                "is_default": is_model_default,
+                **user_overrides
+            }
+
+    # Second pass: Dynamically assemble Smart Router groups using member profiles
+    for binding in all_bindings:
+        if (binding.name == 'smart_router' or binding.alias == 'smart_router'):
+            aliases = binding.model_aliases or {}
+            if isinstance(aliases, str):
+                try: aliases = json.loads(aliases)
+                except Exception: aliases = {}
+
+            if not aliases:
+                aliases = {"auto": {"title": "Auto Smart Router", "routing_strategy": "balanced"}}
+
+            for group_key, group_data in aliases.items():
+                if not isinstance(group_data, dict):
+                    group_data = {"title": str(group_data)}
+
+                cfg = group_data.get('alias', {}) if 'alias' in group_data else group_data
+                selected_profs = cfg.get('selected_model_profiles', [])
+                group_strategy = cfg.get('routing_strategy', 'balanced')
+
+                assembled_pool = {}
+                for p_id, p_info in model_profiles.items():
+                    if p_info.get("binding_profile_name") == binding.alias:
+                        continue
+                    if not selected_profs or p_id in selected_profs:
+                        parent_b = binding_profiles.get(p_info["binding_profile_name"], {})
+                        assembled_pool[p_id] = {
+                            "binding_name": parent_b.get("binding_name", "openai"),
+                            "binding_config": {
+                                **(parent_b.get("binding_config", {})),
+                                "model_name": p_info["model_name"]
+                            },
+                            "vision_enabled": p_info.get("vision_enabled", False),
+                            "routing_profile": p_info.get("routing_config", {
+                                "description": p_info.get("description") or p_info.get("title"),
+                                "complexity_tier": 2,
+                                "cost_per_1k_tokens": 0.0,
+                                "avg_latency_ms": 200,
+                                "priority": 1
+                            })
+                        }
+
+                smart_b_profile_name = f"{binding.alias}_group_{group_key}"
+                binding_profiles[smart_b_profile_name] = {
+                    "binding_name": "smart_router",
+                    "binding_config": {
+                        "routing_strategy": group_strategy,
+                        "model_profiles": assembled_pool
+                    },
+                    "is_default": (binding.alias == active_binding_alias and group_key == active_model_name)
+                }
+
+                prof_full_name = f"{binding.alias}/{group_key}"
+                is_group_default = (binding.alias == active_binding_alias and (group_key == active_model_name or active_model_name is None))
+                if is_group_default:
+                    default_model_profile_name = prof_full_name
+
+                model_profiles[prof_full_name] = {
+                    "binding_profile_name": smart_b_profile_name,
+                    "model_name": group_key,
+                    "title": cfg.get('title') or f"Smart Router ({group_key})",
+                    "description": cfg.get('description', f"Auto-routing group with {len(assembled_pool)} models"),
+                    "vision_enabled": True,
+                    "has_vision": True,
+                    "forced_context_size": forced_ctx_size or cfg.get('forced_context_size'),
+                    "ctx_size": forced_ctx_size or cfg.get('forced_context_size'),
+                    "selected_model_profiles": selected_profs,
+                    "routing_strategy": group_strategy,
+                    "is_default": is_group_default,
+                    **user_overrides
+                }
+
+    return binding_profiles, model_profiles, default_model_profile_name
 
 def build_lollms_client_from_params(
     username: str, 
@@ -566,9 +702,7 @@ def build_lollms_client_from_params(
 ) -> LollmsClient:
     session = user_sessions.get(username)
     
-    is_temp_session = False
     if not session:
-        is_temp_session = True
         session = {
             "safe_store_instances": {},
             "discussions": {},
@@ -581,345 +715,111 @@ def build_lollms_client_from_params(
         if not user_db:
              raise HTTPException(status_code=404, detail=f"User '{username}' not found.")
         
-        # Validate selected models against active bindings before building client
-        if load_llm and user_db.lollms_model_name and '/' in user_db.lollms_model_name:
-            binding_alias_check, _ = user_db.lollms_model_name.split('/', 1)
-            is_active = db.query(DBLLMBinding.id).filter(DBLLMBinding.alias == binding_alias_check, DBLLMBinding.is_active == True).first()
-            if not is_active:
-                user_db.lollms_model_name = None
+        user_saved_params = {
+            "temperature": user_db.llm_temperature,
+            "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
+            "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
+            "put_thoughts_in_context": user_db.put_thoughts_in_context,
+            "reasoning_activation": user_db.reasoning_activation,
+            "reasoning_effort": user_db.reasoning_effort,
+            "reasoning_summary": user_db.reasoning_summary
+        }
+        user_session_params = session.get("llm_params", {})
+        final_user_params = {**{k: v for k, v in user_saved_params.items() if v is not None}, **user_session_params}
+        if llm_params:
+            final_user_params.update(llm_params)
 
-        if load_tti and user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name:
-            binding_alias_check, _ = user_db.tti_binding_model_name.split('/', 1)
-            is_active = db.query(DBTTIBinding.id).filter(DBTTIBinding.alias == binding_alias_check, DBTTIBinding.is_active == True).first()
-            if not is_active:
-                user_db.tti_binding_model_name = None
+        force_model_mode = settings.get("force_model_mode", "disabled")
+        forced_ctx = None
+        if force_model_mode == "force_always":
+            forced_ctx = settings.get("force_context_size")
+            forced_model = settings.get("force_model_name")
+            if forced_model:
+                if '/' in forced_model:
+                    binding_alias, model_name = forced_model.split('/', 1)
+                else:
+                    binding_alias, model_name = None, forced_model
 
-        if load_tti and user_db.iti_binding_model_name and '/' in user_db.iti_binding_model_name:
-            binding_alias_check, _ = user_db.iti_binding_model_name.split('/', 1)
-            is_active = db.query(DBTTIBinding.id).filter(DBTTIBinding.alias == binding_alias_check, DBTTIBinding.is_active == True).first()
-            if not is_active:
-                user_db.iti_binding_model_name = None
+        user_model_full = user_db.lollms_model_name or session.get("lollms_model_name") or settings.get("default_lollms_model_name")
+        target_binding_alias = binding_alias
+        target_model_name = model_name
 
-        if load_tts and user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name:
-            binding_alias_check, _ = user_db.tts_binding_model_name.split('/', 1)
-            is_active = db.query(DBTTSBinding.id).filter(DBTTSBinding.alias == binding_alias_check, DBTTSBinding.is_active == True).first()
-            if not is_active:
-                user_db.tts_binding_model_name = None
-                
-        if load_stt and user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name:
-            binding_alias_check, _ = user_db.stt_binding_model_name.split('/', 1)
-            is_active = db.query(DBSTTBinding.id).filter(DBSTTBinding.alias == binding_alias_check, DBSTTBinding.is_active == True).first()
-            if not is_active:
-                user_db.stt_binding_model_name = None
+        if not target_binding_alias and user_model_full:
+            if '/' in user_model_full:
+                target_binding_alias, target_model_name = user_model_full.split('/', 1)
+            else:
+                try:
+                    resolved_alias, resolved_model = resolve_model_name(db, user_model_full, fallback_to_default=True)
+                    target_binding_alias = resolved_alias
+                    if not target_model_name:
+                        target_model_name = resolved_model
+                except Exception:
+                    pass
+
+        if not target_binding_alias:
+            default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
+            if default_binding:
+                target_binding_alias = default_binding.alias
+                if not target_model_name:
+                    target_model_name = default_binding.default_model_name
+
+        llm_binding_profiles, llm_model_profiles, default_llm_prof = _build_universal_profiles_for_modality(
+            db=db,
+            binding_model_cls=DBLLMBinding,
+            active_binding_alias=target_binding_alias,
+            active_model_name=target_model_name,
+            user_overrides=final_user_params,
+            forced_ctx_size=forced_ctx
+        )
+
+        tti_binding_profiles, tti_model_profiles, _ = _build_universal_profiles_for_modality(
+            db=db,
+            binding_model_cls=DBTTIBinding,
+            active_binding_alias=tti_binding_alias or (user_db.tti_binding_model_name.split('/')[0] if user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name else None),
+            active_model_name=tti_model_name or (user_db.tti_binding_model_name.split('/', 1)[1] if user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name else None),
+            user_overrides=tti_params or {}
+        )
+
+        tts_binding_profiles, tts_model_profiles, _ = _build_universal_profiles_for_modality(
+            db=db,
+            binding_model_cls=DBTTSBinding,
+            active_binding_alias=tts_binding_alias or (user_db.tts_binding_model_name.split('/')[0] if user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name else None),
+            active_model_name=tts_model_name or (user_db.tts_binding_model_name.split('/', 1)[1] if user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name else None),
+            user_overrides=tts_params or {}
+        )
+
+        stt_binding_profiles, stt_model_profiles, _ = _build_universal_profiles_for_modality(
+            db=db,
+            binding_model_cls=DBSTTBinding,
+            active_binding_alias=stt_binding_alias or (user_db.stt_binding_model_name.split('/')[0] if user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name else None),
+            active_model_name=stt_model_name or (user_db.stt_binding_model_name.split('/', 1)[1] if user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name else None),
+            user_overrides=stt_params or {}
+        )
+
+        primary_binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
+        primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
+        primary_config["model_name"] = target_model_name or (primary_binding.default_model_name if primary_binding else "")
+        if forced_ctx:
+            primary_config["ctx_size"] = forced_ctx
+        primary_config.update(final_user_params)
 
         client_init_params = {
             "load_llm": load_llm,
             "load_tti": load_tti,
             "load_tts": load_tts,
             "load_stt": load_stt,
+            "llm_binding_profiles": llm_binding_profiles,
+            "llm_model_profiles": llm_model_profiles,
+            "tti_binding_profiles": tti_binding_profiles,
+            "tti_model_profiles": tti_model_profiles,
+            "tts_binding_profiles": tts_binding_profiles,
+            "tts_model_profiles": tts_model_profiles,
+            "stt_binding_profiles": stt_binding_profiles,
+            "stt_model_profiles": stt_model_profiles,
+            "llm_binding_name": primary_binding.name if primary_binding else None,
+            "llm_binding_config": primary_config
         }
 
-        binding_to_use = None
-        
-        # Determine the model name: DB is the source of truth, followed by session
-        user_model_full = user_db.lollms_model_name or session.get("lollms_model_name")
-        if not user_model_full and username == 'lollms':
-            user_model_full = settings.get("ai_bot_binding_model") or settings.get("default_lollms_model_name")
-        elif not user_model_full:
-            user_model_full = settings.get("default_lollms_model_name")
-
-        # Always resolve the LLM binding configurations to allow model listings 
-        # and metadata queries even when load_llm is set to False.
-        if True:
-            # --- FORCE MODEL ENFORCEMENT ---
-            force_model_mode = settings.get("force_model_mode", "disabled")
-            forced_model = settings.get("force_model_name")
-
-            if force_model_mode == "force_always" and forced_model:
-                user_model_full = forced_model
-                if '/' in forced_model:
-                    binding_alias, model_name = forced_model.split('/', 1)
-                else:
-                    binding_alias = None
-                    model_name = forced_model
-            else:
-                # If a model_name is provided, attempt to resolve it through the central aliasing engine
-                if model_name:
-                    try:
-                        resolved_alias, resolved_model = resolve_model_name(db, model_name, fallback_to_default=False)
-                        binding_alias = resolved_alias
-                        model_name = resolved_model
-                    except Exception:
-                        pass
-
-            if user_model_full:
-                target_binding_alias = binding_alias
-                target_model_name = model_name
-                if not target_binding_alias and '/' in user_model_full:
-                    target_binding_alias, target_model_name = user_model_full.split('/', 1)
-                elif not target_binding_alias:
-                    try:
-                        resolved_alias, resolved_model = resolve_model_name(db, user_model_full, fallback_to_default=False)
-                        target_binding_alias = resolved_alias
-                        if not target_model_name:
-                            target_model_name = resolved_model
-                    except Exception:
-                        pass
-
-                if target_binding_alias:
-                    binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
-                    if binding_to_use:
-                        ASCIIColors.debug(f"[ClientBuild] Using user-requested binding: {target_binding_alias}")
-                        if not model_name:
-                            model_name = target_model_name
-
-            if not binding_to_use:
-                binding_to_use = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
-                if binding_to_use:
-                    ASCIIColors.debug(f"[ClientBuild] No user model set or binding inactive. Falling back to system default: {binding_to_use.alias}")
-
-            if binding_to_use:            
-                final_alias = binding_to_use.alias
-                model_name_for_binding = model_name
-                if not model_name_for_binding:
-                    if user_model_full and '/' in user_model_full:
-                        selected_binding_alias, selected_model_name = user_model_full.split('/', 1)
-                        if selected_binding_alias == final_alias:
-                            model_name_for_binding = selected_model_name
-                    elif user_model_full and user_model_full != final_alias:
-                        try:
-                            _, resolved_model = resolve_model_name(db, user_model_full, fallback_to_default=False)
-                            model_name_for_binding = resolved_model
-                        except Exception:
-                            pass
-
-                if not model_name_for_binding:
-                    model_name_for_binding = binding_to_use.default_model_name
-
-                if not model_name_for_binding:
-                    try:
-                        from lollms_client.lollms_llm_binding import list_binding_models
-                        avail_models = list_binding_models(llm_binding_name=binding_to_use.name, llm_binding_config=binding_to_use.config)
-                        if avail_models and isinstance(avail_models, list) and len(avail_models) > 0:
-                            first_m = avail_models[0]
-                            model_name_for_binding = first_m if isinstance(first_m, str) else (first_m.get("name") or first_m.get("id") or first_m.get("model_name"))
-                    except Exception:
-                        pass
-
-                llm_init_params = { **binding_to_use.config }
-                
-                user_saved_params = {
-                    "temperature": user_db.llm_temperature,
-                    "top_k": user_db.llm_top_k, "top_p": user_db.llm_top_p,
-                    "repeat_penalty": user_db.llm_repeat_penalty, "repeat_last_n": user_db.llm_repeat_last_n,
-                    "put_thoughts_in_context": user_db.put_thoughts_in_context
-                }
-                user_session_params = session.get("llm_params", {})
-                
-                final_user_params = {**{k:v for k,v in user_saved_params.items() if v is not None}, **user_session_params}
-                if llm_params:
-                    final_user_params.update(llm_params)
-
-                # --- ADMIN OVERRIDE ENFORCEMENT ---
-                # If the admin has forced a global context size, apply it now to ensure
-                # the LollmsClient is built with the correct static value.
-                force_model_mode = settings.get("force_model_mode", "disabled")
-                if force_model_mode == "force_always":
-                    forced_ctx = settings.get("force_context_size")
-                    if forced_ctx:
-                        final_user_params["ctx_size"] = forced_ctx
-
-                model_aliases = binding_to_use.model_aliases or {}
-                if isinstance(model_aliases,str):
-                    try:
-                        model_aliases = json.loads(model_aliases)
-                    except Exception as e:
-                        trace_exception(e)
-                        model_aliases= {}
-                alias_info = model_aliases.get(model_name_for_binding)
-
-                if alias_info:
-                    alias_config = alias_info.get('alias', {}) if 'alias' in alias_info else alias_info
-                    override_allowed = alias_config.get('allow_parameters_override', True)
-                    alias_params = {k: v for k, v in alias_config.items() if v is not None}
-
-                    if override_allowed:
-                        llm_init_params.update({**alias_params, **final_user_params})
-                    else:
-                        llm_init_params.update(final_user_params)
-                        llm_init_params.update(alias_params)
-
-                    # Respect Alias context size if provided
-                    ctx_size = alias_config.get('ctx_size')
-                    if ctx_size:
-                        llm_init_params["ctx_size"] = int(ctx_size)
-                else:
-                    llm_init_params.update(final_user_params)
-
-                llm_init_params["model_name"] = model_name_for_binding
-                client_init_params["llm_binding_name"] = binding_to_use.name
-                client_init_params["llm_binding_config"] = llm_init_params    
-        
-        # --- TTI Binding Integration ---
-        if load_tti:
-            force_tti_mode = settings.get("force_tti_model_mode", "disabled")
-            force_tti_name = settings.get("force_tti_model_name")
-            effective_tti_model_full = None
-
-            if force_tti_mode == "force_always" and force_tti_name:
-                effective_tti_model_full = force_tti_name
-            elif tti_binding_alias:
-                effective_tti_model_full = f"{tti_binding_alias}/{tti_model_name or ''}"
-            elif user_db.tti_binding_model_name:
-                effective_tti_model_full = user_db.tti_binding_model_name
-            
-            selected_tti_binding = None
-            selected_tti_model_name = None
-
-            if effective_tti_model_full:
-                if '/' in effective_tti_model_full:
-                    effective_tti_binding_alias, effective_tti_model_name_part = effective_tti_model_full.split('/', 1)
-                    selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == effective_tti_binding_alias, DBTTIBinding.is_active == True).first()
-                    if selected_tti_binding:
-                        selected_tti_model_name = effective_tti_model_name_part
-
-                if not selected_tti_binding:
-                    selected_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
-                    if selected_tti_binding:
-                        selected_tti_model_name = selected_tti_binding.default_model_name
-            
-            if selected_tti_binding:
-                tti_binding_config = selected_tti_binding.config.copy() if selected_tti_binding.config else {}
-                
-                tti_model_aliases = selected_tti_binding.model_aliases or {}
-                tti_alias_info = tti_model_aliases.get(selected_tti_model_name)
-                
-                if tti_alias_info:
-                    for key, value in tti_alias_info.items():
-                        if key not in ['title', 'description', 'icon'] and value is not None:
-                            tti_binding_config[key] = value
-                            
-                allow_tti_override = (tti_alias_info or {}).get('allow_parameters_override', True)
-                if allow_tti_override:
-                    user_tti_configs = user_db.tti_models_config or {}
-                    model_user_config = user_tti_configs.get(user_db.tti_binding_model_name)
-                    if model_user_config:
-                        for key, value in model_user_config.items():
-                            if value is not None:
-                                tti_binding_config[key] = value
-
-                if tti_params:
-                    tti_binding_config.update(tti_params)
-                                
-                if selected_tti_model_name:
-                    tti_binding_config['model_name'] = selected_tti_model_name                
-                    tti_binding_config["models_path"]= str(Path(settings.get("data_dir","data"))/"tti_models"/selected_tti_binding.name)
-                client_init_params["tti_binding_name"] = selected_tti_binding.name
-                client_init_params["tti_binding_config"] = tti_binding_config
-        
-        # --- TTS Binding Integration ---
-        if load_tts:
-            selected_tts_binding = None
-            selected_tts_model_name = tts_model_name
-
-            user_tts_model_full = user_db.tts_binding_model_name
-            if tts_binding_alias:
-                user_tts_model_full = f"{tts_binding_alias}/{tts_model_name or ''}"
-
-            if user_tts_model_full:
-                if '/' in user_tts_model_full:
-                    tts_binding_alias_local, tts_model_name_local = user_tts_model_full.split('/', 1)
-                    selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == tts_binding_alias_local, DBTTSBinding.is_active == True).first()
-                    if not selected_tts_model_name:
-                        selected_tts_model_name = tts_model_name_local
-
-            if not selected_tts_binding:
-                selected_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
-                if selected_tts_binding and not selected_tts_model_name:
-                    selected_tts_model_name = selected_tts_binding.default_model_name
-
-            if selected_tts_binding:
-                tts_binding_config = selected_tts_binding.config.copy() if selected_tts_binding.config else {}
-                
-                tts_model_aliases = selected_tts_binding.model_aliases or {}
-                tts_alias_info = tts_model_aliases.get(selected_tts_model_name)
-                
-                if tts_alias_info:
-                    for key, value in tts_alias_info.items():
-                        if key not in ['title', 'description', 'icon'] and value is not None:
-                            tts_binding_config[key] = value
-                            
-                allow_tts_override = (tts_alias_info or {}).get('allow_parameters_override', True)
-                if allow_tts_override:
-                    user_tts_configs = user_db.tts_models_config or {}
-                    model_user_config = user_tts_configs.get(user_db.tts_binding_model_name)
-                    if model_user_config:
-                        for key, value in model_user_config.items():
-                            if value is not None:
-                                tts_binding_config[key] = value
-
-                if tts_params:
-                    tts_binding_config.update(tts_params)
-                                
-                if selected_tts_model_name:
-                    tts_binding_config['model_name'] = selected_tts_model_name
-                    
-                client_init_params["tts_binding_name"] = selected_tts_binding.name
-                client_init_params["tts_binding_config"] = tts_binding_config
-            
-        # --- STT Binding Integration ---
-        if load_stt:
-            selected_stt_binding = None
-            selected_stt_model_name = stt_model_name
-
-            user_stt_model_full = user_db.stt_binding_model_name
-            if stt_binding_alias:
-                user_stt_model_full = f"{stt_binding_alias}/{stt_model_name or ''}"
-
-            if user_stt_model_full:
-                if '/' in user_stt_model_full:
-                    stt_binding_alias_local, stt_model_name_local = user_stt_model_full.split('/', 1)
-                    selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.alias == stt_binding_alias_local, DBSTTBinding.is_active == True).first()
-                    if not selected_stt_model_name:
-                        selected_stt_model_name = stt_model_name_local
-
-            if not selected_stt_binding:
-                selected_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
-                if selected_stt_binding and not selected_stt_model_name:
-                    selected_stt_model_name = selected_stt_binding.default_model_name
-
-            if selected_stt_binding:
-                stt_binding_config = selected_stt_binding.config.copy() if selected_stt_binding.config else {}
-                
-                stt_model_aliases = selected_stt_binding.model_aliases or {}
-                stt_alias_info = stt_model_aliases.get(selected_stt_model_name)
-                
-                if stt_alias_info:
-                    for key, value in stt_alias_info.items():
-                        if key not in ['title', 'description', 'icon'] and value is not None:
-                            stt_binding_config[key] = value
-                            
-                allow_stt_override = (stt_alias_info or {}).get('allow_parameters_override', True)
-                if allow_stt_override:
-                    user_stt_configs = user_db.stt_models_config or {}
-                    model_user_config = user_stt_configs.get(user_db.stt_binding_model_name)
-                    if model_user_config:
-                        for key, value in model_user_config.items():
-                            if value is not None:
-                                stt_binding_config[key] = value
-
-                if stt_params:
-                    stt_binding_config.update(stt_params)
-                                
-                if selected_stt_model_name:
-                    stt_binding_config['model_name'] = selected_stt_model_name
-                    
-                client_init_params["stt_binding_name"] = selected_stt_binding.name
-                client_init_params["stt_binding_config"] = stt_binding_config
-        
-        # --- MCP Integration ---
-        # Do not block the initial client build with MCP network fetching.
-        # MCPs will be lazily loaded when the client is first used for generation.
         if load_llm and load_mcp:
             servers_infos = session.get('servers_infos')
             if servers_infos is not None:
@@ -927,75 +827,48 @@ def build_lollms_client_from_params(
                 client_init_params["tools_binding_config"] = {"servers_infos": servers_infos}
 
         try:
-            # --- GLOBAL REGISTRY LOGIC ---
             registry_payload = {k: v for k, v in client_init_params.items() if v is not None}
-            registry_key = str(hash(json.dumps(registry_payload, sort_keys=True)))
+            registry_key = str(hash(json.dumps(registry_payload, sort_keys=True, default=str)))
 
             with _registry_lock:
                 if registry_key in _global_client_registry:
-                    # If already loaded, trigger a "Fast Load" completion message
                     if callback:
-                        callback("⚡ Engine cached - Instant access enabled.", 28, {}) # MSG_TYPE_INIT_PROGRESS = 28
+                        callback("⚡ Universal Engine cached - Instant access enabled.", 28, {})
                     return _global_client_registry[registry_key]
 
-                if load_llm:
-                    ASCIIColors.info(f"Worker {os.getpid()}: Building Engine [Hash: {registry_key[:8]}]")
-
                 try:
-                    # Pass the callback directly to LollmsClient
-                    if load_llm:
-                        ASCIIColors.info(f"[Registry] Constructing LollmsClient for {username}...")
                     lc = LollmsClient(**registry_payload, callback=callback)
                     _global_client_registry[registry_key] = lc
-                    if load_llm:
-                        ASCIIColors.success(f"[Registry] Engine built successfully [Hash: {registry_key[:8]}]")
                     return lc
-                except (ValueError, Exception) as engine_err:
-                    # [CRITICAL FIX] Catch binding initialization errors (like missing API keys)
-                    # We log the error but do NOT raise a 500 error here.
-                    # This allows the User Session to load so the user can fix the config in the UI.
+                except Exception as engine_err:
                     error_msg = str(engine_err)
-                    binding_alias_to_show = binding_to_use.alias if binding_to_use else 'N/A'
+                    binding_alias_to_show = target_binding_alias or 'N/A'
                     
                     ASCIIColors.warning(f"Engine Load Failed >> Binding: {binding_alias_to_show} | Error: {error_msg}")
                     
                     if callback:
-                        callback(f"⚠️ Configuration Issue: {error_msg}", 24, {}) # MSG_TYPE_ERROR = 24
+                        callback(f"⚠️ Configuration Issue: {error_msg}", 24, {})
                     
-                    # Return a "Degraded" client - This prevents 500 errors in session loaders.
-                    # CRITICAL: We MUST remove the specific binding keys from the payload.
-                    # Otherwise, LollmsClient will still try to instantiate the broken class.
                     degraded_payload = registry_payload.copy()
-                    
-                    # Strip LLM config
                     degraded_payload["load_llm"] = False
-                    degraded_payload.pop("llm_binding_name", None)
-                    degraded_payload.pop("llm_binding_config", None)
-                    
-                    # Strip TTI/TTS/STT configs as well just in case they caused the crash
                     degraded_payload["load_tti"] = False
                     degraded_payload["load_tts"] = False
                     degraded_payload["load_stt"] = False
-                    degraded_payload.pop("tti_binding_name", None)
-                    degraded_payload.pop("tts_binding_name", None)
-                    degraded_payload.pop("stt_binding_name", None)
+                    degraded_payload.pop("llm_binding_name", None)
+                    degraded_payload.pop("llm_binding_config", None)
+                    degraded_payload.pop("llm_binding_profiles", None)
+                    degraded_payload.pop("llm_model_profiles", None)
                     
                     degraded_lc = LollmsClient(**degraded_payload)
                     return degraded_lc
 
         except Exception as e:
             traceback.print_exc()
-            binding_alias_to_show = binding_to_use.alias if binding_to_use else 'N/A'
             raise HTTPException(status_code=500, detail=f"System error during engine registry: {str(e)}")
     finally:
         db.close()
-        
 
 def _migrate_datastore_sqlite_schema(db_path: Path):
-    """
-    Self-healing migration for DataStore SQLite databases.
-    Ensures modern safe_store columns (e.g. full_text, metadata) exist on legacy store files.
-    """
     if not db_path.exists() or db_path.is_dir():
         return
     import sqlite3
@@ -1081,9 +954,7 @@ def get_safe_store_instance(
     if datastore_id not in session.get("safe_store_instances", {}):
         ss_db_path = get_datastore_db_path(owner_username, datastore_id)
         _migrate_datastore_sqlite_schema(ss_db_path)
-        # ASCIIColors.info(f"Recovering vectorizer:{datastore_record.vectorizer_name}")
         try:
-            # FIX: Ensure 'model' key exists if 'model_name' is present, required for some vectorizers like ollama
             vectorizer_config = datastore_record.vectorizer_config or {}
             if isinstance(vectorizer_config, str):
                 try:
@@ -1091,8 +962,6 @@ def get_safe_store_instance(
                 except Exception:
                     vectorizer_config = {}
             
-            # Make a copy to avoid mutating the DB object if it's attached, though here it's likely fine.
-            # safe_store modifies config passed to it sometimes? better be safe.
             v_config = vectorizer_config.copy()
             if 'model_name' in v_config and 'model' not in v_config:
                 v_config['model'] = v_config['model_name']
@@ -1121,7 +990,6 @@ def get_safe_store_instance(
             raise HTTPException(status_code=500, detail=f"Could not initialize SafeStore for {datastore_id}: {str(e)}")
 
     return session["safe_store_instances"][datastore_id]
-
 
 def get_user_data_root(username: str) -> Path:
     safe_username = secure_filename(username)
@@ -1173,7 +1041,6 @@ def get_user_notebook_assets_path(username: str, notebook_id: str) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-
 def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], Optional[str]]:
     all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
     for binding in all_bindings:
@@ -1185,14 +1052,11 @@ def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], O
                 continue
 
         for original_name, alias_data in model_aliases.items():
-            if original_name == "smart-routing":
-                continue 
             if alias_data:
-                title = alias_data.get('title') or alias_data.get('alias', {}).get('title')
-                if title == alias_title:
+                title = alias_data.get('title') or (alias_data.get('alias', {}).get('title') if isinstance(alias_data, dict) else None)
+                if title == alias_title or original_name == alias_title:
                     return binding.alias, original_name
     return None, None
-
 
 def invalidate_model_cache(db: Session):
     db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").delete()
@@ -1200,10 +1064,8 @@ def invalidate_model_cache(db: Session):
     with _registry_lock:
         _global_client_registry.clear()
 
-    # Broadcast to all other workers to clear their registries and client caches
     from backend.ws_manager import manager
     manager.broadcast_internal_event_sync("global_model_cache_invalidate", {})
-
 
 def resolve_model_name(db: Session, requested_model: str, fallback_to_default: bool = True) -> Tuple[str, str]:
     if not requested_model:
@@ -1217,7 +1079,6 @@ def resolve_model_name(db: Session, requested_model: str, fallback_to_default: b
         parts = requested_model.split('/', 1)
         binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
         if binding:
-            # Check if parts[1] is an alias name for this binding
             model_aliases = binding.model_aliases or {}
             if isinstance(model_aliases, str):
                 try:
@@ -1227,8 +1088,8 @@ def resolve_model_name(db: Session, requested_model: str, fallback_to_default: b
 
             for original_name, alias_data in model_aliases.items():
                 if alias_data:
-                    title = alias_data.get('title') or alias_data.get('alias', {}).get('title')
-                    if title == parts[1]:
+                    title = alias_data.get('title') or (alias_data.get('alias', {}).get('title') if isinstance(alias_data, dict) else None)
+                    if title == parts[1] or original_name == parts[1]:
                         return parts[0], original_name
             return parts[0], parts[1]
 
@@ -1236,13 +1097,11 @@ def resolve_model_name(db: Session, requested_model: str, fallback_to_default: b
     if binding_alias:
         return binding_alias, model_name
 
-    # If we fail to resolve, let's see if we can fall back to the system default model
     if fallback_to_default:
         default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
         if default_binding:
             ASCIIColors.warning(f"Model '{requested_model}' not found. Falling back to default: {default_binding.alias}/{default_binding.default_model_name}")
             return default_binding.alias, default_binding.default_model_name
 
-    # If we fail to resolve and no fallback, force invalidate cache so next list attempt is fresh
     invalidate_model_cache(db)
-    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid alias.")
+    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid profile alias.")

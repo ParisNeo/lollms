@@ -28,6 +28,7 @@ import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconLock from '../../../assets/icons/IconLock.vue';
 import IconCircle from '../../../assets/icons/IconCircle.vue';
 import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
+import IconGitBranch from '../../../assets/icons/ui/IconGitBranch.vue';
 
 const props = defineProps({
     notebookId: { type: String, default: null }
@@ -362,6 +363,25 @@ function toggleSelectionMode() {
     selectionMode.value = !selectionMode.value;
     selectedTitles.value.clear();
 }
+
+async function handleCreateDiscussionWithAllArtefacts() {
+    if (!idToUse.value || groupedArtefacts.value.length === 0) return;
+    const titles = groupedArtefacts.value.map(g => g.title);
+    await discussionsStore.createDiscussionWithArtefacts({
+        sourceDiscussionId: idToUse.value,
+        artefactTitles: titles
+    });
+}
+
+async function handleBatchCreateDiscussion() {
+    if (!idToUse.value || selectedTitles.value.size === 0) return;
+    const titles = Array.from(selectedTitles.value);
+    await discussionsStore.createDiscussionWithArtefacts({
+        sourceDiscussionId: idToUse.value,
+        artefactTitles: titles
+    });
+    exitSelectionMode();
+}
 </script>
 
 <template>
@@ -413,6 +433,9 @@ function toggleSelectionMode() {
             
             <!-- Context Control Triggers -->
             <div class="flex items-center gap-1.5">
+                 <button v-if="groupedArtefacts.length > 0 && !selectionMode" @click="handleCreateDiscussionWithAllArtefacts" class="p-1.5 hover:text-purple-600 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all text-purple-500" title="Start New Chat with All Files">
+                     <IconGitBranch class="w-4.5 h-4.5" />
+                 </button>
                  <button @click="toggleSelectionMode" class="p-1.5 rounded-lg transition-all" :class="selectionMode ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-400 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'" title="Batch Operations (Select Multiple)">
                      <IconGather class="w-4.5 h-4.5" />
                  </button>
@@ -491,6 +514,12 @@ function toggleSelectionMode() {
                 </div>
                 
                 <div class="flex items-center gap-1.5">
+                    <!-- New Chat with Selected Artefacts -->
+                    <button @click="handleBatchCreateDiscussion" class="px-2.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95" title="Start new conversation with selected documents">
+                        <IconGitBranch class="w-3.5 h-3.5" />
+                        <span>New Chat</span>
+                    </button>
+
                     <!-- Make RAG Store (Direct Action) -->
                     <button @click="handleOpenMakeRagStore()" class="px-2.5 py-1.5 rounded-lg bg-green-600 hover:bg-green-700 text-white font-bold text-xs flex items-center gap-1 shadow-sm transition-all active:scale-95" title="Create a new DataStore from selected documents and link it to this chat">
                         <IconDatabase class="w-3.5 h-3.5" />

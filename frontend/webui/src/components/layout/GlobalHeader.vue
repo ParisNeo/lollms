@@ -148,7 +148,7 @@ const isSttAvailable = computed(() => formattedAvailableSttModels.value.length >
 const isTtmAvailable = computed(() => formattedAvailableTtmModels.value.length > 0);
 const isTtvAvailable = computed(() => formattedAvailableTtvModels.value.length > 0);
 
-// Root Dropdown Status (red: no LLM, orange: LLM selected but available other models missing, green: all set)
+// Root Dropdown Status
 const modelSelectorStatus = computed(() => {
     if (!isLlmSelected.value) {
         return 'red';
@@ -170,12 +170,12 @@ const modelSelectorStatus = computed(() => {
 
 const modelSelectorTooltip = computed(() => {
     if (modelSelectorStatus.value === 'red') {
-        return 'No LLM model selected. Please select a model to chat.';
+        return 'No LLM model selected. Please select a model profile to chat.';
     }
     if (modelSelectorStatus.value === 'orange') {
-        return 'Other binding models are available in the system but not selected.';
+        return 'Other binding profiles are available in the system but not selected.';
     }
-    return 'All available model bindings configured.';
+    return 'All universal model profiles active and configured.';
 });
 
 // Filtering Logic
@@ -202,7 +202,7 @@ async function handleRefreshModels() {
             dataStore.refreshAllModels(),
             dataStore.fetchPersonalities()
         ]);
-        uiStore.addNotification('Models, bindings, and personalities refreshed.', 'success');
+        uiStore.addNotification('Models, binding profiles, and personalities refreshed.', 'success');
     } catch (e) {
         uiStore.addNotification('Failed to refresh models.', 'error');
     } finally {
@@ -231,7 +231,7 @@ async function handleRefreshModels() {
 
         <div class="h-6 w-px bg-gray-200 dark:border-gray-700 hidden sm:block"></div>
 
-        <!-- Clean, Single-Avatar Status-Aware Model Selector -->
+        <!-- Clean, Single-Avatar Status-Aware Universal Model Selector -->
         <div class="relative" v-if="user && user.user_ui_level >= 2">
             <button ref="menuTriggerRef" @click="isMenuOpen = !isMenuOpen" 
                 class="flex items-center gap-2.5 px-2.5 py-1.5 rounded-xl transition-all group border shadow-xs active:scale-95"
@@ -242,19 +242,16 @@ async function handleRefreshModels() {
                 }"
                 :title="modelSelectorTooltip"
             >
-                <!-- Clean Avatar (Single unnested avatar without overlapping sub-badges) -->
                 <div class="w-7 h-7 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-800 shrink-0 border border-gray-200 dark:border-gray-700 shadow-xs flex items-center justify-center">
                      <img v-if="selectedPersonality?.icon_base64" :src="selectedPersonality.icon_base64" class="w-full h-full object-cover" />
                      <IconCpuChip v-else class="w-4 h-4 text-gray-500 dark:text-gray-400" />
                 </div>
                 
-                <!-- Model and Personality Information -->
                 <div class="hidden lg:flex flex-col items-start text-xs leading-tight min-w-0">
                     <div class="flex items-center gap-1.5">
                         <span class="font-bold max-w-[130px] truncate text-gray-900 dark:text-gray-100" :title="selectedModel?.name || 'No Model Selected'">
                             {{ selectedModel?.name || 'No LLM Selected' }}
                         </span>
-                        <!-- Status Dot Indicator -->
                         <span 
                             class="w-2 h-2 rounded-full shrink-0" 
                             :class="{
@@ -290,18 +287,18 @@ async function handleRefreshModels() {
                     >
                          <button @click="handleRefreshModels" class="menu-item flex items-center gap-3 border-b dark:border-gray-700 mb-1 py-3 px-4 hover:bg-gray-50 dark:hover:bg-gray-700" :disabled="isRefreshingModels">
                             <IconRefresh class="h-4 w-4 text-primary" :class="{'animate-spin': isRefreshingModels}" />
-                            <span class="font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300">Refresh Models</span>
+                            <span class="font-bold text-xs uppercase tracking-wider text-gray-600 dark:text-gray-300">Refresh Profiles</span>
                          </button>
 
-                         <!-- LLM Model Submenu with Clean Status Badge -->
+                         <!-- LLM Model Profile Submenu -->
                          <DropdownSubmenu 
-                            title="LLM Model" 
+                            title="LLM Profile" 
                             icon="cpu-chip"
                             :status-color="isLlmSelected ? 'green' : 'red'"
                             :status-text="isLlmSelected ? 'Selected' : 'None'"
                          >
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search models..." class="input-field-sm w-full">
+                                <input type="text" v-model="modelSearchTerm" @click.stop placeholder="Search profiles..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 grow overflow-y-auto max-h-96">
                                 <button 
@@ -322,7 +319,7 @@ async function handleRefreshModels() {
                                         >
                                             <span class="truncate pr-2">{{ item.name }}</span>
                                             <div class="flex items-center gap-1.5 shrink-0">
-                                                <IconEye v-if="item.alias?.has_vision" class="w-3.5 h-3.5 text-gray-400" title="Vision Support" />
+                                                <IconEye v-if="item.vision_enabled || item.has_vision" class="w-3.5 h-3.5 text-blue-500" title="Vision Enabled" />
                                                 <IconCheckCircle v-if="activeModelName === item.id" class="w-4 h-4 text-emerald-500" />
                                             </div>
                                         </button>
@@ -331,16 +328,16 @@ async function handleRefreshModels() {
                             </div>
                          </DropdownSubmenu>
 
-                         <!-- TTI Model Submenu with Clean Status Badge -->
+                         <!-- TTI Model Profile Submenu -->
                          <DropdownSubmenu 
                             v-if="formattedAvailableTtiModels.length > 0" 
-                            title="TTI Model" 
+                            title="TTI Profile" 
                             icon="photo"
                             :status-color="isTtiSelected ? 'green' : 'red'"
                             :status-text="isTtiSelected ? 'Selected' : 'None'"
                          >
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI models..." class="input-field-sm w-full">
+                                <input type="text" v-model="ttiModelSearchTerm" @click.stop placeholder="Search TTI profiles..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 grow overflow-y-auto max-h-96">
                                 <button 
@@ -348,7 +345,7 @@ async function handleRefreshModels() {
                                     class="menu-item-button" 
                                     :class="{'!bg-gray-100 dark:!bg-gray-700 font-bold': !activeTtiModelName}"
                                 >
-                                    <span class="truncate">None (No TTI Model)</span>
+                                    <span class="truncate">None (No TTI Profile)</span>
                                     <span v-if="!activeTtiModelName" class="text-[9px] font-black uppercase text-gray-400">Active</span>
                                 </button>
                                 <div v-for="group in filteredAvailableTtiModels" :key="group.label">
@@ -367,16 +364,16 @@ async function handleRefreshModels() {
                             </div>
                          </DropdownSubmenu>
 
-                         <!-- TTS Model Submenu with Clean Status Badge -->
+                         <!-- TTS Model Profile Submenu -->
                          <DropdownSubmenu 
                             v-if="formattedAvailableTtsModels.length > 0" 
-                            title="TTS Model" 
+                            title="TTS Profile" 
                             icon="speaker-wave"
                             :status-color="isTtsSelected ? 'green' : 'red'"
                             :status-text="isTtsSelected ? 'Selected' : 'None'"
                          >
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS models..." class="input-field-sm w-full">
+                                <input type="text" v-model="ttsModelSearchTerm" @click.stop placeholder="Search TTS profiles..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 grow overflow-y-auto max-h-96">
                                 <button 
@@ -384,7 +381,7 @@ async function handleRefreshModels() {
                                     class="menu-item-button" 
                                     :class="{'!bg-gray-100 dark:!bg-gray-700 font-bold': !activeTtsModelName}"
                                 >
-                                    <span class="truncate">None (No TTS Model)</span>
+                                    <span class="truncate">None (No TTS Profile)</span>
                                     <span v-if="!activeTtsModelName" class="text-[9px] font-black uppercase text-gray-400">Active</span>
                                 </button>
                                 <div v-for="group in filteredAvailableTtsModels" :key="group.label">
@@ -403,16 +400,16 @@ async function handleRefreshModels() {
                             </div>
                          </DropdownSubmenu>
 
-                         <!-- STT Model Submenu with Clean Status Badge -->
+                         <!-- STT Model Profile Submenu -->
                          <DropdownSubmenu 
                             v-if="formattedAvailableSttModels.length > 0" 
-                            title="STT Model" 
+                            title="STT Profile" 
                             icon="microphone"
                             :status-color="isSttSelected ? 'green' : 'red'"
                             :status-text="isSttSelected ? 'Selected' : 'None'"
                          >
                             <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search STT models..." class="input-field-sm w-full">
+                                <input type="text" v-model="sttModelSearchTerm" @click.stop placeholder="Search STT profiles..." class="input-field-sm w-full">
                             </div>
                             <div class="p-1 grow overflow-y-auto max-h-96">
                                 <button 
@@ -420,7 +417,7 @@ async function handleRefreshModels() {
                                     class="menu-item-button" 
                                     :class="{'!bg-gray-100 dark:!bg-gray-700 font-bold': !activeSttModelName}"
                                 >
-                                    <span class="truncate">None (No STT Model)</span>
+                                    <span class="truncate">None (No STT Profile)</span>
                                     <span v-if="!activeSttModelName" class="text-[9px] font-black uppercase text-gray-400">Active</span>
                                 </button>
                                 <div v-for="group in filteredAvailableSttModels" :key="group.label">
@@ -439,79 +436,7 @@ async function handleRefreshModels() {
                             </div>
                          </DropdownSubmenu>
 
-                         <!-- TTM Model Submenu with Clean Status Badge -->
-                         <DropdownSubmenu 
-                            v-if="formattedAvailableTtmModels.length > 0" 
-                            title="TTM Model" 
-                            icon="speaker-wave"
-                            :status-color="isTtmSelected ? 'green' : 'red'"
-                            :status-text="isTtmSelected ? 'Selected' : 'None'"
-                         >
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="ttmModelSearchTerm" @click.stop placeholder="Search TTM models..." class="input-field-sm w-full">
-                            </div>
-                            <div class="p-1 grow overflow-y-auto max-h-96">
-                                <button 
-                                    @click="selectTtmModel(null)" 
-                                    class="menu-item-button" 
-                                    :class="{'!bg-gray-100 dark:!bg-gray-700 font-bold': !activeTtmModelName}"
-                                >
-                                    <span class="truncate">None (No TTM Model)</span>
-                                    <span v-if="!activeTtmModelName" class="text-[9px] font-black uppercase text-gray-400">Active</span>
-                                </button>
-                                <div v-for="group in filteredAvailableTtmModels" :key="group.label">
-                                    <h4 class="px-2 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ group.label }}</h4>
-                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
-                                        <button 
-                                            @click="selectTtmModel(item.id)" 
-                                            class="menu-item-button grow !justify-between" 
-                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:!text-blue-300 font-bold': activeTtmModelName === item.id}"
-                                        >
-                                            <span class="truncate pr-2">{{ item.name }}</span>
-                                            <IconCheckCircle v-if="activeTtmModelName === item.id" class="w-4 h-4 text-emerald-500 shrink-0" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                         </DropdownSubmenu>
-
-                         <!-- TTV Model Submenu with Clean Status Badge -->
-                         <DropdownSubmenu 
-                            v-if="formattedAvailableTtvModels.length > 0" 
-                            title="TTV Model" 
-                            icon="video-camera"
-                            :status-color="isTtvSelected ? 'green' : 'red'"
-                            :status-text="isTtvSelected ? 'Selected' : 'None'"
-                         >
-                            <div class="p-2 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
-                                <input type="text" v-model="ttvModelSearchTerm" @click.stop placeholder="Search TTV models..." class="input-field-sm w-full">
-                            </div>
-                            <div class="p-1 grow overflow-y-auto max-h-96">
-                                <button 
-                                    @click="selectTtvModel(null)" 
-                                    class="menu-item-button" 
-                                    :class="{'!bg-gray-100 dark:!bg-gray-700 font-bold': !activeTtvModelName}"
-                                >
-                                    <span class="truncate">None (No TTV Model)</span>
-                                    <span v-if="!activeTtvModelName" class="text-[9px] font-black uppercase text-gray-400">Active</span>
-                                </button>
-                                <div v-for="group in filteredAvailableTtvModels" :key="group.label">
-                                    <h4 class="px-2 py-1.5 text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">{{ group.label }}</h4>
-                                    <div v-for="item in group.items" :key="item.id" class="flex items-center group/model">
-                                        <button 
-                                            @click="selectTtvModel(item.id)" 
-                                            class="menu-item-button grow !justify-between" 
-                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:text-blue-300 font-bold': activeTtvModelName === item.id}"
-                                        >
-                                            <span class="truncate pr-2">{{ item.name }}</span>
-                                            <IconCheckCircle v-if="activeTtvModelName === item.id" class="w-4 h-4 text-emerald-500 shrink-0" />
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                         </DropdownSubmenu>
-
-                         <!-- Personality Submenu with Clean Status Badge -->
+                         <!-- Personality Submenu -->
                          <DropdownSubmenu 
                             title="Personality" 
                             icon="user-circle"
@@ -534,7 +459,7 @@ async function handleRefreshModels() {
                                         <button 
                                             @click="selectPersonality(item.id)" 
                                             class="menu-item-button w-full" 
-                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:text-blue-300 font-bold': activePersonalityId === item.id}"
+                                            :class="{'!bg-blue-50/70 dark:!bg-blue-900/30 !text-blue-600 dark:!text-blue-300 font-bold': activePersonalityId === item.id}"
                                         >
                                             <div class="flex items-center gap-2 truncate">
                                                 <img v-if="item.icon_base64" :src="item.icon_base64" class="h-5 w-5 rounded object-cover" />
@@ -562,7 +487,7 @@ async function handleRefreshModels() {
         </div>
     </div>
 
-    <!-- Right: Vibe Selector & Tools -->
+    <!-- Right: Tools & Theme -->
     <div class="flex items-center gap-1 sm:gap-2 shrink-0">
         <div id="global-header-actions-target" class="flex items-center gap-1 mr-1 sm:mr-3"></div>
         

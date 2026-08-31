@@ -1371,6 +1371,69 @@ def build_artefacts_router(router: APIRouter):
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
+    class CreateDiscussionWithArtefactsRequest(BaseModel):
+        artefact_titles: List[str]
+        title: Optional[str] = None
+
+    @router.post("/{discussion_id}/artefacts/create-discussion-with-artefacts")
+    async def create_discussion_with_artefacts(
+        discussion_id: str,
+        payload: CreateDiscussionWithArtefactsRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Creates a new conversation initialized with the specified artefacts from the source discussion.
+        """
+        source_discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+
+        new_disc_id = str(uuid.uuid4())
+        lc = get_user_lollms_client(current_user.username)
+        new_discussion = get_user_discussion(current_user.username, new_disc_id, create_if_missing=True, lollms_client=lc)
+
+        if not new_discussion:
+            raise HTTPException(status_code=500, detail="Failed to initialize new conversation.")
+
+        imported_count = 0
+        derived_titles = []
+
+        for raw_title in payload.artefact_titles:
+            decoded_title = unquote(raw_title)
+            art = source_discussion.get_artefact(title=decoded_title)
+            if art:
+                content = art.get('content', '')
+                images = art.get('images', [])
+                art_type = art.get('artefact_type', art.get('type', 'document'))
+
+                new_discussion.add_artefact(
+                    title=decoded_title,
+                    content=content,
+                    images=images,
+                    author=current_user.username,
+                    active=True,
+                    artefact_type=art_type
+                )
+                imported_count += 1
+                derived_titles.append(decoded_title)
+
+        auto_title = payload.title
+        if not auto_title:
+            if len(derived_titles) == 1:
+                auto_title = f"Chat: {derived_titles[0]}"
+            elif len(derived_titles) > 1:
+                auto_title = f"Chat ({len(derived_titles)} Docs): {derived_titles[0]}..."
+            else:
+                auto_title = "New Discussion with Documents"
+
+        new_discussion.set_metadata_item('title', auto_title)
+        new_discussion.commit()
+
+        return {
+            "discussion_id": new_disc_id,
+            "title": auto_title,
+            "imported_count": imported_count
+        }
+
     @router.post("/{discussion_id}/artefacts/import-from-source", response_model=ArtefactAndDataZoneUpdateResponse)
     async def import_artefact_from_source_discussion(
         discussion_id: str,

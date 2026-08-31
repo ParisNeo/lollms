@@ -1,13 +1,18 @@
+<!-- frontend/webui/src/components/modals/SkillEditorModal.vue -->
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useSkillsStore } from '../../stores/skills';
+import { useDiscussionsStore } from '../../stores/discussions';
 import GenericModal from './GenericModal.vue';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const uiStore = useUiStore();
 const skillsStore = useSkillsStore();
+const discussionsStore = useDiscussionsStore();
 
 const modalData = computed(() => uiStore.modalData('skillEditor'));
 const skill = computed(() => modalData.value?.skill);
@@ -23,22 +28,12 @@ const editorMode = ref('edit');
 function initForm() {
     const s = skill.value;
     if (s && typeof s === 'object') {
-        // Map fields from either the DB object (name) or the Chat tag (title)
         name.value = s.name || s.title || '';
         description.value = s.description || '';
         category.value = s.category || '';
         language.value = s.language || 'markdown';
         content.value = s.content || '';
-        // If it has an ID, it's an existing skill -> start in Render (view) mode
         editorMode.value = (s && s.id) ? 'view' : 'edit';
-        
-        // Update the form object too so the footer template has valid state
-        form.value = {
-            ...getInitialFormState(),
-            ...s,
-            name: name.value,
-            content: content.value
-        };
     } else {
         name.value = '';
         description.value = '';
@@ -49,7 +44,6 @@ function initForm() {
     }
 }
 
-// Watch both the visibility AND the data itself to ensure it populates
 watch([() => uiStore.isModalOpen('skillEditor'), skill], ([isOpen, newSkill]) => {
     if (isOpen) {
         nextTick(() => {
@@ -80,8 +74,10 @@ async function handleSave() {
 
         if (skill.value && skill.value.id) {
             await skillsStore.updateSkill(skill.value.id, payload);
+            uiStore.addNotification(`Skill '${name.value}' updated.`, 'success');
         } else {
             await skillsStore.createSkill(payload);
+            uiStore.addNotification(`Skill '${name.value}' created.`, 'success');
         }
         uiStore.closeModal('skillEditor');
     } finally {
@@ -91,19 +87,19 @@ async function handleSave() {
 
 async function handleAddToDiscussion() {
     if (!discussionsStore.currentDiscussionId) {
-        uiStore.addNotification('Please select an active discussion first.', 'warning');
+        uiStore.addNotification('Please select or start an active discussion first.', 'warning');
         return;
     }
     
-    // Create the skill as a versioned artefact in the background
     await discussionsStore.addSkillAsArtefact({
-        name: name.value,
+        name: name.value || 'Untitled Skill',
         content: content.value,
         description: description.value,
         category: category.value
     });
     
-    uiStore.addNotification('Skill added to discussion.', 'success');
+    uiStore.addNotification(`Skill '${name.value || 'Untitled'}' added to workspace.`, 'success');
+    uiStore.closeModal('skillEditor');
 }
 
 async function exportFormat(format) {
@@ -119,23 +115,23 @@ async function exportFormat(format) {
             <div class="space-y-4 h-[70vh] flex flex-col p-4">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div class="col-span-2">
-                        <label class="block text-sm font-medium mb-1">Name</label>
-                        <input type="text" v-model="name" class="input-field w-full" placeholder="Skill Name">
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Name *</label>
+                        <input type="text" v-model="name" class="input-field text-xs w-full" placeholder="Skill Name" required>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium mb-1">Category</label>
-                        <input type="text" v-model="category" class="input-field w-full" placeholder="e.g. python/coding">
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Category</label>
+                        <input type="text" v-model="category" class="input-field text-xs w-full" placeholder="e.g. python/coding">
                     </div>
                     <div>
-                        <label class="block text-sm font-medium mb-1">Language</label>
-                        <input type="text" v-model="language" class="input-field w-full" placeholder="markdown">
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Language</label>
+                        <input type="text" v-model="language" class="input-field text-xs w-full" placeholder="markdown">
                     </div>
                     <div class="col-span-4">
-                        <label class="block text-sm font-medium mb-1">Description</label>
-                        <input type="text" v-model="description" class="input-field w-full" placeholder="Brief description of what this skill does">
+                        <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Description</label>
+                        <input type="text" v-model="description" class="input-field text-xs w-full" placeholder="Brief description of what this skill enables">
                     </div>
                 </div>
-                <div class="grow min-h-0 border rounded-md overflow-hidden dark:border-gray-700">
+                <div class="grow min-h-0 border rounded-xl overflow-hidden dark:border-gray-700">
                      <CodeMirrorEditor 
                         v-model="content" 
                         class="h-full" 
@@ -149,24 +145,23 @@ async function exportFormat(format) {
         <template #footer>
             <div class="flex justify-between items-center w-full">
                 <div class="flex gap-2">
-                    <!-- Export buttons only visible if the skill is already saved (has an ID) -->
-                    <template v-if="form?.id || skill?.id">
-                        <button @click="exportFormat('xml')" class="btn btn-secondary btn-sm flex items-center gap-2">
+                    <template v-if="skill && skill.id">
+                        <button @click="exportFormat('xml')" class="btn btn-secondary btn-sm flex items-center gap-1.5">
                             <IconArrowDownTray class="w-3.5 h-3.5" /> XML
                         </button>
-                        <button @click="exportFormat('claude')" class="btn btn-secondary btn-sm flex items-center gap-2">
+                        <button @click="exportFormat('claude')" class="btn btn-secondary btn-sm flex items-center gap-1.5">
                             <IconArrowDownTray class="w-3.5 h-3.5" /> Claude
                         </button>
                     </template>
-                    <button @click="handleAddToDiscussion" class="btn btn-secondary flex items-center gap-2" :disabled="!content || !content.trim()">
+                    <button @click="handleAddToDiscussion" class="btn btn-secondary btn-sm flex items-center gap-1.5" :disabled="!content || !content.trim()">
                         <IconArrowUpTray class="w-4 h-4" />
                         Add to Discussion
                     </button>
                 </div>
                 <div class="flex gap-2">
-                    <button @click="uiStore.closeModal('skillEditor')" class="btn btn-secondary">Cancel</button>
-                    <button @click="handleSave" class="btn btn-primary" :disabled="isLoading">
-                        <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
+                    <button @click="uiStore.closeModal('skillEditor')" class="btn btn-secondary btn-sm">Cancel</button>
+                    <button @click="handleSave" class="btn btn-primary btn-sm" :disabled="isLoading">
+                        <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-1.5 animate-spin" />
                         {{ skill && skill.id ? 'Update Skill' : 'Save Skill' }}
                     </button>
                 </div>
@@ -174,3 +169,7 @@ async function exportFormat(format) {
         </template>
     </GenericModal>
 </template>
+
+<style scoped>
+@reference "tailwindcss";
+</style>

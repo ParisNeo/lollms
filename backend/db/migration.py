@@ -1292,6 +1292,8 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
 
     if inspector.has_table("fun_fact_categories"):
         _bootstrap_fun_facts(connection)
+
+    _migrate_model_aliases_to_universal_profiles(connection)
     
     if not inspector.has_table("datastores"):
         from backend.db.models.datastore import DataStore, SharedDataStoreLink
@@ -1496,6 +1498,137 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
                 connection.rollback()
 
     connection.commit()
+
+def _migrate_model_aliases_to_universal_profiles(connection):
+    """
+    Migrates legacy model aliases to the Universal Two-Tier Profile Architecture across all binding tables.
+    Normalizes vision_enabled, forced_context_size, routing_config, and vlm_model_profile.
+    Also heals orphaned model references in the users table.
+    """
+    print("INFO: Checking and migrating model aliases to Universal Model Profiles...")
+    binding_tables = [
+        "llm_bindings", "tti_bindings", "tts_bindings", 
+        "stt_bindings", "ttv_bindings", "ttm_bindings", "rag_bindings"
+    ]
+
+    active_llm_profiles = set()
+
+    for tbl in binding_tables:
+        try:
+            records = connection.execute(text(f"SELECT id, alias, name, model_aliases, default_model_name FROM {tbl}")).fetchall()
+            for row in records:
+                b_id, b_alias, b_name, raw_aliases, def_model = row[0], row[1], row[2], row[3], row[4]
+
+                aliases_dict = {}
+                if raw_aliases:
+                    if isinstance(raw_aliases, str):
+                        try:
+                            aliases_dict = json.loads(raw_aliases)
+                        except Exception:
+                            aliases_dict = {}
+                    elif isinstance(raw_aliases, dict):
+                        aliases_dict = raw_aliases
+
+                modified = False
+                upgraded_aliases = {}
+
+                for orig_name, data in aliases_dict.items():
+                    if not isinstance(data, dict):
+                        data = {"title": str(data)}
+
+                    cfg = data.get("alias", {}) if "alias" in data else data
+
+                    # 1. Normalize Vision flag
+                    is_vision = bool(cfg.get("vision_enabled") if cfg.get("vision_enabled") is not None else cfg.get("has_vision", False))
+
+                    # 2. Normalize Forced Context Size
+                    forced_ctx = cfg.get("forced_context_size") if cfg.get("forced_context_size") is not None else cfg.get("ctx_size")
+                    if forced_ctx is not None:
+                        try: forced_ctx = int(forced_ctx)
+                        except (ValueError, TypeError): forced_ctx = None
+
+                    # 3. Normalize Smart Routing Config
+                    routing_cfg = cfg.get("routing_config", {})
+                    if not isinstance(routing_cfg, dict):
+                        routing_cfg = {}
+
+                    default_routing = {
+                        "description": routing_cfg.get("description") or cfg.get("description") or cfg.get("title") or orig_name,
+                        "complexity_tier": int(routing_cfg.get("complexity_tier", 2)),
+                        "cost_per_1k_tokens": float(routing_cfg.get("cost_per_1k_tokens", 0.0)),
+                        "avg_latency_ms": int(routing_cfg.get("avg_latency_ms", 200)),
+                        "priority": int(routing_cfg.get("priority", 1))
+                    }
+
+                    # 4. Normalize VLM companion model profile
+                    vlm_prof = cfg.get("vlm_model_profile", None)
+
+                    upgraded_entry = {
+                        "binding_profile_name": b_alias,
+                        "model_name": orig_name,
+                        "title": cfg.get("title") or cfg.get("name") or orig_name,
+                        "name": cfg.get("name") or cfg.get("title") or orig_name,
+                        "description": cfg.get("description", ""),
+                        "vision_enabled": is_vision,
+                        "has_vision": is_vision,
+                        "forced_context_size": forced_ctx,
+                        "ctx_size": forced_ctx,
+                        "temperature": cfg.get("temperature"),
+                        "top_k": cfg.get("top_k"),
+                        "top_p": cfg.get("top_p"),
+                        "repeat_penalty": cfg.get("repeat_penalty"),
+                        "repeat_last_n": cfg.get("repeat_last_n"),
+                        "allow_parameters_override": cfg.get("allow_parameters_override", True),
+                        "reasoning_activation": cfg.get("reasoning_activation", False),
+                        "reasoning_effort": cfg.get("reasoning_effort"),
+                        "reasoning_summary": cfg.get("reasoning_summary", False),
+                        "icon": cfg.get("icon"),
+                        "routing_config": default_routing,
+                        "vlm_model_profile": vlm_prof
+                    }
+
+                    upgraded_aliases[orig_name] = upgraded_entry
+                    modified = True
+
+                    if tbl == "llm_bindings":
+                        active_llm_profiles.add(f"{b_alias}/{orig_name}")
+                        active_llm_profiles.add(upgraded_entry["title"])
+
+                if tbl == "llm_bindings" and def_model:
+                    active_llm_profiles.add(f"{b_alias}/{def_model}")
+
+                if modified:
+                    connection.execute(
+                        text(f"UPDATE {tbl} SET model_aliases = :aliases WHERE id = :id"),
+                        {"aliases": json.dumps(upgraded_aliases), "id": b_id}
+                    )
+            connection.commit()
+        except Exception as e:
+            print(f"WARNING: Profile migration error on table {tbl}: {e}")
+            connection.rollback()
+
+    # Self-heal orphaned user models
+    try:
+        if active_llm_profiles:
+            def_llm_rec = connection.execute(text("SELECT alias, default_model_name FROM llm_bindings WHERE is_active = 1 ORDER BY id ASC LIMIT 1")).fetchone()
+            if def_llm_rec and def_llm_rec[0] and def_llm_rec[1]:
+                fallback_full_model = f"{def_llm_rec[0]}/{def_llm_rec[1]}"
+                users = connection.execute(text("SELECT id, username, lollms_model_name FROM users")).fetchall()
+                healed_count = 0
+                for u in users:
+                    u_id, u_name, u_model = u[0], u[1], u[2]
+                    if not u_model or (u_model not in active_llm_profiles and "/" in u_model and u_model.split("/")[0] not in [r[1] for r in records if tbl == "llm_bindings"]):
+                        connection.execute(
+                            text("UPDATE users SET lollms_model_name = :fallback WHERE id = :id"),
+                            {"fallback": fallback_full_model, "id": u_id}
+                        )
+                        healed_count += 1
+                if healed_count > 0:
+                    connection.commit()
+                    print(f"INFO: Self-healed {healed_count} user(s) with fallback model '{fallback_full_model}'.")
+    except Exception as e:
+        print(f"WARNING: User self-healing fallback warning: {e}")
+        connection.rollback()
 
 def check_and_update_db_version(SessionLocal):
     session = SessionLocal()

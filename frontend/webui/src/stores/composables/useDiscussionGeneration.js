@@ -1,6 +1,7 @@
-// [UPDATE] frontend/webui/src/stores/composables/useDiscussionGeneration.js
+// frontend/webui/src/stores/composables/useDiscussionGeneration.js
 import apiClient from '../../services/api';
 import { processSingleMessage } from './discussionProcessor';
+
 export function useDiscussionGeneration(state, stores, getActions) {
     const { 
         discussions, 
@@ -122,7 +123,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
             switch (data.type) {
                 case 'chunk':
-                    // RAW FLOW: Immediate visibility for all text and tags
                     messageToUpdate.content += data.content;
                     break;
 
@@ -131,7 +131,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
 
                 case 'processing_open':
-                    // [FIX] Ensure the opening tag starts on a new line and is added to content so the renderer catches it
                     if (messageToUpdate.content && !messageToUpdate.content.endsWith('\n')) {
                         messageToUpdate.content += '\n';
                     }
@@ -143,12 +142,10 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
 
                 case 'processing_status':
-                    // [FIX] Append status lines immediately to the visible content
                     messageToUpdate.content += `\n* ${data.status}`;
                     break;
 
                 case 'processing_close':
-                    // [FIX] Close the tag to finalize the UI block appearance with a trailing newline
                     messageToUpdate.content += '</processing>\n';
                     break;
 
@@ -176,30 +173,31 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         uiStore.addNotification(`💤 Dream: Reinforced ${rep.reinforced || 0} memories, Demoted ${rep.decayed || 0}`, 'info', 5000);
                     }
                     break;
+
                 case 'sources':
-                    currentAiMessage.sources = Array.isArray(data.content) ? data.content : [data.content];
-                    if (!currentAiMessage.metadata) currentAiMessage.metadata = {};
-                    currentAiMessage.metadata.sources = currentAiMessage.sources;
+                    messageToUpdate.sources = Array.isArray(data.content) ? data.content : [data.content];
+                    if (!messageToUpdate.metadata) messageToUpdate.metadata = {};
+                    messageToUpdate.metadata.sources = messageToUpdate.sources;
                     break;
 
                 case 'finalize':
                     if (data.data && data.data.ai_message) {
                         const finalAi = data.data.ai_message;
-                        currentAiMessage.id = finalAi.id;
-                        currentAiMessage.tokens = finalAi.tokens || finalAi.token_count || 0;
-                        currentAiMessage.metadata = finalAi.metadata || {};
+                        messageToUpdate.id = finalAi.id;
+                        messageToUpdate.tokens = finalAi.tokens || finalAi.token_count || 0;
+                        messageToUpdate.metadata = finalAi.metadata || {};
                         if (finalAi.sources && finalAi.sources.length > 0) {
-                            currentAiMessage.sources = finalAi.sources;
+                            messageToUpdate.sources = finalAi.sources;
                         } else if (finalAi.metadata?.sources) {
-                            currentAiMessage.sources = finalAi.metadata.sources;
+                            messageToUpdate.sources = finalAi.metadata.sources;
                         }
                         if (finalAi.events && finalAi.events.length > 0) {
-                            currentAiMessage.events = finalAi.events;
+                            messageToUpdate.events = finalAi.events;
                         }
                     }
+                    break;
                     
                 default:
-                    // Log tools/steps in background events
                     if (['tool_call', 'tool_output', 'step_start', 'step_end', 'info', 'warning', 'error'].includes(data.type)) {
                         if (!messageToUpdate.events) messageToUpdate.events = [];
                         messageToUpdate.events.push(data);
@@ -248,8 +246,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
             generationState.value = { status: 'idle', details: '' };
             activeGenerationAbortController = null;
 
-            // Auto-refresh the cognitive memories list at the end of the turn
-            // in case the AI generated or updated any facts
             try {
                 const { useMemoriesStore } = await import('../memories');
                 await useMemoriesStore().fetchMemories();
@@ -273,9 +269,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
     async function initiateBranch(message) {
         if (!state.activeDiscussion.value || generationInProgress.value || !message) return;
 
-        // Logic: To regenerate/branch, we need the last USER message as the parent.
-        // If clicking on an AI message, the target is its parent (the User prompt).
-        // If clicking on a User message, the target is that message itself.
         let anchorMessage = message;
         if (anchorMessage.sender_type !== 'user') {
             anchorMessage = messages.value.find(m => m.id === anchorMessage.parent_message_id);
@@ -287,16 +280,13 @@ export function useDiscussionGeneration(state, stores, getActions) {
         }
 
         try {
-            // 1. Tell backend which message we are branching FROM
             await apiClient.put(`/api/discussions/${currentDiscussionId.value}/active_branch`, { active_branch_id: anchorMessage.id });
 
-            // 2. Visually trim the local message list to the branch point
             const idx = messages.value.findIndex(m => m.id === anchorMessage.id);
             if (idx > -1) {
                 messages.value = messages.value.slice(0, idx + 1);
             }
 
-            // 3. Trigger new generation starting from this anchor
             await sendMessage({ 
                 prompt: anchorMessage.content, 
                 is_resend: true, 
@@ -317,4 +307,3 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
     return { sendMessage, stopGeneration, initiateBranch, switchBranch };
 }
-
