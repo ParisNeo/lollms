@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, onMounted, watch, defineAsyncComponent } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { useRouter, useRoute } from 'vue-router'; 
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useNotesStore } from '../../stores/notes';
@@ -16,10 +16,7 @@ import NoteList from '../notes/NoteList.vue';
 import SkillList from '../skills/SkillList.vue';
 import ArtefactGlobalList from './ArtefactGlobalList.vue';
 import AlbumList from '../images/AlbumList.vue';
-import DataStoreItem from '../datastores/DataStoreItem.vue'; // Imported DataStoreItem
-
-// New: Async import the wizard
-const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
+import DataStoreItem from '../datastores/DataStoreItem.vue';
 
 import logoDefault from '../../assets/logo.png';
 import IconHome from '../../assets/icons/IconHome.vue';
@@ -67,7 +64,8 @@ const route = useRoute();
 const { user } = storeToRefs(authStore);
 const { isLoadingDiscussions, discussionGroupsTree, sharedWithMe, sortedDiscussions } = storeToRefs(store);
 const { notebooks } = storeToRefs(notebookStore);
-const { ownedDataStores, sharedDataStores } = storeToRefs(dataStore);
+const { ownedDataStores, sharedDataStores, availableVectorizers } = storeToRefs(dataStore);
+const hasActiveVectorizers = computed(() => Array.isArray(availableVectorizers.value) && availableVectorizers.value.length > 0);
 const { flows } = storeToRefs(flowStore);
 
 const activeDiscussion = computed(() => store.activeDiscussion);
@@ -84,8 +82,6 @@ const isUngroupedVisible = ref(true);
 const isFoldersVisible = ref(true);
 const isStarredVisible = ref(false);
 const isRootDragOver = ref(false);
-
-const isFlowWizardOpen = ref(false);
 
 const isUploadingArtefact = ref(false);
 const uploadingMessage = ref('Processing files...');
@@ -373,8 +369,7 @@ async function handleNewItem() {
             await imageStore.createAlbum(value);
         }
     } else if (activeTab.value === 'flows') {
-        // [MODIFIED] Trigger Wizard instead of prompt
-        isFlowWizardOpen.value = true;
+        uiStore.openModal('flowWizard');
     }
 }
 
@@ -450,6 +445,11 @@ function handleExportClick() { uiStore.openModal('export', { allDiscussions: sto
 function handlePrune() { store.pruneDiscussions(); }
 function handleShowTree() { if (activeDiscussion.value) uiStore.openModal('discussionTree', { discussionId: activeDiscussion.value.id }); else uiStore.addNotification('Please select a discussion first.', 'warning'); }
 function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activeDiscussion.value.id); else uiStore.addNotification('Please select a discussion to clone.', 'warning'); }
+function handleCopyDiscussionMarkdown() {
+    if (activeDiscussion.value) {
+        store.copyDiscussionAsMarkdown(activeDiscussion.value.id);
+    }
+}
 </script>
 
 <template>
@@ -550,6 +550,7 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <span>BOOK</span>
                 </button>
                 <button 
+                    v-if="hasActiveVectorizers"
                     @click="handleTabClick('data')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'data' ? 'bg-white dark:bg-gray-900/50 text-green-600 dark:text-green-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
@@ -645,7 +646,8 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
                     <template #icon>
                         <IconPlus class="h-4 w-4" stroke-width="2.5" />
                     </template>
-                    <div class="p-1 min-w-[250px]">
+                    <div class="p-1 min-w-[260px]">
+                        <button @click="triggerArtefactFileUpload('as_is')" class="menu-item"><IconFolder class="w-4 h-4 mr-3 text-emerald-500" /> <span>Native File (as-is)</span></button>
                         <button @click="triggerArtefactFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
                         <button @click="triggerArtefactFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
                         <button @click="triggerArtefactFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text Only</span></button>
@@ -674,7 +676,8 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
 
             <div v-if="activeTab === 'chat' && user && user.user_ui_level >= 4 && showToolbox" class="overflow-hidden transition-all duration-300 ease-out">
                 <div class="p-3 bg-slate-50 dark:bg-gray-800 rounded-md border border-slate-200 dark:border-gray-700">
-                    <div class="grid grid-cols-5 gap-2">
+                    <div class="grid grid-cols-6 gap-2">
+                        <button @click="handleCopyDiscussionMarkdown" class="btn-toolbox-flat" title="Copy Discussion as Markdown" :disabled="!activeDiscussion"><IconCopy class="h-4 w-4 text-blue-500" /><span class="text-xs mt-1 font-medium">Copy MD</span></button>
                         <button @click="handleImportClick" class="btn-toolbox-flat" title="Import"><IconArrowDownTray class="h-4 w-4" /><span class="text-xs mt-1 font-medium">Import</span></button>
                         <button @click="handleExportClick" class="btn-toolbox-flat" title="Export"><IconArrowUpTray class="h-4 w-4" /><span class="text-xs mt-1 font-medium">Export</span></button>
                         <button @click="handleClone" class="btn-toolbox-flat" title="Clone Discussion" :disabled="!activeDiscussion"><IconCopy class="h-4 w-4" /><span class="text-xs mt-1 font-medium">Clone</span></button>
@@ -923,10 +926,6 @@ function handleClone() { if (activeDiscussion.value) store.cloneDiscussion(activ
             </template>
         </div>
 
-        <!-- WIZARD INTEGRATION -->
-        <Teleport to="body">
-            <FlowWizardModal v-if="isFlowWizardOpen" @close="isFlowWizardOpen = false" />
-        </Teleport>
     </div>
 </template>
 

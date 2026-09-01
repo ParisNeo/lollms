@@ -337,6 +337,16 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
+    async function fetchDataStoreInfo(storeId) {
+        try {
+            const response = await apiClient.get(`/api/store/${storeId}/info`);
+            return response.data;
+        } catch (error) {
+            console.error(`Failed to fetch diagnostic info for datastore ${storeId}:`, error);
+            return null;
+        }
+    }
+
     async function generateDataStoreGraph({ storeId, graphData = {} }) {
         const uiStore = useUiStore();
         const tasksStore = useTasksStore();
@@ -959,6 +969,7 @@ export const useDataStore = defineStore('data', () => {
         fetchFileContent,
         fetchDataLakeData,
         fetchDataStoreDetails,
+        fetchDataStoreInfo,
         generateDataStoreGraph,
         updateDataStoreGraph,
         extractStoreOntology,
@@ -969,6 +980,7 @@ export const useDataStore = defineStore('data', () => {
         querySparqlGraph,
         queryDataStoreGraphHybrid,
         queryDataStore,
+        queryDataStoreAndAnswer,
         fetchDocumentChunksPaginated,
         wipeDataStoreGraph,
         addGraphNode,

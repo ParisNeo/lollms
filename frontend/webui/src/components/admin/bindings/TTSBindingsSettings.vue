@@ -60,7 +60,7 @@ const form = ref(getInitialFormState());
 const isEditMode = computed(() => editingBinding.value !== null);
 
 const selectedBindingType = computed(() => {
-    if (!form.value.name) return null;
+    if (!form.value.name || !Array.isArray(availableTtsBindingTypes.value)) return null;
     return availableTtsBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
 });
 
@@ -99,11 +99,12 @@ const allFormParameters = computed(() => {
 
 watch(() => form.value.name, (newName, oldName) => {
     if (newName !== oldName && !isEditMode.value) {
+        if (!Array.isArray(availableTtsBindingTypes.value)) return;
         const bindingDesc = availableTtsBindingTypes.value.find(b => (b.binding_name || b.name) === newName);
         const newConfig = {};
         if (bindingDesc && bindingDesc.input_parameters) {
             bindingDesc.input_parameters.forEach(param => {
-                newConfig[param.name] = param.default;
+                newConfig[param.name] = param.default !== undefined ? param.default : '';
             });
         }
         form.value.config = newConfig;
@@ -134,7 +135,7 @@ function showEditForm(binding) {
     }
     isKeyVisible.value = {};
     
-    const bindingType = availableTtsBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
+    const bindingType = Array.isArray(availableTtsBindingTypes.value) ? availableTtsBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name) : null;
     if(bindingType && bindingType.commands){
         const params = {};
         bindingType.commands.forEach(cmd => {
@@ -220,6 +221,7 @@ async function toggleBindingActive(binding) {
 }
 
 function getBindingTitle(name) {
+    if (!Array.isArray(availableTtsBindingTypes.value)) return name;
     const bindingType = availableTtsBindingTypes.value.find(b => (b.binding_name || b.name) === name);
     return bindingType ? (bindingType.title || bindingType.name) : name;
 }

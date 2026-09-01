@@ -35,9 +35,7 @@ function closeMenu() {
 }
 
 onMounted(() => {
-    if (skillsStore.skills.length === 0) {
-        skillsStore.fetchSkills();
-    }
+    skillsStore.fetchSkills();
 });
 
 const filteredSkills = computed(() => {

@@ -21,6 +21,7 @@ import IconPencil from '../../../assets/icons/IconPencil.vue';
 import IconFolder from '../../../assets/icons/IconFolder.vue';
 import IconPhoto from '../../../assets/icons/IconPhoto.vue';
 import IconEye from '../../../assets/icons/IconEye.vue';
+import IconEyeOff from '../../../assets/icons/IconEyeOff.vue';
 import IconDatabase from '../../../assets/icons/IconDatabase.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import IconXMark from '../../../assets/icons/IconXMark.vue';
@@ -29,6 +30,7 @@ import IconLock from '../../../assets/icons/IconLock.vue';
 import IconCircle from '../../../assets/icons/IconCircle.vue';
 import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
 import IconGitBranch from '../../../assets/icons/ui/IconGitBranch.vue';
+import IconMicrophone from '../../../assets/icons/IconMicrophone.vue';
 
 const props = defineProps({
     notebookId: { type: String, default: null }
@@ -125,9 +127,7 @@ async function handleBatchDelete() {
 async function handleBatchExportBundle() {
     if (selectedTitles.value.size === 0 || !idToUse.value) return;
     
-    // Resolve relative paths inside the workspace_data folder
     const paths = Array.from(selectedTitles.value).map(title => {
-        // Map the title directly to its workspace filename path
         const matchingGroup = groupedArtefacts.value.find(g => g.title === title);
         const fileExt = matchingGroup?.versions[0]?.file_ext || '';
         return `workspace_data/${title}${fileExt}`;
@@ -229,7 +229,7 @@ const groupedArtefacts = computed(() => {
     const allArtefacts = discussionsStore.activeDiscussionArtefacts;
     if (!allArtefacts || !Array.isArray(allArtefacts)) return [];
     
-    const currentId = String(idToUse.value); // Coerce to string for comparison
+    const currentId = String(idToUse.value);
     
     const filtered = allArtefacts.filter(a => {
         const artDiscId = String(a.discussion_id || '');
@@ -253,12 +253,6 @@ const groupedArtefacts = computed(() => {
 
 function handleRefreshArtefacts() {
     if (idToUse.value) discussionsStore.fetchArtefacts(idToUse.value);
-}
-
-async function handleLoadAllArtefacts() {
-    if (!idToUse.value) return;
-    const confirmed = await uiStore.showConfirmation({ title: 'Load All Artefacts?', message: `This will load all ${groupedArtefacts.value.length} source(s) into context.`, confirmText: 'Load All' });
-    if (confirmed.confirmed) discussionsStore.loadAllArtefactsToDataZone(idToUse.value);
 }
 
 function handleCreateArtefact() {
@@ -354,9 +348,7 @@ function openArtefactInWorkspace(group) {
         return;
     }
     if (!group || !group.versions || group.versions.length === 0) return;
-    uiStore.isDataZoneVisible = true;
-    uiStore.dataZoneTab = 'workspace';
-    uiStore.activeSplitArtefactTitle = group.title;
+    uiStore.openWorkspaceArtefact(group.title);
 }
 
 function toggleSelectionMode() {
@@ -498,7 +490,7 @@ async function handleBatchCreateDiscussion() {
             </div>
         </div>
 
-        <!-- ── [NEW] Floating Batch Actions Control Bar ── -->
+        <!-- Floating Batch Actions Control Bar -->
         <Transition
             enter-active-class="transition-all duration-300 ease-out"
             enter-from-class="opacity-0 translate-y-6"
@@ -579,4 +571,3 @@ async function handleBatchCreateDiscussion() {
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 </style>
-```

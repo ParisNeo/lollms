@@ -21,6 +21,7 @@ import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 import IconThinking from '../../../assets/icons/IconThinking.vue';
 import IconFolder from '../../../assets/icons/IconFolder.vue';
 import IconPencil from '../../../assets/icons/IconPencil.vue';
+import IconFileText from '../../../assets/icons/IconFileText.vue';
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
@@ -46,7 +47,7 @@ watch(() => uiStore.activeSplitArtefactTitle, (newTitle) => {
     if (newTitle) {
         activeTab.value = 'workspace';
     }
-});
+}, { immediate: true });
 
 function startResize(event) {
     isResizing.value = true;
@@ -134,9 +135,9 @@ onMounted(() => {
 
             <!-- Dynamic Body Content -->
             <div class="flex-1 overflow-hidden relative">
-                
+
                 <!-- TAB 1: CONTEXT ZONES -->
-                <div v-show="activeTab === 'context'" class="h-full overflow-y-auto custom-scrollbar flex flex-col bg-gray-50/30 dark:bg-gray-900/30">
+                <div v-if="activeTab === 'context'" class="h-full overflow-y-auto custom-scrollbar flex flex-col bg-gray-50/30 dark:bg-gray-900/30">
                     <div class="flex flex-col border-b border-gray-200 dark:border-gray-800">
                         <button @click="collapsed.discussion = !collapsed.discussion" 
                                 class="w-full flex items-center justify-between p-4 hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors group">
@@ -181,12 +182,12 @@ onMounted(() => {
                 </div>
 
                 <!-- TAB 2: ARTEFACTS LIST -->
-                <div v-show="activeTab === 'files'" class="h-full overflow-hidden bg-white dark:bg-gray-900">
+                <div v-else-if="activeTab === 'files'" class="h-full overflow-hidden bg-white dark:bg-gray-900">
                     <ArtefactZone />
                 </div>
 
                 <!-- TAB 3: WORKSPACE EDITOR -->
-                <div v-show="activeTab === 'workspace'" class="h-full overflow-hidden bg-white dark:bg-gray-950">
+                <div v-else-if="activeTab === 'workspace'" class="h-full overflow-hidden bg-white dark:bg-gray-950">
                     <div v-if="!uiStore.activeSplitArtefactTitle" class="h-full flex flex-col items-center justify-center p-12 text-center opacity-40">
                          <IconPencil class="w-16 h-16 mb-4 text-gray-400" />
                          <h4 class="text-lg font-bold uppercase tracking-widest text-gray-500">Editor Offline</h4>

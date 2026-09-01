@@ -10,7 +10,7 @@ import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import IconRefresh from '../../../assets/icons/IconRefresh.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
-import IconSave from '../../../assets/icons/IconSave.vue';
+import IconRefresh2 from '../../../assets/icons/IconRefresh.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -90,7 +90,7 @@ async function handleSync() {
                     class="btn btn-primary btn-xs flex items-center gap-2 px-3 shadow-md transition-all active:scale-95"
                     :disabled="isSaving || !hasUnsavedChanges">
                 <IconAnimateSpin v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
-                <IconSave v-else class="w-3.5 h-3.5" />
+                <IconCheckCircle v-else class="w-3.5 h-3.5" />
                 <span>Validate</span>
             </button>
         </div>

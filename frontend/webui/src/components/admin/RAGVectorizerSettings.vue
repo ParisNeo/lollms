@@ -464,7 +464,7 @@ function toggleGodMode() {
 async function saveGodModeSettings() {
     await adminStore.updateGlobalSettings({
         'force_rag_settings_mode': isGodModeEnabled.value ? 'force_always' : 'disabled',
-        'force_rag_vectorizer': forcedVectorizer.value,
+        'force_rag_vectorizer': forcedVectorizer.value || '',
         'force_rag_retrieval_mode': forcedRetrievalMode.value,
         'force_rag_top_k': forcedTopK.value,
         'force_rag_chunk_size': forcedChunkSize.value,
@@ -475,6 +475,26 @@ async function saveGodModeSettings() {
         'force_rag_rrf_k': forcedRrfK.value,
         'force_rag_use_graph': forcedUseGraph.value
     });
+
+    if (isGodModeEnabled.value && forcedVectorizer.value) {
+        const confirmed = await uiStore.showConfirmation({
+            title: 'Trigger Global Revectorization?',
+            message: `You have enforced '${forcedVectorizer.value}'. Would you like to launch a background task to re-vectorize all existing user DataStores to match this model now?`,
+            confirmText: 'Re-vectorize All Stores'
+        });
+        if (confirmed.confirmed) {
+            try {
+                const res = await (await import('../../services/api')).default.post('/api/store/revectorize-all', {
+                    vectorizer_name: forcedVectorizer.value,
+                    vectorizer_config: {}
+                });
+                uiStore.addNotification('Global revectorization task started.', 'success');
+            } catch (e) {
+                // Fallback
+            }
+        }
+    }
+
     uiStore.addNotification('God Mode RAG settings updated successfully.', 'success');
 }
 

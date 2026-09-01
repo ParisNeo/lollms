@@ -51,14 +51,22 @@
 
                 <div class="h-4 w-px bg-gray-300 dark:bg-gray-700 mx-1"></div>
 
+                <!-- Graph Build Mode Selector -->
+                <select v-model="graphBuildMode" class="input-field !py-1 !px-2 text-xs font-bold bg-white dark:bg-gray-800 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300" title="Graph Construction Strategy">
+                    <option value="fast_hybrid">⚡ Fast Hybrid (Tabular Zero-LLM + Schema)</option>
+                    <option value="declarative">📋 Pure Declarative (Zero-LLM)</option>
+                    <option value="llm_deep">🧠 Deep LLM Extraction (Slow)</option>
+                </select>
+
                 <button @click="handleAutoExtractOntology" :disabled="isExtractingOntology" class="btn btn-secondary btn-sm h-8 text-purple-600 dark:text-purple-300 border-purple-200 dark:border-purple-800" title="Extract schema from documents">
                     <IconAnimateSpin v-if="isExtractingOntology" class="w-3.5 h-3.5 mr-1 animate-spin" />
                     <IconSparkles v-else class="w-3.5 h-3.5 mr-1 text-purple-500" />
-                    <span>Auto-Extract</span>
+                    <span>Auto-Schema</span>
                 </button>
+
                 <button @click="handleGenerateGraph" :disabled="!!task" class="btn btn-primary btn-sm h-8 shadow-sm">
                     <IconPlay class="w-3.5 h-3.5 mr-1" />
-                    <span>{{ graphStats.nodes > 0 ? 'Full Rebuild' : 'Initialize Graph' }}</span>
+                    <span>{{ graphStats.nodes > 0 ? 'Rebuild Graph' : 'Build Graph' }}</span>
                 </button>
             </div>
         </header>
@@ -250,6 +258,7 @@ const selectedElementData = ref(null);
 const tooltip = ref({ visible: false, x: 0, y: 0, data: null });
 
 const isExtractingOntology = ref(false);
+const graphBuildMode = ref('fast_hybrid'); // 'fast_hybrid', 'declarative', 'llm_deep'
 const isExecutingSparql = ref(false);
 const isFindingPath = ref(false);
 
@@ -573,6 +582,7 @@ function handleGenerateGraph() {
         storeId: props.store.id,
         graphData: {
             graph_type: 'knowledge_graph',
+            mode: graphBuildMode.value,
             ontology: dataStore.storeOntologies?.[props.store.id] || ''
         }
     });

@@ -41,6 +41,7 @@ import IconYoutube from '../assets/icons/IconYoutube.vue';
 import IconWikipedia from '../assets/icons/IconWikipedia.vue';
 import IconServer from '../assets/icons/IconServer.vue';
 import IconWeb from '../assets/icons/ui/IconWeb.vue';
+import IconRefresh from '../assets/icons/IconRefresh.vue';
 
 const dataStore = useDataStore();
 const uiStore = useUiStore();
@@ -82,6 +83,8 @@ const newStoreForm = ref({
 const isKeyVisible = ref({});
 const filesInSelectedStore = ref([]);
 const filesLoading = ref(false);
+const isStoreInitializing = ref(false);
+const storeDiagnosticInfo = ref(null);
 const selectedFilesToUpload = ref([]);
 const fileInputRef = ref(null);
 const folderInputRef = ref(null);
@@ -223,7 +226,46 @@ const someFilesSelected = computed(() => {
 });
 
 // Use availableVectorizers directly which now contains models
+const hasActiveVectorizers = computed(() => Array.isArray(availableVectorizers.value) && availableVectorizers.value.length > 0);
+const isForcedVectorizerMode = computed(() => authStore.user?.rag_settings_forced);
 const vectorizerOptions = computed(() => availableVectorizers.value);
+
+// Revectorize Modal State
+const isRevectorizeOpen = ref(false);
+const revectorizeTargetKey = ref(null);
+const isRevectorizing = ref(false);
+
+function openRevectorizeModal() {
+    if (!currentSelectedStore.value) return;
+    revectorizeTargetKey.value = null;
+    isRevectorizeOpen.value = true;
+}
+
+async function handleRevectorize() {
+    if (!currentSelectedStore.value || !revectorizeTargetKey.value) return;
+    isRevectorizing.value = true;
+    try {
+        const parts = revectorizeTargetKey.value.split('/');
+        const alias = parts[0];
+        const modelVal = parts.slice(1).join('/');
+        const group = vectorizerOptions.value.find(g => g.alias === alias);
+
+        const config = { ...(group?.vectorizer_config || {}) };
+        if (modelVal) config['model_name'] = modelVal;
+
+        const res = await apiClient.post(`/api/store/${currentSelectedStore.value.id}/revectorize`, {
+            vectorizer_name: group?.vectorizer_name || alias,
+            vectorizer_config: config
+        });
+        tasksStore.addTask(res.data);
+        uiStore.addNotification(`Revectorization task started.`, 'info');
+        isRevectorizeOpen.value = false;
+    } catch (e) {
+        uiStore.addNotification(e.response?.data?.detail || 'Revectorization failed.', 'error');
+    } finally {
+        isRevectorizing.value = false;
+    }
+}
 
 const selectedVectorizerDetails = computed(() => {
     if (!newStoreForm.value.selectedVectorizerKey) return null;
@@ -586,14 +628,20 @@ function removeFileFromSelection(index) {
 async function fetchFilesInStore(storeId) { 
     if (!storeId) return;
     filesLoading.value = true; 
+    isStoreInitializing.value = true;
     try { 
-        const result = await dataStore.fetchStoreFiles(storeId); 
-        filesInSelectedStore.value = result || []; 
+        const [filesResult, diagInfo] = await Promise.allSettled([
+            dataStore.fetchStoreFiles(storeId),
+            dataStore.fetchDataStoreInfo(storeId)
+        ]);
+        filesInSelectedStore.value = (filesResult.status === 'fulfilled' && filesResult.value) ? filesResult.value : [];
+        storeDiagnosticInfo.value = (diagInfo.status === 'fulfilled' && diagInfo.value) ? diagInfo.value : null;
     } catch (e) {
-        console.error("Failed to fetch store files:", e);
+        console.error("Failed to fetch store files and diagnostic info:", e);
         filesInSelectedStore.value = [];
     } finally { 
         filesLoading.value = false; 
+        isStoreInitializing.value = false;
     } 
 }
 
@@ -762,7 +810,7 @@ async function handleAskAiWithEvidence() {
         queryResults.value = response.chunks || [];
         answerModelName.value = response.model_name || 'LLM';
     } catch (error) {
-        queryError.value = error.response?.data?.detail || 'Failed to synthesize answer from DataStore.';
+        queryError.value = error.response?.data?.detail || error.message || 'Failed to synthesize answer from DataStore.';
     } finally {
         isAnswering.value = false;
     }
@@ -997,10 +1045,9 @@ async function handleImportStore() {
 <template>
     <div class="flex flex-col h-full w-full">
         <!-- Portals to Global Header -->
-        <!-- CRITICAL FIX: Extremely strict guard to prevent Teleport internal crashes -->
-        <template v-if="isComponentMounted && isHeaderReady && currentSelectedStore && !isAddFormVisible">
+        <template v-if="isHeaderReady && currentSelectedStore && !isAddFormVisible">
             <!-- Portal for Title and Tabs -->
-            <Teleport to="#global-header-title-target" v-if="isComponentMounted">
+            <Teleport to="#global-header-title-target">
                 <div class="flex items-center gap-4 h-full max-w-full overflow-hidden">
                     <div class="flex items-center gap-2 min-w-0">
                         <IconDatabase class="w-5 h-5 text-green-500 shrink-0" />
@@ -1017,7 +1064,7 @@ async function handleImportStore() {
             </Teleport>
 
             <!-- Portal for Actions -->
-            <Teleport to="#global-header-actions-target" v-if="isComponentMounted">
+            <Teleport to="#global-header-actions-target">
                 <div class="flex items-center gap-1">
                     <button @click="showStoreInfo = true" class="btn-icon" title="Store Info"><IconInfo class="w-5 h-5"/></button>
                     <div class="h-4 w-px bg-gray-300 dark:border-gray-600 mx-1"></div>
@@ -1031,8 +1078,17 @@ async function handleImportStore() {
             </Teleport>
         </template>
 
+        <!-- Inactive RAG State -->
+        <div v-if="!hasActiveVectorizers && !filesLoading" class="grow flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-gray-950">
+            <div class="w-16 h-16 rounded-3xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 flex items-center justify-center text-amber-500 mb-4 shadow-lg">
+                <IconDatabase class="w-8 h-8" />
+            </div>
+            <h3 class="text-xl font-bold text-gray-900 dark:text-white">Knowledge Studio Offline</h3>
+            <p class="text-xs text-gray-500 max-w-sm mt-1">No active RAG embedding bindings are configured. An administrator must activate a RAG binding in Admin Control Center to enable data indexing.</p>
+        </div>
+
         <!-- Main Content Area -->
-        <div class="p-4 overflow-y-auto grow h-full w-full">
+        <div v-else class="p-4 overflow-y-auto grow h-full w-full">
             <div v-if="isAddFormVisible" class="p-4 sm:p-6 bg-white dark:bg-gray-800 rounded-lg shadow-sm">
                 <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Create New Data Store</h2>
                 <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">A Data Store turns your documents into a queryable knowledge base.</p>
@@ -1074,8 +1130,8 @@ async function handleImportStore() {
                         </div>
                     </div>
 
-                    <div>
-                        <label for="new-ds-vectorizer" class="block text-sm font-medium">Vectorizer</label>
+                    <div v-if="!isForcedVectorizerMode">
+                        <label for="new-ds-vectorizer" class="block text-sm font-medium">Vectorizer Model</label>
                         <select id="new-ds-vectorizer" v-model="newStoreForm.selectedVectorizerKey" class="input-field mt-1">
                             <option :value="null" disabled>-- Select a Vectorizer Model --</option>
                             <optgroup 
@@ -1092,9 +1148,10 @@ async function handleImportStore() {
                                 </option>
                             </optgroup>
                         </select>
-                        <p v-if="vectorizerOptions.length === 0" class="text-xs text-red-500 mt-1">
-                            No active RAG bindings found. Please configure them in Settings.
-                        </p>
+                    </div>
+                    <div v-else class="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl border border-amber-200 dark:border-amber-800 text-xs">
+                        <span class="font-bold text-amber-900 dark:text-amber-200">Enforced Vectorizer:</span>
+                        <p class="text-gray-500 mt-0.5">The system administrator has assigned a mandatory global embedding vectorizer for all new knowledge bases.</p>
                     </div>
                     <div v-if="selectedVectorizerDetails" class="p-4 border dark:border-gray-700 rounded-lg space-y-4">
                         <h4 class="font-medium text-lg">{{ selectedVectorizerDetails.title || selectedVectorizerDetails.name }}</h4>
@@ -1363,37 +1420,69 @@ async function handleImportStore() {
                                 Delete Selected ({{ selectedFilesToDelete.size }})
                             </button>
                         </div>
-                        <div v-if="filesLoading" class="text-center py-10"><p>Loading documents...</p></div>
-                        <div v-else-if="filesInSelectedStore.length === 0" class="text-center py-10 bg-gray-50 dark:bg-gray-800/50 rounded-lg"><p>No documents indexed.</p></div>
-                        <ul v-else class="divide-y divide-gray-200 dark:divide-gray-700">
-                            <li v-for="file in filesInSelectedStore" :key="file.filename" class="py-3 flex items-center">
-                                <input 
-                                    v-if="canReadWrite(currentSelectedStore)"
-                                    type="checkbox" 
-                                    @change="toggleFileSelection(file.filename)" 
-                                    :checked="selectedFilesToDelete.has(file.filename)" 
-                                    class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 mr-4 shrink-0"
-                                >
-                                <div class="grow min-w-0">
-                                    <div class="flex items-center gap-2">
-                                        <span 
-                                            class="text-sm font-medium truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors" 
-                                            @click="viewFileContent(file)"
-                                            :class="{'opacity-50 pointer-events-none': loadingFileContent && loadingFileContent !== file.filename}"
-                                        >
-                                            {{ file.filename }}
-                                        </span>
-                                        <IconAnimateSpin v-if="loadingFileContent === file.filename" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
+                        <!-- Store / Vectorizer Loading Indicator -->
+                        <div v-if="filesLoading || isStoreInitializing" class="py-16 text-center space-y-3 bg-gray-50/50 dark:bg-gray-900/30 rounded-2xl border border-gray-100 dark:border-gray-800">
+                            <div class="flex items-center justify-center">
+                                <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin" />
+                            </div>
+                            <div>
+                                <h4 class="font-bold text-sm text-gray-800 dark:text-gray-200 uppercase tracking-wider">Connecting to SafeStore & Probing Vectorizer</h4>
+                                <p class="text-xs text-gray-500 font-mono mt-0.5">
+                                    {{ currentSelectedStore.vectorizer_name }} · {{ currentSelectedStore.vectorizer_config?.model_name || currentSelectedStore.vectorizer_config?.model || 'Embedding Engine' }}
+                                </p>
+                            </div>
+                        </div>
+
+                        <div v-else-if="filesInSelectedStore.length === 0" class="text-center py-12 bg-gray-50 dark:bg-gray-800/50 rounded-2xl border border-dashed dark:border-gray-700">
+                            <IconFileText class="w-10 h-10 mx-auto text-gray-400 opacity-40 mb-2" />
+                            <p class="text-xs text-gray-500 font-medium">No documents indexed in this DataStore yet.</p>
+                        </div>
+
+                        <!-- Rich Document List with Chunk Counts -->
+                        <div v-else class="space-y-2">
+                            <div 
+                                v-for="file in filesInSelectedStore" 
+                                :key="file.filename" 
+                                class="p-3.5 bg-white dark:bg-gray-900/60 rounded-xl border border-gray-150 dark:border-gray-700/80 hover:border-blue-500/50 dark:hover:border-blue-500/50 transition-all flex items-center justify-between gap-4 group"
+                            >
+                                <div class="flex items-center gap-3 min-w-0">
+                                    <input 
+                                        v-if="canReadWrite(currentSelectedStore)"
+                                        type="checkbox" 
+                                        @change="toggleFileSelection(file.filename)" 
+                                        :checked="selectedFilesToDelete.has(file.filename)" 
+                                        class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0"
+                                    >
+                                    <div class="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 shrink-0">
+                                        <IconFileText class="w-4 h-4" />
                                     </div>
-                                    <details v-if="file.metadata && Object.keys(file.metadata).length > 0" class="mt-2 text-xs">
-                                        <summary class="cursor-pointer text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">View Metadata</summary>
-                                        <div class="mt-1 p-2 bg-gray-100 dark:bg-gray-700/50 rounded">
-                                            <JsonRenderer :json="file.metadata" />
+                                    <div class="min-w-0">
+                                        <div class="flex items-center gap-2">
+                                            <span 
+                                                class="text-sm font-bold text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                                                @click="viewFileContent(file)"
+                                                :title="file.filename"
+                                            >
+                                                {{ file.filename }}
+                                            </span>
+                                            <IconAnimateSpin v-if="loadingFileContent === file.filename" class="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
                                         </div>
-                                    </details>
+                                        <div class="flex items-center gap-2 mt-0.5 text-[10px] text-gray-400 font-mono">
+                                            <span v-if="file.chunk_count !== undefined" class="font-bold text-blue-500 px-1.5 py-0.2 rounded bg-blue-50 dark:bg-blue-950/50 border border-blue-100 dark:border-blue-900/30">
+                                                {{ file.chunk_count }} Chunks
+                                            </span>
+                                            <span v-if="file.char_count">{{ file.char_count.toLocaleString() }} chars</span>
+                                        </div>
+                                    </div>
                                 </div>
-                            </li>
-                        </ul>
+
+                                <div class="flex items-center gap-2 shrink-0">
+                                    <button @click="viewFileContent(file)" class="btn btn-secondary btn-xs py-1 px-2.5 text-xs font-bold" title="Inspect Document Chunks">
+                                        Inspect
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div v-if="activeTab === 'query'" class="p-6 grow overflow-y-auto flex flex-col">
@@ -1628,40 +1717,90 @@ async function handleImportStore() {
         </div>
     </div>
     
-    <!-- Store Info Modal -->
-    <GenericModal :visible="showStoreInfo" @close="showStoreInfo = false" :title="currentSelectedStore ? `${currentSelectedStore.name} Details` : 'Store Details'">
+    <!-- Store Info & Diagnostic Modal -->
+    <GenericModal :visible="showStoreInfo" @close="showStoreInfo = false" :title="currentSelectedStore ? `${currentSelectedStore.name} Diagnostic & Topology` : 'Store Details'" maxWidthClass="max-w-2xl">
         <template #body>
-            <div v-if="currentSelectedStore" class="space-y-4">
-                <div>
-                    <h4 class="font-semibold text-sm text-gray-700 dark:text-gray-300">Description</h4>
-                    <p class="text-sm text-gray-600 dark:text-gray-400">{{ currentSelectedStore.description || 'No description available.' }}</p>
+            <div v-if="currentSelectedStore" class="space-y-5 p-1 text-xs">
+                <!-- Summary Card -->
+                <div class="p-4 bg-gradient-to-br from-blue-50/70 to-indigo-50/40 dark:from-blue-950/30 dark:to-indigo-950/20 rounded-2xl border border-blue-100 dark:border-blue-900/50 space-y-3">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <span class="text-[9px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-widest">SafeStore Diagnostics</span>
+                            <h3 class="text-base font-bold text-gray-900 dark:text-white">{{ currentSelectedStore.name }}</h3>
+                        </div>
+                        <span class="px-2.5 py-1 rounded-full bg-blue-600 text-white font-mono font-bold text-[10px] uppercase">
+                            {{ currentSelectedStore.permission_level }}
+                        </span>
+                    </div>
+                    <p class="text-gray-600 dark:text-gray-300 leading-relaxed">{{ currentSelectedStore.description || 'No description provided.' }}</p>
                 </div>
-                <div>
-                    <h4 class="font-semibold text-sm text-gray-700 dark:text-gray-300">Owner</h4>
-                    <div class="flex items-center gap-2 mt-1">
-                        <UserAvatar :username="currentSelectedStore.owner_username" size-class="h-6 w-6" />
-                        <span class="text-sm">{{ currentSelectedStore.owner_username }}</span>
+
+                <!-- Diagnostic Stats Grid -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
+                    <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border dark:border-gray-800">
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block mb-1">Documents</span>
+                        <span class="text-lg font-black text-gray-900 dark:text-white">
+                            {{ storeDiagnosticInfo?.documents?.total_documents ?? filesInSelectedStore.length }}
+                        </span>
+                    </div>
+                    <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border dark:border-gray-800">
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block mb-1">Indexed Chunks</span>
+                        <span class="text-lg font-black text-blue-500">
+                            {{ storeDiagnosticInfo?.chunks?.total_chunks ?? '...' }}
+                        </span>
+                    </div>
+                    <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border dark:border-gray-800">
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block mb-1">Graph Nodes</span>
+                        <span class="text-lg font-black text-purple-500">
+                            {{ storeDiagnosticInfo?.knowledge_graph?.total_nodes ?? 0 }}
+                        </span>
+                    </div>
+                    <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border dark:border-gray-800">
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block mb-1">Graph Edges</span>
+                        <span class="text-lg font-black text-emerald-500">
+                            {{ storeDiagnosticInfo?.knowledge_graph?.total_relationships ?? 0 }}
+                        </span>
                     </div>
                 </div>
-                <div class="grid grid-cols-2 gap-4 bg-gray-50 dark:bg-gray-700/30 p-3 rounded-lg border dark:border-gray-600">
+
+                <!-- Vectorizer and Chunking Parameters -->
+                <div class="grid grid-cols-2 gap-3 p-3 bg-gray-50 dark:bg-gray-900 rounded-xl border dark:border-gray-800">
                     <div>
-                        <span class="block text-xs font-semibold text-gray-500 uppercase">Vectorizer</span>
-                        <span class="text-sm">{{ currentSelectedStore.vectorizer_name }}</span>
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block">Vectorizer Backend</span>
+                        <span class="font-bold text-gray-800 dark:text-gray-200 capitalize">{{ currentSelectedStore.vectorizer_name }}</span>
                     </div>
                     <div>
-                        <span class="block text-xs font-semibold text-gray-500 uppercase">Chunking</span>
-                        <span class="text-sm">{{ currentSelectedStore.chunk_size }} / {{ currentSelectedStore.chunk_overlap }}</span>
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block">Chunking Strategy</span>
+                        <span class="font-bold text-purple-500 uppercase">{{ currentSelectedStore.chunking_strategy || 'recursive' }}</span>
+                    </div>
+                    <div>
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block">Window / Overlap</span>
+                        <span class="font-mono">{{ currentSelectedStore.chunk_size }} chars / {{ currentSelectedStore.chunk_overlap }} overlap</span>
+                    </div>
+                    <div>
+                        <span class="text-[9px] font-bold text-gray-400 uppercase block">Storage Size</span>
+                        <span class="font-mono">{{ (storeDiagnosticInfo?.size_bytes ? (storeDiagnosticInfo.size_bytes / 1024 / 1024).toFixed(2) + ' MB' : 'Calculating...') }}</span>
                     </div>
                 </div>
+
                 <div>
-                    <h4 class="font-semibold text-sm text-gray-700 dark:text-gray-300 mb-1">Configuration</h4>
-                    <div class="max-h-60 overflow-y-auto border rounded dark:border-gray-600 p-2 bg-gray-50 dark:bg-gray-800">
+                    <h4 class="font-bold text-[10px] uppercase text-gray-400 tracking-wider mb-1.5">Raw Vectorizer Configuration</h4>
+                    <div class="max-h-48 overflow-y-auto border rounded-xl dark:border-gray-800 p-2 bg-gray-50 dark:bg-gray-950 font-mono text-[10px]">
                         <JsonRenderer :json="currentSelectedStore.vectorizer_config" />
                     </div>
                 </div>
                 
                 <!-- Actions -->
                 <div class="flex flex-wrap gap-2 pt-2">
+                    <button 
+                        v-if="canReadWrite(currentSelectedStore) && !isForcedVectorizerMode"
+                        @click="openRevectorizeModal"
+                        class="btn btn-secondary btn-sm flex items-center gap-2"
+                    >
+                        <IconRefresh class="w-4 h-4 text-purple-500" />
+                        Re-Vectorize
+                    </button>
+
                     <button 
                         v-if="currentSelectedStore.permission_level === 'owner'"
                         @click="handleExportStore(currentSelectedStore)"
@@ -1691,8 +1830,37 @@ async function handleImportStore() {
         </template>
     </GenericModal>
 
+    <!-- Revectorize Modal -->
+    <GenericModal :visible="isRevectorizeOpen" @close="isRevectorizeOpen = false" title="Migrate & Re-Vectorize DataStore" maxWidthClass="max-w-md">
+        <template #body>
+            <div class="space-y-4 p-1">
+                <p class="text-xs text-gray-500">Re-embed all document chunks in this DataStore using a new embedding model. Chunks will be re-vectorized in-place.</p>
+                <div>
+                    <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Target Vectorizer Model</label>
+                    <select v-model="revectorizeTargetKey" class="input-field text-xs">
+                        <option :value="null" disabled>-- Select New Model --</option>
+                        <optgroup v-for="group in vectorizerOptions" :key="group.id" :label="group.alias || group.vectorizer_name">
+                            <option v-for="model in group.models" :key="`${group.id}-${model.value}`" :value="`${group.alias}/${model.value}`">
+                                {{ model.name }}
+                            </option>
+                        </optgroup>
+                    </select>
+                </div>
+            </div>
+        </template>
+        <template #footer>
+            <div class="flex justify-end gap-2 w-full">
+                <button @click="isRevectorizeOpen = false" class="btn btn-secondary" :disabled="isRevectorizing">Cancel</button>
+                <button @click="handleRevectorize" class="btn btn-primary" :disabled="!revectorizeTargetKey || isRevectorizing">
+                    <IconAnimateSpin v-if="isRevectorizing" class="w-4 h-4 mr-1.5 animate-spin" />
+                    <span>{{ isRevectorizing ? 'Starting...' : 'Start Revectorization' }}</span>
+                </button>
+            </div>
+        </template>
+    </GenericModal>
+
     <!-- File Viewer Modal -->
-    <GenericModal modalName="fileContent" title="Document Viewer" size="4xl">
+    <GenericModal modalName="fileContent" title="Document Viewer" maxWidthClass="max-w-4xl">
         <template #body>
             <div v-if="viewingFile" class="space-y-4">
                 <!-- Info Header -->
@@ -1774,7 +1942,7 @@ async function handleImportStore() {
     </GenericModal>
     
     <!-- Import Modal -->
-    <GenericModal modalName="importDataStore" title="Import Datastore" size="lg">
+    <GenericModal modalName="importDataStore" title="Import Datastore" maxWidthClass="max-w-lg">
         <template #body>
             <div class="space-y-4">
                 <div v-if="importFile" class="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">

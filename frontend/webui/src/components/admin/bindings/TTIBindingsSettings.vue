@@ -61,7 +61,7 @@ const form = ref(getInitialFormState());
 const isEditMode = computed(() => editingBinding.value !== null);
 
 const selectedBindingType = computed(() => {
-    if (!form.value.name) return null;
+    if (!form.value.name || !Array.isArray(availableTtiBindingTypes.value)) return null;
     return availableTtiBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
 });
 
@@ -104,11 +104,12 @@ watch(globalSettings, (newSettings) => {
 
 watch(() => form.value.name, (newName, oldName) => {
     if (newName !== oldName && !isEditMode.value) {
+        if (!Array.isArray(availableTtiBindingTypes.value)) return;
         const bindingDesc = availableTtiBindingTypes.value.find(b => (b.binding_name || b.name) === newName);
         const newConfig = {};
         if (bindingDesc && bindingDesc.input_parameters) {
             bindingDesc.input_parameters.forEach(param => {
-                newConfig[param.name] = param.default;
+                newConfig[param.name] = param.default !== undefined ? param.default : '';
             });
         }
         form.value.config = newConfig;
@@ -139,7 +140,7 @@ function showEditForm(binding) {
     }
     isKeyVisible.value = {};
     
-    const bindingType = availableTtiBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
+    const bindingType = Array.isArray(availableTtiBindingTypes.value) ? availableTtiBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name) : null;
     if(bindingType && bindingType.commands){
         const params = {};
         bindingType.commands.forEach(cmd => {
@@ -225,6 +226,7 @@ async function toggleBindingActive(binding) {
 }
 
 function getBindingTitle(name) {
+    if (!Array.isArray(availableTtiBindingTypes.value)) return name;
     const bindingType = availableTtiBindingTypes.value.find(b => (b.binding_name || b.name) === name);
     return bindingType ? (bindingType.title || bindingType.name) : name;
 }

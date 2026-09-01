@@ -43,9 +43,15 @@ class SharedWithUserPublic(BaseModel):
     icon: Optional[str]
     permission_level: str
 
+class DataStoreRevectorizeRequest(BaseModel):
+    vectorizer_name: str
+    vectorizer_config: Dict[str, Any] = Field(default_factory=dict)
+
 class SafeStoreDocumentInfo(BaseModel):
     filename: str
     metadata: Optional[Dict[str, Any]] = None
+    chunk_count: Optional[int] = None
+    char_count: Optional[int] = None
 
 class ScrapeRequest(BaseModel):
     url: str
@@ -87,7 +93,6 @@ class DocumentChunksPaginatedResponse(BaseModel):
     total_chunks: int
     chunks: List[Dict[str, Any]]
 
-
 class DataStoreAnswerResponse(BaseModel):
     answer: str
     chunks: List[Dict[str, Any]]
@@ -95,7 +100,6 @@ class DataStoreAnswerResponse(BaseModel):
 
 class SparqlQueryRequest(BaseModel):
     query: str
-
 
 class GraphHybridQueryRequest(BaseModel):
     query: str

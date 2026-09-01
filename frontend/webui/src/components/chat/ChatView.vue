@@ -1,4 +1,3 @@
-<!-- [UPDATE] frontend/webui/src/components/chat/ChatView.vue -->
 <script setup>
 import { computed, ref } from 'vue';
 import { useUiStore } from '../../stores/ui';
@@ -20,13 +19,13 @@ const isDraggingOver = ref(false);
 
 function handleDragOver(event) {
     event.preventDefault();
-    if (event.dataTransfer.types.includes('Files')) {
+    if (event.dataTransfer?.types?.includes('Files')) {
         isDraggingOver.value = true;
     }
 }
 
 function handleDragLeave(event) {
-    if (!event.currentTarget.contains(event.relatedTarget)) {
+    if (!event.currentTarget?.contains(event.relatedTarget)) {
         isDraggingOver.value = false;
     }
 }
@@ -35,35 +34,30 @@ function handleDrop(event) {
     event.preventDefault();
     isDraggingOver.value = false;
 
-    // Pass all dropped files to the event bus.
-    // The Input component handles separating images from documents.
-    const files = Array.from(event.dataTransfer.files);
+    const files = Array.from(event.dataTransfer?.files || []);
     if (files.length > 0) {
         emit('files-dropped-in-chat', files);
     }
 }
 
 async function handlePaste(event) {
-    // If vision is not supported, we don't try to intercept images at the view level.
     if (!currentModelVisionSupport.value) return;
     
-    const items = (event.clipboardData || window.clipboardData).items;
+    const items = (event.clipboardData || window.clipboardData)?.items;
     if (!items) return;
     
     const imageFiles = [];
-    for (const item of items) {
-        if (item.kind === 'file' && item.type.startsWith('image/')) {
-            const file = item.getAsFile();
-            if (file) {
-                const extension = (file.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
-                imageFiles.push(new File([file], `pasted_image_${Date.now()}.${extension}`, { type: file.type }));
+    for (let i = 0; i < items.length; i++) {
+        if (items[i].type?.indexOf("image") !== -1) {
+            const blob = items[i].getAsFile();
+            if (blob) {
+                const extension = (blob.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg');
+                imageFiles.push(new File([blob], `pasted_image_${Date.now()}.${extension}`, { type: blob.type }));
             }
         }
     }
     
     if (imageFiles.length > 0) {
-        // Only prevent default if we actually found images to process.
-        // This allows text paste to work normally via bubbling if no images are present.
         event.preventDefault();
         emit('files-pasted-in-chat', imageFiles);
     }
@@ -71,7 +65,8 @@ async function handlePaste(event) {
 </script>
 
 <template>
-<div class="h-full flex flex-row overflow-hidden relative"
+    <div 
+        class="h-full flex flex-row overflow-hidden relative"
         @dragover.prevent="handleDragOver"
         @dragleave="handleDragLeave"
         @drop.stop="handleDrop"
@@ -87,9 +82,10 @@ async function handlePaste(event) {
 
         <div class="flex-1 flex flex-row h-full overflow-hidden relative">
             <!-- Main Chat Area -->
-            <div class="flex-1 flex flex-col h-full overflow-hidden relative border-r border-border-main transition-all duration-300"
-                 :class="{ 'border-r-0': isDataZoneVisible }">
-                
+            <div 
+                class="flex-1 flex flex-col h-full overflow-hidden relative border-r border-border-main transition-all duration-300"
+                :class="{ 'border-r-0': isDataZoneVisible }"
+            >
                 <!-- Editorial Loading State -->
                 <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-900 z-20 flex flex-col items-center justify-center">
                     <div class="relative mb-8">
@@ -117,7 +113,7 @@ async function handlePaste(event) {
                             @click="emit('scroll-chat-to-bottom')" 
                             class="fab-editorial absolute bottom-28 left-1/2 -translate-x-1/2"
                         >
-=                            <div class="fab-icon-container">
+                            <div class="fab-icon-container">
                                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
                                     <path fill-rule="evenodd" d="M10 3a.75.75 0 01.75.75v10.638l3.96-4.158a.75.75 0 111.08 1.04l-5.25 5.5a.75.75 0 01-1.08 0l-5.25-5.5a.75.75 0 111.08-1.04l3.96 4.158V3.75A.75.75 0 0110 3z" clip-rule="evenodd" />
                                 </svg>

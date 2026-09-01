@@ -1834,6 +1834,46 @@ def build_llm_generation_router(router: APIRouter):
 
                     payload = payload_map.get(mtype_val)
                     if payload:
+                        # Auto-persist generated skills to permanent skills DB table
+                        if mtype_val == 43: # skill_done
+                            try:
+                                with next(get_db()) as db_sk_session:
+                                    from backend.db.models.skill import Skill as DBSkillModel
+                                    sk_title = (params or {}).get("title") or (params or {}).get("name") or (chunk if isinstance(chunk, str) and len(chunk) < 100 else "AI Skill")
+                                    clean_sk_name = sk_title.replace('.md', '').replace('.txt', '').strip()
+                                    sk_desc = (params or {}).get("description") or f"Skill: {clean_sk_name}"
+                                    sk_cat = (params or {}).get("category") or "General"
+                                    sk_content = (params or {}).get("content") or ""
+
+                                    if not sk_content and discussion_obj:
+                                        art = discussion_obj.get_artefact(title=sk_title) or discussion_obj.get_artefact(title=f"{clean_sk_name}.md") or discussion_obj.get_artefact(title=clean_sk_name)
+                                        if art:
+                                            sk_content = art.get("content", "")
+
+                                    if sk_content:
+                                        existing_sk = db_sk_session.query(DBSkillModel).filter(
+                                            DBSkillModel.owner_user_id == owner_db_user.id,
+                                            DBSkillModel.name ==  clean_sk_name
+                                        ).first()
+                                        if existing_sk:
+                                            existing_sk.content = sk_content
+                                            existing_sk.description = sk_desc
+                                            existing_sk.category = sk_cat
+                                            existing_sk.updated_at = datetime.now()
+                                        else:
+                                            new_sk = DBSkillModel(
+                                                name=clean_sk_name,
+                                                content=sk_content,
+                                                description=sk_desc,
+                                                category=sk_cat,
+                                                owner_user_id=owner_db_user.id
+                                            )
+                                            db_sk_session.add(new_sk)
+                                        db_sk_session.commit()
+                                        manager.send_personal_message_sync({"type": "skill_saved", "data": {"title": clean_sk_name}}, owner_db_user.id)
+                            except Exception as auto_sk_err:
+                                print(f"Warning: Auto-saving skill to DB: {auto_sk_err}")
+
                         # Ensure content is set for chunks, even if we have params
                         if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value or mtype_val == MSG_TYPE.MSG_TYPE_CONTENT.value:
                             payload["content"] = chunk

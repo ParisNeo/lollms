@@ -60,6 +60,8 @@ import IconCalendar from '../../assets/icons/IconCalendar.vue';
 import IconGoogle from '../../assets/icons/IconGoogle.vue';
 import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
+import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
+import IconCog from '../../assets/icons/IconCog.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -735,21 +737,10 @@ function viewLoadedContextItem(item) {
 }
 
 function viewAttachedFile(file) {
-    if (!activeDiscussion.value) return;
-    
-    // 1. Ensure Data Zone is visible FIRST
-    uiStore.isDataZoneVisible = true;
-    
-    // 2. CRITICAL: Switch to workspace tab
-    uiStore.dataZoneTab = 'workspace';
-    
-    // 3. Set the document title LAST (triggers the watcher in ArtefactSplitView)
-    uiStore.activeSplitArtefactTitle = file.title;
-    
-    // Force a small delay to allow reactivity to propagate before showing notification
-    setTimeout(() => {
-        uiStore.addNotification(`Opening workspace: ${file.title}`, 'info', 1500);
-    }, 100);
+    if (!activeDiscussion.value || !file?.title) return;
+
+    // Ensure data zone is visible and focus on the workspace document
+    uiStore.openWorkspaceArtefact(file.title);
 }
 function getGroupExtension(group) {
     const title = group?.title || '';
@@ -1235,7 +1226,8 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                     <DropdownMenu icon="plus" collection="" title="Add" buttonClass="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative">
                          <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
                         <DropdownSubmenu title="Add Document" icon="file-text" collection="ui">
-                            <div class="p-1 min-w-[250px]">
+                            <div class="p-1 min-w-[260px]">
+                                <button @click="triggerFileUpload('as_is')" class="menu-item"><IconFolder class="w-4 h-4 mr-3 text-emerald-500" /> <span>Native File (as-is)</span></button>
                                 <button @click="triggerFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text</span></button>
                                 <button @click="triggerFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
                                 <button @click="triggerFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>

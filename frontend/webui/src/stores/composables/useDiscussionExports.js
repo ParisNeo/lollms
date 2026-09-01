@@ -192,7 +192,37 @@ export function useDiscussionExports(state, stores, getActions) {
             }
         }
     }
+    async function copyDiscussionAsMarkdown(discussionId = null) {
+        const idToUse = discussionId || currentDiscussionId.value;
+        if (!idToUse) {
+            uiStore.addNotification('No discussion selected.', 'warning');
+            return;
+        }
 
+        try {
+            const response = await apiClient.get(`/api/discussions/${idToUse}/export_context`);
+            let markdownContent = response.data;
+            if (typeof markdownContent !== 'string') {
+                markdownContent = JSON.stringify(markdownContent, null, 2);
+            }
+            if (!markdownContent || !markdownContent.trim()) {
+                throw new Error("Empty context returned from backend");
+            }
+            await uiStore.copyToClipboard(markdownContent, 'Full discussion copied as Markdown!');
+        } catch (error) {
+            console.warn("Falling back to active messages for Markdown copy:", error);
+            const activeMsgs = messages.value || [];
+            if (activeMsgs.length > 0) {
+                const mdParts = activeMsgs
+                    .filter(m => m.content && m.sender_type !== 'system')
+                    .map(m => `### ${m.sender_type === 'user' ? (m.sender || 'User') : (m.sender || 'Assistant')}\n\n${m.content}`);
+                const fullMd = mdParts.join('\n\n---\n\n');
+                await uiStore.copyToClipboard(fullMd, 'Full discussion copied as Markdown!');
+            } else {
+                uiStore.addNotification('No discussion content to copy.', 'warning');
+            }
+        }
+    }
     return {
         exportDiscussions,
         exportCodeToZip,
@@ -200,6 +230,7 @@ export function useDiscussionExports(state, stores, getActions) {
         exportMessage,
         exportRawContent,
         compileLatexCode,
-        pruneDiscussions
+        pruneDiscussions,
+        copyDiscussionAsMarkdown
     };
 }

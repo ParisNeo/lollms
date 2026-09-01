@@ -1,10 +1,11 @@
 <!-- frontend/webui/src/components/layout/Sidebar.vue -->
 <script setup>
-import { computed, ref, onMounted, onUnmounted, watch, defineAsyncComponent } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
+import { useDataStore } from '../../stores/data';
 import { useImageStore } from '../../stores/images';
 import DiscussionList from './DiscussionList.vue';
 
@@ -23,11 +24,12 @@ import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
 
-const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
+const hasActiveVectorizers = computed(() => Array.isArray(dataStore.availableVectorizers) && dataStore.availableVectorizers.length > 0);
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
+const dataStore = useDataStore();
 const imageStore = useImageStore();
 const route = useRoute();
 const router = useRouter();
@@ -43,7 +45,6 @@ const isVoicesStudioAvailable = computed(() => isTtsConfigured.value || isSttCon
 
 const activityTimeout = ref(null);
 const sidebarRef = ref(null);
-const isFlowWizardOpen = ref(false);
 
 async function goToFeed() {
     uiStore.setMainView('feed');
@@ -54,11 +55,10 @@ async function goToFeed() {
 
 const resetActivityTimer = () => {
     clearTimeout(activityTimeout.value);
-    // If the sidebar is pinned, never auto-collapse
     if (isSidebarOpen.value && !isSidebarPinned.value) {
         activityTimeout.value = setTimeout(() => {
             uiStore.closeSidebar();
-        }, 30000); // 30 seconds inactivity
+        }, 30000);
     }
 };
 
@@ -127,7 +127,7 @@ async function handlePlusClick() {
             setTimeout(() => window.dispatchEvent(new CustomEvent('lollms:open-new-datastore')), 100);
             break;
         case 'flows':
-            isFlowWizardOpen.value = true;
+            uiStore.openModal('flowWizard');
             break;
         case 'images':
             const { confirmed, value } = await uiStore.showConfirmation({
@@ -188,7 +188,7 @@ async function handlePlusClick() {
         </button>
 
         <button 
-          @click="activeTab = 'artefacts'; uiStore.openSidebar();" 
+          @click="uiStore.openSidebar();" 
           class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
           title="Artefacts"
         >
@@ -219,6 +219,7 @@ async function handlePlusClick() {
             </router-link>
 
             <router-link
+              v-if="hasActiveVectorizers"
               to="/datastores"
               class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
               title="Data Studio"
@@ -295,9 +296,5 @@ async function handlePlusClick() {
         </router-link>
       </div>
     </div>
-
-    <Teleport to="body">
-        <FlowWizardModal v-if="isFlowWizardOpen" @close="isFlowWizardOpen = false" />
-    </Teleport>
   </aside>
 </template>

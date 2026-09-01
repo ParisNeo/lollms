@@ -100,6 +100,12 @@ function handleRename(event) {
   closeMenu();
 }
 
+async function handleCopyMarkdown(event) {
+  event.stopPropagation();
+  closeMenu();
+  await store.copyDiscussionAsMarkdown(props.discussion.id);
+}
+
 function handleShare(event) {
   event.stopPropagation();
   uiStore.openModal('shareDiscussion', {
@@ -204,6 +210,11 @@ function handleClickOutside() {
               <span>{{ discussion.is_starred ? 'Unstar' : 'Star' }}</span>
             </button>
 
+            <button @click="handleCopyMarkdown" class="menu-item">
+              <IconCopy class="h-4 w-4 text-blue-500" />
+              <span>Copy as Markdown</span>
+            </button>
+
             <button @click="handleRename" class="menu-item">
               <IconPencil class="h-4 w-4" />
               <span>Rename</span>
@@ -233,6 +244,10 @@ function handleClickOutside() {
           </template>
           
           <template v-else>
+            <button @click="handleCopyMarkdown" class="menu-item">
+              <IconCopy class="h-4 w-4 text-blue-500" />
+              <span>Copy as Markdown</span>
+            </button>
             <button @click="handleClone" class="menu-item">
               <IconCopy class="h-4 w-4" />
               <span>Clone Discussion</span>

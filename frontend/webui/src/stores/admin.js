@@ -283,35 +283,35 @@ export const useAdminStore = defineStore('admin', () => {
     
     // TTI
     async function fetchTtiBindings(force = false) { if (!force && ttiBindings.value.length > 0) return; isLoadingTtiBindings.value = true; try { const r = await apiClient.get('/api/admin/tti-bindings'); ttiBindings.value = r.data; } finally { isLoadingTtiBindings.value = false; } }
-    async function fetchAvailableTtiBindingTypes(force = false) { if (!force && availableTtiBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/tti-bindings/available_types'); availableTtiBindingTypes.value = r.data; }
+    async function fetchAvailableTtiBindingTypes(force = false) { if (!force && availableTtiBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/tti-bindings/available_types'); availableTtiBindingTypes.value = Array.isArray(r.data) ? r.data : []; }
     async function addTtiBinding(payload) { const r = await apiClient.post('/api/admin/tti-bindings', payload); ttiBindings.value.push(r.data); uiStore.addNotification(`TTI Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtiBinding(id, payload) { const r = await apiClient.put(`/api/admin/tti-bindings/${id}`, payload); const i = ttiBindings.value.findIndex(b => b.id === id); if (i !== -1) ttiBindings.value[i] = r.data; uiStore.addNotification(`TTI Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtiBinding(id) { await apiClient.delete(`/api/admin/tti-bindings/${id}`); ttiBindings.value = ttiBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTI Binding deleted.', 'success'); }
     
     // TTS
     async function fetchTtsBindings(force = false) { if (!force && ttsBindings.value.length > 0) return; isLoadingTtsBindings.value = true; try { const r = await apiClient.get('/api/admin/tts-bindings'); ttsBindings.value = r.data; } finally { isLoadingTtsBindings.value = false; } }
-    async function fetchAvailableTtsBindingTypes(force = false) { if (!force && availableTtsBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/tts-bindings/available_types'); availableTtsBindingTypes.value = r.data; }
+    async function fetchAvailableTtsBindingTypes(force = false) { if (!force && availableTtsBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/tts-bindings/available_types'); availableTtsBindingTypes.value = Array.isArray(r.data) ? r.data : []; }
     async function addTtsBinding(payload) { const r = await apiClient.post('/api/admin/tts-bindings', payload); ttsBindings.value.push(r.data); uiStore.addNotification(`TTS Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtsBinding(id, payload) { const r = await apiClient.put(`/api/admin/tts-bindings/${id}`, payload); const i = ttsBindings.value.findIndex(b => b.id === id); if (i !== -1) ttsBindings.value[i] = r.data; uiStore.addNotification(`TTS Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtsBinding(id) { await apiClient.delete(`/api/admin/tts-bindings/${id}`); ttsBindings.value = ttsBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTS Binding deleted.', 'success'); }
     
     // STT
     async function fetchSttBindings(force = false) { if (!force && sttBindings.value.length > 0) return; isLoadingSttBindings.value = true; try { const r = await apiClient.get('/api/admin/stt-bindings'); sttBindings.value = r.data; } finally { isLoadingSttBindings.value = false; } }
-    async function fetchAvailableSttBindingTypes(force = false) { if (!force && availableSttBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/stt-bindings/available_types'); availableSttBindingTypes.value = r.data; }
+    async function fetchAvailableSttBindingTypes(force = false) { if (!force && availableSttBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/stt-bindings/available_types'); availableSttBindingTypes.value = Array.isArray(r.data) ? r.data : []; }
     async function addSttBinding(payload) { const r = await apiClient.post('/api/admin/stt-bindings', payload); sttBindings.value.push(r.data); uiStore.addNotification(`STT Binding '${r.data.alias}' created.`, 'success'); }
     async function updateSttBinding(id, payload) { const r = await apiClient.put(`/api/admin/stt-bindings/${id}`, payload); const i = sttBindings.value.findIndex(b => b.id === id); if (i !== -1) sttBindings.value[i] = r.data; uiStore.addNotification(`STT Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteSttBinding(id) { await apiClient.delete(`/api/admin/stt-bindings/${id}`); sttBindings.value = sttBindings.value.filter(b => b.id !== id); uiStore.addNotification('STT Binding deleted.', 'success'); }
     
     // TTV
     async function fetchTtvBindings(force = false) { if (!force && ttvBindings.value.length > 0) return; isLoadingTtvBindings.value = true; try { const r = await apiClient.get('/api/admin/ttv-bindings'); ttvBindings.value = r.data; } finally { isLoadingTtvBindings.value = false; } }
-    async function fetchAvailableTtvBindingTypes(force = false) { if (!force && availableTtvBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttv-bindings/available_types'); availableTtvBindingTypes.value = r.data; }
+    async function fetchAvailableTtvBindingTypes(force = false) { if (!force && availableTtvBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttv-bindings/available_types'); availableTtvBindingTypes.value = Array.isArray(r.data) ? r.data : []; }
     async function addTtvBinding(payload) { const r = await apiClient.post('/api/admin/ttv-bindings', payload); ttvBindings.value.push(r.data); uiStore.addNotification(`TTV Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtvBinding(id, payload) { const r = await apiClient.put(`/api/admin/ttv-bindings/${id}`, payload); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; uiStore.addNotification(`TTV Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtvBinding(id) { await apiClient.delete(`/api/admin/ttv-bindings/${id}`); ttvBindings.value = ttvBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTV Binding deleted.', 'success'); }
 
     // TTM
     async function fetchTtmBindings(force = false) { if (!force && ttmBindings.value.length > 0) return; isLoadingTtmBindings.value = true; try { const r = await apiClient.get('/api/admin/ttm-bindings'); ttmBindings.value = r.data; } finally { isLoadingTtmBindings.value = false; } }
-    async function fetchAvailableTtmBindingTypes(force = false) { if (!force && availableTtmBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttm-bindings/available_types'); availableTtmBindingTypes.value = r.data; }
+    async function fetchAvailableTtmBindingTypes(force = false) { if (!force && availableTtmBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttm-bindings/available_types'); availableTtmBindingTypes.value = Array.isArray(r.data) ? r.data : []; }
     async function addTtmBinding(payload) { const r = await apiClient.post('/api/admin/ttm-bindings', payload); ttmBindings.value.push(r.data); uiStore.addNotification(`TTM Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtmBinding(id, payload) { const r = await apiClient.put(`/api/admin/ttm-bindings/${id}`, payload); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) ttmBindings.value[i] = r.data; uiStore.addNotification(`TTM Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtmBinding(id) { await apiClient.delete(`/api/admin/ttm-bindings/${id}`); ttmBindings.value = ttmBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTM Binding deleted.', 'success'); }

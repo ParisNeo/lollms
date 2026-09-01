@@ -174,6 +174,22 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     }
                     break;
 
+                case 'skill_done':
+                    import('../skills').then(s => s.useSkillsStore().fetchSkills());
+                    break;
+
+                case 'note_done':
+                    import('../notes').then(n => n.useNotesStore().fetchNotes());
+                    break;
+
+                case 'skill_done':
+                    import('../skills').then(s => s.useSkillsStore().fetchSkills());
+                    break;
+
+                case 'note_done':
+                    import('../notes').then(n => n.useNotesStore().fetchNotes());
+                    break;
+
                 case 'sources':
                     messageToUpdate.sources = Array.isArray(data.content) ? data.content : [data.content];
                     if (!messageToUpdate.metadata) messageToUpdate.metadata = {};

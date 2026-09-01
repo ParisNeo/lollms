@@ -4,6 +4,7 @@ import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useNotesStore } from '../../stores/notes';
 import { useSkillsStore } from '../../stores/skills';
+import apiClient from '../../services/api';
 import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
 import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
@@ -21,6 +22,8 @@ import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconSpeakerWave from '../../assets/icons/IconSpeakerWave.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
+import IconCode from '../../assets/icons/IconCode.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
@@ -501,13 +504,12 @@ async function handleSendToDataStore(datastoreId, datastoreName) {
 }
 
 async function handlePushToLibrary(type) {
-
-    // FIX: Reference dbContent.value instead of content.value
     if (!dbContent.value) {
         uiStore.addNotification("Document is empty.", "warning");
         return;
     }
 
+    isSaving.value = true;
     try {
         if (type === 'saved') {
             await discussionsStore.saveArtefactToLibrary({
@@ -516,27 +518,45 @@ async function handlePushToLibrary(type) {
                 version: selectedVersion.value
             });
         } else if (type === 'note') {
+            const cleanTitle = title.value.replace(/\.md$/i, '').replace(/\.txt$/i, '');
             await notesStore.createNote({
-                title: title.value,
+                title: cleanTitle,
                 content: dbContent.value
             });
-            // FIX: Refresh the notes list so it appears in the sidebar
             await notesStore.fetchNotes();
+            if (discussionsStore.currentDiscussionId !== 'saved') {
+                await discussionsStore.updateArtefact({
+                    discussionId: discussionsStore.currentDiscussionId,
+                    artefactTitle: title.value,
+                    newContent: dbContent.value,
+                    updateInPlace: false
+                });
+            }
             uiStore.addNotification("Saved to global Notes library.", "success");
         } else if (type === 'skill') {
+            const cleanTitle = title.value.replace(/\.md$/i, '').replace(/\.txt$/i, '');
             await skillsStore.createSkill({
-                name: title.value,
+                name: cleanTitle,
                 content: dbContent.value,
-                category: 'Imported',
-                description: `Created from workspace artefact: ${title.value}`
+                category: artefactGroup.value?.versions[0]?.category || 'General',
+                description: artefactGroup.value?.versions[0]?.description || `Skill: ${cleanTitle}`
             });
-            // FIX: Refresh the skills list so it appears in the sidebar
             await skillsStore.fetchSkills();
+            if (discussionsStore.currentDiscussionId !== 'saved') {
+                await discussionsStore.updateArtefact({
+                    discussionId: discussionsStore.currentDiscussionId,
+                    artefactTitle: title.value,
+                    newContent: dbContent.value,
+                    updateInPlace: false
+                });
+            }
             uiStore.addNotification("Saved to global Skills library.", "success");
         }
     } catch (e) {
         console.error("Library export failed:", e);
         uiStore.addNotification("Failed to export to library.", "error");
+    } finally {
+        isSaving.value = false;
     }
 }
 

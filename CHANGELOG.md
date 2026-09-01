@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-01 01:20]
+
+- feat(backend): enhance data store management and LLM generation routing
+
 ## [2026-08-31 22:43]
 
 - feat(admin): update user and bindings management with frontend assets and backend refinements

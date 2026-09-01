@@ -8,7 +8,7 @@ import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useSocialStore } from '../../stores/social';
 
-import DropdownSubmenu from '../ui/DropDownMenu/DropdownSubmenu.vue';
+import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 import TasksManagerButton from './TasksManagerButton.vue';
 import NotificationBell from '../ui/NotificationBell.vue';
 import ThemeSelector from '../ui/ThemeSelector.vue';
@@ -32,6 +32,7 @@ import IconMessage from '../../assets/icons/IconMessage.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconChevronDown from '../../assets/icons/IconChevronDown.vue';
+import IconCopy from '../../assets/icons/IconCopy.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -59,6 +60,16 @@ const showMainSidebarToggle = computed(() => {
 const showDataZoneButton = computed(() => {
     return !!discussionsStore.currentDiscussionId;
 });
+
+const showCopyDiscussionButton = computed(() => {
+    return !!discussionsStore.currentDiscussionId && 
+           Array.isArray(discussionsStore.messages) && 
+           discussionsStore.messages.length > 0;
+});
+
+async function handleCopyDiscussion() {
+    await discussionsStore.copyDiscussionAsMarkdown();
+}
 
 const isRefreshingModels = ref(false);
 const menuTriggerRef = ref(null);
@@ -490,7 +501,18 @@ async function handleRefreshModels() {
     <!-- Right: Tools & Theme -->
     <div class="flex items-center gap-1 sm:gap-2 shrink-0">
         <div id="global-header-actions-target" class="flex items-center gap-1 mr-1 sm:mr-3"></div>
-        
+
+        <!-- Copy Full Discussion as Markdown -->
+        <button 
+            v-if="showCopyDiscussionButton" 
+            @click="handleCopyDiscussion" 
+            class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5"
+            title="Copy entire discussion as Markdown to clipboard"
+        >
+            <IconCopy class="w-4 h-4" />
+            <span class="text-xs font-bold hidden xl:inline">Copy MD</span>
+        </button>
+
         <div class="h-6 w-px bg-gray-200 dark:border-gray-700 mx-1 hidden sm:block"></div>
 
         <TasksManagerButton />

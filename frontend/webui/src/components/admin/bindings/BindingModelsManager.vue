@@ -143,13 +143,14 @@ const filteredConfiguredAliases = computed(() => {
 
 const filteredModels = computed(() => {
     if (isSmartRouter.value) return [];
+    if (!Array.isArray(models.value)) return [];
     const aliasedKeys = new Set(configuredAliases.value.map(a => a.original_model_name));
-    const unaliased = models.value.filter(m => !aliasedKeys.has(m.original_model_name));
+    const unaliased = models.value.filter(m => m && !aliasedKeys.has(m.original_model_name));
 
     if (!searchTerm.value) return unaliased;
     const lowerSearch = searchTerm.value.toLowerCase();
     return unaliased.filter(m => 
-        m.original_model_name.toLowerCase().includes(lowerSearch)
+        m && (m.original_model_name || '').toLowerCase().includes(lowerSearch)
     );
 });
 
@@ -199,14 +200,20 @@ async function fetchModels() {
     if (!props.binding) { isLoading.value = false; models.value = []; return; }
     isLoading.value = true;
     try {
+        let res = [];
         switch (props.bindingType) {
-            case 'llm': models.value = await adminStore.fetchBindingModels(props.binding.id); break;
-            case 'tti': models.value = await adminStore.fetchTtiBindingModels(props.binding.id); break;
-            case 'tts': models.value = await adminStore.fetchTtsBindingModels(props.binding.id); break;
-            case 'stt': models.value = await adminStore.fetchSttBindingModels(props.binding.id); break;
-            case 'rag': models.value = await adminStore.fetchRagBindingModels(props.binding.id); break;
-            default: models.value = [];
+            case 'llm': res = await adminStore.fetchBindingModels(props.binding.id); break;
+            case 'tti': res = await adminStore.fetchTtiBindingModels(props.binding.id); break;
+            case 'tts': res = await adminStore.fetchTtsBindingModels(props.binding.id); break;
+            case 'stt': res = await adminStore.fetchSttBindingModels(props.binding.id); break;
+            case 'ttv': res = await adminStore.fetchTtvBindingModels(props.binding.id); break;
+            case 'ttm': res = await adminStore.fetchTtmBindingModels(props.binding.id); break;
+            case 'rag': res = await adminStore.fetchRagBindingModels(props.binding.id); break;
+            default: res = [];
         }
+        models.value = Array.isArray(res) ? res : [];
+    } catch (e) {
+        models.value = [];
     } finally {
         isLoading.value = false;
     }

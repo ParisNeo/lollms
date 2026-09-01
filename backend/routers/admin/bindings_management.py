@@ -660,18 +660,189 @@ async def generate_model_icon(
     )
     return task
 
-# Modality routes
+# --- Modality Specific Model Listing & Alias Management ---
+
+def _get_modality_models_list(binding_record, binding_type: str) -> List[BindingModel]:
+    try:
+        config = _get_effective_config(binding_record)
+        service = _get_binding_instance(binding_type, binding_record.name, config)
+        raw_models = service.list_models() if hasattr(service, 'list_models') else []
+
+        models_list = []
+        if isinstance(raw_models, list):
+            for item in raw_models:
+                m_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
+                if m_id:
+                    models_list.append(m_id)
+
+        model_aliases = binding_record.model_aliases or {}
+        if isinstance(model_aliases, str):
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception:
+                model_aliases = {}
+
+        return [BindingModel(original_model_name=model_name, alias=model_aliases.get(model_name)) for model_name in sorted(models_list)]
+    except Exception as e:
+        trace_exception(e)
+        return []
+
+# TTI
 @bindings_management_router.get("/tti-bindings", response_model=List[TTIBindingPublicAdmin])
 async def get_all_tti_bindings(db: Session = Depends(get_db)): return db.query(DBTTIBinding).all()
 
+@bindings_management_router.get("/tti-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_tti_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTI Binding not found.")
+    return _get_modality_models_list(binding, "tti")
+
+@bindings_management_router.put("/tti-bindings/{binding_id}/alias", response_model=TTIBindingPublicAdmin)
+async def update_tti_model_alias(binding_id: int, payload: TtiModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTI Binding not found.")
+    if binding.model_aliases is None: binding.model_aliases = {}
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+@bindings_management_router.delete("/tti-bindings/{binding_id}/alias", response_model=TTIBindingPublicAdmin)
+async def delete_tti_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBTTIBinding).filter(DBTTIBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTI Binding not found.")
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+# TTS
 @bindings_management_router.get("/tts-bindings", response_model=List[TTSBindingPublicAdmin])
 async def get_all_tts_bindings(db: Session = Depends(get_db)): return db.query(DBTTSBinding).all()
 
+@bindings_management_router.get("/tts-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    return _get_modality_models_list(binding, "tts")
+
+@bindings_management_router.put("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
+async def update_tts_model_alias(binding_id: int, payload: TtsModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    if binding.model_aliases is None: binding.model_aliases = {}
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+@bindings_management_router.delete("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
+async def delete_tts_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+# STT
 @bindings_management_router.get("/stt-bindings", response_model=List[STTBindingPublicAdmin])
 async def get_all_stt_bindings(db: Session = Depends(get_db)): return db.query(DBSTTBinding).all()
 
+@bindings_management_router.get("/stt-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_stt_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="STT Binding not found.")
+    return _get_modality_models_list(binding, "stt")
+
+@bindings_management_router.put("/stt-bindings/{binding_id}/alias", response_model=STTBindingPublicAdmin)
+async def update_stt_model_alias(binding_id: int, payload: SttModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="STT Binding not found.")
+    if binding.model_aliases is None: binding.model_aliases = {}
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+@bindings_management_router.delete("/stt-bindings/{binding_id}/alias", response_model=STTBindingPublicAdmin)
+async def delete_stt_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBSTTBinding).filter(DBSTTBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="STT Binding not found.")
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+# TTV
 @bindings_management_router.get("/ttv-bindings", response_model=List[TTVBindingPublicAdmin])
 async def get_all_ttv_bindings(db: Session = Depends(get_db)): return db.query(DBTTVBinding).all()
 
+@bindings_management_router.get("/ttv-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_ttv_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTVBinding).filter(DBTTVBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTV Binding not found.")
+    return _get_modality_models_list(binding, "ttv")
+
+@bindings_management_router.put("/ttv-bindings/{binding_id}/alias", response_model=TTVBindingPublicAdmin)
+async def update_ttv_model_alias(binding_id: int, payload: TtvModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBTTVBinding).filter(DBTTVBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTV Binding not found.")
+    if binding.model_aliases is None: binding.model_aliases = {}
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+@bindings_management_router.delete("/ttv-bindings/{binding_id}/alias", response_model=TTVBindingPublicAdmin)
+async def delete_ttv_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBTTVBinding).filter(DBTTVBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTV Binding not found.")
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+# TTM
 @bindings_management_router.get("/ttm-bindings", response_model=List[TTMBindingPublicAdmin])
 async def get_all_ttm_bindings(db: Session = Depends(get_db)): return db.query(DBTTMBinding).all()
+
+@bindings_management_router.get("/ttm-bindings/{binding_id}/models", response_model=List[BindingModel])
+async def get_ttm_binding_models(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTMBinding).filter(DBTTMBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTM Binding not found.")
+    return _get_modality_models_list(binding, "ttm")
+
+@bindings_management_router.put("/ttm-bindings/{binding_id}/alias", response_model=TTMBindingPublicAdmin)
+async def update_ttm_model_alias(binding_id: int, payload: TtmModelAliasUpdate, db: Session = Depends(get_db)):
+    binding = db.query(DBTTMBinding).filter(DBTTMBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTM Binding not found.")
+    if binding.model_aliases is None: binding.model_aliases = {}
+    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding
+
+@bindings_management_router.delete("/ttm-bindings/{binding_id}/alias", response_model=TTMBindingPublicAdmin)
+async def delete_ttm_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+    binding = db.query(DBTTMBinding).filter(DBTTMBinding.id == binding_id).first()
+    if not binding: raise HTTPException(status_code=404, detail="TTM Binding not found.")
+    if binding.model_aliases and payload.original_model_name in binding.model_aliases:
+        del binding.model_aliases[payload.original_model_name]
+        flag_modified(binding, "model_aliases")
+    db.commit(); db.refresh(binding)
+    manager.broadcast_sync({"type": "bindings_updated"})
+    return binding

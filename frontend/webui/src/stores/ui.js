@@ -412,6 +412,13 @@ export const useUiStore = defineStore('ui', {
         this.isDataZoneExpanded = !this.isDataZoneExpanded;
     },
 
+    openWorkspaceArtefact(artefactTitle) {
+        if (!artefactTitle) return;
+        this.isDataZoneVisible = true;
+        this.activeSplitArtefactTitle = artefactTitle;
+        this.dataZoneTab = 'workspace';
+    },
+
     setPageTitle({ title, icon = null }) {
         this.pageTitle = title;
         this.pageTitleIcon = icon ? markRaw(icon) : null;

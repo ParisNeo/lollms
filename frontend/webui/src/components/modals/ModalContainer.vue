@@ -80,6 +80,7 @@ const AdminCreateUserModal = defineAsyncComponent(() => import('./AdminCreateUse
 const CreateArtefactModal = defineAsyncComponent(() => import('./CreateArtefactModal.vue'));
 const SkillEditorModal = defineAsyncComponent(() => import('./SkillEditorModal.vue'));
 const EmailNotesModal = defineAsyncComponent(() => import('./EmailNotesModal.vue'));
+const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardModal.vue'));
 </script>
 
 <template>

@@ -16,6 +16,7 @@ import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 import IconStar from '../../../assets/icons/IconStar.vue';
 import IconStarFilled from '../../../assets/icons/IconStarFilled.vue';
 import IconShare from '../../../assets/icons/IconShare.vue';
+import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 import IconArrowUpTray from '../../../assets/icons/IconArrowUpTray.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../../assets/icons/IconCircle.vue';
@@ -25,6 +26,7 @@ import IconLock from '../../../assets/icons/IconLock.vue';
 import IconCog from '../../../assets/icons/IconCog.vue';
 import IconWrenchScrewdriver from '../../../assets/icons/IconWrenchScrewdriver.vue';
 import DropdownMenu from '../DropdownMenu/DropdownMenu.vue';
+import DropdownSubmenu from '../DropdownMenu/DropdownSubmenu.vue';
 
 import { useDataStore } from '../../../stores/data';
 import IconDatabase from '../../../assets/icons/IconDatabase.vue';
