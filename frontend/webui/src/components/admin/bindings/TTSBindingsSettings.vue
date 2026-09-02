@@ -11,6 +11,8 @@ import IconTerminal from '../../../assets/icons/ui/IconTerminal.vue';
 import IconSpeakerWave from '../../../assets/icons/IconSpeakerWave.vue';
 import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 import IconPlayCircle from '../../../assets/icons/IconPlayCircle.vue';
+import IconSparkles from '../../../assets/icons/IconSparkles.vue';
+import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
 import JsonRenderer from '../../ui/JsonRenderer.vue';
 
 const BindingModelsManager = defineAsyncComponent(() => import('./BindingModelsManager.vue'));
@@ -29,6 +31,50 @@ const isLoadingForm = ref(false);
 const isKeyVisible = ref({});
 const commandParams = ref({});
 const activeTab = ref('settings');
+const hasZoo = ref(false);
+
+const getInitialFormState = () => ({
+    id: null,
+    alias: '',
+    name: '',
+    config: {},
+    default_model_name: '',
+    is_active: true
+});
+
+const form = ref(getInitialFormState());
+const isEditMode = computed(() => editingBinding.value !== null);
+
+const selectedBindingType = computed(() => {
+    if (!form.value.name || !Array.isArray(availableTtsBindingTypes.value)) return null;
+    return availableTtsBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
+});
+
+const hasCommands = computed(() => {
+    if (!selectedBindingType.value || !Array.isArray(selectedBindingType.value.commands)) return false;
+    return selectedBindingType.value.commands.length > 0;
+});
+
+async function checkZooAvailability(bindingId) {
+    if (!bindingId) { hasZoo.value = false; return; }
+    hasZoo.value = false;
+    try {
+        const res = await adminStore.fetchTtsBindingZoo(bindingId);
+        hasZoo.value = Array.isArray(res) && res.length > 0;
+    } catch {
+        hasZoo.value = false;
+    } finally {
+        if (!hasZoo.value && activeTab.value === 'zoo') {
+            activeTab.value = 'settings';
+        }
+    }
+}
+
+watch(hasCommands, (val) => {
+    if (!val && activeTab.value === 'commands') {
+        activeTab.value = 'settings';
+    }
+});
 
 // Command execution tracking
 const currentCommandTaskId = ref(null);
@@ -46,23 +92,19 @@ watch(currentTask, (newTask) => {
     }
 }, { deep: true });
 
-const getInitialFormState = () => ({
-    id: null,
-    alias: '',
-    name: '',
-    config: {},
-    default_model_name: '',
-    is_active: true
-});
+function openPolicyModal() {
+    uiStore.openModal('forceSettings');
+}
 
-const form = ref(getInitialFormState());
-
-const isEditMode = computed(() => editingBinding.value !== null);
-
-const selectedBindingType = computed(() => {
-    if (!form.value.name || !Array.isArray(availableTtsBindingTypes.value)) return null;
-    return availableTtsBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
-});
+async function handleHealProfiles() {
+    try {
+        const res = await (await import('../../../services/api')).default.post('/api/admin/bindings/migrate-and-heal');
+        uiStore.addNotification(res.data.message, 'success');
+        await adminStore.fetchTtsBindings(true);
+    } catch (e) {
+        uiStore.addNotification('Healing operation failed.', 'error');
+    }
+}
 
 const allFormParameters = computed(() => {
     if (!selectedBindingType.value) return [];
@@ -156,6 +198,7 @@ function showEditForm(binding) {
     activeCommandResult.value = null;
     lastExecutedCommandName.value = null;
 
+    checkZooAvailability(binding.id);
     isFormVisible.value = true;
     activeTab.value = 'settings';
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -253,9 +296,9 @@ async function executeCommand(cmd, bindingId, params) {
                 <h3 class="text-xl font-semibold">{{ isEditMode ? 'Edit TTS Binding: ' + form.alias : 'Add New TTS Binding' }}</h3>
                 <div v-if="isEditMode" class="flex gap-2 text-sm font-medium overflow-x-auto">
                     <button @click="activeTab = 'settings'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'settings', 'text-gray-500 hover:text-gray-700': activeTab !== 'settings'}" class="px-3 py-2 whitespace-nowrap">Settings</button>
-                    <button @click="activeTab = 'commands'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'commands', 'text-gray-500 hover:text-gray-700': activeTab !== 'commands'}" class="px-3 py-2 whitespace-nowrap">Commands</button>
-                    <button @click="activeTab = 'zoo'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'zoo', 'text-gray-500 hover:text-gray-700': activeTab !== 'zoo'}" class="px-3 py-2 whitespace-nowrap">Models Zoo</button>
                     <button @click="activeTab = 'models'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'models', 'text-gray-500 hover:text-gray-700': activeTab !== 'models'}" class="px-3 py-2 whitespace-nowrap">Installed Models</button>
+                    <button v-if="hasZoo" @click="activeTab = 'zoo'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'zoo', 'text-gray-500 hover:text-gray-700': activeTab !== 'zoo'}" class="px-3 py-2 whitespace-nowrap">Models Zoo</button>
+                    <button v-if="hasCommands" @click="activeTab = 'commands'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'commands', 'text-gray-500 hover:text-gray-700': activeTab !== 'commands'}" class="px-3 py-2 whitespace-nowrap">Commands</button>
                 </div>
             </div>
 
@@ -421,11 +464,33 @@ async function executeCommand(cmd, bindingId, params) {
             </div>
         </div>
 
-        <div v-else>
-            <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
-                <h2 class="text-2xl font-bold">TTS Bindings</h2>
-                <div class="flex items-center gap-4">
-                    <button @click="showAddForm" class="btn btn-primary self-end" v-if="!isFormVisible">+ Add New TTS Binding</button>
+        <div v-else class="space-y-6">
+            <div class="flex justify-between items-center flex-wrap gap-4 bg-white/60 dark:bg-gray-850/50 p-4 rounded-2xl border border-gray-200/80 dark:border-gray-700/60 backdrop-blur-md">
+                <div>
+                    <h2 class="text-xl font-black tracking-tight text-gray-900 dark:text-white flex items-center gap-2">
+                        <IconSpeakerWave class="w-6 h-6 text-blue-500" />
+                        <span>TTS Speech Bindings</span>
+                        <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
+                            {{ ttsBindings.length }} Connections
+                        </span>
+                    </h2>
+                    <p class="text-xs text-gray-500 mt-0.5">Manage text-to-speech engines and voice synthesis bindings.</p>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button @click="handleHealProfiles" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Heal orphaned user preferences">
+                        <IconSparkles class="w-3.5 h-3.5 text-purple-500" />
+                        <span>Sync & Heal</span>
+                    </button>
+
+                    <button @click="openPolicyModal" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Force models or set system defaults for users">
+                        <IconCpuChip class="w-3.5 h-3.5 text-blue-500" />
+                        <span>⚡ Policy & Defaults</span>
+                    </button>
+
+                    <button @click="showAddForm" class="btn btn-primary btn-sm flex items-center gap-1.5 shadow-sm">
+                        <span>+ Add TTS Binding</span>
+                    </button>
                 </div>
             </div>
 

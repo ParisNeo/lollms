@@ -89,8 +89,9 @@ class AdminUserUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class BatchUsersSettingsUpdate(BaseModel):
+    model_config = ConfigDict(extra="allow")
     user_ids: List[int]
-    settings: Dict[str, Any]
+    settings: Optional[Dict[str, Any]] = None
 
 class EmailUsersRequest(BaseModel):
     subject: str

@@ -1,4 +1,3 @@
-<!-- frontend/webui/src/components/modals/RegisterModal.vue -->
 <script setup>
 import { ref, computed } from 'vue';
 import { useAuthStore } from '../../stores/auth';
@@ -81,6 +80,7 @@ const handleRegister = async () => {
                 v-model="username"
                 type="text"
                 id="reg-username"
+                name="username"
                 required
                 :disabled="isLoading"
                 class="input-field w-full"
@@ -97,6 +97,7 @@ const handleRegister = async () => {
                 v-model="email"
                 type="email"
                 id="reg-email"
+                name="email"
                 required
                 :disabled="isLoading"
                 class="input-field w-full"
@@ -113,6 +114,7 @@ const handleRegister = async () => {
                 v-model="password"
                 type="password"
                 id="reg-password"
+                name="password"
                 required
                 :disabled="isLoading"
                 class="input-field w-full"
@@ -133,6 +135,7 @@ const handleRegister = async () => {
                 v-model="confirmPassword"
                 type="password"
                 id="reg-confirm-password"
+                name="confirm-password"
                 required
                 :disabled="isLoading"
                 class="input-field w-full"

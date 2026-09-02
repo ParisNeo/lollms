@@ -29,21 +29,7 @@ const isLoadingForm = ref(false);
 const isKeyVisible = ref({});
 const commandParams = ref({});
 const activeTab = ref('settings');
-
-const currentCommandTaskId = ref(null);
-const lastExecutedCommandName = ref(null);
-const activeCommandResult = ref(null);
-
-const currentTask = computed(() => {
-    if (!currentCommandTaskId.value) return null;
-    return tasks.value.find(t => t.id === currentCommandTaskId.value);
-});
-
-watch(currentTask, (newTask) => {
-    if (newTask && newTask.status === 'completed') {
-        activeCommandResult.value = newTask.result;
-    }
-}, { deep: true });
+const hasZoo = ref(false);
 
 const getInitialFormState = () => ({
     id: null,
@@ -61,6 +47,47 @@ const selectedBindingType = computed(() => {
     if (!form.value.name || !Array.isArray(availableTtvBindingTypes.value)) return null;
     return availableTtvBindingTypes.value.find(b => (b.binding_name || b.name) === form.value.name);
 });
+
+const hasCommands = computed(() => {
+    if (!selectedBindingType.value || !Array.isArray(selectedBindingType.value.commands)) return false;
+    return selectedBindingType.value.commands.length > 0;
+});
+
+async function checkZooAvailability(bindingId) {
+    if (!bindingId) { hasZoo.value = false; return; }
+    hasZoo.value = false;
+    try {
+        const res = await adminStore.fetchTtvBindingZoo(bindingId);
+        hasZoo.value = Array.isArray(res) && res.length > 0;
+    } catch {
+        hasZoo.value = false;
+    } finally {
+        if (!hasZoo.value && activeTab.value === 'zoo') {
+            activeTab.value = 'settings';
+        }
+    }
+}
+
+watch(hasCommands, (val) => {
+    if (!val && activeTab.value === 'commands') {
+        activeTab.value = 'settings';
+    }
+});
+
+const currentCommandTaskId = ref(null);
+const lastExecutedCommandName = ref(null);
+const activeCommandResult = ref(null);
+
+const currentTask = computed(() => {
+    if (!currentCommandTaskId.value) return null;
+    return tasks.value.find(t => t.id === currentCommandTaskId.value);
+});
+
+watch(currentTask, (newTask) => {
+    if (newTask && newTask.status === 'completed') {
+        activeCommandResult.value = newTask.result;
+    }
+}, { deep: true });
 
 const allFormParameters = computed(() => {
     if (!selectedBindingType.value) return [];
@@ -136,6 +163,7 @@ function showEditForm(binding) {
     activeCommandResult.value = null;
     lastExecutedCommandName.value = null;
 
+    checkZooAvailability(binding.id);
     isFormVisible.value = true;
     activeTab.value = 'settings';
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -218,9 +246,9 @@ async function executeCommand(cmd, bindingId, params) {
                 <h3 class="text-xl font-semibold">{{ isEditMode ? 'Edit TTV Binding: ' + form.alias : 'Add New TTV Binding' }}</h3>
                 <div v-if="isEditMode" class="flex gap-2 text-sm font-medium overflow-x-auto">
                     <button @click="activeTab = 'settings'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'settings', 'text-gray-500 hover:text-gray-700': activeTab !== 'settings'}" class="px-3 py-2 whitespace-nowrap">Settings</button>
-                    <button @click="activeTab = 'commands'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'commands', 'text-gray-500 hover:text-gray-700': activeTab !== 'commands'}" class="px-3 py-2 whitespace-nowrap">Commands</button>
-                    <button @click="activeTab = 'zoo'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'zoo', 'text-gray-500 hover:text-gray-700': activeTab !== 'zoo'}" class="px-3 py-2 whitespace-nowrap">Models Zoo</button>
                     <button @click="activeTab = 'models'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'models', 'text-gray-500 hover:text-gray-700': activeTab !== 'models'}" class="px-3 py-2 whitespace-nowrap">Installed Models</button>
+                    <button v-if="hasZoo" @click="activeTab = 'zoo'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'zoo', 'text-gray-500 hover:text-gray-700': activeTab !== 'zoo'}" class="px-3 py-2 whitespace-nowrap">Models Zoo</button>
+                    <button v-if="hasCommands" @click="activeTab = 'commands'" :class="{'text-blue-600 border-b-2 border-blue-600': activeTab === 'commands', 'text-gray-500 hover:text-gray-700': activeTab !== 'commands'}" class="px-3 py-2 whitespace-nowrap">Commands</button>
                 </div>
             </div>
 

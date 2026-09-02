@@ -11,6 +11,7 @@ import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 import IconArrowUpTray from '../../../assets/icons/IconArrowUpTray.vue';
 import IconPhoto from '../../../assets/icons/IconPhoto.vue';
 import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
+import IconDatabase from '../../../assets/icons/IconDatabase.vue';
 import IconEye from '../../../assets/icons/IconEye.vue';
 import IconPlus from '../../../assets/icons/IconPlus.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
@@ -54,6 +55,51 @@ const isSmartRouter = computed(() => {
 });
 
 const isTtiConfigured = computed(() => ttiBindings.value && ttiBindings.value.some(b => b.is_active));
+
+const availableVisionProfiles = computed(() => {
+    const list = [];
+    if (allUniversalProfiles.value && typeof allUniversalProfiles.value === 'object') {
+        for (const [profId, prof] of Object.entries(allUniversalProfiles.value)) {
+            if (prof.vision_enabled || prof.has_vision) {
+                list.push({
+                    id: profId,
+                    name: prof.title ? `${prof.title} (${profId})` : profId,
+                    bindingAlias: prof.binding_alias || profId.split('/')[0]
+                });
+            }
+        }
+    }
+    if (dataStore.availableLLMModelsGrouped && Array.isArray(dataStore.availableLLMModelsGrouped)) {
+        for (const group of dataStore.availableLLMModelsGrouped) {
+            if (group.items && Array.isArray(group.items)) {
+                for (const item of group.items) {
+                    if (item.vision_enabled || item.has_vision) {
+                        if (!list.some(p => p.id === item.id)) {
+                            list.push({
+                                id: item.id,
+                                name: item.name ? `${item.name} (${item.id})` : item.id,
+                                bindingAlias: group.label || item.id.split('/')[0]
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+});
+
+const availableVisionProfilesGrouped = computed(() => {
+    const groups = {};
+    for (const item of availableVisionProfiles.value) {
+        const groupKey = item.bindingAlias || item.id.split('/')[0] || 'Other Models';
+        if (!groups[groupKey]) {
+            groups[groupKey] = [];
+        }
+        groups[groupKey].push(item);
+    }
+    return Object.entries(groups).map(([label, items]) => ({ label, items }));
+});
 
 const getInitialFormState = () => ({
     icon: '',
@@ -222,10 +268,11 @@ async function fetchModels() {
 function selectModel(model) {
     selectedModel.value = model;
     associatedModel.value = model.original_model_name;
-    const rawAlias = model.alias || {};
+    const rawAlias = (model.alias && typeof model.alias === 'object') ? model.alias : {};
     const newForm = { 
         ...getInitialFormState(), 
         ...rawAlias,
+        title: rawAlias.title || rawAlias.name || (props.bindingType === 'llm' ? model.original_model_name : ''),
         has_vision: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
         vision_enabled: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
         ctx_size: rawAlias.forced_context_size ?? rawAlias.ctx_size ?? null,
@@ -314,13 +361,15 @@ async function saveAlias() {
     try {
         const payload = { ...form.value };
         payload.vision_enabled = Boolean(payload.has_vision);
-        payload.forced_context_size = payload.ctx_size ? Number(payload.ctx_size) : null;
+        const ctxVal = (payload.ctx_size !== '' && payload.ctx_size !== null && !isNaN(Number(payload.ctx_size))) ? Number(payload.ctx_size) : null;
+        payload.ctx_size = ctxVal;
+        payload.forced_context_size = ctxVal;
 
         let aliasPayload = {};
 
         if (props.bindingType === 'llm') {
             if (payload.title) payload.name = payload.title;
-            ['ctx_size', 'forced_context_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
+            ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
                 const value = payload[key];
                 payload[key] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
             });
@@ -339,6 +388,8 @@ async function saveAlias() {
             if (props.bindingType === 'tti') await adminStore.saveTtiModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'tts') await adminStore.saveTtsModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'stt') await adminStore.saveSttModelAlias(props.binding.id, aliasPayload);
+            else if (props.bindingType === 'ttv') await adminStore.saveTtvModelAlias(props.binding.id, aliasPayload);
+            else if (props.bindingType === 'ttm') await adminStore.saveTtmModelAlias(props.binding.id, aliasPayload);
             else if (props.bindingType === 'rag') await adminStore.saveRagModelAlias(props.binding.id, aliasPayload);
         }
         await fetchModels();
@@ -347,6 +398,9 @@ async function saveAlias() {
         const updatedModel = models.value.find(m => m.original_model_name === targetModelName);
         if (updatedModel) selectModel(updatedModel);
         uiStore.addNotification('Profile saved successfully.', 'success');
+    } catch (e) {
+        console.error("Save alias failed:", e);
+        uiStore.addNotification(e.response?.data?.detail || 'Failed to save model profile.', 'error');
     } finally {
         isSaving.value = false;
     }
@@ -385,6 +439,7 @@ async function setAsBindingDefault() {
             case 'tti': await adminStore.updateTtiBinding(props.binding.id, payload); break;
             case 'tts': await adminStore.updateTtsBinding(props.binding.id, payload); break;
             case 'stt': await adminStore.updateSttBinding(props.binding.id, payload); break;
+            case 'rag': await adminStore.updateRagBinding(props.binding.id, payload); break;
         }
         uiStore.addNotification('Binding default profile updated.', 'success');
     } finally {
@@ -393,12 +448,17 @@ async function setAsBindingDefault() {
 }
 
 async function setAsGlobalDefault() {
-    if (!selectedModel.value || !props.binding || props.bindingType !== 'llm') return;
+    if (!selectedModel.value || !props.binding) return;
     isSettingGlobalDefault.value = true;
     try {
         const fullModelName = `${props.binding.alias}/${selectedModel.value.original_model_name}`;
-        await adminStore.updateGlobalSettings({ 'default_lollms_model_name': fullModelName });
-        uiStore.addNotification('Global default model profile updated.', 'success');
+        if (props.bindingType === 'rag') {
+            await adminStore.updateGlobalSettings({ 'default_safe_store_vectorizer': fullModelName });
+            uiStore.addNotification('Global default RAG vectorizer profile updated.', 'success');
+        } else if (props.bindingType === 'llm') {
+            await adminStore.updateGlobalSettings({ 'default_lollms_model_name': fullModelName });
+            uiStore.addNotification('Global default model profile updated.', 'success');
+        }
     } finally {
         isSettingGlobalDefault.value = false;
     }
@@ -488,14 +548,15 @@ watch(() => props.binding, (newBinding) => {
                         <h4 class="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest px-2">
                             {{ isSmartRouter ? 'Routing Groups' : 'Configured Profiles' }} ({{ configuredAliases.length }})
                         </h4>
-                        <ul class="space-y-1.5">
-                            <li v-for="item in filteredConfiguredAliases" :key="item.original_model_name">
+                        <ul class="list-none p-0 m-0 space-y-1.5">
+                            <li v-for="item in filteredConfiguredAliases" :key="item.original_model_name" class="list-none p-0 m-0">
                                 <button @click="selectModelByName(item.original_model_name)"
                                         class="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 shadow-xs"
                                         :class="{'bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800': selectedModel && selectedModel.original_model_name === item.original_model_name}">
                                     <div class="grow min-w-0 flex items-center gap-2.5">
                                         <div class="w-7 h-7 rounded-lg bg-blue-100/50 dark:bg-blue-900/40 flex items-center justify-center shrink-0 overflow-hidden border border-blue-200 dark:border-blue-800">
                                             <img v-if="item.alias?.icon" :src="item.alias.icon" class="w-full h-full object-cover" />
+                                            <IconDatabase v-else-if="bindingType === 'rag'" class="w-4 h-4 text-blue-500" />
                                             <IconCpuChip v-else class="w-4 h-4 text-blue-500" />
                                         </div>
                                         <div class="min-w-0">
@@ -518,8 +579,8 @@ watch(() => props.binding, (newBinding) => {
                     <!-- Installed Raw Models (Hidden for smart router) -->
                     <div v-if="!isSmartRouter" class="space-y-2">
                         <h4 class="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest px-2">Engine Models ({{ models.length }})</h4>
-                        <ul v-if="filteredModels.length > 0" class="space-y-1">
-                            <li v-for="model in filteredModels" :key="model.original_model_name">
+                        <ul v-if="filteredModels.length > 0" class="list-none p-0 m-0 space-y-1">
+                            <li v-for="model in filteredModels" :key="model.original_model_name" class="list-none p-0 m-0">
                                 <button @click="selectModel(model)"
                                         class="w-full text-left p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between transition-colors"
                                         :class="{'bg-gray-200 dark:bg-gray-700 font-bold': selectedModel && selectedModel.original_model_name === model.original_model_name}">
@@ -676,15 +737,32 @@ watch(() => props.binding, (newBinding) => {
                                 </button>
                             </div>
 
-                            <div v-if="!form.has_vision" class="space-y-1 pt-1">
-                                <label class="block text-[10px] font-bold uppercase text-gray-500">VLM Companion Profile</label>
-                                <input v-model="form.vlm_model_profile" type="text" class="input-field text-xs" placeholder="e.g. openai_cloud/gpt-4o or ollama/llava:13b">
+                            <div v-if="!form.has_vision" class="space-y-2 pt-1">
+                                <div class="flex items-center justify-between">
+                                    <label class="block text-[10px] font-bold uppercase text-gray-500">VLM Companion Profile</label>
+                                    <span class="text-[9px] text-blue-600 dark:text-blue-400 font-semibold">Vision Delegation</span>
+                                </div>
+                                <select v-model="form.vlm_model_profile" class="input-field text-xs">
+                                    <option value="">-- No Companion (Text Only / Disable Image Delegation) --</option>
+                                    <optgroup v-for="group in availableVisionProfilesGrouped" :key="group.label" :label="group.label">
+                                        <option v-for="item in group.items" :key="item.id" :value="item.id">
+                                            👁️ {{ item.name }}
+                                        </option>
+                                    </optgroup>
+                                </select>
+                                <p class="text-[10px] text-gray-500 dark:text-gray-400 italic">
+                                    When this model receives image attachments, visual perception and image analysis will be delegated to the selected Vision-Language Model.
+                                </p>
                             </div>
                         </div>
 
                         <div class="flex justify-end gap-3 pt-2">
-                            <button v-if="selectedModel.alias" type="button" @click="deleteAlias" class="btn btn-secondary text-rose-500" :disabled="isSaving">Delete Group</button>
-                            <button type="submit" class="btn btn-primary" :disabled="isSaving">{{ isSaving ? 'Saving...' : 'Save Routing Group' }}</button>
+                            <button v-if="selectedModel.alias" type="button" @click="deleteAlias" class="btn btn-secondary text-rose-500" :disabled="isSaving">
+                                {{ isSmartRouter ? 'Delete Group' : 'Delete Profile' }}
+                            </button>
+                            <button type="submit" class="btn btn-primary" :disabled="isSaving">
+                                {{ isSaving ? 'Saving...' : (isSmartRouter ? 'Save Routing Group' : 'Save Profile') }}
+                            </button>
                         </div>
                     </form>
 

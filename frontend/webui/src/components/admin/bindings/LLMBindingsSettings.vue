@@ -37,6 +37,7 @@ const isLoadingForm = ref(false);
 const isKeyVisible = ref({});
 const commandParams = ref({});
 const activeTab = ref('settings');
+const hasZoo = ref(false);
 
 // Smart Router Model Profiles Selection State
 const allUniversalProfiles = ref({});
@@ -47,17 +48,6 @@ const isSmartRouterBinding = computed(() => {
 const currentCommandTaskId = ref(null);
 const lastExecutedCommandName = ref(null);
 const activeCommandResult = ref(null);
-
-const currentTask = computed(() => {
-    if (!currentCommandTaskId.value) return null;
-    return tasks.value.find(t => t.id === currentCommandTaskId.value);
-});
-
-watch(currentTask, (newTask) => {
-    if (newTask && newTask.status === 'completed') {
-        activeCommandResult.value = newTask.result;
-    }
-}, { deep: true });
 
 const getInitialFormState = () => ({
     id: null,
@@ -75,7 +65,7 @@ const selectedBindingType = computed(() => {
     if (!form.value.name) return null;
     const rawTarget = form.value.name.toLowerCase();
     const cleanTarget = rawTarget.replace(/[^a-z0-9]/g, '');
-    
+
     return availableBindingTypes.value.find(b => {
         const bName = (b.binding_name || '').toLowerCase();
         const bShortName = (b.name || '').toLowerCase();
@@ -85,6 +75,43 @@ const selectedBindingType = computed(() => {
                bShortName.replace(/[^a-z0-9]/g, '') === cleanTarget;
     }) || null;
 });
+
+const hasCommands = computed(() => {
+    if (!selectedBindingType.value || !Array.isArray(selectedBindingType.value.commands)) return false;
+    return selectedBindingType.value.commands.length > 0;
+});
+
+async function checkZooAvailability(bindingId) {
+    if (!bindingId) { hasZoo.value = false; return; }
+    hasZoo.value = false;
+    try {
+        const res = await adminStore.fetchBindingZoo(bindingId);
+        hasZoo.value = Array.isArray(res) && res.length > 0;
+    } catch {
+        hasZoo.value = false;
+    } finally {
+        if (!hasZoo.value && activeTab.value === 'zoo') {
+            activeTab.value = 'settings';
+        }
+    }
+}
+
+watch(hasCommands, (val) => {
+    if (!val && activeTab.value === 'commands') {
+        activeTab.value = 'settings';
+    }
+});
+
+const currentTask = computed(() => {
+    if (!currentCommandTaskId.value) return null;
+    return tasks.value.find(t => t.id === currentCommandTaskId.value);
+});
+
+watch(currentTask, (newTask) => {
+    if (newTask && newTask.status === 'completed') {
+        activeCommandResult.value = newTask.result;
+    }
+}, { deep: true });
 
 const allFormParameters = computed(() => {
     const paramsFromDesc = selectedBindingType.value ? (
@@ -154,11 +181,52 @@ function showEditForm(binding) {
     form.value = JSON.parse(JSON.stringify(binding));
     if (!form.value.config) form.value.config = {};
     isKeyVisible.value = {};
-    
+
     fetchUniversalProfiles();
+    checkZooAvailability(binding.id);
+
+    const bType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
+    if (bType && bType.commands && Array.isArray(bType.commands)) {
+        const params = {};
+        bType.commands.forEach(cmd => {
+            params[cmd.name] = {};
+            if (cmd.parameters && Array.isArray(cmd.parameters)) {
+                cmd.parameters.forEach(p => {
+                    params[cmd.name][p.name] = p.default !== undefined ? p.default : '';
+                });
+            }
+        });
+        commandParams.value = params;
+    } else {
+        commandParams.value = {};
+    }
+
+    currentCommandTaskId.value = null;
+    activeCommandResult.value = null;
+    lastExecutedCommandName.value = null;
+
     isFormVisible.value = true;
     activeTab.value = 'settings';
     window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+async function executeCommand(cmd, bindingId, params) {
+    currentCommandTaskId.value = null;
+    activeCommandResult.value = null;
+    lastExecutedCommandName.value = cmd.name;
+
+    try {
+        uiStore.addNotification(`Submitting command '${cmd.title || cmd.name}'...`, 'info');
+        const taskInfo = await adminStore.executeBindingCommand(bindingId, cmd.name, params);
+        if (taskInfo && taskInfo.id) {
+             currentCommandTaskId.value = taskInfo.id;
+             tasksStore.addTask(taskInfo);
+             uiStore.addNotification(`Task started: ${cmd.title || cmd.name}`, 'success');
+        }
+    } catch (e) {
+        console.error(e);
+        uiStore.addNotification(`Command submission failed: ${e.message}`, 'error');
+    }
 }
 
 function hideForm() {
@@ -218,6 +286,7 @@ async function toggleBindingActive(binding) {
 }
 
 function getBindingTitle(name) {
+    if (!Array.isArray(availableBindingTypes.value)) return name;
     const bindingType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === name);
     return bindingType ? (bindingType.title || bindingType.name) : name;
 }
@@ -231,7 +300,6 @@ async function handleHealProfiles() {
         const res = await apiClient.post('/api/admin/bindings/migrate-and-heal');
         uiStore.addNotification(res.data.message, 'success');
         await adminStore.fetchBindings(true);
-        await dataStore.fetchAvailableLollmsModels();
     } catch (e) {
         uiStore.addNotification('Healing operation failed.', 'error');
     }
@@ -250,8 +318,8 @@ async function handleHealProfiles() {
                 <div v-if="isEditMode" class="flex gap-2 text-xs font-bold overflow-x-auto p-1 bg-gray-100 dark:bg-gray-700/50 rounded-xl">
                     <button @click="activeTab = 'settings'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'settings', 'text-gray-500': activeTab !== 'settings'}" class="px-3 py-1.5 rounded-lg transition-all">Connection Settings</button>
                     <button @click="activeTab = 'models'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'models', 'text-gray-500': activeTab !== 'models'}" class="px-3 py-1.5 rounded-lg transition-all">Universal Profiles</button>
-                    <button @click="activeTab = 'zoo'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'zoo', 'text-gray-500': activeTab !== 'zoo'}" class="px-3 py-1.5 rounded-lg transition-all">Models Zoo</button>
-                    <button @click="activeTab = 'commands'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'commands', 'text-gray-500': activeTab !== 'commands'}" class="px-3 py-1.5 rounded-lg transition-all">Commands</button>
+                    <button v-if="hasZoo" @click="activeTab = 'zoo'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'zoo', 'text-gray-500': activeTab !== 'zoo'}" class="px-3 py-1.5 rounded-lg transition-all">Models Zoo</button>
+                    <button v-if="hasCommands" @click="activeTab = 'commands'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'commands', 'text-gray-500': activeTab !== 'commands'}" class="px-3 py-1.5 rounded-lg transition-all">Commands</button>
                 </div>
             </div>
 
@@ -382,9 +450,65 @@ async function handleHealProfiles() {
             </div>
 
             <!-- Commands Tab -->
-            <div v-else-if="activeTab === 'commands'">
-                <div class="text-center text-xs text-gray-400 py-8">
-                    No active maintenance commands for this binding.
+            <div v-else-if="activeTab === 'commands' && hasCommands" class="space-y-6">
+                <div v-for="cmd in selectedBindingType.commands" :key="cmd.name" class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-2xl border dark:border-gray-600 mb-4">
+                    <div class="flex justify-between items-start mb-3">
+                        <div>
+                            <h5 class="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                                <IconTerminal class="w-4 h-4 text-blue-500"/>
+                                <span>{{ cmd.title || cmd.name }}</span>
+                            </h5>
+                            <p class="text-xs text-gray-500 mt-1">{{ cmd.description }}</p>
+                        </div>
+                        <button 
+                            type="button" 
+                            @click="executeCommand(cmd, editingBinding.id, commandParams[cmd.name])" 
+                            class="btn btn-primary btn-sm flex items-center gap-1.5"
+                            :disabled="currentTask && (currentTask.status === 'running' || currentTask.status === 'pending')"
+                        >
+                            <IconPlayCircle class="w-4 h-4" />
+                            <span>Execute</span>
+                        </button>
+                    </div>
+
+                    <div v-if="cmd.parameters && cmd.parameters.length > 0" class="space-y-3 mb-4 p-3 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
+                        <div v-for="p in cmd.parameters" :key="p.name">
+                            <label class="block text-xs font-bold uppercase text-gray-500 mb-1">{{ p.name }}</label>
+                            <input v-if="p.type !== 'bool'" type="text" v-model="commandParams[cmd.name][p.name]" class="input-field text-xs" :placeholder="p.default">
+                            <div v-else class="flex items-center gap-2">
+                                <button @click="commandParams[cmd.name][p.name] = !commandParams[cmd.name][p.name]" type="button" :class="[commandParams[cmd.name][p.name] ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
+                                    <span :class="[commandParams[cmd.name][p.name] ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
+                                </button>
+                                <span class="text-xs text-gray-600 dark:text-gray-400">{{ p.description }}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-if="currentTask && lastExecutedCommandName === cmd.name && (currentTask.status === 'running' || currentTask.status === 'pending')" class="mt-4">
+                        <div class="flex justify-between text-xs mb-1 font-semibold text-blue-600 dark:text-blue-400">
+                            <span>Executing command...</span>
+                            <span>{{ currentTask.progress }}%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
+                            <div class="bg-blue-600 h-2 rounded-full transition-all duration-300 relative overflow-hidden" :style="{ width: currentTask.progress + '%' }">
+                                <div class="absolute inset-0 bg-white/20 animate-pulse"></div>
+                            </div>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-1 truncate">{{ currentTask.description }}</p>
+                    </div>
+
+                    <div v-if="activeCommandResult && lastExecutedCommandName === cmd.name && currentTask && currentTask.status === 'completed'" class="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-xl">
+                        <h6 class="text-xs font-bold text-green-800 dark:text-green-300 mb-2 uppercase flex items-center gap-2">
+                            <IconCheckCircle class="w-4 h-4 text-green-500" />
+                            <span>Command Finished</span>
+                        </h6>
+                        <div v-if="typeof activeCommandResult === 'object'">
+                            <JsonRenderer :json="activeCommandResult" />
+                        </div>
+                        <div v-else class="whitespace-pre-wrap text-xs text-gray-800 dark:text-gray-200 font-mono">
+                            {{ activeCommandResult }}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

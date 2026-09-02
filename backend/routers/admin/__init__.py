@@ -37,5 +37,4 @@ admin_router.include_router(news_management_router)
 admin_router.include_router(moderation_router)
 admin_router.include_router(services_management_router)
 admin_router.include_router(email_marketing_router)
-admin_router.include_router(security_router) # INCLUDED
 admin_router.include_router(security_router)

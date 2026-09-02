@@ -336,21 +336,29 @@ async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Sess
 async def admin_batch_update_user_settings(update_data: BatchUsersSettingsUpdate, db: Session = Depends(get_db)):
     if not update_data.user_ids:
         raise HTTPException(status_code=400, detail="No user IDs provided.")
-    
+
     users = db.query(DBUser).filter(DBUser.id.in_(update_data.user_ids)).all()
     if not users:
         raise HTTPException(status_code=404, detail="No valid users found.")
 
-    update_fields = update_data.model_dump(exclude={"user_ids"}, exclude_unset=True)
+    raw_fields = update_data.model_dump(exclude={"user_ids"}, exclude_unset=True)
+    update_fields = {}
+    if "settings" in raw_fields and isinstance(raw_fields["settings"], dict):
+        update_fields.update(raw_fields["settings"])
+    for k, v in raw_fields.items():
+        if k != "settings":
+            update_fields[k] = v
+
     if not update_fields:
         raise HTTPException(status_code=400, detail="No settings provided.")
 
     for user in users:
         for key, value in update_fields.items():
-            setattr(user, key, value)
+            if hasattr(user, key):
+                setattr(user, key, value)
         if user.username in user_sessions:
             user_sessions[user.username]["lollms_clients_cache"] = {}
-    
+
     db.commit()
     return {"message": f"Updated settings for {len(users)} users."}
 

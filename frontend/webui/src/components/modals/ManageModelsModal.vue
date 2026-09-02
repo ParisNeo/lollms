@@ -23,16 +23,23 @@
                          </div>
                     </div>
                     <div class="overflow-y-auto grow custom-scrollbar pr-1">
-                        <ul v-if="filteredModels.length > 0" class="space-y-1.5">
-                            <li v-for="model in filteredModels" :key="model.original_model_name">
+                        <ul v-if="filteredModels.length > 0" class="list-none p-0 m-0 space-y-1.5">
+                            <li v-for="model in filteredModels" :key="model.original_model_name" class="list-none p-0 m-0">
                                 <button @click="selectModel(model)"
                                         class="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 shadow-xs"
                                         :class="{'bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800': selectedModel && selectedModel.original_model_name === model.original_model_name}">
-                                    <div class="grow min-w-0">
-                                        <p class="font-bold text-xs truncate" :class="{'text-blue-600 dark:text-blue-400': model.alias}">
-                                            {{ model.alias?.title || model.original_model_name }}
-                                        </p>
-                                        <p v-if="model.alias" class="text-[9px] font-mono text-gray-500 truncate">{{ model.original_model_name }}</p>
+                                    <div class="grow min-w-0 flex items-center gap-2">
+                                        <div class="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-900/40 flex items-center justify-center shrink-0 border border-blue-100 dark:border-blue-800/60 overflow-hidden">
+                                            <img v-if="model.alias?.icon" :src="model.alias.icon" class="w-full h-full object-cover" />
+                                            <IconDatabase v-else-if="bindingType === 'rag'" class="w-3.5 h-3.5 text-blue-500" />
+                                            <IconCpuChip v-else class="w-3.5 h-3.5 text-blue-500" />
+                                        </div>
+                                        <div class="min-w-0">
+                                            <p class="font-bold text-xs truncate" :class="{'text-blue-600 dark:text-blue-400': model.alias}">
+                                                {{ model.alias?.title || model.original_model_name }}
+                                            </p>
+                                            <p v-if="model.alias" class="text-[9px] font-mono text-gray-500 truncate">{{ model.original_model_name }}</p>
+                                        </div>
                                     </div>
                                     <div class="shrink-0 flex items-center gap-1.5 pl-2">
                                         <IconEye v-if="model.alias?.vision_enabled || model.alias?.has_vision" class="w-3.5 h-3.5 text-blue-500" title="Vision Enabled" />
@@ -147,19 +154,38 @@
                                 </div>
                             </div>
 
-                            <!-- Vision and Overrides -->
-                            <div v-if="bindingType === 'llm'" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
+                            <!-- Vision and VLM Companion Pairing -->
+                            <div v-if="bindingType === 'llm'" class="p-4 border rounded-2xl dark:border-gray-700 bg-blue-50/40 dark:bg-blue-950/20 space-y-3">
+                                <div class="flex items-center justify-between border-b dark:border-gray-800 pb-2">
                                     <div class="flex items-center gap-2">
                                         <IconEye class="w-4 h-4 text-blue-500" />
-                                        <span class="text-xs font-bold">Vision Support</span>
+                                        <span class="text-xs font-bold text-blue-950 dark:text-blue-200">Multimodal Vision & VLM Companion</span>
                                     </div>
                                     <button type="button" @click="form.has_vision = !form.has_vision" :class="[form.has_vision ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
                                         <span :class="[form.has_vision ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                                     </button>
                                 </div>
-                                <div class="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
-                                    <span class="text-xs font-bold">Allow User Overrides</span>
+
+                                <div v-if="!form.has_vision" class="space-y-2 pt-1">
+                                    <div class="flex items-center justify-between">
+                                        <label class="block text-[10px] font-bold uppercase text-gray-500">VLM Companion Profile</label>
+                                        <span class="text-[9px] text-blue-600 dark:text-blue-400 font-semibold">Vision Delegation</span>
+                                    </div>
+                                    <select v-model="form.vlm_model_profile" class="input-field text-xs">
+                                        <option value="">-- No Companion (Text Only / Disable Image Delegation) --</option>
+                                        <optgroup v-for="group in availableVisionProfilesGrouped" :key="group.label" :label="group.label">
+                                            <option v-for="item in group.items" :key="item.id" :value="item.id">
+                                                👁️ {{ item.name }}
+                                            </option>
+                                        </optgroup>
+                                    </select>
+                                    <p class="text-[10px] text-gray-500 dark:text-gray-400 italic">
+                                        When this model receives image attachments, visual perception and image analysis will be delegated to the selected Vision-Language Model.
+                                    </p>
+                                </div>
+
+                                <div class="flex items-center justify-between pt-2 border-t dark:border-gray-800">
+                                    <span class="text-xs font-bold text-gray-700 dark:text-gray-300">Allow User Overrides</span>
                                     <button type="button" @click="form.allow_parameters_override = !form.allow_parameters_override" :class="[form.allow_parameters_override ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out']">
                                         <span :class="[form.allow_parameters_override ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                                     </button>
@@ -172,19 +198,23 @@
                             </div>
                         </form>
 
-                        <div class="mt-6">
-                             <h4 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3">System Defaults</h4>
-                             <div class="space-y-3 text-xs">
-                                <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
-                                    <span>Binding Default</span>
-                                    <button @click="setAsBindingDefault" class="font-bold text-blue-600 hover:underline" :disabled="isCurrentBindingDefault || isSettingBindingDefault">
-                                        {{ isCurrentBindingDefault ? '✓ Current Default' : 'Set as Default' }}
+                        <div class="mt-6 border-t dark:border-gray-700/80 pt-5">
+                             <h4 class="text-xs font-black uppercase text-gray-400 tracking-widest mb-3">Default Assignments</h4>
+                             <div class="p-3.5 bg-gray-50 dark:bg-gray-900/40 rounded-xl border border-gray-100 dark:border-gray-800 space-y-3 text-xs">
+                                <div class="flex items-center justify-between">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">Default for this Binding</span>
+                                    <button @click="setAsBindingDefault" class="px-3 py-1 rounded-lg text-xs font-bold transition-all" 
+                                            :class="isCurrentBindingDefault ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' : 'btn btn-secondary btn-xs'"
+                                            :disabled="isCurrentBindingDefault || isSettingBindingDefault">
+                                        {{ isCurrentBindingDefault ? '✓ Assigned as Binding Default' : (isSettingBindingDefault ? 'Saving...' : 'Set as Binding Default') }}
                                     </button>
                                 </div>
-                                 <div v-if="bindingType === 'llm'" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-900 rounded-xl">
-                                    <span>Global System Default</span>
-                                    <button @click="setAsGlobalDefault" class="font-bold text-emerald-600 hover:underline" :disabled="isCurrentGlobalDefault || isSettingGlobalDefault">
-                                        {{ isCurrentGlobalDefault ? '✓ Global Default' : 'Set Global Default' }}
+                                <div v-if="bindingType === 'llm' || bindingType === 'rag'" class="flex items-center justify-between pt-2 border-t dark:border-gray-800">
+                                    <span class="font-medium text-gray-700 dark:text-gray-300">Global System Default for All Users</span>
+                                    <button @click="setAsGlobalDefault" class="px-3 py-1 rounded-lg text-xs font-bold transition-all"
+                                            :class="isCurrentGlobalDefault ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'btn btn-secondary btn-xs'"
+                                            :disabled="isCurrentGlobalDefault || isSettingGlobalDefault">
+                                        {{ isCurrentGlobalDefault ? '✓ Assigned as Global Default' : (isSettingGlobalDefault ? 'Saving...' : 'Set as Global Default') }}
                                     </button>
                                 </div>
                              </div>
@@ -212,6 +242,7 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
+import IconDatabase from '../../assets/icons/IconDatabase.vue';
 
 const uiStore = useUiStore();
 const adminStore = useAdminStore();
@@ -240,6 +271,62 @@ const modelParameters = ref([]);
 
 const isTtiConfigured = computed(() => ttiBindings.value && ttiBindings.value.some(b => b.is_active));
 
+const allUniversalProfiles = ref({});
+
+async function fetchUniversalProfiles() {
+    try {
+        const res = await (await import('../../services/api')).default.get('/api/admin/universal-profiles');
+        allUniversalProfiles.value = res.data.profiles || {};
+    } catch (e) {
+        console.error("Failed to fetch universal profiles:", e);
+    }
+}
+
+const availableVisionProfiles = computed(() => {
+    const list = [];
+    if (allUniversalProfiles.value && typeof allUniversalProfiles.value === 'object') {
+        for (const [profId, prof] of Object.entries(allUniversalProfiles.value)) {
+            if (prof.vision_enabled || prof.has_vision) {
+                list.push({
+                    id: profId,
+                    name: prof.title ? `${prof.title} (${profId})` : profId,
+                    bindingAlias: prof.binding_alias || profId.split('/')[0]
+                });
+            }
+        }
+    }
+    if (dataStore.availableLLMModelsGrouped && Array.isArray(dataStore.availableLLMModelsGrouped)) {
+        for (const group of dataStore.availableLLMModelsGrouped) {
+            if (group.items && Array.isArray(group.items)) {
+                for (const item of group.items) {
+                    if (item.vision_enabled || item.has_vision) {
+                        if (!list.some(p => p.id === item.id)) {
+                            list.push({
+                                id: item.id,
+                                name: item.name ? `${item.name} (${item.id})` : item.id,
+                                bindingAlias: group.label || item.id.split('/')[0]
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+});
+
+const availableVisionProfilesGrouped = computed(() => {
+    const groups = {};
+    for (const item of availableVisionProfiles.value) {
+        const groupKey = item.bindingAlias || item.id.split('/')[0] || 'Other Models';
+        if (!groups[groupKey]) {
+            groups[groupKey] = [];
+        }
+        groups[groupKey].push(item);
+    }
+    return Object.entries(groups).map(([label, items]) => ({ label, items }));
+});
+
 const getInitialFormState = () => ({
     icon: '',
     title: '',
@@ -258,6 +345,7 @@ const getInitialFormState = () => ({
     reasoning_activation: false,
     reasoning_effort: null,
     reasoning_summary: false,
+    vlm_model_profile: '',
     routing_config: {
         description: '',
         complexity_tier: 2,
@@ -338,10 +426,12 @@ function selectModel(model) {
     const newForm = { 
         ...getInitialFormState(), 
         ...rawAlias,
+        title: rawAlias.title || rawAlias.name || (bindingType.value === 'llm' ? model.original_model_name : ''),
         has_vision: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
         vision_enabled: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
         ctx_size: rawAlias.forced_context_size ?? rawAlias.ctx_size ?? null,
         forced_context_size: rawAlias.forced_context_size ?? rawAlias.ctx_size ?? null,
+        vlm_model_profile: rawAlias.vlm_model_profile || '',
         routing_config: {
             description: rawAlias.routing_config?.description || '',
             complexity_tier: rawAlias.routing_config?.complexity_tier || 2,
@@ -399,9 +489,13 @@ async function saveAlias() {
         payload.forced_context_size = payload.ctx_size ? Number(payload.ctx_size) : null;
         let aliasPayload = {};
 
+        const ctxVal = (payload.ctx_size !== '' && payload.ctx_size !== null && !isNaN(Number(payload.ctx_size))) ? Number(payload.ctx_size) : null;
+        payload.ctx_size = ctxVal;
+        payload.forced_context_size = ctxVal;
+
         if (bindingType.value === 'llm') {
             if (payload.title) payload.name = payload.title;
-            ['ctx_size', 'forced_context_size', 'temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
+            ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n'].forEach(key => {
                 const value = payload[key];
                 payload[key] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
             });
@@ -412,6 +506,8 @@ async function saveAlias() {
             if (bindingType.value === 'tti') await adminStore.saveTtiModelAlias(binding.value.id, aliasPayload);
             else if (bindingType.value === 'tts') await adminStore.saveTtsModelAlias(binding.value.id, aliasPayload);
             else if (bindingType.value === 'stt') await adminStore.saveSttModelAlias(binding.value.id, aliasPayload);
+            else if (bindingType.value === 'ttv') await adminStore.saveTtvModelAlias(binding.value.id, aliasPayload);
+            else if (bindingType.value === 'ttm') await adminStore.saveTtmModelAlias(binding.value.id, aliasPayload);
             else if (bindingType.value === 'rag') await adminStore.saveRagModelAlias(binding.value.id, aliasPayload);
         }
         await fetchModels();
@@ -505,6 +601,8 @@ onMounted(() => {
     adminStore.fetchAvailableTtiBindingTypes();
     adminStore.fetchAvailableTtsBindingTypes();
     adminStore.fetchTtiBindings();
+    dataStore.fetchAvailableLollmsModels();
+    fetchUniversalProfiles();
 });
 
 watch(binding, (newBinding) => {

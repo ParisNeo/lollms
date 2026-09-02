@@ -66,6 +66,9 @@ class ForceProfilesPayload(BaseModel):
     tti_binding_model_name: Optional[str] = None
     tts_binding_model_name: Optional[str] = None
     stt_binding_model_name: Optional[str] = None
+    ttv_binding_model_name: Optional[str] = None
+    ttm_binding_model_name: Optional[str] = None
+    rag_vectorizer_name: Optional[str] = None
     context_size: Optional[int] = None
     vlm_model_profile: Optional[str] = None
 
@@ -457,13 +460,32 @@ async def get_available_models(
 
     for binding in active_bindings:
         try:
-            lc = get_user_lollms_client(current_admin.username, binding.alias, load_mcp=False)
-            models = lc.list_models()
-            if isinstance(models, list):
-                for item in models:
+            config = _get_effective_config(binding)
+            service = _get_binding_instance("llm", binding.name, config)
+            raw_models = service.list_models() if (service and hasattr(service, 'list_models')) else []
+
+            aliases = binding.model_aliases or {}
+            if isinstance(aliases, str):
+                try: aliases = json.loads(aliases)
+                except Exception: aliases = {}
+            if not isinstance(aliases, dict):
+                aliases = {}
+
+            if isinstance(raw_models, list):
+                for item in raw_models:
                     model_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
-                    if model_id: 
-                        all_models.append({"id": f"{binding.alias}/{model_id}", "name": f"{binding.alias}/{model_id}"})
+                    if model_id:
+                        alias_data = aliases.get(model_id, {})
+                        alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else {"title": str(alias_data)}
+                        display_name = alias_dict.get('title') or alias_dict.get('name') or model_id
+                        all_models.append({"id": f"{binding.alias}/{model_id}", "name": f"{binding.alias}/{display_name}", "alias": alias_dict if alias_dict else None})
+
+            for orig_name, alias_data in aliases.items():
+                alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else {"title": str(alias_data)}
+                full_id = f"{binding.alias}/{orig_name}"
+                if not any(m["id"] == full_id for m in all_models):
+                    display_name = alias_dict.get('title') or alias_dict.get('name') or orig_name
+                    all_models.append({"id": full_id, "name": f"{binding.alias}/{display_name}", "alias": alias_dict})
         except Exception:
             continue
 
@@ -477,26 +499,8 @@ async def get_binding_models(binding_id: int, current_admin: UserAuthDetails = D
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding:
         raise HTTPException(status_code=404, detail="Binding not found.")
-    
-    try:
-        lc = get_user_lollms_client(current_admin.username, binding.alias, load_mcp=False)
-        raw_models = lc.list_models()
-        
-        models_list = []
-        if isinstance(raw_models, list):
-            for item in raw_models:
-                model_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
-                if model_id: models_list.append(model_id)
-        
-        model_aliases = binding.model_aliases or {}
-        if isinstance(model_aliases, str):
-            try: model_aliases = json.loads(model_aliases)
-            except (json.JSONDecodeError, TypeError): model_aliases = {}
-        
-        return [BindingModel(original_model_name=model_name, alias=model_aliases.get(model_name)) for model_name in sorted(models_list)]
-    except Exception as e:
-        trace_exception(e)
-        raise HTTPException(status_code=500, detail=f"Could not fetch models from binding '{binding.alias}': {e}")
+
+    return _get_modality_models_list(binding, "llm")
 
 @bindings_management_router.put("/bindings/{binding_id}/alias", response_model=LLMBindingPublicAdmin)
 async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Session = Depends(get_db)):
@@ -506,12 +510,22 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
 
     if binding.model_aliases is None:
         binding.model_aliases = {}
+    elif isinstance(binding.model_aliases, str):
+        try:
+            binding.model_aliases = json.loads(binding.model_aliases)
+        except Exception:
+            binding.model_aliases = {}
 
     alias_dict = payload.alias.model_dump()
     alias_dict["binding_profile_name"] = binding.alias
-    alias_dict["model_name"] = payload.original_model_name
+    target_key = payload.new_model_name or payload.original_model_name
+    alias_dict["model_name"] = target_key
 
-    binding.model_aliases[payload.original_model_name] = alias_dict
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
+
+    binding.model_aliases[target_key] = alias_dict
     flag_modified(binding, "model_aliases")
 
     db.commit()
@@ -541,15 +555,20 @@ async def get_model_context_size(binding_id: int, payload: ModelNamePayload, cur
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.id == binding_id).first()
     if not binding:
         raise HTTPException(status_code=404, detail="Binding not found.")
-    
+
     try:
-        lc = build_lollms_client_from_params(
-            username=current_admin.username, 
-            binding_alias=binding.alias, 
-            model_name=payload.model_name,
-            load_mcp=False
-        )
-        ctx_size = lc.get_ctx_size()
+        config = _get_effective_config(binding)
+        safe_config = config.copy() if config else {}
+        safe_config['model_name'] = payload.model_name
+        service = _get_binding_instance("llm", binding.name, safe_config)
+        ctx_size = None
+        if service:
+            if hasattr(service, 'get_ctx_size') and callable(service.get_ctx_size):
+                ctx_size = service.get_ctx_size()
+            elif hasattr(service, 'ctx_size'):
+                ctx_size = service.ctx_size
+            elif hasattr(service, 'config') and isinstance(service.config, dict):
+                ctx_size = service.config.get('ctx_size')
         return {"ctx_size": ctx_size}
     except Exception as e:
         trace_exception(e)
@@ -562,56 +581,76 @@ async def force_model_profiles_action(
     current_admin: UserAuthDetails = Depends(get_current_admin_user)
 ):
     target_model = payload.lollms_model_name
-    if not target_model:
-        raise HTTPException(status_code=400, detail="Target model profile identifier is required.")
+    msg_parts = []
 
     try:
-        if payload.mode == "force_always":
-            await admin_update_setting(db, "force_model_mode", "force_always", "string")
-            await admin_update_setting(db, "force_model_name", target_model, "string")
-            if payload.context_size:
-                await admin_update_setting(db, "force_context_size", payload.context_size, "integer")
-            msg = f"God Mode Activated: Enforcing '{target_model}' on all users."
-
-        elif payload.mode == "force_once":
-            users = db.query(DBUser).all()
-            for u in users:
-                u.lollms_model_name = target_model
+        if target_model:
+            if payload.mode == "force_always":
+                await admin_update_setting(db, "force_model_mode", "force_always", "string")
+                await admin_update_setting(db, "force_model_name", target_model, "string")
                 if payload.context_size:
-                    u.llm_ctx_size = payload.context_size
-            db.commit()
-            msg = f"Updated {len(users)} existing users to model profile '{target_model}'."
+                    await admin_update_setting(db, "force_context_size", payload.context_size, "integer")
+                msg_parts.append(f"God Mode LLM: '{target_model}'")
 
-        elif payload.mode == "set_default":
-            await admin_update_setting(db, "default_lollms_model_name", target_model, "string")
-            if payload.context_size:
-                await admin_update_setting(db, "default_llm_ctx_size", payload.context_size, "integer")
-            msg = f"Default model profile for new accounts set to '{target_model}'."
+            elif payload.mode == "force_once":
+                users = db.query(DBUser).all()
+                for u in users:
+                    u.lollms_model_name = target_model
+                    if payload.context_size:
+                        u.llm_ctx_size = payload.context_size
+                db.commit()
+                msg_parts.append(f"Batch updated {len(users)} users to '{target_model}'")
 
-        elif payload.mode == "set_beginner":
-            await admin_update_setting(db, "default_lollms_model_name_beginner", target_model, "string")
-            beginners = db.query(DBUser).filter(DBUser.user_ui_level == 0).all()
-            for u in beginners:
-                u.lollms_model_name = target_model
-            db.commit()
-            msg = f"Assigned '{target_model}' as default for {len(beginners)} beginner accounts."
+            elif payload.mode == "set_default":
+                await admin_update_setting(db, "default_lollms_model_name", target_model, "string")
+                if payload.context_size:
+                    await admin_update_setting(db, "default_llm_ctx_size", payload.context_size, "integer")
+                msg_parts.append(f"Default LLM: '{target_model}'")
 
-        else:
-            raise HTTPException(status_code=400, detail=f"Unknown mode: {payload.mode}")
+            elif payload.mode == "set_beginner":
+                await admin_update_setting(db, "default_lollms_model_name_beginner", target_model, "string")
+                beginners = db.query(DBUser).filter(DBUser.user_ui_level == 0).all()
+                for u in beginners:
+                    u.lollms_model_name = target_model
+                db.commit()
+                msg_parts.append(f"Beginner default LLM: '{target_model}'")
 
-        # Update other modality bindings if provided
+        if payload.rag_vectorizer_name:
+            if payload.mode == "force_always":
+                await admin_update_setting(db, "force_rag_settings_mode", "force_always", "string")
+                await admin_update_setting(db, "force_rag_vectorizer", payload.rag_vectorizer_name, "string")
+                msg_parts.append(f"God Mode RAG: '{payload.rag_vectorizer_name}'")
+            elif payload.mode == "force_once":
+                users = db.query(DBUser).all()
+                for u in users:
+                    u.safe_store_vectorizer = payload.rag_vectorizer_name
+                db.commit()
+                msg_parts.append(f"Batch updated {len(users)} users vectorizer to '{payload.rag_vectorizer_name}'")
+            else:
+                await admin_update_setting(db, "default_safe_store_vectorizer", payload.rag_vectorizer_name, "string")
+                msg_parts.append(f"Default RAG vectorizer: '{payload.rag_vectorizer_name}'")
+
         if payload.tti_binding_model_name:
             await admin_update_setting(db, "default_tti_binding_model", payload.tti_binding_model_name, "string")
+            msg_parts.append(f"Default TTI: '{payload.tti_binding_model_name}'")
         if payload.tts_binding_model_name:
             await admin_update_setting(db, "default_tts_binding_model", payload.tts_binding_model_name, "string")
+            msg_parts.append(f"Default TTS: '{payload.tts_binding_model_name}'")
         if payload.stt_binding_model_name:
             await admin_update_setting(db, "default_stt_binding_model", payload.stt_binding_model_name, "string")
+            msg_parts.append(f"Default STT: '{payload.stt_binding_model_name}'")
+        if payload.ttv_binding_model_name:
+            await admin_update_setting(db, "default_ttv_binding_model", payload.ttv_binding_model_name, "string")
+            msg_parts.append(f"Default TTV: '{payload.ttv_binding_model_name}'")
+        if payload.ttm_binding_model_name:
+            await admin_update_setting(db, "default_ttm_binding_model", payload.ttm_binding_model_name, "string")
+            msg_parts.append(f"Default TTM: '{payload.ttm_binding_model_name}'")
 
         user_sessions.clear()
         from backend.settings import settings
         settings.refresh(db)
         manager.broadcast_sync({"type": "settings_updated"})
-        return {"message": msg}
+        return {"message": "Policy Applied: " + (", ".join(msg_parts) if msg_parts else "Settings updated.")}
 
     except HTTPException:
         raise
@@ -662,6 +701,67 @@ async def generate_model_icon(
 
 # --- Modality Specific Model Listing & Alias Management ---
 
+def _get_modality_models(
+    db: Session,
+    binding_model_cls: Any,
+    modality_type: str,
+    username: str,
+    display_mode_setting: str
+) -> List[ModelInfo]:
+    mode_setting = settings.get(display_mode_setting, "mixed")
+    active_bindings = db.query(binding_model_cls).filter(binding_model_cls.is_active == True).all()
+    models_list = []
+
+    for binding in active_bindings:
+        try:
+            config = _get_effective_config(binding)
+            service = _get_binding_instance(modality_type, binding.name, config)
+            raw_models = service.list_models() if (service and hasattr(service, 'list_models')) else []
+
+            aliases = binding.model_aliases or {}
+            if isinstance(aliases, str):
+                try: aliases = json.loads(aliases)
+                except Exception: aliases = {}
+            if not isinstance(aliases, dict):
+                aliases = {}
+
+            # Populate models list according to display mode
+            for raw_model in (raw_models or []):
+                model_name = raw_model if isinstance(raw_model, str) else (raw_model.get("name") or raw_model.get("id") or raw_model.get("model_name"))
+                if not model_name: continue
+
+                alias_dict = _format_model_alias_dict(aliases.get(model_name))
+                model_id = f"{binding.alias}/{model_name}"
+
+                if mode_setting == 'aliased':
+                    if alias_dict and (alias_dict.get('title') or alias_dict.get('name')):
+                        models_list.append(ModelInfo(id=model_id, name=alias_dict.get('title') or alias_dict.get('name'), alias=alias_dict))
+                elif mode_setting == 'original':
+                    models_list.append(ModelInfo(id=model_id, name=model_name, alias=None))
+                else: # mixed
+                    display_name = alias_dict.get('title') or alias_dict.get('name') or model_name
+                    models_list.append(ModelInfo(id=model_id, name=display_name, alias=alias_dict if alias_dict else None))
+
+            # Ensure aliased entries are always present even if raw engine list fails
+            for orig_name, alias_data in aliases.items():
+                alias_dict = _format_model_alias_dict(alias_data)
+                model_id = f"{binding.alias}/{orig_name}"
+                if not any(m.id == model_id for m in models_list):
+                    display_name = alias_dict.get('title') or alias_dict.get('name') or orig_name
+                    models_list.append(ModelInfo(id=model_id, name=display_name, alias=alias_dict))
+
+        except Exception as e:
+            trace_exception(e)
+            continue
+
+    seen_ids = set()
+    deduped_models = []
+    for m in models_list:
+        if m.id not in seen_ids:
+            seen_ids.add(m.id)
+            deduped_models.append(m)
+
+    return sorted(deduped_models, key=lambda x: x.name)
 def _get_modality_models_list(binding_record, binding_type: str) -> List[BindingModel]:
     try:
         config = _get_effective_config(binding_record)

@@ -799,6 +799,23 @@ def build_lollms_client_from_params(
         primary_binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
         primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
         primary_config["model_name"] = target_model_name or (primary_binding.default_model_name if primary_binding else "")
+
+        if primary_binding and primary_binding.model_aliases:
+            aliases_map = primary_binding.model_aliases
+            if isinstance(aliases_map, str):
+                try: aliases_map = json.loads(aliases_map)
+                except Exception: aliases_map = {}
+            if isinstance(aliases_map, dict) and target_model_name in aliases_map:
+                alias_item = aliases_map[target_model_name]
+                alias_cfg = alias_item.get('alias', {}) if isinstance(alias_item, dict) and 'alias' in alias_item else (alias_item if isinstance(alias_item, dict) else {})
+                alias_ctx = alias_cfg.get('forced_context_size') or alias_cfg.get('ctx_size')
+                if alias_ctx:
+                    primary_config["ctx_size"] = int(alias_ctx)
+                if not alias_cfg.get('allow_parameters_override', True):
+                    for param_k in ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_activation', 'reasoning_effort', 'reasoning_summary']:
+                        if alias_cfg.get(param_k) is not None:
+                            primary_config[param_k] = alias_cfg[param_k]
+
         if forced_ctx:
             primary_config["ctx_size"] = forced_ctx
         primary_config.update(final_user_params)

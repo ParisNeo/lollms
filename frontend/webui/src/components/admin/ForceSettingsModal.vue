@@ -17,22 +17,25 @@ const uiStore = useUiStore();
 const adminStore = useAdminStore();
 const dataStore = useDataStore();
 
-const { availableLLMModelsGrouped, availableTtiModelsGrouped, availableTtsModelsGrouped, availableSttModelsGrouped } = storeToRefs(dataStore);
+const { availableLLMModelsGrouped, availableTtiModelsGrouped, availableTtsModelsGrouped, availableSttModelsGrouped, availableVectorizers, availableTtvModelsGrouped, availableTtmModelsGrouped } = storeToRefs(dataStore);
 const { globalSettings } = storeToRefs(adminStore);
 
 const selectedModelProfile = ref('');
 const selectedTtiProfile = ref('');
 const selectedTtsProfile = ref('');
 const selectedSttProfile = ref('');
+const selectedTtvProfile = ref('');
+const selectedTtmProfile = ref('');
+const selectedRagProfile = ref('');
 const targetMode = ref('force_always'); // 'force_always', 'force_once', 'set_default', 'set_beginner'
 const forcedContextSize = ref(null);
 const isLoading = ref(false);
 const isHealing = ref(false);
 
 const modes = [
-    { id: 'force_always', title: 'God Mode (Force Always)', desc: 'Overrides user preferences and locks this exact model profile for all users.' },
-    { id: 'force_once', title: 'Force Once (Batch Apply)', desc: 'Sets all existing users to this profile now, but allows them to change it later.' },
-    { id: 'set_default', title: 'System Default (New Users & Fallback)', desc: 'Assigned to new registrations and used for self-healing if a model is removed.' },
+    { id: 'force_always', title: 'God Mode (Force Always)', desc: 'Overrides user preferences and locks this exact configuration for all users.' },
+    { id: 'force_once', title: 'Force Once (Batch Apply)', desc: 'Applies these profiles to all existing users now, allowing them to adjust it later.' },
+    { id: 'set_default', title: 'System Default (New Users & Fallback)', desc: 'Assigned to newly registered accounts and used for fallback routing.' },
     { id: 'set_beginner', title: 'Beginner Default (UI Level 0)', desc: 'Auto-assigned to users operating in beginner mode.' }
 ];
 
@@ -42,20 +45,31 @@ onMounted(async () => {
         dataStore.fetchAvailableTtiModels(),
         dataStore.fetchAvailableTtsModels(),
         dataStore.fetchAvailableSttModels(),
+        dataStore.fetchAvailableTtvModels(),
+        dataStore.fetchAvailableTtmModels(),
+        dataStore.fetchAvailableVectorizers(),
         adminStore.fetchGlobalSettings()
     ]);
 
     const currentGodModel = globalSettings.value.find(s => s.key === 'force_model_name')?.value;
     const currentDefaultModel = globalSettings.value.find(s => s.key === 'default_lollms_model_name')?.value;
     const currentCtx = globalSettings.value.find(s => s.key === 'force_context_size')?.value;
+    const currentDefaultRag = globalSettings.value.find(s => s.key === 'default_safe_store_vectorizer')?.value;
+    const currentDefaultTti = globalSettings.value.find(s => s.key === 'default_tti_binding_model')?.value;
+    const currentDefaultTts = globalSettings.value.find(s => s.key === 'default_tts_binding_model')?.value;
+    const currentDefaultStt = globalSettings.value.find(s => s.key === 'default_stt_binding_model')?.value;
 
     selectedModelProfile.value = currentGodModel || currentDefaultModel || '';
     if (currentCtx) forcedContextSize.value = Number(currentCtx);
+    if (currentDefaultRag) selectedRagProfile.value = currentDefaultRag;
+    if (currentDefaultTti) selectedTtiProfile.value = currentDefaultTti;
+    if (currentDefaultTts) selectedTtsProfile.value = currentDefaultTts;
+    if (currentDefaultStt) selectedSttProfile.value = currentDefaultStt;
 });
 
 async function handleApply() {
-    if (!selectedModelProfile.value) {
-        uiStore.addNotification('Please select a model profile.', 'warning');
+    if (!selectedModelProfile.value && !selectedRagProfile.value && !selectedTtiProfile.value && !selectedTtsProfile.value && !selectedSttProfile.value) {
+        uiStore.addNotification('Please select at least one profile or setting to apply.', 'warning');
         return;
     }
 
@@ -63,10 +77,13 @@ async function handleApply() {
     try {
         const response = await apiClient.post('/api/admin/force-profiles', {
             mode: targetMode.value,
-            lollms_model_name: selectedModelProfile.value,
+            lollms_model_name: selectedModelProfile.value || null,
             tti_binding_model_name: selectedTtiProfile.value || null,
             tts_binding_model_name: selectedTtsProfile.value || null,
             stt_binding_model_name: selectedSttProfile.value || null,
+            ttv_binding_model_name: selectedTtvProfile.value || null,
+            ttm_binding_model_name: selectedTtmProfile.value || null,
+            rag_vectorizer_name: selectedRagProfile.value || null,
             context_size: forcedContextSize.value ? Number(forcedContextSize.value) : null
         });
 
@@ -139,8 +156,19 @@ async function handleHealOrphanedUsers() {
 
                 <!-- Auxiliary Modalities Defaults -->
                 <div class="space-y-4">
-                    <h4 class="text-xs font-black uppercase text-gray-400 tracking-widest">Auxiliary Modalities System Defaults</h4>
-                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <h4 class="text-xs font-black uppercase text-gray-400 tracking-widest">Auxiliary Modalities & Knowledge Defaults</h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                        <div>
+                            <label class="block text-[10px] font-bold uppercase text-gray-500 mb-1">Default RAG Vectorizer</label>
+                            <select v-model="selectedRagProfile" class="input-field text-xs">
+                                <option value="">-- Unchanged --</option>
+                                <optgroup v-for="g in availableVectorizers" :key="g.id" :label="g.alias || g.vectorizer_name">
+                                    <option v-for="m in g.models" :key="`${g.alias}/${m.value}`" :value="`${g.alias}/${m.value}`">
+                                        {{ m.name }}
+                                    </option>
+                                </optgroup>
+                            </select>
+                        </div>
                         <div>
                             <label class="block text-[10px] font-bold uppercase text-gray-500 mb-1">Default TTI (Image)</label>
                             <select v-model="selectedTtiProfile" class="input-field text-xs">

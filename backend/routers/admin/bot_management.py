@@ -46,6 +46,9 @@ class AiBotSettingsUpdate(BaseModel):
     ai_bot_slack_enabled: Optional[bool] = None
     ai_bot_slack_app_token: Optional[str] = None
     ai_bot_slack_bot_token: Optional[str] = None
+    ai_bot_whatsapp_enabled: Optional[bool] = None
+    ai_bot_whatsapp_token: Optional[str] = None
+    ai_bot_whatsapp_phone_number_id: Optional[str] = None
     
     # Tools Support
     ai_bot_tool_ddg_enabled: Optional[bool] = None
@@ -86,6 +89,9 @@ class AiBotSettingsPublic(BaseModel):
     ai_bot_slack_enabled: bool = False
     ai_bot_slack_app_token: str = ""
     ai_bot_slack_bot_token: str = ""
+    ai_bot_whatsapp_enabled: bool = False
+    ai_bot_whatsapp_token: str = ""
+    ai_bot_whatsapp_phone_number_id: str = ""
     
     # Tools Support
     ai_bot_tool_ddg_enabled: bool = False
@@ -107,42 +113,48 @@ async def get_ai_bot_settings(db: Session = Depends(get_db)):
     bot_user = db.query(DBUser).filter(DBUser.username == "lollms").first()
     if not bot_user:
         raise HTTPException(status_code=404, detail="@lollms user not found.")
-    
+
     # Force refresh to ensure we have the latest DB values
     lollms_settings.refresh(db)
 
+    effective_model = bot_user.lollms_model_name or lollms_settings.get("ai_bot_binding_model", "")
+    effective_personality = bot_user.active_personality_id or lollms_settings.get("ai_bot_personality_id", "")
+
     return AiBotSettingsPublic(
-        lollms_model_name=bot_user.lollms_model_name,
-        active_personality_id=bot_user.active_personality_id,
-        ai_bot_enabled=lollms_settings.get("ai_bot_enabled", False),
+        lollms_model_name=effective_model,
+        active_personality_id=effective_personality,
+        ai_bot_enabled=bool(lollms_settings.get("ai_bot_enabled", False)),
         ai_bot_system_prompt=lollms_settings.get("ai_bot_system_prompt", ""),
-        ai_bot_auto_post=lollms_settings.get("ai_bot_auto_post", False),
+        ai_bot_auto_post=bool(lollms_settings.get("ai_bot_auto_post", False)),
         ai_bot_post_schedule=lollms_settings.get("ai_bot_post_schedule", ["09:00"]),
-        
+
         ai_bot_content_mode=lollms_settings.get("ai_bot_content_mode", "static_text"),
         ai_bot_static_content=lollms_settings.get("ai_bot_static_content", ""),
         ai_bot_file_path=lollms_settings.get("ai_bot_file_path", ""),
         ai_bot_generation_prompt=lollms_settings.get("ai_bot_generation_prompt", ""),
         ai_bot_rag_datastore_ids=lollms_settings.get("ai_bot_rag_datastore_ids", []),
-        ai_bot_moderation_enabled=lollms_settings.get("ai_bot_moderation_enabled", False),
+        ai_bot_moderation_enabled=bool(lollms_settings.get("ai_bot_moderation_enabled", False)),
         ai_bot_moderation_criteria=lollms_settings.get("ai_bot_moderation_criteria", "Be polite and respectful."),
-        
-        ai_bot_scheduled_tasks=lollms_settings.get("ai_bot_scheduled_tasks",[]),
-        ai_bot_telegram_enabled=lollms_settings.get("ai_bot_telegram_enabled", False),
+
+        ai_bot_scheduled_tasks=lollms_settings.get("ai_bot_scheduled_tasks", []),
+        ai_bot_telegram_enabled=bool(lollms_settings.get("ai_bot_telegram_enabled", False)),
         ai_bot_telegram_token=lollms_settings.get("ai_bot_telegram_token", ""),
-        ai_bot_discord_enabled=lollms_settings.get("ai_bot_discord_enabled", False),
+        ai_bot_discord_enabled=bool(lollms_settings.get("ai_bot_discord_enabled", False)),
         ai_bot_discord_token=lollms_settings.get("ai_bot_discord_token", ""),
-        ai_bot_slack_enabled=lollms_settings.get("ai_bot_slack_enabled", False),
+        ai_bot_slack_enabled=bool(lollms_settings.get("ai_bot_slack_enabled", False)),
         ai_bot_slack_app_token=lollms_settings.get("ai_bot_slack_app_token", ""),
         ai_bot_slack_bot_token=lollms_settings.get("ai_bot_slack_bot_token", ""),
+        ai_bot_whatsapp_enabled=bool(lollms_settings.get("ai_bot_whatsapp_enabled", False)),
+        ai_bot_whatsapp_token=lollms_settings.get("ai_bot_whatsapp_token", ""),
+        ai_bot_whatsapp_phone_number_id=lollms_settings.get("ai_bot_whatsapp_phone_number_id", ""),
 
-        ai_bot_tool_ddg_enabled=lollms_settings.get("ai_bot_tool_ddg_enabled", False),
-        ai_bot_tool_google_enabled=lollms_settings.get("ai_bot_tool_google_enabled", False),
+        ai_bot_tool_ddg_enabled=bool(lollms_settings.get("ai_bot_tool_ddg_enabled", False)),
+        ai_bot_tool_google_enabled=bool(lollms_settings.get("ai_bot_tool_google_enabled", False)),
         ai_bot_tool_google_api_key=lollms_settings.get("ai_bot_tool_google_api_key", ""),
         ai_bot_tool_google_cse_id=lollms_settings.get("ai_bot_tool_google_cse_id", ""),
-        ai_bot_tool_arxiv_enabled=lollms_settings.get("ai_bot_tool_arxiv_enabled", False),
-        ai_bot_tool_scraper_enabled=lollms_settings.get("ai_bot_tool_scraper_enabled", False),
-        ai_bot_tool_rss_enabled=lollms_settings.get("ai_bot_tool_rss_enabled", False)
+        ai_bot_tool_arxiv_enabled=bool(lollms_settings.get("ai_bot_tool_arxiv_enabled", False)),
+        ai_bot_tool_scraper_enabled=bool(lollms_settings.get("ai_bot_tool_scraper_enabled", False)),
+        ai_bot_tool_rss_enabled=bool(lollms_settings.get("ai_bot_tool_rss_enabled", False))
     )
 
 @bot_management_router.put("/ai-bot-settings", response_model=AiBotSettingsPublic)
@@ -194,6 +206,9 @@ async def update_ai_bot_settings(settings: AiBotSettingsUpdate, db: Session = De
         ("ai_bot_slack_enabled", settings.ai_bot_slack_enabled, "boolean"),
         ("ai_bot_slack_app_token", settings.ai_bot_slack_app_token, "string"),
         ("ai_bot_slack_bot_token", settings.ai_bot_slack_bot_token, "string"),
+        ("ai_bot_whatsapp_enabled", settings.ai_bot_whatsapp_enabled, "boolean"),
+        ("ai_bot_whatsapp_token", settings.ai_bot_whatsapp_token, "string"),
+        ("ai_bot_whatsapp_phone_number_id", settings.ai_bot_whatsapp_phone_number_id, "string"),
 
         ("ai_bot_tool_ddg_enabled", settings.ai_bot_tool_ddg_enabled, "boolean"),
         ("ai_bot_tool_google_enabled", settings.ai_bot_tool_google_enabled, "boolean"),
