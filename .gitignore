@@ -188,7 +188,7 @@ models/
 !backend/db/models/
 # lollms vscoder discussions
 .lollms
-
+.lollms_code
 
 # Videos
 *.mp4

@@ -93,7 +93,6 @@ def _import_artefact_task(
             path=str(file_path.resolve()),
             mode=import_mode,
             title=filename,
-            auto_load=auto_load,
             on_conflict=on_conflict
         )
         
