@@ -26,15 +26,46 @@ const error = ref(false);
 let objectUrl = null;
 
 async function fetchImage() {
-  if (!props.src) return;
+  if (!props.src) {
+    isLoading.value = false;
+    return;
+  }
 
-  if (props.src.startsWith('data:image/')) {
+  // 1. Handle Blob URLs directly
+  if (props.src.startsWith('blob:')) {
       imageUrl.value = props.src;
       isLoading.value = false;
       error.value = false;
       return;
   }
 
+  // 2. Handle Data URIs and sanitize any duplicate prefix headers
+  if (props.src.startsWith('data:image/')) {
+      let clean = props.src;
+      while (clean.startsWith('data:image/png;base64,data:image/') || clean.startsWith('data:image/jpeg;base64,data:image/')) {
+          clean = clean.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+      }
+      imageUrl.value = clean;
+      isLoading.value = false;
+      error.value = false;
+      return;
+  }
+
+  // 3. Handle Raw Base64 Strings (not starting with URL prefixes)
+  if (!props.src.startsWith('http://') && !props.src.startsWith('https://') && !props.src.startsWith('/') && !props.src.startsWith('api/')) {
+      let cleanB64 = props.src.trim();
+      while (cleanB64.startsWith('data:image/')) {
+          const commaIdx = cleanB64.indexOf(',');
+          if (commaIdx !== -1) cleanB64 = cleanB64.substring(commaIdx + 1);
+          else break;
+      }
+      imageUrl.value = `data:image/png;base64,${cleanB64}`;
+      isLoading.value = false;
+      error.value = false;
+      return;
+  }
+
+  // 4. Handle Server / API URLs via authenticated fetch
   isLoading.value = true;
   error.value = false;
 
@@ -48,6 +79,7 @@ async function fetchImage() {
     objectUrl = URL.createObjectURL(response.data);
     imageUrl.value = objectUrl;
   } catch (e) {
+    console.error("Failed to load authenticated image:", e);
     error.value = true;
   } finally {
     isLoading.value = false;

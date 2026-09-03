@@ -1,6 +1,6 @@
 # backend/routers/prompts.py
-from typing import List, Dict
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import List, Dict, Any, Union
+from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from packaging import version as packaging_version
@@ -25,7 +25,6 @@ prompts_router = APIRouter(
 )
 
 def _to_task_info(db_task: DBTask) -> TaskInfo:
-    """Converts a DBTask SQLAlchemy model to a TaskInfo Pydantic model."""
     if not db_task:
         return None
     return TaskInfo(
@@ -60,13 +59,11 @@ def _generate_prompt_task(task: Task, username: str, user_prompt: str):
             "description": "JSON object defining a LoLLMs saved prompt."
         }
         
-        system_prompt = """You are an expert prompt designer. Create a new prompt based on the user's request. The author will be set automatically.
-When creating the prompt content, you can use LoLLMs placeholders to make it interactive. Here's how they work:
+        system_prompt = """You are an expert prompt designer. Create a new prompt based on the user's request.
+When creating the prompt content, you can use LoLLMs placeholders to make it interactive:
 
-1.  **Simple Placeholder**: For a basic text input field, use `@<placeholder_name>@`.
-    Example: `Summarize the following text: @<text_to_summarize>@`
-
-2.  **Advanced Placeholder**: For more control, you can define a form with fields like title, type, options, default value, and help text. Use the following block format:
+1.  **Simple Placeholder**: For a basic text input field, use `@<placeholder_name>@` or `{{placeholder_name}}`.
+2.  **Advanced Placeholder**: For structured forms, use:
     ```
     @<name>@
     title: The title displayed to the user
@@ -75,25 +72,7 @@ When creating the prompt content, you can use LoLLMs placeholders to make it int
     default: A default value
     help: A helpful tip for the user.
     @</name>@
-    ```
-    - `title`: The label for the input field.
-    - `type`: Can be `str` (single-line text), `text` (multi-line text area), `int` (integer), `float` (number with decimals), or `bool` (checkbox).
-    - `options`: (Optional) A comma-separated list of choices for a dropdown menu.
-    - `default`: (Optional) The pre-filled value for the field.
-    - `help`: (Optional) A tooltip to guide the user.
-
-Example of an advanced placeholder in a prompt:
-```
-Translate the following text to @<language>@.
-
-@<language>@
-title: Target Language
-type: str
-options: English, French, Spanish, German
-default: French
-help: Select the language you want to translate the text into.
-@</language>@
-```"""
+    ```"""
         
         task.log("Sending request to LLM for structured prompt generation...")
         task.set_progress(30)
@@ -101,8 +80,7 @@ help: Select the language you want to translate the text into.
         generated_data = lc.generate_structured_content(
             user_prompt,
             system_prompt=system_prompt,
-            schema=prompt_schema,
-            #n_predict=settings.get("default_llm_ctx_size", 4096)
+            schema=prompt_schema
         )
 
         task.log("Creating new prompt in the database...")
@@ -131,14 +109,11 @@ async def generate_prompt_from_prompt(
     payload: GeneratePromptRequest,
     current_user: UserAuthDetails = Depends(get_current_active_user)
 ):
-    """
-    Triggers a background task to generate a new user-owned prompt using AI.
-    """
     db_task = task_manager.submit_task(
         name=f"Generate Prompt: {payload.prompt[:30]}...",
         target=_generate_prompt_task,
         args=(current_user.username, payload.prompt),
-        description=f"Generating a new prompt based on the request: '{payload.prompt[:100]}...'",
+        description=f"Generating a new prompt based on: '{payload.prompt[:100]}...'",
         owner_username=current_user.username
     )
     return db_task
@@ -167,7 +142,7 @@ def get_prompts(
                     if packaging_version.parse(repo_ver) > packaging_version.parse(installed_ver):
                         prompt_public.update_available = True
                 except (packaging_version.InvalidVersion, TypeError):
-                    pass # Ignore version parsing errors
+                    pass
         system_prompts_public.append(prompt_public)
         
     user_prompts_public = [PromptPublic.from_orm(p) for p in user_prompts_db]
@@ -183,7 +158,6 @@ def create_saved_prompt(
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
-    # For user-created prompts, the author is always the user.
     new_prompt = DBSavedPrompt(
         **prompt_data.model_dump(),
         owner_user_id=current_user.id
@@ -200,7 +174,6 @@ def create_saved_prompt(
             detail=f"A prompt with the name '{prompt_data.name}' already exists in your collection."
         )
 
-
 @prompts_router.put("/{prompt_id}", response_model=PromptPublic)
 def update_saved_prompt(
     prompt_id: str,
@@ -214,7 +187,6 @@ def update_saved_prompt(
     
     update_data = prompt_data.model_dump(exclude_unset=True)
     
-    # Check for name conflict if name is being changed
     if 'name' in update_data and update_data['name'] != prompt_to_update.name:
         existing = db.query(DBSavedPrompt).filter(
             DBSavedPrompt.id != prompt_id,
@@ -236,10 +208,7 @@ def update_saved_prompt(
         return prompt_to_update
     except IntegrityError:
         db.rollback()
-        raise HTTPException(
-            status_code=409,
-            detail="A prompt with that name already exists."
-        )
+        raise HTTPException(status_code=409, detail="A prompt with that name already exists.")
 
 @prompts_router.delete("/{prompt_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_saved_prompt(
@@ -296,21 +265,41 @@ def export_user_prompts(
     db: Session = Depends(get_db)
 ):
     prompts_db = db.query(DBSavedPrompt).filter(DBSavedPrompt.owner_user_id == current_user.id).all()
-    prompts_to_export = [PromptBase(name=p.name, content=p.content) for p in prompts_db]
-    return PromptsExport(prompts=prompts_to_export)
+    return PromptsExport(prompts=[PromptPublic.from_orm(p) for p in prompts_db])
 
 @prompts_router.post("/import", status_code=status.HTTP_201_CREATED)
 def import_user_prompts(
-    import_data: PromptsImport,
+    import_payload: Union[PromptsImport, List[Dict[str, Any]], Dict[str, Any]] = Body(...),
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """
+    Enhanced prompt importing supporting single prompt JSON, arrays, and standard PromptsImport envelopes.
+    """
+    raw_list = []
+    if isinstance(import_payload, list):
+        raw_list = import_payload
+    elif isinstance(import_payload, dict):
+        if "prompts" in import_payload and isinstance(import_payload["prompts"], list):
+            raw_list = import_payload["prompts"]
+        elif "name" in import_payload and "content" in import_payload:
+            raw_list = [import_payload]
+    elif hasattr(import_payload, 'prompts'):
+        raw_list = [p.model_dump() if hasattr(p, 'model_dump') else dict(p) for p in import_payload.prompts]
+
     imported_count = 0
     skipped_count = 0
-    for prompt_data in import_data.prompts:
+
+    for item in raw_list:
+        p_name = item.get("name") if isinstance(item, dict) else getattr(item, 'name', None)
+        p_content = item.get("content") if isinstance(item, dict) else getattr(item, 'content', None)
+
+        if not p_name or not p_content:
+            continue
+
         existing = db.query(DBSavedPrompt).filter(
             DBSavedPrompt.owner_user_id == current_user.id,
-            DBSavedPrompt.name == prompt_data.name
+            DBSavedPrompt.name == p_name
         ).first()
         
         if existing:
@@ -318,8 +307,13 @@ def import_user_prompts(
             continue
 
         new_prompt = DBSavedPrompt(
-            name=prompt_data.name,
-            content=prompt_data.content,
+            name=p_name,
+            content=p_content,
+            category=item.get("category") if isinstance(item, dict) else getattr(item, 'category', 'General'),
+            author=item.get("author") if isinstance(item, dict) else getattr(item, 'author', current_user.username),
+            description=item.get("description") if isinstance(item, dict) else getattr(item, 'description', None),
+            icon=item.get("icon") if isinstance(item, dict) else getattr(item, 'icon', None),
+            version=str(item.get("version", "1.0")) if isinstance(item, dict) else str(getattr(item, 'version', '1.0')),
             owner_user_id=current_user.id
         )
         db.add(new_prompt)
@@ -329,6 +323,6 @@ def import_user_prompts(
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise HTTPException(status_code=400, detail="An integrity error occurred during import.")
+        raise HTTPException(status_code=400, detail="An integrity error occurred during prompt import.")
 
-    return {"message": f"Successfully imported {imported_count} prompts. Skipped {skipped_count} due to name conflicts."}
+    return {"message": f"Successfully imported {imported_count} prompt(s). Skipped {skipped_count} existing.", "imported": imported_count, "skipped": skipped_count}

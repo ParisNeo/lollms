@@ -363,7 +363,7 @@ def _distill_search_query(raw_topic: str, max_words: int = 8) -> str:
         return " ".join(words[:max_words]).strip()
     return raw_topic[:50].replace('\n', ' ').strip()
 
-def _research_and_post_task(task: Task, topic: str, user_instructions: str, requester_user_id: Optional[int] = None):
+def _research_and_post_task(task: Task, topic: str, user_instructions: str, requester_user_id: Optional[int] = None, originating_post_id: Optional[int] = None):
     task.log(f"Starting research and post generation for: {topic[:60]}...")
     task.set_progress(5)
     db = next(get_db())
@@ -538,6 +538,18 @@ Write a high-quality, comprehensive, and engaging publication on the social feed
             post_public = get_post_public(db, new_post, lollms_bot_user.id)
             manager.broadcast_sync({"type": "new_post", "data": post_public.model_dump(mode="json")})
 
+            # Clean up the original prompt post so the feed stays clean and high-quality
+            if originating_post_id:
+                orig_post = db.query(DBPost).filter(DBPost.id == originating_post_id).first()
+                if orig_post:
+                    task.log(f"Cleaning up prompt post ID: {originating_post_id}")
+                    db.delete(orig_post)
+                    db.commit()
+                    manager.broadcast_sync({
+                        "type": "post_deleted",
+                        "data": {"post_id": originating_post_id}
+                    })
+
             if requester_user_id:
                 manager.send_personal_message_sync({
                     "type": "notification",
@@ -678,7 +690,7 @@ def _respond_to_mention_task(task: Task, mention_type: str, item_id: int):
             task_manager.submit_task(
                 name=f"Research & Post: {research_instructions[:30]}...",
                 target=_research_and_post_task,
-                args=(research_instructions, thread_context, requester_user_id),
+                args=(research_instructions, thread_context, requester_user_id, post_id if mention_type == 'post' else None),
                 description=f"Drafting and publishing post for {research_instructions[:40]}",
                 owner_username='lollms'
             )

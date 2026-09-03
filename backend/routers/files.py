@@ -352,7 +352,7 @@ async def fetch_youtube_transcript_for_staging(
     pm.ensure_packages(["youtube-transcript-api"])
     from youtube_transcript_api import YouTubeTranscriptApi
 
-    video_id_match = re.search(r'(?:v=|\/|youtu\.be\/)([0-9A-Za-z_-]{11})', payload.video_url)
+    video_id_match = re.search(r'(?:v=|\/|youtu\.be\/|embed\/|shorts\/)([0-9A-Za-z_-]{11})', payload.video_url)
     if not video_id_match:
         raise HTTPException(status_code=400, detail="Invalid YouTube URL.")
     video_id = video_id_match.group(1)
@@ -360,14 +360,28 @@ async def fetch_youtube_transcript_for_staging(
     try:
         transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
         transcript = None
+
+        # 1. Try manual transcript in requested language
         try:
             transcript = transcript_list.find_transcript([payload.language])
         except Exception:
+            pass
+
+        # 2. Try auto-generated transcript in requested language
+        if not transcript:
             try:
                 transcript = transcript_list.find_generated_transcript([payload.language])
             except Exception:
-                for t in transcript_list:
+                pass
+
+        # 3. Fallback to any transcript and translate to requested language
+        if not transcript:
+            for t in transcript_list:
+                try:
                     transcript = t.translate(payload.language)
+                    break
+                except Exception:
+                    transcript = t
                     break
 
         if not transcript:

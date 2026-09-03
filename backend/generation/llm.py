@@ -1375,12 +1375,25 @@ def build_llm_generation_router(router: APIRouter):
                     print(f"Failed to mount personality datastore {db_pers.data_source}: {e}")
 
         search_sources_list =[]
-        if owner_db_user.web_search_enabled:
-            active_providers = owner_db_user.web_search_providers or ["google"]
+        # Resolve effective web search credentials (fallback to global admin settings if user has none configured)
+        effective_google_api_key = owner_db_user.google_api_key or settings.get("ai_bot_tool_google_api_key") or settings.get("google_api_key")
+        effective_google_cse_id = owner_db_user.google_cse_id or settings.get("ai_bot_tool_google_cse_id") or settings.get("google_cse_id")
+
+        if owner_db_user.web_search_enabled or bool(effective_google_api_key and effective_google_cse_id):
+            active_providers = owner_db_user.web_search_providers or ["google", "duckduckgo"]
             def tool_internet_search(query: str):
                 search_sources_list.clear() # Reset for this turn
                 main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "step_start", "content": f"Web Agent: Searching {', '.join(active_providers)}..."}) + "\n")
-                results = perform_multi_search(query, active_providers, owner_db_user)
+
+                # Create a proxy user wrapper that inherits the resolved global keys if needed
+                class WebUserProxy:
+                    def __init__(self, original_user, api_key, cse_id):
+                        self.google_api_key = api_key
+                        self.google_cse_id = cse_id
+                        self.username = getattr(original_user, 'username', 'user')
+
+                user_proxy = WebUserProxy(owner_db_user, effective_google_api_key, effective_google_cse_id)
+                results = perform_multi_search(query, active_providers, user_proxy)
                 if results:
                     scraped =[]
                     scraper = ScrapeMaster()
@@ -1411,10 +1424,56 @@ def build_llm_generation_router(router: APIRouter):
 
             agentic_tools["internet_search"] = {
                 "name": "internet_search",
-                "description": "Search the internet for up-to-date information.",
+                "description": "Search the internet for up-to-date information, fact-checking, and verifying claims.",
                 "parameters": [{"name": "query", "type": "str", "optional": False}],
                 "output":[{"name": "success", "type": "bool"}, {"name": "results", "type": "list"}, {"name": "scraped_text", "type": "str"}, {"name": "sources", "type": "list"}],
                 "callable": tool_internet_search
+            }
+
+            # Ephemeral As-Is Document / Article Research Tool
+            def tool_fetch_and_analyze_article(url: str, title: Optional[str] = None):
+                """Downloads an external web article/document into the workspace for deep analysis."""
+                from backend.security import validate_url
+                try:
+                    validate_url(url)
+                    scraper = ScrapeMaster()
+                    scraped_content = scraper.scrape(url)
+                    if not scraped_content or len(scraped_content.strip()) < 50:
+                        return {"success": False, "error": "No readable text could be extracted from the target URL."}
+
+                    art_title = title or f"Article_{urlparse(url).netloc[:20]}.md"
+                    if not art_title.endswith(('.md', '.txt')):
+                        art_title += ".md"
+
+                    # Add as an as_is / document artefact in discussion workspace
+                    discussion_obj.add_artefact(
+                        title=art_title,
+                        content=scraped_content,
+                        author="LoLLMs Research Agent",
+                        active=True,
+                        artefact_type="document"
+                    )
+                    discussion_obj.commit()
+
+                    return {
+                        "success": True,
+                        "title": art_title,
+                        "content_length": len(scraped_content),
+                        "snippet": scraped_content[:600] + "...",
+                        "message": f"Article '{art_title}' successfully loaded into workspace for deep analysis."
+                    }
+                except Exception as e:
+                    return {"success": False, "error": f"Failed to fetch and analyze article: {str(e)}"}
+
+            agentic_tools["fetch_and_analyze_article"] = {
+                "name": "fetch_and_analyze_article",
+                "description": "Fetch and ingest an external article or web document URL into the workspace as an artefact for deep analysis and fact-checking.",
+                "parameters": [
+                    {"name": "url", "type": "str", "optional": False, "description": "The URL of the article to inspect."},
+                    {"name": "title", "type": "str", "optional": True, "description": "Optional custom title for the workspace artefact."}
+                ],
+                "output": [{"name": "success", "type": "bool"}, {"name": "title", "type": "str"}, {"name": "snippet", "type": "str"}],
+                "callable": tool_fetch_and_analyze_article
             }
 
         if owner_db_user.memory_enabled:
@@ -1674,6 +1733,7 @@ def build_llm_generation_router(router: APIRouter):
                                    "DANGER: Using an 'options' attribute is DEPRECATED and will result in an EMPTY list. Always use <option> tags.")
         if getattr(owner_db_user, 'skills_building_enabled', False):
             preamble_parts.append("## Skill Building: If the user asks to save this as a skill, learn a new trick, or remember a pattern, wrap the detailed documentation or code pattern in `<skill title=\"Clear Name\" description=\"What this teaches/provides\" category=\"programming/language/feature\">content</skill>`. Make sure the category uses forward slashes.")
+        preamble_parts.append("## YouTube Embeds: To embed a YouTube video or playlist, use `<youtube>https://www.youtube.com/watch?v=VIDEO_ID</youtube>` or `<youtube>https://www.youtube.com/playlist?list=PLAYLIST_ID</youtube>`.")
 
         # --- SKILL AUTO SEARCH ---
         if getattr(owner_db_user, 'skills_library_enabled', False):
@@ -1743,12 +1803,23 @@ def build_llm_generation_router(router: APIRouter):
         stop_event = threading.Event()
         user_sessions.setdefault(current_user.username, {}).setdefault("active_generation_control", {})[discussion_id] = stop_event
 
+        # Broadcast active generation status over WebSocket
+        manager.send_personal_message_sync({
+            "type": "generation_status",
+            "data": {"discussion_id": discussion_id, "is_generating": True}
+        }, current_user.id)
+
         async def stream_generator() -> AsyncGenerator[str, None]:
             all_events = []
             collected_sources = []
             watcher_task = None
 
             async def watch_disconnect() -> None:
+                """
+                Passively monitors connection status without aborting background execution.
+                Page refreshes or discussion switches will not terminate ongoing generation.
+                Explicit cancellation is handled solely via the stop_generation endpoint.
+                """
                 try:
                     receive = (
                         fastapi_request.scope.get("_receive")
@@ -1761,17 +1832,15 @@ def build_llm_generation_router(router: APIRouter):
                                 break
                     else:
                         while not await fastapi_request.is_disconnected():
-                            await asyncio.sleep(0.25)
+                            await asyncio.sleep(0.5)
                 except asyncio.CancelledError:
                     return
-                except Exception as e:
-                    ASCIIColors.warning(f"[watch_disconnect] {e}")
+                except Exception:
                     return
 
-                ASCIIColors.warning(
-                    f"[chat] Client disconnected — cancelling active generation for discussion '{discussion_id}'."
+                ASCIIColors.info(
+                    f"[chat] Client detached from stream for discussion '{discussion_id}'. Continuing background generation..."
                 )
-                stop_event.set()
 
             def blocking_call():
                 start_time = time.time()
@@ -2080,7 +2149,11 @@ def build_llm_generation_router(router: APIRouter):
                             "sources": meta.get('sources', []),
                             "events": meta.get('events', []),
                             "sender_type": m.sender_type, 
-                            "image_references": [f"data:image/png;base64,{i}" for i in (m.images or [])]
+                            "image_references": [
+                                i if (isinstance(i, str) and (i.startswith('data:image/') or i.startswith('http://') or i.startswith('https://') or i.startswith('/api/')))
+                                else f"data:image/png;base64,{i}"
+                                for i in (m.images or [])
+                            ]
                         }
 
                     effective_user_msg = result.get('user_message') or user_msg
@@ -2122,6 +2195,10 @@ def build_llm_generation_router(router: APIRouter):
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": error_str}) + "\n")
                 finally:
                     user_sessions.get(current_user.username, {}).get("active_generation_control", {}).pop(discussion_id, None)
+                    manager.send_personal_message_sync({
+                        "type": "generation_status",
+                        "data": {"discussion_id": discussion_id, "is_generating": False}
+                    }, current_user.id)
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
             
             try:

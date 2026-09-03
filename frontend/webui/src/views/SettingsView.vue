@@ -36,7 +36,7 @@ const AppsSettings = markRaw(defineAsyncComponent(() => import('../components/se
 const sections = [
     { id: 'account', name: 'Account', icon: markRaw(IconUserCircle), component: AccountSettings },
     { id: 'general', name: 'General', icon: markRaw(IconCog), component: GeneralSettings },
-    { id: 'context', name: 'User Context', icon: markRaw(IconFingerPrint), component: UserContextSettings },
+    { id: 'context', name: 'User Tools & Context', icon: markRaw(IconFingerPrint), component: UserContextSettings },
     { type: 'divider' },
     { id: 'prompts', name: 'Prompts', icon: markRaw(IconSparkles), component: PromptsSettings },
     { id: 'mcps', name: 'MCPs', icon: markRaw(IconMcp), component: McpsSettings },

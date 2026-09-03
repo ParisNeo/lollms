@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-03 00:00]
+
+- refactor(backend/frontend): improve discussion context and social features
+
 ## [2026-09-02 12:40]
 
 - chore: update gitignore and remove unused auto_load parameter from artefact import

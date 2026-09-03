@@ -213,12 +213,19 @@ def build_discussions_router():
             full_image_refs = []
             active_images_bools = []
             for img_data in images_list:
-                if isinstance(img_data, dict) and 'image' in img_data:
-                    full_image_refs.append(f"data:image/png;base64,{img_data['image']}")
-                    active_images_bools.append(img_data.get('active', True))
-                elif isinstance(img_data, str):
-                    full_image_refs.append(f"data:image/png;base64,{img_data}")
-                    active_images_bools.append(True)
+                raw_val = img_data
+                active = True
+                if isinstance(img_data, dict):
+                    raw_val = img_data.get('image') or img_data.get('data') or ''
+                    active = img_data.get('active', True)
+
+                if isinstance(raw_val, str) and raw_val.strip():
+                    cleaned_val = raw_val.strip()
+                    if cleaned_val.startswith('data:image/') or cleaned_val.startswith('http://') or cleaned_val.startswith('https://') or cleaned_val.startswith('/api/'):
+                        full_image_refs.append(cleaned_val)
+                    else:
+                        full_image_refs.append(f"data:image/png;base64,{cleaned_val}")
+                    active_images_bools.append(active)
 
             msg_metadata_raw = msg.metadata
             if isinstance(msg_metadata_raw, str):
@@ -488,12 +495,19 @@ def build_discussions_router():
             full_image_refs = []
             active_images_bools = []
             for img_data in images_list:
-                if isinstance(img_data, dict) and 'image' in img_data:
-                    full_image_refs.append(f"data:image/png;base64,{img_data['image']}")
-                    active_images_bools.append(img_data.get('active', True))
-                elif isinstance(img_data, str):
-                    full_image_refs.append(f"data:image/png;base64,{img_data}")
-                    active_images_bools.append(True)
+                raw_val = img_data
+                active = True
+                if isinstance(img_data, dict):
+                    raw_val = img_data.get('image') or img_data.get('data') or ''
+                    active = img_data.get('active', True)
+
+                if isinstance(raw_val, str) and raw_val.strip():
+                    cleaned_val = raw_val.strip()
+                    if cleaned_val.startswith('data:image/') or cleaned_val.startswith('http://') or cleaned_val.startswith('https://') or cleaned_val.startswith('/api/'):
+                        full_image_refs.append(cleaned_val)
+                    else:
+                        full_image_refs.append(f"data:image/png;base64,{cleaned_val}")
+                    active_images_bools.append(active)
                     
             msg_metadata_raw = msg_obj.metadata
             if isinstance(msg_metadata_raw, str):

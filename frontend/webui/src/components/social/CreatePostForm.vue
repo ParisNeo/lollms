@@ -9,6 +9,7 @@ import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconGlobeAlt from '../../assets/icons/IconGlobeAlt.vue';
 import IconXMark from '../../assets/icons/IconXMark.vue';
+import IconYoutube from '../../assets/icons/IconYoutube.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const emit = defineEmits(['posted', 'close']);
@@ -30,6 +31,9 @@ const stagedFiles = ref([]); // Raw File objects with preview URLs
 const attachedMedia = ref([]); // Uploaded or link preview media objects
 const linkInputUrl = ref('');
 const isLinkInputOpen = ref(false);
+
+const youtubeInputUrl = ref('');
+const isYoutubeInputOpen = ref(false);
 
 const isAdmin = computed(() => authStore.isAdmin);
 const user = computed(() => authStore.user);
@@ -143,6 +147,34 @@ function removeStagedFile(index) {
 
 function removeAttachedMedia(index) {
   attachedMedia.value.splice(index, 1);
+}
+
+function handleEmbedYoutube() {
+  const target = youtubeInputUrl.value.trim();
+  if (!target) return;
+
+  const listMatch = target.match(/[?&]list=([a-zA-Z0-9_-]{12,64})/i);
+  const urlMatch = target.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/|youtube-nocookie\.com\/embed\/)([a-zA-Z0-9_-]{11})/i);
+  const isDirectId = /^[a-zA-Z0-9_-]{11}$/.test(target);
+
+  if (!urlMatch && !isDirectId && !listMatch) {
+    uiStore.addNotification('Please enter a valid YouTube video URL, playlist link, or video ID.', 'warning');
+    return;
+  }
+
+  let youtubeTag = '';
+  if (listMatch && !urlMatch && !isDirectId) {
+    youtubeTag = `\n<youtube>https://www.youtube.com/playlist?list=${listMatch[1]}</youtube>\n`;
+  } else {
+    const videoId = isDirectId ? target : urlMatch[1];
+    const listParam = listMatch ? `&list=${listMatch[1]}` : '';
+    youtubeTag = `\n<youtube>https://www.youtube.com/watch?v=${videoId}${listParam}</youtube>\n`;
+  }
+
+  content.value = (content.value.trim() ? content.value.trim() + '\n' : '') + youtubeTag;
+  youtubeInputUrl.value = '';
+  isYoutubeInputOpen.value = false;
+  uiStore.addNotification(listMatch && !urlMatch ? 'YouTube playlist embedded.' : 'YouTube video embedded into post.', 'success');
 }
 
 // Link Preview Resolver
@@ -383,6 +415,23 @@ function selectMention(u) {
           </div>
         </div>
 
+        <!-- Inline YouTube Embed Input Drawer -->
+        <div v-if="isYoutubeInputOpen" class="my-2.5 p-3 rounded-xl bg-red-50/50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 flex items-center gap-2 animate-in fade-in">
+          <IconYoutube class="w-4 h-4 text-red-600 shrink-0" />
+          <input 
+            v-model="youtubeInputUrl" 
+            @keyup.enter="handleEmbedYoutube"
+            placeholder="Paste YouTube link (https://www.youtube.com/watch?v=... or https://youtu.be/...)" 
+            class="input-field !py-1 text-xs grow"
+          />
+          <button @click="handleEmbedYoutube" class="btn bg-red-600 hover:bg-red-700 text-white btn-xs py-1.5 px-3" :disabled="!youtubeInputUrl.trim()">
+            <span>Embed Video</span>
+          </button>
+          <button @click="isYoutubeInputOpen = false" class="p-1 text-gray-400 hover:text-red-500">
+            <IconXMark class="w-4 h-4" />
+          </button>
+        </div>
+
         <!-- Inline Link Input Drawer -->
         <div v-if="isLinkInputOpen" class="my-2.5 p-3 rounded-xl bg-gray-50 dark:bg-gray-900/60 border border-gray-200 dark:border-gray-700 flex items-center gap-2 animate-in fade-in">
           <IconGlobeAlt class="w-4 h-4 text-blue-500 shrink-0" />
@@ -412,8 +461,14 @@ function selectMention(u) {
             </button>
             <input ref="fileInputRef" type="file" @change="handleFileSelection" multiple accept="image/*,video/mp4,video/webm,video/ogg,audio/*" class="hidden" />
 
+            <!-- YouTube Embed Trigger -->
+            <button @click="isYoutubeInputOpen = !isYoutubeInputOpen; isLinkInputOpen = false;" class="btn btn-secondary btn-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Embed a YouTube video player into this post">
+              <IconYoutube class="w-4 h-4 text-red-500" />
+              <span class="text-xs">YouTube</span>
+            </button>
+
             <!-- Link Attach Trigger -->
-            <button @click="isLinkInputOpen = !isLinkInputOpen" class="btn btn-secondary btn-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Attach rich link preview">
+            <button @click="isLinkInputOpen = !isLinkInputOpen; isYoutubeInputOpen = false;" class="btn btn-secondary btn-xs py-1.5 px-2.5 flex items-center gap-1.5" title="Attach rich link preview">
               <IconGlobeAlt class="w-4 h-4 text-blue-500" />
               <span class="text-xs">Link</span>
             </button>

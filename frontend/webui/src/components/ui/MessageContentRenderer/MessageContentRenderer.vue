@@ -191,12 +191,52 @@ onUnmounted(() => {
   });
 });
 
+function extractYouTubeEmbedInfo(input) {
+    if (!input || typeof input !== 'string') return null;
+    const str = input.trim();
+
+    // 1. Direct 11-char Video ID
+    if (/^[a-zA-Z0-9_-]{11}$/.test(str)) {
+        return { type: 'video', videoId: str, listId: null, startTime: 0 };
+    }
+
+    // 2. Direct Playlist ID
+    if (/^(?:PL|UU|LL|FL|RD|OLAK)[a-zA-Z0-9_-]{10,60}$/.test(str)) {
+        return { type: 'playlist', videoId: null, listId: str, startTime: 0 };
+    }
+
+    // 3. Playlist query parameter list=...
+    const listMatch = str.match(/[?&]list=([a-zA-Z0-9_-]{12,64})/i);
+    const listId = listMatch ? listMatch[1] : null;
+
+    // 4. Video ID in URL
+    const videoMatch = str.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?|shorts)\/|.*[?&]v=)|youtu\.be\/|youtube-nocookie\.com\/embed\/)([a-zA-Z0-9_-]{11})/i);
+    const videoId = videoMatch ? videoMatch[1] : null;
+
+    // 5. Start time in URL
+    let startTime = 0;
+    const timeMatch = str.match(/[?&](?:t|start)=(\d+)/i);
+    if (timeMatch && timeMatch[1]) {
+        startTime = parseInt(timeMatch[1], 10);
+    }
+
+    if (listId && !videoId) {
+        return { type: 'playlist', videoId: null, listId, startTime };
+    }
+
+    if (videoId) {
+        return { type: listId ? 'playlist_video' : 'video', videoId, listId, startTime };
+    }
+
+    return null;
+}
+
 const highlightInlineXmlTags = (text) => {
     if (!text) return '';
     const parts = text.split(/(`[^`\n]+`|```[\s\S]*?```)/g);
     return parts.map((part, index) => {
         if (index % 2 === 0) {
-            const xmlTagRegex = /<\/?(think|annotate|generate_image|edit_image|generate_slides|street_view|schedule_task|note|skill|lollms_widget|lollms_inline|lollms_building|lollms_form_anchor|lollms_working|artefact_image|processing|lollms_form|owl)\b[^>]*>/gi;
+            const xmlTagRegex = /<\/?(annotate|edit_image|generate_slides|street_view|schedule_task|lollms_widget|lollms_building|lollms_form_anchor|lollms_working|artefact_image|owl)\b[^>]*>/gi;
             return part.replace(xmlTagRegex, (match) => {
                 const escaped = match.replace(/</g, '&lt;').replace(/>/g, '&gt;');
                 return `<code class="inline-xml-tag px-1 py-0.5 rounded font-mono text-xs bg-blue-100/80 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40">${escaped}</code>`;
@@ -427,6 +467,49 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         const id = idMatch ? idMatch[1] : '';
         return { type: 'mem_load', memoryId: id, raw };
     }
+    else if (rawBlock.includes('<youtube') || rawBlock.includes('<youtube_video')) {
+        const raw = rawBlock;
+        const idMatch = raw.match(/id=["']([^"']+)["']/i);
+        const urlMatch = raw.match(/url=["']([^"']+)["']/i);
+        const listMatch = raw.match(/list=["']([^"']+)["']/i);
+        const titleMatch = raw.match(/title=["']([^"']+)["']/i);
+        const startMatch = raw.match(/start=["']?(\d+)["']?/i);
+
+        const innerMatch = raw.match(/<youtube(?:_video)?[^>]*>([\s\S]*?)<\/youtube(?:_video)?>/i);
+        const innerText = innerMatch ? innerMatch[1].trim() : '';
+
+        const candidate = (idMatch && idMatch[1]) || (urlMatch && urlMatch[1]) || (listMatch && `list=${listMatch[1]}`) || innerText;
+        const extracted = extractYouTubeEmbedInfo(candidate);
+
+        if (extracted) {
+            const startTime = (startMatch && parseInt(startMatch[1], 10)) || extracted.startTime || 0;
+            const listId = (listMatch && listMatch[1]) || extracted.listId;
+            return {
+                type: 'youtube_video',
+                embedType: extracted.type,
+                videoId: extracted.videoId,
+                listId: listId,
+                startTime: startTime,
+                title: (titleMatch && titleMatch[1]) || (extracted.type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video'),
+                raw: rawBlock
+            };
+        } else {
+            return { type: 'content', content: rawBlock };
+        }
+    } else {
+        const ytExtracted = extractYouTubeEmbedInfo(rawBlock);
+        if (ytExtracted && (rawBlock.includes('youtube.com') || rawBlock.includes('youtu.be') || rawBlock.includes('youtube-nocookie.com'))) {
+            return {
+                type: 'youtube_video',
+                embedType: ytExtracted.type,
+                videoId: ytExtracted.videoId,
+                listId: ytExtracted.listId,
+                startTime: ytExtracted.startTime || 0,
+                title: ytExtracted.type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video',
+                raw: rawBlock
+            };
+        }
+    }
 
     return { type: 'content', content: rawBlock };
 };
@@ -593,7 +676,9 @@ const messageParts = computed(() => {
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<tool_call[^>]*>([\s\S]*?)(?:<\/tool_call>|$))/gi },
-                { type: 'tool', regex: /(?:\n|^)[ \t]*(<mem_load\s+id=["']([^"']+)["']\s*\/?>)/gi }
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<mem_load\s+id=["']([^"']+)["']\s*\/?>)/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<(?:youtube|youtube_video)\b[^>]*>(?:[\s\S]*?<\/(?:youtube|youtube_video)>)?|<(?:youtube|youtube_video)\b[^>]*\/>)/gi },
+                { type: 'tool', regex: /(?:^|\n)[ \t]*(?:\[[^\]]*\]\()?(https?:\/\/(?:www\.|m\.)?(?:youtube\.com|youtu\.be|youtube-nocookie\.com)\/(?:watch\?[^\s)><]+|playlist\?[^\s)><]+|embed\/[^\s)><]+|shorts\/[a-zA-Z0-9_-]{11}|v\/[a-zA-Z0-9_-]{11}|[a-zA-Z0-9_-]{11}[^\s)><]*))\)?[ \t]*(?=\n|$)/gi }
             ];
 
             const allElements = [];
@@ -1144,6 +1229,54 @@ function onMermaidReady({ svg }, partIndex) {
           <template v-else-if="part.type === 'code'">
             <CodeBlock :language="part.lang" :code="part.code" :message-id="messageId" />
           </template>
+
+          <!-- YouTube Video / Playlist Embed -->
+          <div v-else-if="part.type === 'youtube_video'" class="my-6 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-black shadow-xl max-w-2xl mx-auto group/yt">
+              <div class="px-4 py-2.5 bg-gray-900 border-b border-gray-800 flex items-center justify-between text-xs text-gray-300 select-none">
+                  <div class="flex items-center gap-2 min-w-0">
+                      <div class="p-1 rounded bg-red-600 text-white flex items-center justify-center shrink-0">
+                          <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                      </div>
+                      <span class="font-bold truncate text-white">
+                          {{ part.title && part.title !== part.videoId ? part.title : (part.embedType === 'playlist' ? 'YouTube Playlist' : 'YouTube Video') }}
+                      </span>
+                      <span v-if="part.listId" class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-red-950 text-red-300 border border-red-800 shrink-0">
+                          Playlist
+                      </span>
+                      <span v-else-if="part.videoId" class="text-[10px] font-mono text-gray-400">({{ part.videoId }})</span>
+                  </div>
+                  <div class="flex items-center gap-1.5 shrink-0">
+                      <a 
+                          :href="part.embedType === 'playlist' ? `https://www.youtube.com/playlist?list=${encodeURIComponent(part.listId)}` : `https://www.youtube.com/watch?v=${encodeURIComponent(part.videoId)}${part.listId ? '&list=' + encodeURIComponent(part.listId) : ''}${part.startTime ? '&t=' + part.startTime : ''}`" 
+                          target="_blank" 
+                          rel="noopener noreferrer" 
+                          class="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+                          title="Open on YouTube"
+                      >
+                          <IconGlobeAlt class="w-3.5 h-3.5" />
+                          <span class="text-[10px] hidden sm:inline">Open</span>
+                      </a>
+                      <button 
+                          @click="uiStore.copyToClipboard(part.embedType === 'playlist' ? `https://www.youtube.com/playlist?list=${part.listId}` : `https://www.youtube.com/watch?v=${part.videoId}`)"
+                          class="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                          title="Copy Link"
+                      >
+                          <IconCopy class="w-3.5 h-3.5" />
+                      </button>
+                  </div>
+              </div>
+              <div class="relative w-full aspect-video bg-black">
+                  <iframe 
+                      :src="part.embedType === 'playlist' ? `https://www.youtube-nocookie.com/embed/videoseries?list=${encodeURIComponent(part.listId)}&rel=0&enablejsapi=0` : `https://www.youtube-nocookie.com/embed/${encodeURIComponent(part.videoId)}?rel=0&enablejsapi=0${part.listId ? '&list=' + encodeURIComponent(part.listId) : ''}${part.startTime ? '&start=' + part.startTime : ''}`"
+                      class="w-full h-full border-0"
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                      allowfullscreen
+                      sandbox="allow-scripts allow-same-origin allow-presentation"
+                      loading="lazy"
+                      referrerpolicy="strict-origin-when-cross-origin"
+                  ></iframe>
+              </div>
+          </div>
 
           <!-- Thinking block -->
           <details v-else-if="part.type === 'think'" class="think-block my-4" open>

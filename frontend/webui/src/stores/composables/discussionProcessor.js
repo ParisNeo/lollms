@@ -89,6 +89,19 @@ export function processSingleMessage(msg) {
         }
     }
 
+    // Ensure all image references are sanitized against double headers
+    const rawRefs = msg.image_references || [];
+    const normalizedImageRefs = (Array.isArray(rawRefs) ? rawRefs : []).map(ref => {
+        if (typeof ref === 'string') {
+            let clean = ref.trim();
+            while (clean.startsWith('data:image/png;base64,data:image/') || clean.startsWith('data:image/jpeg;base64,data:image/')) {
+                clean = clean.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+            }
+            return clean;
+        }
+        return ref;
+    });
+
     return {
         ...msg,
         content: cleanContent,
@@ -98,7 +111,7 @@ export function processSingleMessage(msg) {
         events,
         sources,
         forms: msg.forms || metadata.forms || [],
-        image_references: msg.image_references || [],
+        image_references: normalizedImageRefs,
         active_images: msg.active_images || [],
         inline_widgets: normalizedWidgets,
         vision_support: visionSupport,

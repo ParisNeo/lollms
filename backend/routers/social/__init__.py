@@ -13,7 +13,7 @@ from werkzeug.utils import secure_filename
 
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, and_, exists, select, insert, delete, func
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
 from ascii_colors import trace_exception
@@ -37,8 +37,10 @@ from backend.models import (
 from backend.session import (
     get_current_active_user,
     get_current_db_user_from_token,
-    get_user_social_assets_path
+    get_user_social_assets_path,
+    get_user_lollms_client
 )
+from backend.discussion import get_user_discussion
 from backend.routers.social.mentions import mentions_router
 from backend.security import sanitize_content, validate_url
 from backend.ws_manager import manager
@@ -590,6 +592,138 @@ def update_post(
         )
 
     return get_post_public(db, post, current_user.id)
+
+class PostExplainActionRequest(BaseModel):
+    action: Optional[str] = "explain" # "explain", "fact_check", "expand", "summarize", "discuss"
+
+class PostExplanationResponse(BaseModel):
+    discussion_id: str
+    prompt: str
+    post_id: int
+    title: str
+    action: str
+
+@social_router.post("/posts/{post_id}/explain", response_model=PostExplanationResponse)
+def explain_post_with_lollms(
+    post_id: int,
+    action: Optional[str] = Query("explain"),
+    payload: Optional[PostExplainActionRequest] = None,
+    db: Session = Depends(get_db),
+    current_user: UserAuthDetails = Depends(get_current_active_user)
+):
+    """
+    Creates a private, personal explanation discussion for the current user anchored to a specific post.
+    Supports actions: 'explain', 'fact_check', 'expand', 'summarize', 'discuss'.
+    """
+    selected_action = (payload.action if payload and payload.action else action or "explain").lower().strip()
+    """
+    Creates a private, personal explanation discussion for the current user anchored to a specific post.
+    The resulting discussion is private and visible only to the requesting user.
+    """
+    try:
+        post = db.query(DBPost).options(joinedload(DBPost.author)).filter(
+            DBPost.id == post_id,
+            DBPost.moderation_status != 'flagged'
+        ).first()
+
+        if not post:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found.")
+
+        # Validate post visibility for the current user
+        if post.author_id != current_user.id and post.visibility != PostVisibility.public:
+            if post.visibility == PostVisibility.followers:
+                is_following = db.query(exists().where(and_(follows_table.c.follower_id == current_user.id, follows_table.c.following_id == post.author_id))).scalar()
+                if not is_following and not current_user.is_admin:
+                    raise HTTPException(status_code=403, detail="Forbidden.")
+            elif post.visibility == PostVisibility.friends:
+                are_friends = db.query(exists().where(
+                    and_(
+                        or_(
+                            and_(DBFriendship.user1_id == current_user.id, DBFriendship.user2_id == post.author_id),
+                            and_(DBFriendship.user1_id == post.author_id, DBFriendship.user2_id == current_user.id)
+                        ),
+                        DBFriendship.status == FriendshipStatus.ACCEPTED
+                    )
+                )).scalar()
+                if not are_friends and not current_user.is_admin:
+                    raise HTTPException(status_code=403, detail="Forbidden.")
+
+        # Create a private discussion for the requesting user
+        author_name = post.author.username if post.author else "Community User"
+        discussion_id = str(uuid.uuid4())
+
+        lc = get_user_lollms_client(current_user.username)
+        discussion_obj = get_user_discussion(current_user.username, discussion_id, create_if_missing=True, lollms_client=lc)
+
+        # Collect media references or links from post if available
+        media_links = []
+        if post.media and isinstance(post.media, list):
+            for m in post.media:
+                if isinstance(m, dict) and m.get("url"):
+                    media_links.append(f"- {m.get('type', 'media').capitalize()}: {m.get('url')}")
+
+        media_context = ("\n\nAttached Media / Links:\n" + "\n".join(media_links)) if media_links else ""
+
+        # Construct customized prompts & titles based on requested cognitive action
+        if selected_action in ["fact_check", "verify"]:
+            clean_title = f"Fact-Check: @{author_name}'s Post"
+            prompt = (
+                f"Please fact-check and critically verify the claims made in this post by @{author_name}:\n\n"
+                f"\"{post.content}\"{media_context}\n\n"
+                "Instructions:\n"
+                "1. Cross-examine all facts, statistics, historical claims, and technical assertions.\n"
+                "2. Search the web or analyze external references if necessary to find verifying or contradicting evidence.\n"
+                "3. Provide a clear, objective assessment with verifiable sources and conclusions."
+            )
+        elif selected_action in ["expand", "research"]:
+            clean_title = f"Research: @{author_name}'s Post"
+            prompt = (
+                f"Please expand and deep-dive into the concepts presented in this post by @{author_name}:\n\n"
+                f"\"{post.content}\"{media_context}\n\n"
+                "Instructions:\n"
+                "1. Provide in-depth technical context, history, and broader implications of the topic.\n"
+                "2. Feel free to use web search or research tools to bring in external papers, documentation, or related case studies.\n"
+                "3. Structure your response clearly with detailed explanations and actionable insights."
+            )
+        elif selected_action in ["summarize", "summary"]:
+            clean_title = f"Summary: @{author_name}'s Post"
+            prompt = (
+                f"Please summarize the following post by @{author_name}:\n\n"
+                f"\"{post.content}\"{media_context}\n\n"
+                "Extract the core arguments, main takeaways, and key conclusions into concise, structured bullet points."
+            )
+        elif selected_action in ["discuss", "chat"]:
+            clean_title = f"Chat: @{author_name}'s Post"
+            prompt = (
+                f"Let's discuss this post by @{author_name}:\n\n"
+                f"\"{post.content}\"{media_context}\n\n"
+                "Share your initial perspective and key thoughts on this post to start our discussion."
+            )
+        else:
+            clean_title = f"Explain: @{author_name}'s Post"
+            prompt = (
+                f"Please explain and analyze the following post by @{author_name}:\n\n"
+                f"\"{post.content}\"{media_context}\n\n"
+                "Break down the key concepts in plain, accessible language, explain any technical terms or jargon, and provide intuitive background context."
+            )
+
+        discussion_obj.set_metadata_item('title', clean_title)
+        discussion_obj.set_metadata_item('linked_post_id', post_id)
+        discussion_obj.set_metadata_item('cognitive_action', selected_action)
+        discussion_obj.commit()
+
+        return PostExplanationResponse(
+            discussion_id=discussion_id,
+            prompt=prompt,
+            post_id=post_id,
+            title=clean_title,
+            action=selected_action
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to generate explanation discussion: {e}")
 
 @social_router.post("/posts/{post_id}/pin", response_model=PostPublic)
 def toggle_pin_post(

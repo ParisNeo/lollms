@@ -350,7 +350,10 @@ export const useSocialStore = defineStore('social', () => {
     async function createPost(postData) {
         try {
             const response = await apiClient.post('/api/social/posts', postData);
-            feedPosts.value.unshift(response.data);
+            const exists = feedPosts.value.some(p => String(p.id) === String(response.data.id));
+            if (!exists) {
+                feedPosts.value.unshift(response.data);
+            }
             useUiStore().addNotification('Post created successfully!', 'success');
             return response.data;
         } catch (error) {
@@ -993,7 +996,7 @@ export const useSocialStore = defineStore('social', () => {
         fetchSocialGroups, createSocialGroup, fetchSocialGroupDetails, updateSocialGroup, deleteSocialGroup, addMemberToSocialGroup, removeMemberFromSocialGroup, fetchSocialGroupFeed,
         handleNewPost(post) {
             if (!post || !post.id) return;
-            const exists = feedPosts.value.some(p => p.id === post.id);
+            const exists = feedPosts.value.some(p => String(p.id) === String(post.id));
             if (!exists) {
                 feedPosts.value.unshift(post);
             }

@@ -125,6 +125,15 @@ function sanitizeDangerousTags(html) {
     // 5. Neutralize dangerous URL schemes in href and src attributes (e.g. javascript:, vbscript:)
     clean = clean.replace(/\s(href|src)\s*=\s*["']?\s*(?:javascript:|vbscript:|data:text\/html)[^"'>\s]*/gi, ' $1="#"');
 
+    // 6. Security guard for iframes: Only allow verified YouTube embeds & playlists, sanitize attributes
+    clean = clean.replace(/<iframe\b([^>]*)>/gi, (match, attrs) => {
+        const srcMatch = attrs.match(/src=["']([^"']+)["']/i);
+        if (srcMatch && /^https:\/\/(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)\/embed\/(?:videoseries\?list=[a-zA-Z0-9_-]{12,64}|[a-zA-Z0-9_-]{11}(?:\?[a-zA-Z0-9_=&-]*)?)$/i.test(srcMatch[1])) {
+            return `<iframe ${attrs} sandbox="allow-scripts allow-same-origin allow-presentation" loading="lazy" referrerpolicy="strict-origin-when-cross-origin">`;
+        }
+        return '<!-- [Untrusted iframe embed removed] -->';
+    });
+
     return clean;
 }
 

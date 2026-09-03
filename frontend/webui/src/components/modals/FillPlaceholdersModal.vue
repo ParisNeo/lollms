@@ -32,21 +32,22 @@ watch(() => modalData.value?.promptTemplate, (newTemplate) => {
 }, { immediate: true });
 
 function handleSubmit() {
-    // 1. Get the original template from the modal data.
     const originalTemplate = modalData.value.promptTemplate;
-
-    // 2. Use the cleanTemplate function to strip out definition blocks and get the base prompt structure.
     let filledTemplate = placeholderParser.clean(originalTemplate);
 
-    // 3. Iterate through all placeholders and replace their simple form in the cleaned template.
     placeholders.value.forEach(p => {
-        const value = formValues.value[p.name];
-        // Use a simple regex with a 'g' flag to replace all instances of the placeholder.
-        const simpleRegex = new RegExp(`@<${p.name}>@`, 'g');
-        filledTemplate = filledTemplate.replace(simpleRegex, String(value));
+        const value = formValues.value[p.name] !== undefined ? formValues.value[p.name] : (p.default || '');
+        const escapedName = p.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+        // Replace @<name>@
+        const atRegex = new RegExp(`@<${escapedName}>@`, 'g');
+        filledTemplate = filledTemplate.replace(atRegex, String(value));
+
+        // Replace {{name}} and {{ name }}
+        const curlyRegex = new RegExp(`\\{\\{\\s*${escapedName}\\s*\\}\\}`, 'g');
+        filledTemplate = filledTemplate.replace(curlyRegex, String(value));
     });
 
-    // 4. Call the confirmation callback with the correctly constructed prompt.
     if (modalData.value?.onConfirm) {
         modalData.value.onConfirm(filledTemplate);
     }

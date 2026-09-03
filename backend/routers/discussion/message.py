@@ -136,7 +136,11 @@ def build_message_router(router: APIRouter):
         branch = discussion_obj.get_branch(discussion_obj.active_branch_id)
         target_message = next((msg for msg in branch if msg.id == message_id), None)
         if not target_message: raise HTTPException(status_code=404, detail="Message not found in active branch.")
-        full_image_refs = [ f"data:image/png;base64,{img}" for img in target_message.images or []]
+        full_image_refs = [
+            img if (isinstance(img, str) and (img.startswith('data:image/') or img.startswith('http://') or img.startswith('https://') or img.startswith('/api/')))
+            else f"data:image/png;base64,{img}"
+            for img in target_message.images or []
+        ]
 
         msg_metadata = target_message.metadata or {}
         return MessageOutput(
@@ -225,7 +229,11 @@ def build_message_router(router: APIRouter):
         db_user = db.query(DBUser).filter(DBUser.username == username).one()
         grade = db.query(UserMessageGrade.grade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).scalar() or 0
         
-        full_image_refs = [f"data:image/png;base64,{img}" for img in target_message.images or []]
+        full_image_refs = [
+            img if (isinstance(img, str) and (img.startswith('data:image/') or img.startswith('http://') or img.startswith('https://') or img.startswith('/api/')))
+            else f"data:image/png;base64,{img}"
+            for img in target_message.images or []
+        ]
 
         msg_metadata = target_message.metadata or {}
         return MessageOutput(
@@ -281,7 +289,11 @@ def build_message_router(router: APIRouter):
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         grade = db.query(UserMessageGrade.grade).filter_by(user_id=db_user.id, discussion_id=discussion_id, message_id=message_id).scalar() or 0
         
-        full_image_refs = [f"data:image/png;base64,{img}" for img in msg.images or []]
+        full_image_refs = [
+            img if (isinstance(img, str) and (img.startswith('data:image/') or img.startswith('http://') or img.startswith('https://') or img.startswith('/api/')))
+            else f"data:image/png;base64,{img}"
+            for img in msg.images or []
+        ]
         msg_metadata = msg.metadata or {}
 
         return MessageOutput(

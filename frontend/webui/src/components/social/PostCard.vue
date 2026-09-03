@@ -2,9 +2,14 @@
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
 import { useAuthStore } from '../../stores/auth';
 import { useSocialStore } from '../../stores/social';
+import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
+import { useRouter } from 'vue-router';
+import apiClient from '../../services/api';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import CommentSection from './CommentSection.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import MessageContentRenderer from '../ui/MessageContentRenderer/MessageContentRenderer.vue';
 
 const props = defineProps({
@@ -14,11 +19,16 @@ const props = defineProps({
   },
 });
 
+const router = useRouter();
 const authStore = useAuthStore();
 const socialStore = useSocialStore();
+const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
 
 const isOptionsMenuOpen = ref(false);
+const isAiMenuOpen = ref(false);
+const isExplaining = ref(false);
+const activeAiAction = ref('');
 const isCommentsVisible = ref(false);
 const isEditing = ref(false);
 const editContent = ref('');
@@ -61,6 +71,7 @@ function formatTimestamp(dateString) {
 
 function closeOptionsMenu() {
   isOptionsMenuOpen.value = false;
+  isAiMenuOpen.value = false;
 }
 function handleLikeClick() {
     socialStore.toggleLike(props.post.id);
@@ -152,6 +163,51 @@ async function handleShare() {
 
 function toggleComments() {
   isCommentsVisible.value = !isCommentsVisible.value;
+}
+
+async function handleAiAction(action = 'explain') {
+  if (isExplaining.value) return;
+  isExplaining.value = true;
+  activeAiAction.value = action;
+  isAiMenuOpen.value = false;
+
+  try {
+    const res = await apiClient.post(`/api/social/posts/${props.post.id}/explain`, { action });
+    const { discussion_id, prompt, title } = res.data;
+
+    // Optimistically register discussion record into store
+    discussionsStore.discussions[discussion_id] = {
+      id: discussion_id,
+      title: title || 'Explanation',
+      created_at: new Date().toISOString(),
+      last_activity_at: new Date().toISOString()
+    };
+
+    // Switch to chat view and select the newly spawned private discussion
+    uiStore.setMainView('chat');
+    await discussionsStore.selectDiscussion(discussion_id);
+
+    // Trigger the generation turn with web search enabled by default for research/fact checking
+    discussionsStore.sendMessage({
+      prompt: prompt,
+      webSearchEnabled: true
+    });
+
+    const labels = {
+      explain: 'Explanation',
+      fact_check: 'Fact-Check',
+      expand: 'Deep Research',
+      summarize: 'Summary'
+    };
+
+    uiStore.addNotification(`Private ${labels[action] || 'AI'} session started.`, 'success');
+  } catch (err) {
+    console.error("Failed to create AI session:", err);
+    uiStore.addNotification('Could not start AI session.', 'error');
+  } finally {
+    isExplaining.value = false;
+    activeAiAction.value = '';
+  }
 }
 </script>
 
@@ -293,9 +349,13 @@ function toggleComments() {
               </div>
             </div>
 
-            <!-- 4. Rich Link Cards -->
+            <!-- 4. Rich Link Cards & Embedded YouTube Players -->
             <div v-for="(lnk, lIdx) in postLinks" :key="'lnk-'+lIdx" class="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-gray-50/70 dark:bg-gray-900/50 hover:border-blue-500/50 transition-all shadow-sm group/link">
-              <a :href="lnk.url" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row gap-3 p-3.5 no-underline">
+              <!-- If the attached link is a YouTube video, embed it directly -->
+              <div v-if="lnk.url && (lnk.domain.includes('youtube.com') || lnk.domain.includes('youtu.be'))" class="w-full">
+                <MessageContentRenderer :content="lnk.url" class="prose max-w-none" />
+              </div>
+              <a v-else :href="lnk.url" target="_blank" rel="noopener noreferrer" class="flex flex-col sm:flex-row gap-3 p-3.5 no-underline">
                 <div v-if="lnk.image" class="w-full sm:w-32 h-24 rounded-xl overflow-hidden shrink-0 bg-gray-200 dark:bg-gray-800">
                   <img :src="lnk.image" class="w-full h-full object-cover group-hover/link:scale-105 transition-transform" />
                 </div>
@@ -310,7 +370,76 @@ function toggleComments() {
         </div>
 
         <!-- Action Buttons -->
-        <div class="mt-4 flex justify-between text-gray-500">
+        <div class="mt-4 flex justify-between items-center text-gray-500 select-none">
+
+          <!-- AI Cognitive Suite Menu -->
+          <div class="relative options-menu-container">
+            <button 
+              @click.stop="isAiMenuOpen = !isAiMenuOpen" 
+              :disabled="isExplaining" 
+              class="flex items-center space-x-1.5 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 px-2 py-1 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-all text-xs font-bold cursor-pointer"
+              title="AI assistance: Explain, Fact-Check, Expand, or Summarize this post privately"
+            >
+              <IconAnimateSpin v-if="isExplaining" class="w-4 h-4 animate-spin text-blue-500" />
+              <IconSparkles v-else class="w-4 h-4 text-blue-500" />
+              <span>Ask LoLLMs ▾</span>
+            </button>
+
+            <!-- Cognitive Action Popover -->
+            <div 
+              v-if="isAiMenuOpen" 
+              class="absolute left-0 bottom-full mb-2 w-64 bg-white dark:bg-gray-900 rounded-2xl shadow-2xl z-50 border border-gray-100 dark:border-gray-700/80 p-1.5 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            >
+              <div class="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-gray-400 border-b dark:border-gray-800 mb-1">
+                Private AI Analysis
+              </div>
+
+              <button 
+                @click="handleAiAction('explain')" 
+                class="w-full text-left flex items-start gap-2.5 p-2 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 text-gray-800 dark:text-gray-200 transition-colors group/item"
+              >
+                <span class="text-base leading-none mt-0.5">💡</span>
+                <div class="flex flex-col min-w-0">
+                  <span class="text-xs font-bold group-hover/item:text-blue-600">Explain in Plain Terms</span>
+                  <span class="text-[10px] text-gray-500">Break down jargon and concepts</span>
+                </div>
+              </button>
+
+              <button 
+                @click="handleAiAction('fact_check')" 
+                class="w-full text-left flex items-start gap-2.5 p-2 rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-gray-800 dark:text-gray-200 transition-colors group/item"
+              >
+                <span class="text-base leading-none mt-0.5">🔍</span>
+                <div class="flex flex-col min-w-0">
+                  <span class="text-xs font-bold group-hover/item:text-emerald-600">Fact-Check & Verify</span>
+                  <span class="text-[10px] text-gray-500">Verify claims with web search</span>
+                </div>
+              </button>
+
+              <button 
+                @click="handleAiAction('expand')" 
+                class="w-full text-left flex items-start gap-2.5 p-2 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 text-gray-800 dark:text-gray-200 transition-colors group/item"
+              >
+                <span class="text-base leading-none mt-0.5">🚀</span>
+                <div class="flex flex-col min-w-0">
+                  <span class="text-xs font-bold group-hover/item:text-purple-600">Expand & Deep Research</span>
+                  <span class="text-[10px] text-gray-500">Explore literature & papers</span>
+                </div>
+              </button>
+
+              <button 
+                @click="handleAiAction('summarize')" 
+                class="w-full text-left flex items-start gap-2.5 p-2 rounded-xl hover:bg-amber-50 dark:hover:bg-amber-900/20 text-gray-800 dark:text-gray-200 transition-colors group/item"
+              >
+                <span class="text-base leading-none mt-0.5">📝</span>
+                <div class="flex flex-col min-w-0">
+                  <span class="text-xs font-bold group-hover/item:text-amber-600">Key Takeaways</span>
+                  <span class="text-[10px] text-gray-500">Concise summary of main points</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
           <button @click="handleLikeClick" class="flex items-center space-x-2 hover:text-blue-500 transition-colors" :class="{'text-blue-600 dark:text-blue-400 font-semibold': post.has_liked}">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" :fill="post.has_liked ? 'currentColor' : 'none'" :stroke="post.has_liked ? 'none' : 'currentColor'" stroke-width="1.5"><path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0016.556 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" /></svg>
             <span>{{ post.has_liked ? 'Liked' : 'Like' }}</span>

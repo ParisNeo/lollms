@@ -37,8 +37,14 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 ALLOWED_TAGS = [
     'p', 'b', 'i', 'u', 'em', 'strong', 'a', 'br', 'ul', 'ol', 'li', 
     'code', 'pre', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-    'table', 'thead', 'tbody', 'tr', 'th', 'td', 'strike', 'hr', 'span', 'div'
+    'table', 'thead', 'tbody', 'tr', 'th', 'td', 'strike', 'hr', 'span', 'div',
+    'youtube', 'youtube_video', 'iframe'
 ]
+
+def _filter_iframe_attrs(tag, name, value):
+    if name == 'src':
+        return bool(re.match(r'^https://(?:www\.)?(?:youtube\.com|youtube-nocookie\.com)/embed/(?:videoseries\?list=[a-zA-Z0-9_-]{12,64}|[a-zA-Z0-9_-]{11}(?:\?[a-zA-Z0-9_=&-]+)?)$', value))
+    return name in ['width', 'height', 'frameborder', 'allow', 'allowfullscreen', 'title', 'loading', 'referrerpolicy', 'sandbox', 'class']
 
 ALLOWED_ATTRS = {
     'a': ['href', 'title', 'target', 'rel'],
@@ -46,7 +52,10 @@ ALLOWED_ATTRS = {
     'span': ['class'],
     'div': ['class'],
     'code': ['class'],
-    'pre': ['class']
+    'pre': ['class'],
+    'youtube': ['id', 'url', 'list', 'start', 'title', 'width', 'height'],
+    'youtube_video': ['id', 'url', 'list', 'start', 'title', 'width', 'height'],
+    'iframe': _filter_iframe_attrs
 }
 
 def validate_url(url: str):

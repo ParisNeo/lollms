@@ -86,7 +86,7 @@ const currentModelVisionSupport = computed(() => dStoreRefs.currentModelVisionSu
 const activeAiTasks = computed(() => dStoreRefs.activeAiTasks?.value || {});
 
 const { availableRagStores, availableMcpToolsForSelector } = storeToRefs(dataStore);
-const { lollmsPrompts, userPromptsByCategory } = storeToRefs(promptsStore);
+const { lollmsPrompts, userPromptsByCategory, systemPromptsByZooCategory } = storeToRefs(promptsStore);
 const { notes } = storeToRefs(notesStore);
 const { skills } = storeToRefs(skillsStore);
 
@@ -1219,6 +1219,20 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
 
             </div>
 
+            <!-- Active Generation / Background Task Status Pill -->
+            <div v-if="generationInProgress || currentActiveTask || isUploading" 
+                 class="flex items-center justify-between px-3.5 py-1.5 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/60 rounded-xl text-xs text-blue-800 dark:text-blue-300 shadow-xs animate-in fade-in slide-in-from-bottom-1">
+                <div class="flex items-center gap-2.5 min-w-0">
+                    <IconAnimateSpin class="w-4 h-4 animate-spin text-blue-600 dark:text-blue-400 shrink-0" />
+                    <span v-if="isUploading" class="truncate font-semibold">{{ uploadingMessage }}</span>
+                    <span v-else-if="currentActiveTask" class="truncate font-semibold">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>
+                    <span v-else class="truncate font-semibold">{{ generationState.details || 'AI is generating response...' }}</span>
+                </div>
+                <button v-if="generationInProgress" @click="handleStopGeneration" class="text-[10px] font-black uppercase tracking-wider text-red-500 hover:text-red-600 hover:underline shrink-0 ml-3 py-0.5 px-1.5 rounded bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-900">
+                    Stop
+                </button>
+            </div>
+
             <!-- Input Controls -->
             <div class="flex items-end gap-2 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm relative overflow-hidden">
                 
@@ -1529,7 +1543,7 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                 </div>
 
                 <div class="grow min-w-0 relative flex items-center">
-                    <!-- Standard Auto-Growing Textarea -->
+                    <!-- Standard Auto-Growing Textarea (Always accessible for drafting) -->
                     <textarea 
                         ref="textareaRef"
                         v-model="messageText" 
@@ -1538,16 +1552,8 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                         @paste="handlePaste" 
                         rows="1" 
                         class="w-full bg-transparent border-0 focus:ring-0 resize-none py-2.5 px-3 max-h-80 overflow-y-auto text-sm leading-relaxed transition-all duration-100 min-h-[42px]" 
-                        :class="{ 'opacity-0 pointer-events-none': generationInProgress }"
-                        :placeholder="isRecording ? 'Recording... Click to stop.' : 'Type a message... (Shift+Enter for new line)'" 
+                        :placeholder="isRecording ? 'Recording... Click to stop.' : (generationInProgress ? 'Draft next message... (Ready when generation finishes)' : 'Type a message... (Shift+Enter for new line)')" 
                     ></textarea>
-
-                    <div v-if="generationInProgress || currentActiveTask || isUploading" class="absolute inset-0 bg-gray-50/80 dark:bg-gray-900/80 backdrop-blur-sm z-10 flex items-center px-3 text-sm text-gray-500 dark:text-gray-400 italic select-none rounded-xl">
-                         <IconAnimateSpin class="mr-2 w-4 h-4 animate-spin text-blue-500 shrink-0" /> 
-                         <span v-if="isUploading" class="truncate">{{ uploadingMessage }}</span>
-                         <span v-else-if="currentActiveTask">{{ currentActiveTask.name }} ({{ currentActiveTask.progress }}%)...</span>
-                         <span v-else>{{ generationState.details || 'Thinking...' }}</span>
-                    </div>
                 </div>
 
                 <div class="flex items-center gap-1 pb-1 pr-1">

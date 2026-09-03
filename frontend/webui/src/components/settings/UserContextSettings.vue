@@ -311,8 +311,8 @@ async function handleSaveChanges() {
   <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg max-w-5xl mx-auto">
     <div class="px-4 py-5 sm:p-6 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
         <div>
-            <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">Global User Context & Tools</h3>
-            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure global behaviors, rules, and advanced AI features.</p>
+            <h3 class="text-xl font-bold leading-6 text-gray-900 dark:text-white">User Tools & Global Context</h3>
+            <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">Configure global search credentials, custom agent tools, memory, and reasoning features.</p>
         </div>
         <div class="flex items-center gap-3">
             <span v-if="hasChanges" class="text-xs font-bold text-amber-500 animate-pulse uppercase tracking-widest">Unsaved Changes</span>

@@ -46,25 +46,29 @@ def build_context_router(router: APIRouter):
             raise HTTPException(status_code=404, detail="Discussion not found")
         
         try:
-            # Try to attach client for token counting, but fail gracefully if binding is down
             if not getattr(discussion, 'lollms_client', None):
                 try:
-                    # This might fail if the binding is not configured correctly
                     discussion.lollms_client = get_user_lollms_client(current_user.username)
-                except Exception as e:
-                    # Log but continue. get_context_status needs to handle None client or we return empty.
-                    # Usually get_context_status checks if client exists.
+                except Exception:
                     pass
-            
-            # If client is still missing/failed, get_context_status might fail depending on implementation.
-            # We wrap the call itself.
+
             status = discussion.get_context_status()
             return status
 
         except Exception as e:
-            # Do NOT raise 500, or frontend polling will spam errors. Return degraded status.
-            # trace_exception(e) # Optional: comment out to reduce log spam if this happens often
             return ContextStatusResponse(current_tokens=0, max_tokens=0, zones={})
+
+    @router.get("/{discussion_id}/generation_status")
+    async def get_discussion_generation_status(
+        discussion_id: str,
+        current_user: DBUser = Depends(get_current_db_user_from_token),
+        db: Session = Depends(get_db)
+    ):
+        """Returns whether a background generation is actively running for this discussion."""
+        user_session = user_sessions.get(current_user.username, {})
+        active_controls = user_session.get("active_generation_control", {})
+        is_generating = discussion_id in active_controls and not active_controls[discussion_id].is_set()
+        return {"discussion_id": discussion_id, "is_generating": is_generating}
 
 
     @router.get("/{discussion_id}/export_context", response_class=PlainTextResponse)

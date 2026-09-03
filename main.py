@@ -631,6 +631,24 @@ app.include_router(skills_router)
 
 add_ui_routes(app)
 
+# Silence benign WinError 10054 connection reset tracebacks from Windows Proactor EventLoop
+if os.name == 'nt':
+    from asyncio.proactor_events import _ProactorBasePipeTransport
+    _orig_call_connection_lost = _ProactorBasePipeTransport._call_connection_lost
+
+    def _silenced_call_connection_lost(self, exc):
+        try:
+            _orig_call_connection_lost(self, exc)
+        except ConnectionResetError:
+            pass
+        except OSError as e:
+            if getattr(e, 'winerror', None) == 10054:
+                pass
+            else:
+                raise
+
+    _ProactorBasePipeTransport._call_connection_lost = _silenced_call_connection_lost
+
 if __name__ == "__main__":
     if os.name == 'nt':
         try:

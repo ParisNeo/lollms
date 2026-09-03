@@ -11,7 +11,7 @@ import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
 import IconUserCircle from '../../assets/icons/IconUserCircle.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
-import DropdownMenu from '../ui/DropDownMenu/DropdownMenu.vue';
+import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 
 
 const props = defineProps({

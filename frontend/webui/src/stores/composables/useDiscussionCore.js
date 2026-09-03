@@ -69,18 +69,26 @@ export function useDiscussionCore(state, stores, getActions) {
         }
 
         currentDiscussionId.value = discussionId;
-        
+
         if (discussionId) {
             localStorage.setItem('lollms_last_discussion_id', discussionId);
-            
+
             if (discussions.value[discussionId]) {
                 currentGroupId.value = discussions.value[discussionId].group_id;
+            } else if (discussionId !== 'saved') {
+                // Ensure the discussion exists in the local map
+                discussions.value[discussionId] = {
+                    id: discussionId,
+                    title: 'Discussion',
+                    created_at: new Date().toISOString(),
+                    last_activity_at: new Date().toISOString()
+                };
             }
-            
+
         } else {
             localStorage.removeItem('lollms_last_discussion_id');
         }
-        
+
         if (discussionId) {
             isLoadingMessages.value = true;
             messages.value = [];
@@ -96,13 +104,22 @@ export function useDiscussionCore(state, stores, getActions) {
             await fetchParticipants(discussionId);
 
             try {
-                // Parallel fetch for faster loading
-                const [msgResponse] = await Promise.all([
+                // Parallel fetch for faster loading and generation status detection
+                const [msgResponse, genStatusRes] = await Promise.all([
                     apiClient.get(`/api/discussions/${discussionId}`, { params: { branch_id: branchId } }),
-                    getActions().fetchDataZones(discussionId), // CRITICAL FIX: Load text zones content
+                    apiClient.get(`/api/discussions/${discussionId}/generation_status`).catch(() => ({ data: { is_generating: false } })),
+                    getActions().fetchDataZones(discussionId),
                     getActions().fetchContextStatus(discussionId),
                     getActions().fetchArtefacts(discussionId)
                 ]);
+
+                // Sync generation state with server
+                if (genStatusRes?.data?.is_generating) {
+                    state.generationInProgress.value = true;
+                    state.generationState.value = { status: 'running', details: 'AI is generating response in background...' };
+                } else if (!state.generationInProgress.value) {
+                    state.generationInProgress.value = false;
+                }
 
                 messages.value = processMessages(msgResponse.data);
             } catch (error) {

@@ -233,6 +233,13 @@ export const useAuthStore = defineStore('auth', () => {
                         uiStore.addNotification(`📢 New post by @${data.data.author.username}`, 'info', 4000);
                     }
                     break;
+                case 'post_deleted':
+                    getSocialStore().then(s => {
+                        if (data.data?.post_id) {
+                            s.feedPosts = s.feedPosts.filter(p => String(p.id) !== String(data.data.post_id));
+                        }
+                    });
+                    break;
                 case 'new_dm': 
                     getSocialStore().then(s => s.handleNewDm(data.data));
                     if (user.value && data.data.sender_id !== user.value.id) {
@@ -356,6 +363,9 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'skill_saved':
                     import('./skills').then(s => s.useSkillsStore().fetchSkills());
                     uiStore.addNotification(`Skill saved: ${data.data.title}`, 'success');
+                    break;
+                case 'generation_status':
+                    getDiscussionsStore().then(s => s.handleGenerationStatus(data.data));
                     break;
                 case 'discussion_images_updated':
                     getDiscussionsStore().then(s => s.handleDiscussionImagesUpdated(data.data));

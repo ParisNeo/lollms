@@ -99,7 +99,15 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         if (discussions.value[currentDiscussionId.value]) {
             return discussions.value[currentDiscussionId.value];
         }
-        return sharedWithMe.value.find(d => d.id === currentDiscussionId.value) || null;
+        const shared = sharedWithMe.value.find(d => d.id === currentDiscussionId.value);
+        if (shared) return shared;
+
+        return {
+            id: currentDiscussionId.value,
+            title: 'Discussion',
+            created_at: new Date().toISOString(),
+            last_activity_at: new Date().toISOString()
+        };
     });
 
     const activePersonality = computed(() => {
@@ -603,6 +611,21 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         handleDiscussionImagesUpdated,
         toggleDiscussionImage,
         triggerTagGeneration,
+        handleGenerationStatus(statusData) {
+            if (!statusData) return;
+            const { discussion_id, is_generating } = statusData;
+            if (discussion_id === currentDiscussionId.value) {
+                generationInProgress.value = Boolean(is_generating);
+                if (is_generating) {
+                    generationState.value = { status: 'running', details: 'AI is generating response...' };
+                } else {
+                    generationState.value = { status: 'idle', details: '' };
+                    if (typeof getActions().refreshActiveDiscussionMessages === 'function') {
+                        getActions().refreshActiveDiscussionMessages();
+                    }
+                }
+            }
+        },
         $reset,
     };
 });

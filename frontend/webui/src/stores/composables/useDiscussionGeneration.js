@@ -37,6 +37,24 @@ export function useDiscussionGeneration(state, stores, getActions) {
             }
         }
         
+        if (!currentDiscussionId.value) {
+            try {
+                await getActions().createNewDiscussion();
+            } catch (err) {
+                uiStore.addNotification('Failed to create a new discussion.', 'error');
+                return;
+            }
+        }
+
+        if (currentDiscussionId.value && !discussions.value[currentDiscussionId.value]) {
+            discussions.value[currentDiscussionId.value] = {
+                id: currentDiscussionId.value,
+                title: 'Discussion',
+                created_at: new Date().toISOString(),
+                last_activity_at: new Date().toISOString()
+            };
+        }
+
         if (!currentDiscussionId.value || !state.activeDiscussion.value) {
             uiStore.addNotification('No active conversation.', 'error');
             return;

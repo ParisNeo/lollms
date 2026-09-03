@@ -138,8 +138,8 @@ export function useDiscussionMessages(state, stores, getActions) {
         // If target ID is a temporary client-side ID from an interrupted/cancelled generation
         if (typeof targetMessageId === 'string' && targetMessageId.startsWith('temp-')) {
             // Re-fetch real backend messages to resolve actual persisted ID
-            await fetchMessages(currentDiscussionId.value);
-            
+            await refreshActiveDiscussionMessages();
+
             // Find the corresponding message in the refreshed list
             const foundMsg = messages.value.find(m => m.id === targetMessageId);
             if (!foundMsg && messages.value.length > 0) {

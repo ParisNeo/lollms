@@ -1,6 +1,7 @@
 <script setup>
-import { ref, computed, inject } from 'vue';
+import { ref, computed, inject, provide, onMounted, onUnmounted } from 'vue';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
+import useEventBus from '../../../services/eventBus';
 
 import IconChevronRight from '../../../assets/icons/IconChevronRight.vue';
 import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
@@ -28,13 +29,31 @@ const props = defineProps({
   customClass: { type: String, default: '' }
 });
 
+const { emit, on, off } = useEventBus();
+
 const isSubmenuOpen = ref(false);
 const triggerRef = ref(null);
 const floatingRef = ref(null);
 
-const dropdownContext = inject('dropdown-context', {
+// Identity my parent uses to know it's me when closing siblings.
+const submenuId = Symbol('submenu-item');
+// Scope I hand to MY OWN children, so their sibling-close events only
+// ever affect each other — never items that live under a different
+// parent, at any depth.
+const myScopeId = Symbol('submenu-scope');
+
+// How many of MY direct children currently have a submenu open. While
+// this is > 0 I must not close myself, no matter how long the cursor
+// has been off my own trigger/panel.
+const activeChildCount = ref(0);
+
+let closeTimer = null;
+
+const parentContext = inject('dropdown-context', {
+  scopeId: null,
   setSubmenuActive: () => {},
-  cancelClose: () => {}
+  cancelClose: () => {},
+  closeSiblingSubmenus: () => {}
 });
 
 const { floatingStyles } = useFloating(triggerRef, floatingRef, {
@@ -43,21 +62,91 @@ const { floatingStyles } = useFloating(triggerRef, floatingRef, {
   middleware: [offset(4), flip(), shift({ padding: 8 })],
 });
 
+function cancelCloseTimer() {
+  clearTimeout(closeTimer);
+}
+
+function startCloseTimer(delay = 300) {
+  cancelCloseTimer();
+  closeTimer = setTimeout(() => {
+    if (activeChildCount.value <= 0) {
+      isSubmenuOpen.value = false;
+      parentContext.setSubmenuActive(false);
+    }
+  }, delay);
+}
+
+// Cancels MY close timer and bubbles the cancel up through every
+// ancestor, so hovering a deeply nested submenu keeps the whole chain
+// of parents alive, not just the immediate one.
+function cancelCloseChain() {
+  cancelCloseTimer();
+  parentContext.cancelClose();
+}
+
+// Called by a direct child submenu item to report it opened/closed.
+// Keeps me open while any child is open, and bubbles the same signal
+// further up so grandparents stay open too.
+function setChildSubmenuActive(status) {
+  if (status) {
+    activeChildCount.value++;
+    cancelCloseTimer();
+  } else {
+    activeChildCount.value = Math.max(0, activeChildCount.value - 1);
+    if (activeChildCount.value === 0) {
+      startCloseTimer();
+    }
+  }
+  parentContext.setSubmenuActive(status);
+}
+
+// Closes my direct children's submenus other than `exceptId`. Scoped
+// to myScopeId so only items whose immediate parent is ME respond.
+function closeChildSiblings(exceptId) {
+  emit('close-sibling-submenus', { scopeId: myScopeId, exceptId });
+}
+
 function handleMouseEnter() {
-  dropdownContext.cancelClose();
-  dropdownContext.setSubmenuActive(true);
+  cancelCloseChain();
+  parentContext.closeSiblingSubmenus(submenuId);
+  parentContext.setSubmenuActive(true);
   isSubmenuOpen.value = true;
 }
 
 function handleMouseLeave() {
-  isSubmenuOpen.value = false;
-  dropdownContext.setSubmenuActive(false);
+  startCloseTimer();
 }
 
 function toggleClick(e) {
   e.stopPropagation();
-  isSubmenuOpen.value = !isSubmenuOpen.value;
-  dropdownContext.setSubmenuActive(isSubmenuOpen.value);
+  cancelCloseTimer();
+  const next = !isSubmenuOpen.value;
+  if (next) {
+    parentContext.closeSiblingSubmenus(submenuId);
+  }
+  isSubmenuOpen.value = next;
+  parentContext.setSubmenuActive(next);
+}
+
+function forceClose() {
+  activeChildCount.value = 0;
+  cancelCloseTimer();
+  if (isSubmenuOpen.value) {
+    isSubmenuOpen.value = false;
+    parentContext.setSubmenuActive(false);
+  }
+}
+
+function handleSiblingClose({ scopeId, exceptId }) {
+  if (scopeId !== parentContext.scopeId) return;
+  if (exceptId === submenuId) return;
+  forceClose();
+}
+
+function handleCloseAll() {
+  activeChildCount.value = 0;
+  cancelCloseTimer();
+  isSubmenuOpen.value = false;
 }
 
 const resolvedStatusColor = computed(() => {
@@ -85,6 +174,24 @@ const iconComponent = computed(() => {
     case 'eye': return IconEye;
     default: return null;
   }
+});
+
+onMounted(() => {
+  on('close-sibling-submenus', handleSiblingClose);
+  on('close-all-dropdowns', handleCloseAll);
+});
+
+onUnmounted(() => {
+  off('close-sibling-submenus', handleSiblingClose);
+  off('close-all-dropdowns', handleCloseAll);
+  cancelCloseTimer();
+});
+
+provide('dropdown-context', {
+  scopeId: myScopeId,
+  setSubmenuActive: setChildSubmenuActive,
+  cancelClose: cancelCloseChain,
+  closeSiblingSubmenus: closeChildSiblings
 });
 </script>
 

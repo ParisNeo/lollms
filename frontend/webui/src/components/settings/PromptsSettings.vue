@@ -8,11 +8,14 @@ import IconTrash from '../../assets/icons/IconTrash.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconTicket from '../../assets/icons/IconTicket.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconArrowUpTray from '../../assets/icons/IconArrowUpTray.vue';
+import IconArrowDownTray from '../../assets/icons/IconArrowDownTray.vue';
 
 const promptsStore = usePromptsStore();
 const uiStore = useUiStore();
 const { on, off } = useEventBus();
 
+const importFileInput = ref(null);
 const openedCategories = ref({});
 const pendingGenerationTaskId = ref(null);
 
@@ -33,6 +36,20 @@ function toggleCategory(category) {
 
 function handleAddPrompt() {
     uiStore.openModal('editPrompt', { prompt: {}, isSystemPrompt: false });
+}
+
+function triggerImportFile() {
+    importFileInput.value?.click();
+}
+
+async function handleFileImport(event) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+        await promptsStore.importPrompts(file);
+    } finally {
+        event.target.value = '';
+    }
 }
 
 function handleGeneratePrompt() {
@@ -82,6 +99,15 @@ async function handleDeletePrompt(prompt) {
                 <p class="text-sm text-gray-500">Manage your personal library of reusable prompts.</p>
             </div>
             <div class="flex items-center gap-2">
+                <input type="file" ref="importFileInput" @change="handleFileImport" class="hidden" accept=".json,.yaml,.yml,.txt,.md" />
+                <button @click="triggerImportFile" class="btn btn-secondary" title="Import from JSON, Markdown, or YAML">
+                    <IconArrowUpTray class="w-4 h-4 mr-2" />
+                    Import
+                </button>
+                <button @click="promptsStore.exportPrompts()" class="btn btn-secondary" title="Export personal prompts library">
+                    <IconArrowDownTray class="w-4 h-4 mr-2" />
+                    Export
+                </button>
                 <button @click="handleGeneratePrompt" class="btn btn-secondary">
                     <IconSparkles class="w-4 h-4 mr-2" />
                     Generate with AI
