@@ -28,7 +28,7 @@ Authlib==1.6.5
 bleach==6.3.0
 
 # --- LoLLMs Ecosystem & Client Library ---
-lollms-client==1.18.2
+lollms-client==1.18.4
 ascii_colors==0.12.3
 pipmaster==1.1.13
 openai==2.1.0
