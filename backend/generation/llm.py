@@ -1189,6 +1189,18 @@ def build_llm_generation_router(router: APIRouter):
             lc.cancel_generation = False
         discussion_obj.lollms_client = lc
 
+        # Ensure max_context_size is updated with the active model profile
+        try:
+            ctx = lc.get_ctx_size()
+            if ctx and int(ctx) > 1:
+                discussion_obj.max_context_size = int(ctx)
+            else:
+                cfg_ctx = getattr(lc, 'llm_binding_config', {}).get('ctx_size')
+                if cfg_ctx and int(cfg_ctx) > 1:
+                    discussion_obj.max_context_size = int(cfg_ctx)
+        except Exception:
+            pass
+
         if not lc:
             async def error_stream():
                 yield json.dumps({"type": "error", "content": "Failed to get a valid LLM Client. Check your binding settings."}) + "\n"

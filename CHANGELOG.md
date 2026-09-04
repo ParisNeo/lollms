@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-04 12:11]
+
+- feat(core): enhance discussion context management and artefact handling
+
 ## [2026-09-03 00:00]
 
 - refactor(backend/frontend): improve discussion context and social features

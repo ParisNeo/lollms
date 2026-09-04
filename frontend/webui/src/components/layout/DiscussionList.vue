@@ -174,7 +174,9 @@ async function handleArtefactFileUpload(event) {
     }, 5000);
 
     try {
-        await Promise.all(files.map(file => store.addArtefact({ discussionId: idToUse, file, extractImages: true, pdfMode: currentUploadPdfMode.value })));
+        await Promise.all(files.map(file => store.addArtefact({ discussionId: idToUse, file, extractImages: true, auto_load: true, pdfMode: currentUploadPdfMode.value })));
+        await store.fetchArtefacts(idToUse);
+        await store.fetchContextStatus(idToUse);
     } finally {
         clearTimeout(installHintTimer);
         isUploadingArtefact.value = false;

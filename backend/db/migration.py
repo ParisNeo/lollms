@@ -31,7 +31,7 @@ from ascii_colors import ASCIIColors, trace_exception
 
 @compiles(DropTable, "sqlite")
 def _drop_table(element, compiler, **kw):
-    return "DROP TABLE %s;" % compiler.process(element.element)
+    return "DROP TABLE %s;" % compiler.preparer.format_table(element.element)
 
 def _get_all_existing_app_ports(connection) -> set[int]:
     """Retrieves all non-null ports currently used by apps in the database."""

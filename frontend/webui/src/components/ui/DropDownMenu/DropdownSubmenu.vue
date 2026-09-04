@@ -81,7 +81,9 @@ function startCloseTimer(delay = 300) {
 // of parents alive, not just the immediate one.
 function cancelCloseChain() {
   cancelCloseTimer();
-  parentContext.cancelClose();
+  if (typeof parentContext?.cancelClose === 'function') {
+    parentContext.cancelClose();
+  }
 }
 
 // Called by a direct child submenu item to report it opened/closed.
@@ -97,7 +99,9 @@ function setChildSubmenuActive(status) {
       startCloseTimer();
     }
   }
-  parentContext.setSubmenuActive(status);
+  if (typeof parentContext?.setSubmenuActive === 'function') {
+    parentContext.setSubmenuActive(status);
+  }
 }
 
 // Closes my direct children's submenus other than `exceptId`. Scoped
@@ -108,8 +112,12 @@ function closeChildSiblings(exceptId) {
 
 function handleMouseEnter() {
   cancelCloseChain();
-  parentContext.closeSiblingSubmenus(submenuId);
-  parentContext.setSubmenuActive(true);
+  if (typeof parentContext?.closeSiblingSubmenus === 'function') {
+    parentContext.closeSiblingSubmenus(submenuId);
+  }
+  if (typeof parentContext?.setSubmenuActive === 'function') {
+    parentContext.setSubmenuActive(true);
+  }
   isSubmenuOpen.value = true;
 }
 
@@ -121,11 +129,13 @@ function toggleClick(e) {
   e.stopPropagation();
   cancelCloseTimer();
   const next = !isSubmenuOpen.value;
-  if (next) {
+  if (next && typeof parentContext?.closeSiblingSubmenus === 'function') {
     parentContext.closeSiblingSubmenus(submenuId);
   }
   isSubmenuOpen.value = next;
-  parentContext.setSubmenuActive(next);
+  if (typeof parentContext?.setSubmenuActive === 'function') {
+    parentContext.setSubmenuActive(next);
+  }
 }
 
 function forceClose() {
@@ -133,12 +143,14 @@ function forceClose() {
   cancelCloseTimer();
   if (isSubmenuOpen.value) {
     isSubmenuOpen.value = false;
-    parentContext.setSubmenuActive(false);
+    if (typeof parentContext?.setSubmenuActive === 'function') {
+      parentContext.setSubmenuActive(false);
+    }
   }
 }
 
 function handleSiblingClose({ scopeId, exceptId }) {
-  if (scopeId !== parentContext.scopeId) return;
+  if (!parentContext?.scopeId || scopeId !== parentContext.scopeId) return;
   if (exceptId === submenuId) return;
   forceClose();
 }
@@ -264,6 +276,8 @@ provide('dropdown-context', {
           @mouseenter="handleMouseEnter"
           @mouseleave="handleMouseLeave"
         >
+          <div class="absolute -left-3 top-0 bottom-0 w-3 pointer-events-auto"></div>
+          <div class="absolute -right-3 top-0 bottom-0 w-3 pointer-events-auto"></div>
           <slot />
         </div>
       </Transition>

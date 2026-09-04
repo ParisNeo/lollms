@@ -98,7 +98,7 @@ def _import_artefact_task(
         
         task.set_progress(90)
         discussion.commit()
-        
+
         # Fetch updated artefacts list for task result
         artefacts = [
             {
@@ -109,7 +109,24 @@ def _import_artefact_task(
             }
             for a in discussion.list_artefacts()
         ]
-        
+
+        # Broadcast live sync event over WebSocket so all UI components update immediately
+        try:
+            from backend.ws_manager import manager
+            with task.db_session_factory() as db:
+                from backend.db.models.user import User as DBUser
+                user_rec = db.query(DBUser).filter(DBUser.username == username).first()
+                if user_rec:
+                    manager.send_personal_message_sync({
+                        "type": "discussion_updated",
+                        "data": {
+                            "discussion_id": discussion_id,
+                            "sender_username": username
+                        }
+                    }, user_rec.id)
+        except Exception as ws_err:
+            print(f"Warning: Failed to broadcast discussion_updated from artefact task: {ws_err}")
+
         task.set_progress(100)
         task.log(f"Successfully imported '{filename}'.")
         return {
@@ -192,7 +209,24 @@ def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str
             }
             for a in discussion.list_artefacts()
         ]
-        
+
+        # Broadcast live sync event over WebSocket
+        try:
+            from backend.ws_manager import manager
+            with task.db_session_factory() as db:
+                from backend.db.models.user import User as DBUser
+                user_rec = db.query(DBUser).filter(DBUser.username == username).first()
+                if user_rec:
+                    manager.send_personal_message_sync({
+                        "type": "discussion_updated",
+                        "data": {
+                            "discussion_id": discussion_id,
+                            "sender_username": username
+                        }
+                    }, user_rec.id)
+        except Exception as ws_err:
+            print(f"Warning: Failed to broadcast discussion_updated from url task: {ws_err}")
+
         task.set_progress(100)
         task.log(f"Successfully imported from '{url}'.")
         return {

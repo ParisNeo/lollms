@@ -540,6 +540,16 @@ def _build_universal_profiles_for_modality(
             if is_model_default:
                 default_model_profile_name = prof_name
 
+            raw_ctx = forced_ctx_size or cfg.get('forced_context_size') or cfg.get('ctx_size')
+            effective_ctx = None
+            if raw_ctx is not None:
+                try:
+                    parsed_ctx = int(raw_ctx)
+                    if parsed_ctx > 1:
+                        effective_ctx = parsed_ctx
+                except (ValueError, TypeError):
+                    effective_ctx = None
+
             profile_entry = {
                 "binding_profile_name": binding.alias,
                 "model_name": orig_name,
@@ -547,8 +557,8 @@ def _build_universal_profiles_for_modality(
                 "description": cfg.get('description', ''),
                 "vision_enabled": cfg.get('vision_enabled', cfg.get('has_vision', False)),
                 "has_vision": cfg.get('has_vision', cfg.get('vision_enabled', False)),
-                "forced_context_size": forced_ctx_size or cfg.get('forced_context_size', cfg.get('ctx_size')),
-                "ctx_size": forced_ctx_size or cfg.get('ctx_size', cfg.get('forced_context_size')),
+                "forced_context_size": effective_ctx,
+                "ctx_size": effective_ctx,
                 "temperature": cfg.get('temperature'),
                 "top_k": cfg.get('top_k'),
                 "top_p": cfg.get('top_p'),
@@ -800,25 +810,49 @@ def build_lollms_client_from_params(
         primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
         primary_config["model_name"] = target_model_name or (primary_binding.default_model_name if primary_binding else "")
 
+        found_alias_ctx = None
         if primary_binding and primary_binding.model_aliases:
             aliases_map = primary_binding.model_aliases
             if isinstance(aliases_map, str):
                 try: aliases_map = json.loads(aliases_map)
                 except Exception: aliases_map = {}
-            if isinstance(aliases_map, dict) and target_model_name in aliases_map:
-                alias_item = aliases_map[target_model_name]
-                alias_cfg = alias_item.get('alias', {}) if isinstance(alias_item, dict) and 'alias' in alias_item else (alias_item if isinstance(alias_item, dict) else {})
-                alias_ctx = alias_cfg.get('forced_context_size') or alias_cfg.get('ctx_size')
-                if alias_ctx:
-                    primary_config["ctx_size"] = int(alias_ctx)
-                if not alias_cfg.get('allow_parameters_override', True):
-                    for param_k in ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_activation', 'reasoning_effort', 'reasoning_summary']:
-                        if alias_cfg.get(param_k) is not None:
-                            primary_config[param_k] = alias_cfg[param_k]
+            if isinstance(aliases_map, dict):
+                alias_cfg = None
+                if target_model_name in aliases_map:
+                    alias_item = aliases_map[target_model_name]
+                    alias_cfg = alias_item.get('alias', {}) if isinstance(alias_item, dict) and 'alias' in alias_item else (alias_item if isinstance(alias_item, dict) else {})
+                else:
+                    for orig_k, a_val in aliases_map.items():
+                        a_dict = a_val.get('alias', {}) if isinstance(a_val, dict) and 'alias' in a_val else (a_val if isinstance(a_val, dict) else {})
+                        if orig_k == target_model_name or a_dict.get('title') == target_model_name or a_dict.get('name') == target_model_name:
+                            alias_cfg = a_dict
+                            break
 
-        if forced_ctx:
-            primary_config["ctx_size"] = forced_ctx
+                if alias_cfg:
+                    alias_ctx = alias_cfg.get('forced_context_size') or alias_cfg.get('ctx_size')
+                    if alias_ctx:
+                        try:
+                            parsed = int(alias_ctx)
+                            if parsed > 1:
+                                found_alias_ctx = parsed
+                        except (ValueError, TypeError):
+                            pass
+                    if not alias_cfg.get('allow_parameters_override', True):
+                        for param_k in ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_activation', 'reasoning_effort', 'reasoning_summary']:
+                            if alias_cfg.get(param_k) is not None:
+                                primary_config[param_k] = alias_cfg[param_k]
+
+        if found_alias_ctx and found_alias_ctx > 1:
+            primary_config["ctx_size"] = found_alias_ctx
+        elif forced_ctx and int(forced_ctx) > 1:
+            primary_config["ctx_size"] = int(forced_ctx)
+        elif not primary_config.get("ctx_size") or int(primary_config.get("ctx_size", 0)) <= 1:
+            primary_config["ctx_size"] = 4096
+
         primary_config.update(final_user_params)
+        # Ensure ctx_size wasn't wiped out by user_params
+        if found_alias_ctx and found_alias_ctx > 1:
+            primary_config["ctx_size"] = found_alias_ctx
 
         client_init_params = {
             "load_llm": load_llm,

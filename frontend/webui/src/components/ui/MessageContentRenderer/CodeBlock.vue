@@ -148,23 +148,117 @@ function getMimeType(language) {
 }
 
 function getDownloadExtension(language) {
-    const lang = language.toLowerCase();
-    if (lang === 'python') return 'py';
-    if (lang === 'javascript') return 'js';
-    if (lang === 'svg') return 'svg';
-    return lang || 'txt';
+    const l = (language || '').toLowerCase().trim();
+    const map = {
+        'python': 'py', 'py': 'py',
+        'javascript': 'js', 'js': 'js',
+        'typescript': 'ts', 'ts': 'ts',
+        'html': 'html', 'css': 'css', 'scss': 'scss',
+        'json': 'json', 'xml': 'xml', 'yaml': 'yaml', 'yml': 'yaml',
+        'svg': 'svg', 'mermaid': 'mmd',
+        'latex': 'tex', 'tex': 'tex',
+        'sql': 'sql', 'bash': 'sh', 'sh': 'sh', 'powershell': 'ps1',
+        'rust': 'rs', 'go': 'go', 'cpp': 'cpp', 'c++': 'cpp', 'c': 'c', 'csharp': 'cs', 'cs': 'cs',
+        'java': 'java', 'kotlin': 'kt', 'ruby': 'rb', 'php': 'php', 'r': 'r', 'swift': 'swift',
+        'owl': 'owl', 'ttl': 'ttl', 'turtle': 'ttl', 'rdf': 'rdf',
+        'markdown': 'md', 'md': 'md', 'txt': 'txt'
+    };
+    return map[l] || l || 'txt';
+}
+
+function extractSynthesizedTitle(code, language) {
+    const raw = (code || '').trim();
+    if (!raw) return 'code';
+    const lang = (language || '').toLowerCase().trim();
+    const lines = raw.split('\n');
+
+    // Strategy 1: Explicit annotation headers like [CREATE] path/file.py or --- Document: name ---
+    for (let i = 0; i < Math.min(lines.length, 5); i++) {
+        const line = lines[i].trim();
+        const createMatch = line.match(/^(?:#|\/\/|\/\*|<!--)?\s*\[(?:CREATE|UPDATE)\]\s*([a-zA-Z0-9_\-./]+\.[a-zA-Z0-9]+)/i);
+        if (createMatch) {
+            const base = createMatch[1].split(/[/\\]/).pop();
+            return base.replace(/\.[^/.]+$/, '');
+        }
+        const docBlockMatch = line.match(/^---\s*(?:Document|Note|Skill|Artefact):\s*(.*?)\s*---/i);
+        if (docBlockMatch) {
+            return docBlockMatch[1].replace(/\.[^/.]+$/, '');
+        }
+    }
+
+    // Strategy 2: Python / Shell comments & definitions
+    if (['python', 'py', 'sh', 'bash'].includes(lang)) {
+        for (let i = 0; i < Math.min(lines.length, 10); i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith('#') && !trimmed.startsWith('#!')) {
+                const clean = trimmed.replace(/^#+\s*/, '').replace(/^(title|file|filename|description):\s*/i, '').trim();
+                if (clean && clean.length > 2 && clean.length < 60) return clean;
+            }
+            if (trimmed.startsWith('class ') || trimmed.startsWith('def ')) {
+                const defMatch = trimmed.match(/(?:class|def)\s+([a-zA-Z0-9_]+)/);
+                if (defMatch) return defMatch[1];
+            }
+        }
+    }
+
+    // Strategy 3: JS / TS / C / C++ / Java definitions & comments
+    if (['javascript', 'js', 'typescript', 'ts', 'java', 'c', 'cpp', 'c++', 'cs', 'php', 'rust', 'go'].includes(lang)) {
+        for (let i = 0; i < Math.min(lines.length, 10); i++) {
+            const trimmed = lines[i].trim();
+            if (trimmed.startsWith('//') || trimmed.startsWith('/*')) {
+                const clean = trimmed.replace(/^\/\/[/*\s]*/, '').replace(/\*\/$/, '').replace(/^(title|file|filename|description):\s*/i, '').trim();
+                if (clean && clean.length > 2 && clean.length < 60) return clean;
+            }
+            if (trimmed.match(/^(?:export\s+)?(?:default\s+)?(?:class|function|const|interface|struct)\s+([a-zA-Z0-9_]+)/)) {
+                const defMatch = trimmed.match(/(?:class|function|const|interface|struct)\s+([a-zA-Z0-9_]+)/);
+                if (defMatch) return defMatch[1];
+            }
+        }
+    }
+
+    // Strategy 4: HTML / SVG / XML
+    if (['html', 'xml', 'svg'].includes(lang)) {
+        const titleTag = raw.match(/<title\b[^>]*>(.*?)<\/title>/i);
+        if (titleTag && titleTag[1].trim()) return titleTag[1].trim();
+    }
+
+    // Strategy 5: Markdown heading
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.startsWith('#')) {
+            const clean = trimmed.replace(/^#+\s*/, '').trim();
+            if (clean) return clean;
+        }
+    }
+
+    // Strategy 6: First line text snippet
+    for (const line of lines) {
+        const trimmed = line.trim().replace(/^[^a-zA-Z0-9]+/, '');
+        if (trimmed.length > 2) {
+            const words = trimmed.split(/\s+/).slice(0, 5).join('_');
+            if (words) return words.substring(0, 35);
+        }
+    }
+
+    return 'code';
 }
 
 function downloadCode() {
+    const ext = getDownloadExtension(props.language);
+    const rawTitle = extractSynthesizedTitle(props.code, props.language);
+    const safeTitle = rawTitle.replace(/[\\/:*?"<>|#`$@!%^&*()+={}\[\];,~]/g, '_').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '') || 'code';
+    const filename = `${safeTitle}.${ext}`;
+
     const blob = new Blob([props.code], { type: getMimeType(props.language) });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `code.${getDownloadExtension(props.language)}`;
+    a.download = filename;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    uiStore.addNotification(`Saved as '${filename}'`, 'success', 2500);
 }
 
 function showInstallUi() {

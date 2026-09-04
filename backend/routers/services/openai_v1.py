@@ -20,12 +20,19 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from pydantic import BaseModel, Field
-
+import os
+import tempfile
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding
-from backend.db.models.config import GlobalConfig
+from backend.db.models.config import (
+    LLMBinding as DBLLMBinding, 
+    TTIBinding as DBTTIBinding,
+    TTSBinding as DBTTSBinding,
+    STTBinding as DBSTTBinding,
+    GlobalConfig
+)
+from backend.db.models.voice import UserVoice as DBUserVoice
 from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
 from backend.session import user_sessions, build_lollms_client_from_params, get_user_data_root, find_model_by_alias, resolve_model_name, invalidate_model_cache
@@ -67,22 +74,41 @@ class ChatMessage(BaseModel):
     tool_calls: Optional[List[ToolCall]] = None
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
+    reasoning_content: Optional[str] = None
+    refusal: Optional[str] = None
 
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[ChatMessage]
     personality: Optional[str] = None 
     temperature: Optional[float] = None
+    top_p: Optional[float] = None
     max_tokens: Optional[int] = None
+    max_completion_tokens: Optional[int] = None
     stream: Optional[bool] = False
     tools: Optional[List[Dict[str, Any]]] = None
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    response_format: Optional[Union[Dict[str, Any], str]] = None
     reasoning_effort: Optional[str] = None
+    stop: Optional[Union[str, List[str]]] = None
+    presence_penalty: Optional[float] = None
+    frequency_penalty: Optional[float] = None
+    user: Optional[str] = None
+
+class CompletionTokensDetails(BaseModel):
+    reasoning_tokens: Optional[int] = 0
+    accepted_prediction_tokens: Optional[int] = 0
+    rejected_prediction_tokens: Optional[int] = 0
+
+class PromptTokensDetails(BaseModel):
+    cached_tokens: Optional[int] = 0
 
 class UsageInfo(BaseModel):
     prompt_tokens: int
     completion_tokens: int
     total_tokens: int
+    completion_tokens_details: Optional[CompletionTokensDetails] = None
+    prompt_tokens_details: Optional[PromptTokensDetails] = None
 
 class ChatCompletionResponseChoice(BaseModel):
     index: int
@@ -102,6 +128,8 @@ class DeltaMessage(BaseModel):
     role: Optional[str] = None
     content: Optional[str] = None
     tool_calls: Optional[List[ToolCall]] = None
+    reasoning_content: Optional[str] = None
+    refusal: Optional[str] = None
 
 class ChatCompletionResponseStreamChoice(BaseModel):
     index: int
@@ -209,6 +237,47 @@ class FileExtractionRequest(BaseModel):
 
 class FileExtractionResponse(BaseModel):
     text: str = Field(..., description="The extracted text content.")
+
+# --- NEW: Models for OpenAI Audio Suite ---
+class OpenAITTSRequest(BaseModel):
+    input: str = Field(..., description="The text to generate audio for.")
+    model: Optional[str] = Field(default="tts-1", description="The model to use ('tts-1', 'tts-1-hd', or 'binding_alias/model').")
+    voice: Optional[str] = Field(default="alloy", description="Voice to use (alloy, echo, fable, onyx, nova, shimmer, or custom voice ID).")
+    response_format: Optional[str] = Field(default="mp3", description="Audio format (mp3, opus, aac, flac, wav, pcm).")
+    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="Audio speed.")
+
+class AudioTranscriptionResponse(BaseModel):
+    text: str
+
+# --- NEW: Models for OpenAI Responses API ---
+class ResponseCreateRequest(BaseModel):
+    model: str
+    input: Union[str, List[Any]]
+    instructions: Optional[str] = None
+    tools: Optional[List[Dict[str, Any]]] = None
+    temperature: Optional[float] = None
+    max_output_tokens: Optional[int] = None
+    stream: Optional[bool] = False
+    reasoning: Optional[Dict[str, Any]] = None
+
+class ResponseOutputContent(BaseModel):
+    type: str = "text"
+    text: str
+
+class ResponseOutputMessage(BaseModel):
+    id: str = Field(default_factory=lambda: f"msg_{uuid.uuid4().hex[:12]}")
+    type: str = "message"
+    role: str = "assistant"
+    content: List[ResponseOutputContent]
+
+class ResponseObject(BaseModel):
+    id: str = Field(default_factory=lambda: f"resp_{uuid.uuid4().hex}")
+    object: str = "response"
+    created_at: int = Field(default_factory=lambda: int(time.time()))
+    model: str
+    status: str = "completed"
+    output: List[ResponseOutputMessage]
+    usage: UsageInfo
 
 
 
@@ -418,6 +487,79 @@ def preprocess_openai_messages(messages: List[ChatMessage]) -> Tuple[List[Dict],
 
     return processed, image_list
 
+
+def handle_response_format_injection(messages: List[Dict], response_format: Any) -> List[Dict]:
+    """
+    Enforces OpenAI Structured Outputs.
+    If response_format is 'json_schema' or 'json_object', injects strict grammar and schema instructions.
+    """
+    if not response_format:
+        return messages
+
+    format_prompt = ""
+    if isinstance(response_format, dict):
+        fmt_type = response_format.get("type", "").lower()
+        if fmt_type == "json_schema":
+            json_schema = response_format.get("json_schema", {})
+            schema_name = json_schema.get("name", "response")
+            schema_desc = json_schema.get("description", "")
+            schema_def = json_schema.get("schema", {})
+            format_prompt = (
+                f"\n\n### STRUCTURED OUTPUT JSON SCHEMA REQUIREMENTS\n"
+                f"You MUST generate a response that strictly adheres to the following JSON schema.\n"
+                f"Do NOT include markdown formatting, code block fences, explanations, or text outside the JSON object.\n"
+                f"Schema Name: {schema_name}\n"
+            )
+            if schema_desc:
+                format_prompt += f"Schema Description: {schema_desc}\n"
+            format_prompt += f"JSON Schema:\n{json.dumps(schema_def, indent=2)}\n"
+        elif fmt_type == "json_object":
+            format_prompt = (
+                "\n\n### OUTPUT FORMAT\n"
+                "You MUST respond with a valid, well-formed JSON object. "
+                "Do NOT include conversational text or explanations outside the JSON."
+            )
+    elif isinstance(response_format, str) and response_format.lower() in ("json", "json_object"):
+        format_prompt = (
+            "\n\n### OUTPUT FORMAT\n"
+            "You MUST respond with a valid, well-formed JSON object."
+        )
+
+    if not format_prompt:
+        return messages
+
+    for msg in messages:
+        if msg.get("role") == "system":
+            msg["content"] = (msg.get("content") or "") + format_prompt
+            return messages
+
+    messages.insert(0, {"role": "system", "content": format_prompt.strip()})
+    return messages
+
+def parse_reasoning_and_content(text: Any) -> Tuple[str, Optional[str]]:
+    """
+    Separates chain-of-thought thinking blocks (<think>...</think> or <thought>...</thought>)
+    from the final response content according to the OpenAI / DeepSeek standard.
+    Returns: (cleaned_content, reasoning_content)
+    """
+    if not text:
+        return "", None
+    if not isinstance(text, str):
+        text = str(text)
+
+    think_match = re.search(r'<(?:think|thought)>([\s\S]*?)</(?:think|thought)>', text, re.IGNORECASE)
+    if think_match:
+        reasoning = think_match.group(1).strip()
+        cleaned_content = re.sub(r'<(?:think|thought)>[\s\S]*?</(?:think|thought)>', '', text, flags=re.IGNORECASE).strip()
+        return cleaned_content, (reasoning if reasoning else None)
+
+    unclosed_match = re.search(r'<(?:think|thought)>([\s\S]*)$', text, re.IGNORECASE)
+    if unclosed_match:
+        reasoning = unclosed_match.group(1).strip()
+        cleaned_content = text[:unclosed_match.start()].strip()
+        return cleaned_content, (reasoning if reasoning else None)
+
+    return text, None
 
 def handle_tools_injection(messages: List[Dict], tools: List[Dict], tool_choice: Union[str, Dict] = None) -> List[Dict]:
     """
@@ -833,9 +975,18 @@ async def chat_completions(
     if request.tools:
         openai_messages = handle_tools_injection(openai_messages, request.tools, request.tool_choice)
 
+    if request.response_format:
+        openai_messages = handle_response_format_injection(openai_messages, request.response_format)
+
+    effective_max_tokens = request.max_completion_tokens if request.max_completion_tokens is not None else request.max_tokens
+
     generation_kwargs = {}
     if request.reasoning_effort:
         generation_kwargs["reasoning_effort"] = request.reasoning_effort
+    if request.top_p is not None:
+        generation_kwargs["top_p"] = request.top_p
+    if request.stop is not None:
+        generation_kwargs["stop"] = [request.stop] if isinstance(request.stop, str) else request.stop
 
     stream_style = '\nTools requested in stream mode.' if request.tools else ""
 
@@ -958,7 +1109,7 @@ async def chat_completions(
                                 lambda: lc.generate_from_messages(
                                     openai_messages,
                                     temperature=request.temperature,
-                                    n_predict=request.max_tokens,
+                                    n_predict=effective_max_tokens,
                                     **generation_kwargs
                                 )
                             ),
@@ -989,14 +1140,56 @@ async def chat_completions(
                         return
 
                      # ── STREAMING PATH ────────────────────────────────────────────────────
+                    in_reasoning = False
+
                     def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
+                        nonlocal in_reasoning
                         if lc.llm and lc.llm.is_cancelled():
                             return False
-                        if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
+
+                        if msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK and chunk_text:
                             main_loop.call_soon_threadsafe(
                                 stream_queue.put_nowait,
-                                make_chunk(DeltaMessage(content=chunk_text))
+                                make_chunk(DeltaMessage(reasoning_content=chunk_text))
                             )
+                            return True
+
+                        if msg_type == MSG_TYPE.MSG_TYPE_CHUNK and chunk_text:
+                            # Detect inline <think> tags for models emitting raw tokens
+                            if "<think>" in chunk_text:
+                                in_reasoning = True
+                                parts = chunk_text.split("<think>", 1)
+                                if parts[0]:
+                                    main_loop.call_soon_threadsafe(
+                                        stream_queue.put_nowait,
+                                        make_chunk(DeltaMessage(content=parts[0]))
+                                    )
+                                chunk_text = parts[1]
+
+                            if in_reasoning:
+                                if "</think>" in chunk_text:
+                                    parts = chunk_text.split("</think>", 1)
+                                    if parts[0]:
+                                        main_loop.call_soon_threadsafe(
+                                            stream_queue.put_nowait,
+                                            make_chunk(DeltaMessage(reasoning_content=parts[0]))
+                                        )
+                                    in_reasoning = False
+                                    if parts[1]:
+                                        main_loop.call_soon_threadsafe(
+                                            stream_queue.put_nowait,
+                                            make_chunk(DeltaMessage(content=parts[1]))
+                                        )
+                                else:
+                                    main_loop.call_soon_threadsafe(
+                                        stream_queue.put_nowait,
+                                        make_chunk(DeltaMessage(reasoning_content=chunk_text))
+                                    )
+                            else:
+                                main_loop.call_soon_threadsafe(
+                                    stream_queue.put_nowait,
+                                    make_chunk(DeltaMessage(content=chunk_text))
+                                )
                         return True
 
                     # Use a dedicated thread for generation to prevent event loop starvation
@@ -1006,7 +1199,7 @@ async def chat_completions(
                                 openai_messages,
                                 streaming_callback=llm_callback,
                                 temperature=request.temperature,
-                                n_predict=request.max_tokens,
+                                n_predict=effective_max_tokens,
                                 stream=True,
                                 **generation_kwargs
                             )
@@ -1113,7 +1306,7 @@ async def chat_completions(
             lambda: lc.generate_from_messages(
                 openai_messages,
                 temperature=request.temperature,
-                n_predict=request.max_tokens,
+                n_predict=effective_max_tokens,
                 **generation_kwargs
             )
         )
@@ -1160,24 +1353,32 @@ async def chat_completions(
                     detail=error_detail
                 )
 
-            content = result_content
+            raw_text = str(result_content) if result_content is not None else ""
+            clean_content, reasoning_content = parse_reasoning_and_content(raw_text)
+
             finish_reason = "stop"
             tool_calls = None
 
             if request.tools:
-                content, tool_calls = parse_tool_calls_from_text(result_content)
+                parsed_content, tool_calls = parse_tool_calls_from_text(clean_content)
                 if tool_calls:
                     finish_reason = "tool_calls"
+                if parsed_content is not None:
+                    clean_content = parsed_content
 
-            # Safety: Ensure content is a string or list before passing to Pydantic
-            if not isinstance(content, (str, list)):
-                content = str(content) if content is not None else ""
-
-            msg_obj = ChatMessage(role="assistant", content=content, tool_calls=tool_calls)
+            msg_obj = ChatMessage(
+                role="assistant",
+                content=clean_content,
+                tool_calls=tool_calls,
+                reasoning_content=reasoning_content
+            )
             choice = ChatCompletionResponseChoice(index=0, message=msg_obj, finish_reason=finish_reason)
 
             prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(openai_messages)))
-            completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(result_content)))
+            completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(raw_text))
+            reasoning_tokens = 0
+            if reasoning_content:
+                reasoning_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(reasoning_content))
 
             return ChatCompletionResponse(
                 id=f"chatcmpl-{uuid.uuid4().hex}",
@@ -1187,6 +1388,8 @@ async def chat_completions(
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
                     total_tokens=prompt_tokens + completion_tokens,
+                    completion_tokens_details=CompletionTokensDetails(reasoning_tokens=reasoning_tokens),
+                    prompt_tokens_details=PromptTokensDetails(cached_tokens=0)
                 ),
             )
         except HTTPException:
@@ -1646,7 +1849,6 @@ async def extract_text_from_file(
 ):
     try:
         file_bytes = base64.b64decode(request.file)
-        # File extraction can be CPU intensive for large docs
         loop = asyncio.get_running_loop()
         extracted_text, _ = await loop.run_in_executor(
             executor, 
@@ -1658,3 +1860,265 @@ async def extract_text_from_file(
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"File extraction failed: {str(e)}")
+
+# --- Official OpenAI Audio Endpoints ---
+
+@openai_v1_router.post("/audio/speech")
+async def create_speech_openai(
+    request: OpenAITTSRequest,
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
+    """
+    OpenAI-compatible Text-to-Speech endpoint (POST /v1/audio/speech).
+    Compatible with `openai.audio.speech.create(...)`.
+    """
+    loop = asyncio.get_running_loop()
+    tts_binding_alias = None
+    tts_model_name = None
+
+    if request.model and "/" in request.model:
+        tts_binding_alias, tts_model_name = request.model.split("/", 1)
+    else:
+        active_binding = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
+        if not active_binding:
+            raise HTTPException(status_code=501, detail="No active TTS binding configured.")
+        tts_binding_alias = active_binding.alias
+        tts_model_name = active_binding.default_model_name or request.model
+
+    try:
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                load_llm=False,
+                load_tts=True,
+                tts_binding_alias=tts_binding_alias,
+                tts_model_name=tts_model_name
+            )
+        )
+        if not hasattr(lc, "tts") or not lc.tts:
+            raise HTTPException(status_code=500, detail="TTS service is unavailable for this binding.")
+
+        # Clean markdown / emojis from text
+        clean_input = re.sub(r'[*#]', '', request.input)
+        clean_input = re.sub(r'[\U00010000-\U0010ffff]', '', clean_input)
+
+        audio_bytes = await loop.run_in_executor(
+            executor,
+            lambda: lc.tts.generate_audio(
+                text=clean_input,
+                voice=request.voice,
+                model=tts_model_name,
+                speed=request.speed
+            )
+        )
+
+        format_to_mime = {
+            "mp3": "audio/mpeg",
+            "opus": "audio/opus",
+            "aac": "audio/aac",
+            "flac": "audio/flac",
+            "wav": "audio/wav",
+            "pcm": "audio/pcm"
+        }
+        content_type = format_to_mime.get(request.response_format, "audio/mpeg")
+
+        return Response(
+            content=audio_bytes,
+            media_type=content_type,
+            headers={"Content-Disposition": f"attachment; filename=speech.{request.response_format}"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Speech synthesis failed: {e}")
+
+@openai_v1_router.post("/audio/transcriptions", response_model=AudioTranscriptionResponse)
+async def create_transcription_openai(
+    file: UploadFile = File(...),
+    model: str = Form("whisper-1"),
+    language: Optional[str] = Form(None),
+    prompt: Optional[str] = Form(None),
+    response_format: Optional[str] = Form("json"),
+    temperature: Optional[float] = Form(0.0),
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
+    """
+    OpenAI-compatible Speech-to-Text endpoint (POST /v1/audio/transcriptions).
+    Compatible with `openai.audio.transcriptions.create(...)`.
+    """
+    stt_binding_alias = None
+    stt_model_name = None
+
+    if "/" in model:
+        stt_binding_alias, stt_model_name = model.split("/", 1)
+    else:
+        active_stt = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
+        if not active_stt:
+            raise HTTPException(status_code=501, detail="No active STT binding configured.")
+        stt_binding_alias = active_stt.alias
+        stt_model_name = active_stt.default_model_name or model
+
+    loop = asyncio.get_running_loop()
+    with tempfile.NamedTemporaryFile(delete=False, suffix=Path(file.filename or "audio.wav").suffix) as tf:
+        content = await file.read()
+        tf.write(content)
+        temp_path = tf.name
+
+    try:
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                load_llm=False,
+                load_stt=True,
+                stt_binding_alias=stt_binding_alias,
+                stt_model_name=stt_model_name
+            )
+        )
+        if not hasattr(lc, "stt") or not lc.stt:
+            raise HTTPException(status_code=500, detail="STT service is unavailable.")
+
+        def _transcribe():
+            if hasattr(lc.stt, "transcribe_audio"):
+                return lc.stt.transcribe_audio(temp_path)
+            elif hasattr(lc.stt, "transcribe_file"):
+                return lc.stt.transcribe_file(temp_path)
+            elif hasattr(lc.stt, "transcribe"):
+                return lc.stt.transcribe(temp_path)
+            raise ValueError("STT binding lacks audio transcription method.")
+
+        transcript = await loop.run_in_executor(executor, _transcribe)
+        return AudioTranscriptionResponse(text=str(transcript).strip())
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Audio transcription failed: {e}")
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
+
+@openai_v1_router.post("/audio/translations", response_model=AudioTranscriptionResponse)
+async def create_translation_openai(
+    file: UploadFile = File(...),
+    model: str = Form("whisper-1"),
+    prompt: Optional[str] = Form(None),
+    response_format: Optional[str] = Form("json"),
+    temperature: Optional[float] = Form(0.0),
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
+    """
+    OpenAI-compatible Audio translation endpoint (POST /v1/audio/translations).
+    Transcribes and translates audio to English.
+    """
+    return await create_transcription_openai(
+        file=file,
+        model=model,
+        language="en",
+        prompt=prompt,
+        response_format=response_format,
+        temperature=temperature,
+        user=user,
+        db=db
+    )
+
+# --- OpenAI Responses API (Modern Agentic Primitive) ---
+
+@openai_v1_router.post("/responses", response_model=ResponseObject)
+async def create_response_openai(
+    request: ResponseCreateRequest,
+    fastapi_request: Request,
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
+    """
+    OpenAI Responses API (POST /v1/responses).
+    The modern agentic primitive unifying instructions, tools, reasoning, and multi-part outputs.
+    Compatible with `openai.responses.create(...)`.
+    """
+    loop = asyncio.get_running_loop()
+    binding_alias, model_name = await loop.run_in_executor(
+        executor,
+        lambda: resolve_model_name(db, request.model)
+    )
+
+    lc = await loop.run_in_executor(
+        executor,
+        lambda: build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name,
+            load_llm=True
+        )
+    )
+
+    # Convert Responses API inputs to message sequence
+    messages = []
+    if request.instructions:
+        messages.append({"role": "system", "content": request.instructions})
+
+    if isinstance(request.input, str):
+        messages.append({"role": "user", "content": request.input})
+    elif isinstance(request.input, list):
+        for item in request.input:
+            if isinstance(item, dict):
+                role = item.get("role", "user")
+                content = item.get("content") or item.get("text") or str(item)
+                messages.append({"role": role, "content": content})
+            else:
+                messages.append({"role": "user", "content": str(item)})
+
+    if request.tools:
+        messages = handle_tools_injection(messages, request.tools)
+
+    generation_kwargs = {}
+    if request.reasoning and isinstance(request.reasoning, dict):
+        effort = request.reasoning.get("effort")
+        if effort:
+            generation_kwargs["reasoning_effort"] = effort
+
+    _prepare_generation(lc)
+    try:
+        raw_res = await loop.run_in_executor(
+            executor,
+            lambda: lc.generate_from_messages(
+                messages,
+                temperature=request.temperature,
+                n_predict=request.max_output_tokens or 2048,
+                **generation_kwargs
+            )
+        )
+    finally:
+        _cancel_generation(lc)
+
+    clean_content, reasoning_content = parse_reasoning_and_content(str(raw_res))
+
+    prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(messages)))
+    completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(raw_res)))
+    reasoning_tokens = 0
+    if reasoning_content:
+        reasoning_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(reasoning_content))
+
+    return ResponseObject(
+        model=request.model,
+        output=[
+            ResponseOutputMessage(
+                content=[ResponseOutputContent(text=clean_content)]
+            )
+        ],
+        usage=UsageInfo(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            completion_tokens_details=CompletionTokensDetails(reasoning_tokens=reasoning_tokens),
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=0)
+        )
+    )

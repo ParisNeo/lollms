@@ -9,23 +9,51 @@ import asyncio
 from typing import List, Optional, Dict, Any, Union
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 from backend.db import get_db
 from backend.db.models.user import User as DBUser
 from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
 from backend.db.models.personality import Personality as DBPersonality
-from backend.db.models.config import LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding, TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding, RAGBinding as DBRAGBinding
+from backend.db.models.config import (
+    LLMBinding as DBLLMBinding, 
+    TTIBinding as DBTTIBinding, 
+    TTSBinding as DBTTSBinding, 
+    STTBinding as DBSTTBinding, 
+    TTVBinding as DBTTVBinding,
+    TTMBinding as DBTTMBinding,
+    RAGBinding as DBRAGBinding
+)
 from backend.db.models.datastore import DataStore as DBDataStore
 from backend.db.models.voice import UserVoice as DBUserVoice
 from backend.security import verify_api_key
 from backend.session import user_sessions, build_lollms_client_from_params, get_safe_store_instance, get_user_data_root
 from backend.settings import settings
+
+try:
+    from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
+except ImportError:
+    list_llm_binding_models = None
+
+try:
+    from lollms_client.lollms_tti_binding import list_binding_models as list_tti_binding_models
+except ImportError:
+    list_tti_binding_models = None
+
+try:
+    from lollms_client.lollms_tts_binding import list_binding_models as list_tts_binding_models
+except ImportError:
+    list_tts_binding_models = None
+
+try:
+    from lollms_client.lollms_stt_binding import list_binding_models as list_stt_binding_models
+except ImportError:
+    list_stt_binding_models = None
 from backend.utils import track_service_usage, check_rate_limit
 from backend.routers.services.openai_v1 import (
     PersonalityListResponse, PersonalityInfo,
@@ -141,6 +169,190 @@ class RagDatabaseInfo(BaseModel):
 class RagDatabaseListResponse(BaseModel):
     object: str = "list"
     data: List[RagDatabaseInfo]
+
+# --- NEW: Per-Binding Model Listing Models ---
+
+class BindingModelInfo(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+    id: str
+    name: str
+    binding: str
+    model_name: str
+    alias: Optional[Dict[str, Any]] = None
+    created: Optional[int] = Field(default_factory=lambda: int(time.time()))
+    owned_by: str = "lollms"
+
+class BindingModelListResponse(BaseModel):
+    object: str = "list"
+    binding_type: str
+    total: int = 0
+    data: List[BindingModelInfo]
+
+# Supported binding modality configurations
+BINDING_TYPE_MAP = {
+    "llm": DBLLMBinding,
+    "tti": DBTTIBinding,
+    "tts": DBTTSBinding,
+    "stt": DBSTTBinding,
+    "ttv": DBTTVBinding,
+    "ttm": DBTTMBinding,
+    "rag": DBRAGBinding,
+}
+
+BINDING_ALIAS_NORMALIZER = {
+    "text": "llm",
+    "image": "tti",
+    "speech": "tts",
+    "audio": "tts",
+    "transcription": "stt",
+    "video": "ttv",
+    "music": "ttm",
+    "embedding": "rag",
+    "embeddings": "rag",
+    "vectorizer": "rag",
+    "vectorizers": "rag",
+    "safe_store": "rag",
+}
+
+def _clean_alias(alias_data: Any) -> Optional[Dict[str, Any]]:
+    if not alias_data:
+        return None
+    if isinstance(alias_data, str):
+        try:
+            alias_data = json.loads(alias_data)
+        except Exception:
+            return {"title": alias_data}
+    if isinstance(alias_data, dict):
+        if "alias" in alias_data and isinstance(alias_data["alias"], dict):
+            return alias_data["alias"]
+        return alias_data
+    return {"title": str(alias_data)}
+
+def _extract_raw_models_for_binding(b_type: str, binding_record: Any) -> List[Any]:
+    raw_models = []
+
+    if b_type == "rag":
+        from backend.session import safe_store
+        if safe_store and hasattr(safe_store, "SafeStore") and hasattr(safe_store.SafeStore, "list_models"):
+            clean_config = binding_record.config.copy() if isinstance(binding_record.config, dict) else {}
+            clean_config.pop("model", None)
+            try:
+                raw_models = safe_store.SafeStore.list_models(
+                    vectorizer_name=binding_record.name,
+                    vectorizer_config=clean_config
+                )
+            except Exception as e:
+                print(f"Warning: Failed to list SafeStore models for {binding_record.alias}: {e}")
+        return raw_models if isinstance(raw_models, list) else []
+
+    helper_map = {
+        "llm": list_llm_binding_models,
+        "tti": list_tti_binding_models,
+        "tts": list_tts_binding_models,
+        "stt": list_stt_binding_models
+    }
+    helper = helper_map.get(b_type)
+    if helper:
+        try:
+            b_config = binding_record.config if isinstance(binding_record.config, dict) else {}
+            kw = {f"{b_type}_binding_name": binding_record.name, f"{b_type}_binding_config": b_config}
+            models_res = helper(**kw)
+            if isinstance(models_res, list):
+                return models_res
+        except Exception:
+            pass
+
+    try:
+        from backend.routers.admin.bindings_management import _get_binding_instance, _get_effective_config
+        config = _get_effective_config(binding_record)
+        service = _get_binding_instance(b_type, binding_record.name, config)
+        if service and hasattr(service, "list_models") and callable(service.list_models):
+            models_res = service.list_models()
+            if isinstance(models_res, list):
+                return models_res
+    except Exception:
+        pass
+
+    return raw_models
+
+def _get_models_for_binding_type(
+    db: Session,
+    b_type: str,
+    binding_alias: Optional[str] = None
+) -> List[BindingModelInfo]:
+    target_cls = BINDING_TYPE_MAP[b_type]
+    query = db.query(target_cls).filter(target_cls.is_active == True)
+    if binding_alias:
+        query = query.filter(target_cls.alias == binding_alias)
+    active_bindings = query.all()
+
+    models_out: List[BindingModelInfo] = []
+    seen_ids = set()
+
+    for binding in active_bindings:
+        raw_models = _extract_raw_models_for_binding(b_type, binding)
+        raw_names = []
+        if isinstance(raw_models, list):
+            for item in raw_models:
+                m_id = item if isinstance(item, str) else (item.get("model_name") or item.get("name") or item.get("id"))
+                if m_id:
+                    raw_names.append(str(m_id))
+
+        aliases = binding.model_aliases or {}
+        if isinstance(aliases, str):
+            try:
+                aliases = json.loads(aliases)
+            except Exception:
+                aliases = {}
+        if not isinstance(aliases, dict):
+            aliases = {}
+
+        # 1. Process models reported by the underlying binding engine
+        for model_name in raw_names:
+            alias_data = aliases.get(model_name)
+            clean_alias = _clean_alias(alias_data)
+            display_name = (clean_alias.get("title") or clean_alias.get("name") or model_name) if clean_alias else model_name
+            full_id = f"{binding.alias}/{model_name}"
+
+            if full_id not in seen_ids:
+                seen_ids.add(full_id)
+                models_out.append(BindingModelInfo(
+                    id=full_id,
+                    name=display_name,
+                    binding=binding.alias,
+                    model_name=model_name,
+                    alias=clean_alias
+                ))
+
+        # 2. Process models declared in aliases (e.g. configured profiles, router groups)
+        for orig_name, alias_data in aliases.items():
+            full_id = f"{binding.alias}/{orig_name}"
+            if full_id not in seen_ids:
+                clean_alias = _clean_alias(alias_data)
+                display_name = (clean_alias.get("title") or clean_alias.get("name") or orig_name) if clean_alias else orig_name
+                seen_ids.add(full_id)
+                models_out.append(BindingModelInfo(
+                    id=full_id,
+                    name=display_name,
+                    binding=binding.alias,
+                    model_name=orig_name,
+                    alias=clean_alias
+                ))
+
+        # 3. Fallback to default_model_name if available and not yet indexed
+        if binding.default_model_name:
+            full_id = f"{binding.alias}/{binding.default_model_name}"
+            if full_id not in seen_ids:
+                seen_ids.add(full_id)
+                models_out.append(BindingModelInfo(
+                    id=full_id,
+                    name=binding.default_model_name,
+                    binding=binding.alias,
+                    model_name=binding.default_model_name,
+                    alias=None
+                ))
+
+    return sorted(models_out, key=lambda x: x.name)
 
 # --- Endpoints ---
 
@@ -574,3 +786,58 @@ async def list_voices(
         return VoicesListResponse(data=voices)
 
     return await loop.run_in_executor(executor, _fetch_voices)
+
+# --- Per-Binding-Type Model Listing Endpoints ---
+
+@lollms_v1_router.get("/{binding_type}/models", response_model=BindingModelListResponse)
+async def list_models_for_binding_type(
+    binding_type: str,
+    binding_alias: Optional[str] = Query(None, description="Optional filter by specific binding alias"),
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Lists all available models for a specific binding modality.
+    Supported types: 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm', 'rag'.
+    Example endpoints:
+      - /lollms/v1/llm/models
+      - /lollms/v1/tti/models
+      - /lollms/v1/tts/models
+      - /lollms/v1/stt/models
+      - /lollms/v1/ttv/models
+      - /lollms/v1/ttm/models
+      - /lollms/v1/rag/models
+    """
+    normalized_type = binding_type.lower().strip()
+    normalized_type = BINDING_ALIAS_NORMALIZER.get(normalized_type, normalized_type)
+
+    if normalized_type not in BINDING_TYPE_MAP:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported binding type '{binding_type}'. Supported types: {', '.join(BINDING_TYPE_MAP.keys())}"
+        )
+
+    loop = asyncio.get_running_loop()
+    model_items = await loop.run_in_executor(
+        executor,
+        lambda: _get_models_for_binding_type(db, normalized_type, binding_alias)
+    )
+
+    return BindingModelListResponse(
+        object="list",
+        binding_type=normalized_type,
+        total=len(model_items),
+        data=model_items
+    )
+
+@lollms_v1_router.get("/models", response_model=BindingModelListResponse)
+async def list_all_service_models(
+    binding_type: str = Query("llm", description="Binding modality type (llm, tti, tts, stt, ttv, ttm, rag)"),
+    binding_alias: Optional[str] = Query(None, description="Optional filter by specific binding alias"),
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Convenience endpoint listing models for the specified binding type (defaults to 'llm').
+    """
+    return await list_models_for_binding_type(binding_type, binding_alias, user, db)

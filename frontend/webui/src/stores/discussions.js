@@ -516,7 +516,10 @@ export const useDiscussionsStore = defineStore('discussions', () => {
                         if (correspondingTaskInStore.status === 'completed') {
                             if (trackedTask.type === 'import_url' || trackedTask.type === 'import_file') {
                                 if (typeof getActions().fetchArtefacts === 'function') {
-                                    getActions().fetchArtefacts(discussionId);
+                                    await getActions().fetchArtefacts(discussionId);
+                                }
+                                if (typeof getActions().fetchContextStatus === 'function') {
+                                    await getActions().fetchContextStatus(discussionId);
                                 }
                             }
                             if (trackedTask.type === 'memorize') {

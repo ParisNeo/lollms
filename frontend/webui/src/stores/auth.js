@@ -348,13 +348,14 @@ export const useAuthStore = defineStore('auth', () => {
                     });
                     break;
                 case 'discussion_updated':
-                    getDiscussionsStore().then(s => {
+                    getDiscussionsStore().then(async s => {
                         if (s.currentDiscussionId === data.data.discussion_id) {
-                            uiStore.addNotification(`Discussion updated by ${data.data.sender_username}.`, 'info');
+                            await s.fetchArtefacts(data.data.discussion_id);
+                            await s.fetchContextStatus(data.data.discussion_id);
                             s.refreshActiveDiscussionMessages();
                         }
                         s.loadDiscussions();
-                        s.fetchAllUserArtefacts(); // Instantly sync the global artefacts list as well!
+                        s.fetchAllUserArtefacts();
                     });
                     break;
                 case 'data_zone_processed': 

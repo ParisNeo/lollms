@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, provide, watch, nextTick, markRaw } from 'vue';
+import { computed, ref, provide, watch, onMounted, onUnmounted, nextTick, markRaw } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useFloating, offset, flip, shift, autoUpdate } from '@floating-ui/vue';
 import { useDiscussionsStore } from '../../stores/discussions';
@@ -7,6 +7,7 @@ import { useUiStore } from '../../stores/ui';
 import { useAuthStore } from '../../stores/auth';
 import { useDataStore } from '../../stores/data';
 import { useSocialStore } from '../../stores/social';
+import useEventBus from '../../services/eventBus';
 
 import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 import TasksManagerButton from './TasksManagerButton.vue';
@@ -75,7 +76,11 @@ const isRefreshingModels = ref(false);
 const menuTriggerRef = ref(null);
 const menuFloatingRef = ref(null);
 const isSubmenuActive = ref(false);
+const activeSubmenusCount = ref(0);
 let closeTimer = null;
+
+const { emit: eventBusEmit, on: eventBusOn, off: eventBusOff } = useEventBus();
+const headerDropdownScopeId = Symbol('global-header-dropdown-scope');
 
 const { floatingStyles } = useFloating(menuTriggerRef, menuFloatingRef, {
   placement: 'bottom-start',
@@ -84,14 +89,28 @@ const { floatingStyles } = useFloating(menuTriggerRef, menuFloatingRef, {
 });
 
 function setSubmenuActive(status) {
-    isSubmenuActive.value = status;
+    if (status) {
+        activeSubmenusCount.value++;
+        cancelClose();
+    } else {
+        activeSubmenusCount.value = Math.max(0, activeSubmenusCount.value - 1);
+    }
+    isSubmenuActive.value = activeSubmenusCount.value > 0;
 }
+
 function cancelClose() {
     clearTimeout(closeTimer);
 }
+
+function closeSiblingSubmenus(exceptId) {
+    eventBusEmit('close-sibling-submenus', { scopeId: headerDropdownScopeId, exceptId });
+}
+
 provide('dropdown-context', {
+  scopeId: headerDropdownScopeId,
   setSubmenuActive,
-  cancelClose
+  cancelClose,
+  closeSiblingSubmenus
 });
 
 const vOnClickOutside = {
@@ -198,14 +217,52 @@ const filteredAvailableTtvModels = computed(() => ttvModelSearchTerm.value ? for
 const filteredAvailableTtmModels = computed(() => ttmModelSearchTerm.value ? formattedAvailableTtmModels.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(ttmModelSearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : formattedAvailableTtmModels.value);
 const filteredAvailablePersonalities = computed(() => personalitySearchTerm.value ? availablePersonalities.value.map(g => ({...g, items: g.items.filter(i => i.name.toLowerCase().includes(personalitySearchTerm.value.toLowerCase()))})).filter(g => g.items.length > 0) : availablePersonalities.value);
 
-function selectModel(id) { activeModelName.value = id; }
-function selectPersonality(id) { activePersonalityId.value = id; }
-function selectTtiModel(id) { activeTtiModelName.value = id; }
-function selectTtsModel(id) { activeTtsModelName.value = id; }
-function selectSttModel(id) { activeSttModelName.value = id; }
-function selectTtvModel(id) { activeTtvModelName.value = id; }
-function selectTtmModel(id) { activeTtmModelName.value = id; }
+function selectModel(id) { 
+    activeModelName.value = id; 
+    isMenuOpen.value = false; 
+}
+function selectPersonality(id) { 
+    activePersonalityId.value = id; 
+    isMenuOpen.value = false; 
+}
+function selectTtiModel(id) { 
+    activeTtiModelName.value = id; 
+    isMenuOpen.value = false; 
+}
+function selectTtsModel(id) { 
+    activeTtsModelName.value = id; 
+    isMenuOpen.value = false; 
+}
+function selectSttModel(id) { 
+    activeSttModelName.value = id; 
+    isMenuOpen.value = false; 
+}
+function selectTtvModel(id) { 
+    activeTtvModelName.value = id; 
+    isMenuOpen.value = false; 
+}
+function selectTtmModel(id) { 
+    activeTtmModelName.value = id; 
+    isMenuOpen.value = false; 
+}
 
+watch(isMenuOpen, (open) => {
+    if (!open) {
+        activeSubmenusCount.value = 0;
+        isSubmenuActive.value = false;
+        eventBusEmit('close-all-dropdowns');
+    }
+});
+onMounted(() => {
+    eventBusOn('close-all-dropdowns', () => {
+        isMenuOpen.value = false;
+        isSubmenuActive.value = false;
+    });
+});
+onUnmounted(() => {
+    eventBusOff('close-all-dropdowns');
+    clearTimeout(closeTimer);
+});
 async function handleRefreshModels() {
     isRefreshingModels.value = true;
     try {

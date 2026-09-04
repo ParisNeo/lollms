@@ -52,11 +52,40 @@ def build_context_router(router: APIRouter):
                 except Exception:
                     pass
 
+            # Ensure discussion max_context_size is healthy (> 1)
+            if not getattr(discussion, 'max_context_size', None) or discussion.max_context_size <= 1:
+                if getattr(discussion, 'lollms_client', None):
+                    try:
+                        ctx = discussion.lollms_client.get_ctx_size()
+                        if ctx and int(ctx) > 1:
+                            discussion.max_context_size = int(ctx)
+                    except Exception:
+                        pass
+                if not getattr(discussion, 'max_context_size', None) or discussion.max_context_size <= 1:
+                    cfg_ctx = getattr(discussion.lollms_client, 'llm_binding_config', {}).get('ctx_size') if getattr(discussion, 'lollms_client', None) else None
+                    discussion.max_context_size = int(cfg_ctx) if cfg_ctx and int(cfg_ctx) > 1 else 4096
+
             status = discussion.get_context_status()
+
+            # Guard against status returning max_tokens <= 1
+            if isinstance(status, dict):
+                if not status.get("max_tokens") or status.get("max_tokens") <= 1:
+                    status["max_tokens"] = discussion.max_context_size or 4096
+                    cur = status.get("current_tokens", 0)
+                    status["percent"] = (cur / status["max_tokens"]) * 100 if status["max_tokens"] > 0 else 0
+            elif hasattr(status, "max_tokens"):
+                if not status.max_tokens or status.max_tokens <= 1:
+                    status.max_tokens = discussion.max_context_size or 4096
+                    status.percent = (status.current_tokens / status.max_tokens) * 100 if status.max_tokens > 0 else 0
+
             return status
 
         except Exception as e:
-            return ContextStatusResponse(current_tokens=0, max_tokens=0, zones={})
+            trace_exception(e)
+            resolved_max = getattr(discussion, 'max_context_size', 4096)
+            if not resolved_max or resolved_max <= 1:
+                resolved_max = 4096
+            return ContextStatusResponse(current_tokens=0, max_tokens=resolved_max, zones={})
 
     @router.get("/{discussion_id}/generation_status")
     async def get_discussion_generation_status(

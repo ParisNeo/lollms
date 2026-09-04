@@ -11,6 +11,7 @@ import { useAuthStore } from '../../stores/auth';
 import { usePromptsStore } from '../../stores/prompts';
 import { useNotesStore } from '../../stores/notes';
 import { useSkillsStore } from '../../stores/skills';
+import placeholderParser from '../../services/placeholderParser';
 import { storeToRefs } from 'pinia';
 import apiClient from '../../services/api';
 import useEventBus from '../../services/eventBus';
@@ -107,6 +108,27 @@ const textareaRef = ref(null);
 const isWebSearchActive = ref(false); 
 const stagedImages = ref([]); 
 const user = computed(() => authStore.user);
+
+const detectedPlaceholders = computed(() => {
+    if (!messageText.value || typeof messageText.value !== 'string') return [];
+    return placeholderParser.parse(messageText.value);
+});
+
+function openFillPlaceholders(autoSend = false) {
+    if (detectedPlaceholders.value.length === 0) return;
+    uiStore.openModal('fillPlaceholders', {
+        promptTemplate: messageText.value,
+        onConfirm: (filledText) => {
+            messageText.value = filledText;
+            adjustTextareaHeight();
+            if (autoSend) {
+                nextTick(() => {
+                    handleSendMessage();
+                });
+            }
+        }
+    });
+}
 
 async function handleCreateDiscussionWithAttachedArtefacts() {
     if (!activeDiscussion.value) return;
@@ -226,7 +248,18 @@ const canEnableHerd = computed(() => {
 });
 
 const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
-const maxTokens = computed(() => activeDiscussionContextStatus.value?.max_tokens || 1);
+const maxTokens = computed(() => {
+    const rawMax = activeDiscussionContextStatus.value?.max_tokens;
+    if (rawMax && Number(rawMax) > 1) {
+        return Number(rawMax);
+    }
+    const activeModel = dataStore.availableLLMModelsGrouped?.flatMap(g => g.items)?.find(m => m.id === user.value?.lollms_model_name);
+    const modelCtx = activeModel?.forced_context_size || activeModel?.ctx_size;
+    if (modelCtx && Number(modelCtx) > 1) {
+        return Number(modelCtx);
+    }
+    return 4096;
+});
 
 const totalCurrentTokens = computed(() => {
     // Backend 'current_tokens' represents the last known stable state.
@@ -901,6 +934,8 @@ async function handleFilesInput(files) {
 
             try { 
                 await Promise.all(others.map(file => discussionsStore.addArtefact({ discussionId: activeDiscussion.value.id, file, extractImages: true, auto_load: true, pdfMode: currentUploadPdfMode.value }))); 
+                await discussionsStore.fetchArtefacts(activeDiscussion.value.id);
+                await discussionsStore.fetchContextStatus(activeDiscussion.value.id);
             } finally { 
                 clearTimeout(hintTimer);
                 isUploading.value = false; 
@@ -920,7 +955,21 @@ async function handlePaste(event) {
 }
 async function handleImportFromInternet() { if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; } uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id, mode: 'url' }); }
 async function handleCreateManualArtefact() { if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; } uiStore.openModal('createArtefact', { discussionId: activeDiscussion.value.id }); }
-function handlePromptSelection(content) { messageText.value += (messageText.value ? '\n' : '') + content; }
+function handlePromptSelection(content) {
+    const placeholders = placeholderParser.parse(content);
+    if (placeholders.length > 0) {
+        uiStore.openModal('fillPlaceholders', {
+            promptTemplate: content,
+            onConfirm: (filled) => {
+                messageText.value = (messageText.value ? messageText.value + '\n' : '') + filled;
+                adjustTextareaHeight();
+            }
+        });
+    } else {
+        messageText.value = (messageText.value ? messageText.value + '\n' : '') + content;
+        adjustTextareaHeight();
+    }
+}
 
 const filteredUserPromptsByCategory = computed(() => {
     if (!userPromptSearchTerm.value) return userPromptsByCategory.value;
@@ -950,6 +999,11 @@ async function handleSendMessage() {
     if (generationInProgress.value) return;
     const text = messageText.value.trim();
     if (!text && attachedFiles.value.length === 0 && stagedImages.value.length === 0) return;
+
+    if (detectedPlaceholders.value.length > 0) {
+        openFillPlaceholders(true);
+        return;
+    }
 
     // Reset height after sending
     if (textareaRef.value) textareaRef.value.style.height = '42px';
@@ -1102,6 +1156,27 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
         </div>
 
         <div class="p-3 sm:p-4 max-w-4xl mx-auto space-y-3">
+            <!-- Placeholder Detection Pill -->
+            <div v-if="detectedPlaceholders.length > 0" class="flex items-center justify-between px-3.5 py-2 bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/70 rounded-xl text-xs text-amber-900 dark:text-amber-200 shadow-xs animate-in fade-in slide-in-from-bottom-1">
+                <div class="flex items-center gap-2 min-w-0">
+                    <IconSparkles class="w-4 h-4 text-amber-500 shrink-0 animate-pulse" />
+                    <span class="font-bold truncate">
+                        {{ detectedPlaceholders.length }} placeholder{{ detectedPlaceholders.length > 1 ? 's' : '' }} detected:
+                        <span class="font-mono text-[11px] opacity-80">
+                            {{ detectedPlaceholders.map(p => p.name).join(', ') }}
+                        </span>
+                    </span>
+                </div>
+                <button 
+                    @click="openFillPlaceholders(false)" 
+                    type="button" 
+                    class="px-2.5 py-1 bg-amber-500 hover:bg-amber-600 text-white font-bold text-[10px] uppercase tracking-wider rounded-lg shadow-sm transition-all active:scale-95 shrink-0 ml-2 cursor-pointer flex items-center gap-1"
+                >
+                    <span>Fill Values</span>
+                    <IconChevronRight class="w-3 h-3" />
+                </button>
+            </div>
+
             <!-- SPECIAL SELECTION ZONE -->
             <div v-if="stagedImages.length > 0 || attachedFiles.length > 0 || attachedSkills.length > 0 || loadedContextItems.length > 0 || activeRagStoresInfo.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
 

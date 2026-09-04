@@ -155,7 +155,7 @@ export function useDiscussionArtefacts(composableState, stores, getActions) {
         }
     }
 
-    async function addArtefact({ discussionId, file, extractImages = true, pdfMode = 'text_and_embedded_images', auto_load = false }) {
+    async function addArtefact({ discussionId, file, extractImages = true, pdfMode = 'text_and_embedded_images', auto_load = true }) {
         if (!discussionId) return;
         const formData = new FormData();
         formData.append('file', file);

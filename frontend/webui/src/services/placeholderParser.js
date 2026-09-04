@@ -93,21 +93,7 @@ export function cleanTemplate(template) {
     const regex = /@<([^>]+?)>@[\s\S]*?@<\/\1>@/g;
     const withoutDefinitions = template.replace(regex, '');
 
-    const lines = withoutDefinitions.split('\n');
-    let firstContentLineIndex = -1;
-
-    for (let i = 0; i < lines.length; i++) {
-        if (lines[i].trim() !== '') {
-            firstContentLineIndex = i;
-            break;
-        }
-    }
-
-    if (firstContentLineIndex !== -1) {
-        return lines.slice(firstContentLineIndex).join('\n');
-    }
-
-    return '';
+    return withoutDefinitions.trim();
 }
 
 export default {

@@ -64,12 +64,30 @@ def get_user_discussion(
     # Priority-based Context Size Resolution via Universal Profile Architecture
     max_context_size = None
     try:
-        max_context_size = lc.get_ctx_size()
+        if hasattr(lc, 'get_ctx_size'):
+            ctx = lc.get_ctx_size()
+            if ctx and int(ctx) > 1:
+                max_context_size = int(ctx)
     except Exception:
         pass
 
-    if not max_context_size:
-        max_context_size = getattr(lc, 'llm_binding_config', {}).get('ctx_size') or 4096
+    if not max_context_size or max_context_size <= 1:
+        cfg_ctx = getattr(lc, 'llm_binding_config', {}).get('ctx_size')
+        if cfg_ctx and int(cfg_ctx) > 1:
+            max_context_size = int(cfg_ctx)
+
+    if not max_context_size or max_context_size <= 1:
+        profiles = getattr(lc, 'llm_model_profiles', {})
+        if isinstance(profiles, dict):
+            for p in profiles.values():
+                if isinstance(p, dict) and p.get('is_default'):
+                    p_ctx = p.get('forced_context_size') or p.get('ctx_size')
+                    if p_ctx and int(p_ctx) > 1:
+                        max_context_size = int(p_ctx)
+                        break
+
+    if not max_context_size or max_context_size <= 1:
+        max_context_size = 4096
 
     discussion = dm.get_discussion(
         lollms_client=lc,
