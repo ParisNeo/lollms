@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-06 23:17]
+
+- fix(admin_routing): update available models API to add missing model validation logic
+
 ## [2026-09-06 21:41]
 
 - # Commit message for frontend asset deletions and backend minor tweaks

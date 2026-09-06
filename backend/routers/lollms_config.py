@@ -38,15 +38,18 @@ async def get_lollms_models(
 
     for binding in active_bindings:
         try:
-            models_from_binding = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config)
-            
             raw_model_names = []
-            if isinstance(models_from_binding, list):
-                for item in models_from_binding:
-                    model_id = None
-                    if isinstance(item, str): model_id = item
-                    elif isinstance(item, dict): model_id = item.get("name") or item.get("id") or item.get("model_name")
-                    if model_id: raw_model_names.append(model_id)
+            if binding.name != 'smart_router' and binding.alias != 'smart_router':
+                try:
+                    models_from_binding = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config)
+                    if isinstance(models_from_binding, list):
+                        for item in models_from_binding:
+                            model_id = None
+                            if isinstance(item, str): model_id = item
+                            elif isinstance(item, dict): model_id = item.get("name") or item.get("id") or item.get("model_name")
+                            if model_id: raw_model_names.append(model_id)
+                except Exception as b_err:
+                    print(f"WARNING: list_llm_binding_models failed for '{binding.alias}': {b_err}")
 
             model_aliases = binding.model_aliases or {}
             if isinstance(model_aliases, str):
@@ -54,25 +57,43 @@ async def get_lollms_models(
                     model_aliases = json.loads(model_aliases)
                 except Exception:
                     model_aliases = {}
+            if not isinstance(model_aliases, dict):
+                model_aliases = {}
+
+            if (binding.name == 'smart_router' or binding.alias == 'smart_router') and not model_aliases:
+                model_aliases = {"auto": {"title": "Auto Smart Router", "description": "Dynamic multi-model smart router", "routing_strategy": "balanced"}}
 
             for model_name in raw_model_names:
                 alias_data = model_aliases.get(model_name)
-                
+
                 if model_display_mode == 'aliased' and not alias_data:
                     continue
-                
+
                 display_name = f"{binding.alias}/{model_name}"
 
                 if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                    display_name = alias_data.get('title', model_name)
+                    alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else {"title": str(alias_data)}
+                    display_name = alias_dict.get('title') or alias_dict.get('name') or model_name
 
+                alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else alias_data
                 model_info = {
                     "id": f"{binding.alias}/{model_name}",
                     "name": display_name,
-                    "alias": alias_data
+                    "alias": alias_dict
                 }
-
                 all_models.append(model_info)
+
+            # Include configured aliases/routing groups not in raw_model_names (including Smart Router groups)
+            for orig_name, alias_data in model_aliases.items():
+                full_id = f"{binding.alias}/{orig_name}"
+                if not any(m["id"] == full_id for m in all_models):
+                    alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else {"title": str(alias_data)}
+                    display_name = alias_dict.get('title') or alias_dict.get('name') or orig_name
+                    all_models.append({
+                        "id": full_id,
+                        "name": display_name,
+                        "alias": alias_dict
+                    })
 
         except Exception as e:
             print(f"WARNING: Could not fetch models from binding '{binding.alias}': {e}")

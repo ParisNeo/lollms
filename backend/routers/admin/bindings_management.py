@@ -585,9 +585,11 @@ async def get_available_models(
 
     for binding in active_bindings:
         try:
-            config = _get_effective_config(binding)
-            service = _get_binding_instance("llm", binding.name, config)
-            raw_models = service.list_models() if (service and hasattr(service, 'list_models')) else []
+            raw_models = []
+            if binding.name != 'smart_router' and binding.alias != 'smart_router':
+                config = _get_effective_config(binding)
+                service = _get_binding_instance("llm", binding.name, config)
+                raw_models = service.list_models() if (service and hasattr(service, 'list_models')) else []
 
             aliases = binding.model_aliases or {}
             if isinstance(aliases, str):
@@ -595,6 +597,9 @@ async def get_available_models(
                 except Exception: aliases = {}
             if not isinstance(aliases, dict):
                 aliases = {}
+
+            if (binding.name == 'smart_router' or binding.alias == 'smart_router') and not aliases:
+                aliases = {"auto": {"title": "Auto Smart Router", "description": "Dynamic multi-model smart router", "routing_strategy": "balanced"}}
 
             if isinstance(raw_models, list):
                 for item in raw_models:
@@ -891,16 +896,16 @@ def _get_modality_models(
     return sorted(deduped_models, key=lambda x: x.name)
 def _get_modality_models_list(binding_record, binding_type: str) -> List[BindingModel]:
     try:
-        config = _get_effective_config(binding_record)
-        service = _get_binding_instance(binding_type, binding_record.name, config)
-        raw_models = service.list_models() if hasattr(service, 'list_models') else []
-
         models_list = []
-        if isinstance(raw_models, list):
-            for item in raw_models:
-                m_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
-                if m_id:
-                    models_list.append(m_id)
+        if binding_record.name != 'smart_router' and binding_record.alias != 'smart_router':
+            config = _get_effective_config(binding_record)
+            service = _get_binding_instance(binding_type, binding_record.name, config)
+            raw_models = service.list_models() if hasattr(service, 'list_models') else []
+            if isinstance(raw_models, list):
+                for item in raw_models:
+                    m_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
+                    if m_id:
+                        models_list.append(m_id)
 
         model_aliases = binding_record.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -908,6 +913,15 @@ def _get_modality_models_list(binding_record, binding_type: str) -> List[Binding
                 model_aliases = json.loads(model_aliases)
             except Exception:
                 model_aliases = {}
+        if not isinstance(model_aliases, dict):
+            model_aliases = {}
+
+        if (binding_record.name == 'smart_router' or binding_record.alias == 'smart_router') and not model_aliases:
+            model_aliases = {"auto": {"title": "Auto Smart Router", "description": "Dynamic multi-model smart router", "routing_strategy": "balanced"}}
+
+        for k in model_aliases.keys():
+            if k not in models_list:
+                models_list.append(k)
 
         return [BindingModel(original_model_name=model_name, alias=model_aliases.get(model_name)) for model_name in sorted(models_list)]
     except Exception as e:
