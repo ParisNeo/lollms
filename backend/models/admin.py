@@ -161,6 +161,7 @@ class TTMBindingPublicAdmin(TTMBindingCreate):
 
 class ModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+    model_name: Optional[str] = None
     title: Optional[str] = None
     name: Optional[str] = None
     description: Optional[str] = None
@@ -197,6 +198,7 @@ class ModelAlias(BaseModel):
 
 class TtiModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+    model_name: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -205,6 +207,7 @@ class TtiModelAlias(BaseModel):
 
 class TtsModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+    model_name: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -213,6 +216,7 @@ class TtsModelAlias(BaseModel):
 
 class SttModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+    model_name: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -221,6 +225,7 @@ class SttModelAlias(BaseModel):
 
 class TtvModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+    model_name: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -229,6 +234,7 @@ class TtvModelAlias(BaseModel):
 
 class TtmModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+    model_name: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -237,6 +243,7 @@ class TtmModelAlias(BaseModel):
     
 class RagModelAlias(BaseModel):
     model_config = ConfigDict(extra="allow")
+    model_name: Optional[str] = None
     title: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None

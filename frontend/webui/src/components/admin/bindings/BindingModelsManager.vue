@@ -101,10 +101,13 @@ const availableVisionProfilesGrouped = computed(() => {
     return Object.entries(groups).map(([label, items]) => ({ label, items }));
 });
 
+const customTargetModel = ref(false);
+
 const getInitialFormState = () => ({
     icon: '',
     title: '',
     name: '',
+    model_name: '',
     description: '',
     has_vision: true,
     vision_enabled: true,
@@ -168,7 +171,11 @@ watch(currentIconGenerationTask, (newTask) => {
 });
 
 const configuredAliases = computed(() => {
-    const aliases = props.binding?.model_aliases || {};
+    let aliases = props.binding?.model_aliases || {};
+    if (typeof aliases === 'string') {
+        try { aliases = JSON.parse(aliases); } catch (e) { aliases = {}; }
+    }
+    if (!aliases || typeof aliases !== 'object') return [];
     return Object.entries(aliases).map(([model_name, alias_data]) => {
         const data = typeof alias_data === 'object' ? alias_data : { title: String(alias_data) };
         return {
@@ -209,16 +216,23 @@ function selectModelByName(modelName) {
     if (model) {
         selectModel(model);
     } else {
+        let aliases = props.binding.model_aliases || {};
+        if (typeof aliases === 'string') {
+            try { aliases = JSON.parse(aliases); } catch (e) { aliases = {}; }
+        }
         const synthesizedModel = {
             original_model_name: modelName,
-            alias: props.binding.model_aliases[modelName]
+            alias: aliases[modelName]
         };
         selectModel(synthesizedModel);
     }
 }
 
 const globalDefaultModel = computed(() => {
-    const setting = globalSettings.value.find(s => s.key === 'default_lollms_model_name');
+    const settingKey = props.bindingType === 'tti' 
+        ? 'default_tti_binding_model'
+        : (props.bindingType === 'rag' ? 'default_safe_store_vectorizer' : 'default_lollms_model_name');
+    const setting = globalSettings.value.find(s => s.key === settingKey);
     return setting ? setting.value : null;
 });
 
@@ -268,11 +282,13 @@ async function fetchModels() {
 function selectModel(model) {
     selectedModel.value = model;
     associatedModel.value = model.original_model_name;
+    customTargetModel.value = false;
     const rawAlias = (model.alias && typeof model.alias === 'object') ? model.alias : {};
     const newForm = { 
         ...getInitialFormState(), 
         ...rawAlias,
         title: rawAlias.title || rawAlias.name || (props.bindingType === 'llm' ? model.original_model_name : ''),
+        model_name: rawAlias.model_name || model.original_model_name,
         has_vision: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
         vision_enabled: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
         ctx_size: rawAlias.forced_context_size ?? rawAlias.ctx_size ?? null,
@@ -365,7 +381,14 @@ async function saveAlias() {
         payload.ctx_size = ctxVal;
         payload.forced_context_size = ctxVal;
 
-        let aliasPayload = {};
+        const targetModel = form.value.model_name || selectedModel.value.original_model_name;
+        payload.model_name = targetModel;
+
+        let aliasPayload = { 
+            original_model_name: selectedModel.value.original_model_name, 
+            new_model_name: selectedModel.value.original_model_name, 
+            alias: payload 
+        };
 
         if (props.bindingType === 'llm') {
             if (payload.title) payload.name = payload.title;
@@ -373,24 +396,19 @@ async function saveAlias() {
                 const value = payload[key];
                 payload[key] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
             });
-            aliasPayload = { 
-                original_model_name: selectedModel.value.original_model_name, 
-                new_model_name: associatedModel.value || selectedModel.value.original_model_name, 
-                alias: payload 
-            };
             await adminStore.saveModelAlias(props.binding.id, aliasPayload);
-        } else {
-            aliasPayload = { 
-                original_model_name: selectedModel.value.original_model_name, 
-                new_model_name: associatedModel.value || selectedModel.value.original_model_name, 
-                alias: payload 
-            };
-            if (props.bindingType === 'tti') await adminStore.saveTtiModelAlias(props.binding.id, aliasPayload);
-            else if (props.bindingType === 'tts') await adminStore.saveTtsModelAlias(props.binding.id, aliasPayload);
-            else if (props.bindingType === 'stt') await adminStore.saveSttModelAlias(props.binding.id, aliasPayload);
-            else if (props.bindingType === 'ttv') await adminStore.saveTtvModelAlias(props.binding.id, aliasPayload);
-            else if (props.bindingType === 'ttm') await adminStore.saveTtmModelAlias(props.binding.id, aliasPayload);
-            else if (props.bindingType === 'rag') await adminStore.saveRagModelAlias(props.binding.id, aliasPayload);
+        } else if (props.bindingType === 'tti') {
+            await adminStore.saveTtiModelAlias(props.binding.id, aliasPayload);
+        } else if (props.bindingType === 'tts') {
+            await adminStore.saveTtsModelAlias(props.binding.id, aliasPayload);
+        } else if (props.bindingType === 'stt') {
+            await adminStore.saveSttModelAlias(props.binding.id, aliasPayload);
+        } else if (props.bindingType === 'ttv') {
+            await adminStore.saveTtvModelAlias(props.binding.id, aliasPayload);
+        } else if (props.bindingType === 'ttm') {
+            await adminStore.saveTtmModelAlias(props.binding.id, aliasPayload);
+        } else if (props.bindingType === 'rag') {
+            await adminStore.saveRagModelAlias(props.binding.id, aliasPayload);
         }
         await fetchModels();
         await fetchUniversalProfiles();
@@ -455,6 +473,9 @@ async function setAsGlobalDefault() {
         if (props.bindingType === 'rag') {
             await adminStore.updateGlobalSettings({ 'default_safe_store_vectorizer': fullModelName });
             uiStore.addNotification('Global default RAG vectorizer profile updated.', 'success');
+        } else if (props.bindingType === 'tti') {
+            await adminStore.updateGlobalSettings({ 'default_tti_binding_model': fullModelName });
+            uiStore.addNotification('Global default TTI model profile updated.', 'success');
         } else if (props.bindingType === 'llm') {
             await adminStore.updateGlobalSettings({ 'default_lollms_model_name': fullModelName });
             uiStore.addNotification('Global default model profile updated.', 'success');
@@ -562,7 +583,7 @@ watch(() => props.binding, (newBinding) => {
                                         <div class="min-w-0">
                                             <p class="font-bold text-xs truncate text-gray-900 dark:text-white">{{ item.alias?.title || item.original_model_name }}</p>
                                             <p class="text-[9px] opacity-60 truncate font-mono text-gray-500">
-                                                {{ isSmartRouter ? `Strategy: ${item.alias?.routing_strategy || 'balanced'}` : item.original_model_name }}
+                                                {{ isSmartRouter ? `Strategy: ${item.alias?.routing_strategy || 'balanced'}` : (item.alias?.model_name ? `→ ${item.alias.model_name}` : item.original_model_name) }}
                                             </p>
                                         </div>
                                     </div>
@@ -643,6 +664,33 @@ watch(() => props.binding, (newBinding) => {
                                 <div>
                                     <label class="block text-xs font-bold uppercase text-gray-500 mb-1">Description</label>
                                     <input v-model="form.description" type="text" class="input-field text-xs" placeholder="Capabilities and domain focus...">
+                                </div>
+                                <div v-if="!isSmartRouter">
+                                    <div class="flex items-center justify-between mb-1">
+                                        <label class="block text-xs font-bold uppercase text-gray-500">
+                                            Target Engine Model *
+                                        </label>
+                                        <span class="text-[10px] text-blue-600 dark:text-blue-400 font-semibold">
+                                            Underlying model executed for this alias
+                                        </span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <select v-if="models.length > 0 && !customTargetModel" v-model="form.model_name" class="input-field text-xs font-mono grow" required>
+                                            <option v-if="form.model_name && !models.some(m => m.original_model_name === form.model_name)" :value="form.model_name">
+                                                {{ form.model_name }} (Current)
+                                            </option>
+                                            <option v-for="m in models" :key="m.original_model_name" :value="m.original_model_name">
+                                                {{ m.original_model_name }}
+                                            </option>
+                                        </select>
+                                        <input v-else v-model="form.model_name" type="text" class="input-field text-xs font-mono grow" placeholder="e.g. openai/gpt-5-image" required>
+                                        <button v-if="models.length > 0" type="button" @click="customTargetModel = !customTargetModel" class="btn btn-secondary text-xs px-2.5 py-1 shrink-0" :title="customTargetModel ? 'Select from installed engine models' : 'Type custom model name'">
+                                            {{ customTargetModel ? 'Pick list' : 'Custom' }}
+                                        </button>
+                                    </div>
+                                    <p class="text-[10px] text-gray-500 mt-1">
+                                        Change this model to switch the AI engine powering this alias without altering the alias name for your users.
+                                    </p>
                                 </div>
                             </div>
                         </div>

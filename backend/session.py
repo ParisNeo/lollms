@@ -550,9 +550,11 @@ def _build_universal_profiles_for_modality(
                 except (ValueError, TypeError):
                     effective_ctx = None
 
+            target_model = cfg.get('model_name') or orig_name
+
             profile_entry = {
                 "binding_profile_name": binding.alias,
-                "model_name": orig_name,
+                "model_name": target_model,
                 "title": cfg.get('title') or orig_name,
                 "description": cfg.get('description', ''),
                 "vision_enabled": cfg.get('vision_enabled', cfg.get('has_vision', False)),
@@ -808,7 +810,7 @@ def build_lollms_client_from_params(
 
         primary_binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
         primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
-        primary_config["model_name"] = target_model_name or (primary_binding.default_model_name if primary_binding else "")
+        actual_model = target_model_name or (primary_binding.default_model_name if primary_binding else "")
 
         found_alias_ctx = None
         if primary_binding and primary_binding.model_aliases:
@@ -829,6 +831,8 @@ def build_lollms_client_from_params(
                             break
 
                 if alias_cfg:
+                    if alias_cfg.get('model_name'):
+                        actual_model = alias_cfg.get('model_name')
                     alias_ctx = alias_cfg.get('forced_context_size') or alias_cfg.get('ctx_size')
                     if alias_ctx:
                         try:
@@ -842,6 +846,8 @@ def build_lollms_client_from_params(
                             if alias_cfg.get(param_k) is not None:
                                 primary_config[param_k] = alias_cfg[param_k]
 
+        primary_config["model_name"] = actual_model
+
         if found_alias_ctx and found_alias_ctx > 1:
             primary_config["ctx_size"] = found_alias_ctx
         elif forced_ctx and int(forced_ctx) > 1:
@@ -850,6 +856,7 @@ def build_lollms_client_from_params(
             primary_config["ctx_size"] = 4096
 
         primary_config.update(final_user_params)
+        primary_config["model_name"] = actual_model
         # Ensure ctx_size wasn't wiped out by user_params
         if found_alias_ctx and found_alias_ctx > 1:
             primary_config["ctx_size"] = found_alias_ctx
@@ -1105,8 +1112,9 @@ def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], O
         for original_name, alias_data in model_aliases.items():
             if alias_data:
                 title = alias_data.get('title') or (alias_data.get('alias', {}).get('title') if isinstance(alias_data, dict) else None)
+                target = alias_data.get('model_name') or (alias_data.get('alias', {}).get('model_name') if isinstance(alias_data, dict) else None)
                 if title == alias_title or original_name == alias_title:
-                    return binding.alias, original_name
+                    return binding.alias, target or original_name
     return None, None
 
 def invalidate_model_cache(db: Session):
@@ -1140,8 +1148,9 @@ def resolve_model_name(db: Session, requested_model: str, fallback_to_default: b
             for original_name, alias_data in model_aliases.items():
                 if alias_data:
                     title = alias_data.get('title') or (alias_data.get('alias', {}).get('title') if isinstance(alias_data, dict) else None)
+                    target = alias_data.get('model_name') or (alias_data.get('alias', {}).get('model_name') if isinstance(alias_data, dict) else None)
                     if title == parts[1] or original_name == parts[1]:
-                        return parts[0], original_name
+                        return parts[0], target or original_name
             return parts[0], parts[1]
 
     binding_alias, model_name = find_model_by_alias(db, requested_model)
