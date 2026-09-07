@@ -1,4 +1,4 @@
-# LoLLMs - v2.1.0 "Restart"
+# LoLLMs - v2.3.0 "HeartBeat"
 
 One tool to rule them all!
 
