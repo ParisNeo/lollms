@@ -17,6 +17,7 @@ import IconPlus from '../../../assets/icons/IconPlus.vue';
 import IconTrash from '../../../assets/icons/IconTrash.vue';
 import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
 import IconCircle from '../../../assets/icons/IconCircle.vue';
+import IconArrowPath from '../../../assets/icons/IconArrowPath.vue';
 import apiClient from '../../../services/api';
 
 const props = defineProps({
@@ -35,6 +36,7 @@ const {
 const { tasks } = storeToRefs(tasksStore);
 
 const isLoading = ref(true);
+const isRefreshing = ref(false);
 const isSaving = ref(false);
 const isSettingBindingDefault = ref(false);
 const isSettingGlobalDefault = ref(false);
@@ -55,6 +57,13 @@ const isSmartRouter = computed(() => {
 });
 
 const isTtiConfigured = computed(() => ttiBindings.value && ttiBindings.value.some(b => b.is_active));
+
+function isProfileModelMissing(item) {
+    if (!item || isSmartRouter.value) return false;
+    if (!models.value || models.value.length === 0 || isLoading.value) return false;
+    const targetModel = item.alias?.model_name || item.original_model_name;
+    return !models.value.some(m => m && m.original_model_name === targetModel);
+}
 
 const availableVisionProfiles = computed(() => {
     const list = [];
@@ -256,6 +265,23 @@ async function fetchUniversalProfiles() {
     }
 }
 
+async function forceRefreshModels() {
+    isRefreshing.value = true;
+    try {
+        await Promise.allSettled([
+            fetchModels(),
+            fetchUniversalProfiles(),
+            dataStore.refreshAllModels()
+        ]);
+        uiStore.addNotification('Available models and universal profiles refreshed.', 'success');
+    } catch (e) {
+        console.error("Refresh models failed:", e);
+        uiStore.addNotification('Failed to refresh models.', 'error');
+    } finally {
+        isRefreshing.value = false;
+    }
+}
+
 async function fetchModels() {
     if (!props.binding) { isLoading.value = false; models.value = []; return; }
     isLoading.value = true;
@@ -312,18 +338,24 @@ function selectModel(model) {
     form.value = newForm;
 }
 
-function addNewRoutingGroup() {
-    const defaultKey = `group_${Date.now().toString(36)}`;
-    const newGroup = {
+function addNewProfile() {
+    const defaultKey = `profile_${Date.now().toString(36)}`;
+    const defaultTargetModel = (models.value && models.value.length > 0) ? models.value[0].original_model_name : '';
+    const newProfile = {
         original_model_name: defaultKey,
         alias: {
-            title: 'New Smart Routing Group',
-            description: 'Custom routed model profile',
+            title: isSmartRouter.value ? 'New Smart Routing Group' : 'New Model Profile',
+            model_name: defaultTargetModel,
+            description: isSmartRouter.value ? 'Custom routed model profile' : '',
             routing_strategy: 'balanced',
             selected_model_profiles: []
         }
     };
-    selectModel(newGroup);
+    selectModel(newProfile);
+}
+
+function addNewRoutingGroup() {
+    addNewProfile();
 }
 
 function toggleProfileInGroup(profId) {
@@ -424,27 +456,54 @@ async function saveAlias() {
     }
 }
 
-async function deleteAlias() {
-    if (!selectedModel.value?.alias || !props.binding) return;
-    if (await uiStore.showConfirmation({ title: 'Delete Profile?', message: `Remove the profile configuration for '${selectedModel.value.original_model_name}'?`, confirmText: 'Delete' })) {
+async function deleteSpecificAlias(modelKey) {
+    if (!props.binding) return;
+    let aliases = props.binding.model_aliases || {};
+    if (typeof aliases === 'string') {
+        try { aliases = JSON.parse(aliases); } catch (e) { aliases = {}; }
+    }
+    const profileTitle = aliases[modelKey]?.title || modelKey;
+
+    if (await uiStore.showConfirmation({ 
+        title: 'Delete Profile?', 
+        message: `Remove the profile configuration for '${profileTitle}'?`, 
+        confirmText: 'Delete' 
+    })) {
         isSaving.value = true;
         try {
             switch (props.bindingType) {
-                case 'llm': await adminStore.deleteModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
-                case 'tti': await adminStore.deleteTtiModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
-                case 'tts': await adminStore.deleteTtsModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
-                case 'stt': await adminStore.deleteSttModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
-                case 'rag': await adminStore.deleteRagModelAlias(props.binding.id, selectedModel.value.original_model_name); break;
+                case 'llm': await adminStore.deleteModelAlias(props.binding.id, modelKey); break;
+                case 'tti': await adminStore.deleteTtiModelAlias(props.binding.id, modelKey); break;
+                case 'tts': await adminStore.deleteTtsModelAlias(props.binding.id, modelKey); break;
+                case 'stt': await adminStore.deleteSttModelAlias(props.binding.id, modelKey); break;
+                case 'ttv': await adminStore.deleteTtvModelAlias(props.binding.id, modelKey); break;
+                case 'ttm': await adminStore.deleteTtmModelAlias(props.binding.id, modelKey); break;
+                case 'rag': await adminStore.deleteRagModelAlias(props.binding.id, modelKey); break;
             }
             await fetchModels();
             await fetchUniversalProfiles();
-            const updatedModel = models.value.find(m => m.original_model_name === selectedModel.value.original_model_name);
-            selectModel(updatedModel || models.value[0] || null);
-            uiStore.addNotification('Profile deleted.', 'success');
+            if (selectedModel.value && selectedModel.value.original_model_name === modelKey) {
+                const remaining = configuredAliases.value[0] || models.value[0] || null;
+                if (remaining) {
+                    selectModel(remaining);
+                } else {
+                    selectedModel.value = null;
+                    form.value = getInitialFormState();
+                }
+            }
+            uiStore.addNotification('Profile deleted successfully.', 'success');
+        } catch (e) {
+            console.error("Delete failed:", e);
+            uiStore.addNotification('Failed to delete profile.', 'error');
         } finally {
             isSaving.value = false;
         }
     }
+}
+
+async function deleteAlias() {
+    if (!selectedModel.value || !props.binding) return;
+    await deleteSpecificAlias(selectedModel.value.original_model_name);
 }
 
 async function setAsBindingDefault() {
@@ -556,9 +615,13 @@ watch(() => props.binding, (newBinding) => {
                             <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                         </div>
                      </div>
-                     <button v-if="isSmartRouter" @click="addNewRoutingGroup" class="btn btn-primary btn-xs flex items-center gap-1 shrink-0 h-8" title="Add New Smart Router Group">
+                     <button @click="forceRefreshModels" :disabled="isRefreshing || isLoading" class="btn btn-secondary btn-xs flex items-center gap-1 shrink-0 h-8 px-2" title="Force refresh available engine models">
+                        <IconArrowPath class="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" :class="{'animate-spin text-blue-500': isRefreshing || isLoading}" />
+                        <span class="hidden sm:inline">Refresh</span>
+                     </button>
+                     <button @click="addNewProfile" class="btn btn-primary btn-xs flex items-center gap-1 shrink-0 h-8" :title="isSmartRouter ? 'Add New Smart Router Group' : 'Add New Model Profile'">
                         <IconPlus class="w-3.5 h-3.5" />
-                        <span>Add Group</span>
+                        <span>{{ isSmartRouter ? 'Add Group' : 'Add Profile' }}</span>
                      </button>
                 </div>
 
@@ -570,28 +633,46 @@ watch(() => props.binding, (newBinding) => {
                             {{ isSmartRouter ? 'Routing Groups' : 'Configured Profiles' }} ({{ configuredAliases.length }})
                         </h4>
                         <ul class="list-none p-0 m-0 space-y-1.5">
-                            <li v-for="item in filteredConfiguredAliases" :key="item.original_model_name" class="list-none p-0 m-0">
+                            <li v-for="item in filteredConfiguredAliases" :key="item.original_model_name" class="list-none p-0 m-0 flex items-center gap-1 group/item">
                                 <button @click="selectModelByName(item.original_model_name)"
-                                        class="w-full text-left p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center justify-between transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 shadow-xs"
-                                        :class="{'bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800': selectedModel && selectedModel.original_model_name === item.original_model_name}">
+                                        class="grow min-w-0 text-left p-2.5 rounded-xl transition-all border shadow-xs flex items-center justify-between"
+                                        :class="[
+                                            isProfileModelMissing(item)
+                                                ? (selectedModel && selectedModel.original_model_name === item.original_model_name
+                                                    ? 'bg-rose-100/90 dark:bg-rose-950/60 text-rose-900 dark:text-rose-200 border-rose-300 dark:border-rose-700 ring-2 ring-rose-500/20'
+                                                    : 'bg-rose-50/80 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300 border-rose-200/90 dark:border-rose-900/50 hover:bg-rose-100/60 dark:hover:bg-rose-900/40')
+                                                : (selectedModel && selectedModel.original_model_name === item.original_model_name
+                                                    ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800'
+                                                    : 'hover:bg-gray-100 dark:hover:bg-gray-800 border-transparent hover:border-gray-200 dark:hover:border-gray-700')
+                                        ]">
                                     <div class="grow min-w-0 flex items-center gap-2.5">
-                                        <div class="w-7 h-7 rounded-lg bg-blue-100/50 dark:bg-blue-900/40 flex items-center justify-center shrink-0 overflow-hidden border border-blue-200 dark:border-blue-800">
+                                        <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 overflow-hidden border"
+                                             :class="isProfileModelMissing(item)
+                                                ? 'bg-rose-100 dark:bg-rose-900/50 border-rose-300 dark:border-rose-700 text-rose-600 dark:text-rose-400'
+                                                : 'bg-blue-100/50 dark:bg-blue-900/40 border-blue-200 dark:border-blue-800 text-blue-500'">
                                             <img v-if="item.alias?.icon" :src="item.alias.icon" class="w-full h-full object-cover" />
-                                            <IconDatabase v-else-if="bindingType === 'rag'" class="w-4 h-4 text-blue-500" />
-                                            <IconCpuChip v-else class="w-4 h-4 text-blue-500" />
+                                            <IconDatabase v-else-if="bindingType === 'rag'" class="w-4 h-4" />
+                                            <IconCpuChip v-else class="w-4 h-4" />
                                         </div>
                                         <div class="min-w-0">
-                                            <p class="font-bold text-xs truncate text-gray-900 dark:text-white">{{ item.alias?.title || item.original_model_name }}</p>
-                                            <p class="text-[9px] opacity-60 truncate font-mono text-gray-500">
+                                            <p class="font-bold text-xs truncate" :class="isProfileModelMissing(item) ? 'text-rose-950 dark:text-rose-100' : 'text-gray-900 dark:text-white'">{{ item.alias?.title || item.original_model_name }}</p>
+                                            <p class="text-[9px] truncate font-mono" :class="isProfileModelMissing(item) ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-gray-500 opacity-60'">
                                                 {{ isSmartRouter ? `Strategy: ${item.alias?.routing_strategy || 'balanced'}` : (item.alias?.model_name ? `→ ${item.alias.model_name}` : item.original_model_name) }}
                                             </p>
                                         </div>
                                     </div>
                                     <div class="shrink-0 flex items-center gap-1.5 pl-2">
+                                        <span v-if="isProfileModelMissing(item)" class="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-rose-200/80 dark:bg-rose-900 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-700" title="Model not found in engine">Missing</span>
                                         <IconEye v-if="item.alias?.vision_enabled || item.alias?.has_vision" class="w-3.5 h-3.5 text-blue-500" title="Vision Enabled" />
                                         <span v-if="isBindingDefault(item.original_model_name)" class="w-2 h-2 rounded-full bg-blue-500" title="Binding Default"></span>
                                         <span v-if="isGlobalDefault(item.original_model_name)" class="w-2 h-2 rounded-full bg-emerald-500" title="Global Default"></span>
                                     </div>
+                                </button>
+                                <button @click.stop="deleteSpecificAlias(item.original_model_name)"
+                                        type="button"
+                                        class="p-2 rounded-xl text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0"
+                                        title="Delete profile">
+                                    <IconTrash class="w-3.5 h-3.5" />
                                 </button>
                             </li>
                         </ul>
@@ -599,7 +680,13 @@ watch(() => props.binding, (newBinding) => {
 
                     <!-- Installed Raw Models (Hidden for smart router) -->
                     <div v-if="!isSmartRouter" class="space-y-2">
-                        <h4 class="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest px-2">Engine Models ({{ models.length }})</h4>
+                        <div class="flex items-center justify-between px-2">
+                            <h4 class="text-[10px] font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Engine Models ({{ models.length }})</h4>
+                            <button @click="forceRefreshModels" type="button" class="text-[10px] text-blue-500 hover:underline flex items-center gap-1" :disabled="isRefreshing || isLoading" title="Reload raw engine models">
+                                <IconArrowPath class="w-2.5 h-2.5" :class="{'animate-spin': isRefreshing || isLoading}" />
+                                <span>Reload</span>
+                            </button>
+                        </div>
                         <ul v-if="filteredModels.length > 0" class="list-none p-0 m-0 space-y-1">
                             <li v-for="model in filteredModels" :key="model.original_model_name" class="list-none p-0 m-0">
                                 <button @click="selectModel(model)"
@@ -638,7 +725,16 @@ watch(() => props.binding, (newBinding) => {
                             </h3>
                          </div>
                     </div>
-                   
+
+                    <!-- Warning banner if target model is missing -->
+                    <div v-if="isProfileModelMissing(selectedModel)" class="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 rounded-xl flex items-center gap-2.5 text-xs text-rose-800 dark:text-rose-200">
+                        <span class="text-sm shrink-0">⚠️</span>
+                        <div class="min-w-0">
+                            <p class="font-bold">Underlying Engine Model Missing</p>
+                            <p class="text-[11px] opacity-90">The model <span class="font-mono font-bold">{{ form.model_name || selectedModel.original_model_name }}</span> is not available in the active engine models. Please select an available model below.</p>
+                        </div>
+                    </div>
+
                     <form @submit.prevent="saveAlias" class="space-y-6 pb-6">
 
                         <!-- Identity -->

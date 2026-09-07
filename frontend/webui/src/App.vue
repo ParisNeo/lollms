@@ -88,7 +88,7 @@ const funnyStatusHint = computed(() => {
 
 const showMainSidebar = computed(() => {
     if (!isAuthenticated.value) return false;
-    const noSidebarPaths = ['/settings', '/admin', '/friends', '/help', '/profile', '/messages'];
+    const noSidebarPaths = ['/settings', '/admin', '/friends', '/help', '/messages'];
     return !noSidebarPaths.some(path => route.path.startsWith(path));
 });
 

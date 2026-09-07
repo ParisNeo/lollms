@@ -104,6 +104,8 @@ const currentContext = computed(() => {
     if (path.startsWith('/datastores')) return 'data';
     if (path.startsWith('/flow-studio')) return 'flows';
     if (path.startsWith('/image-studio')) return 'images';
+    if (path.startsWith('/personality-studio')) return 'personality';
+    if (path.startsWith('/profile')) return 'feed';
     return 'chat';
 });
 
@@ -113,6 +115,7 @@ const plusButtonTitle = computed(() => {
         case 'data': return 'New Data Store';
         case 'flows': return 'New Workflow';
         case 'images': return 'New Album';
+        case 'personality': return 'New Personality';
         default: return 'New Discussion';
     }
 });
@@ -140,6 +143,11 @@ async function handlePlusClick() {
             if (confirmed && value) {
                 await imageStore.createAlbum(value);
             }
+            break;
+        case 'personality':
+            uiStore.openModal('personalityEditor', { 
+                personality: { id: null, name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null } 
+            });
             break;
         case 'chat':
         default:

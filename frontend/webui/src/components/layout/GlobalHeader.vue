@@ -54,7 +54,7 @@ const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
 const showMainSidebarToggle = computed(() => {
     if (!authStore.isAuthenticated) return false;
-    const noSidebarPaths = ['/settings', '/admin', '/friends', '/help', '/profile', '/messages'];
+    const noSidebarPaths = ['/settings', '/admin', '/friends', '/help', '/messages'];
     return !noSidebarPaths.some(path => route.path.startsWith(path));
 });
 

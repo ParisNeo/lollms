@@ -9,6 +9,8 @@ import { useAuthStore } from '../../stores/auth';
 import { useUiStore } from '../../stores/ui';
 import { useImageStore } from '../../stores/images';
 import { useFlowStore } from '../../stores/flow';
+import { useSocialStore } from '../../stores/social';
+import apiClient from '../../services/api';
 import { storeToRefs } from 'pinia';
 import DiscussionItem from './DiscussionItem.vue';
 import DiscussionGroupItem from './DiscussionGroupItem.vue';
@@ -41,6 +43,7 @@ import IconServer from '../../assets/icons/IconServer.vue';
 import IconDatabase from '../../assets/icons/IconDatabase.vue'; 
 import IconTrash from '../../assets/icons/IconTrash.vue'; 
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconUser from '../../assets/icons/IconUser.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
@@ -58,15 +61,32 @@ const authStore = useAuthStore();
 const uiStore = useUiStore();
 const imageStore = useImageStore();
 const flowStore = useFlowStore();
+const socialStore = useSocialStore();
 const router = useRouter();
 const route = useRoute();
 
 const { user } = storeToRefs(authStore);
 const { isLoadingDiscussions, discussionGroupsTree, sharedWithMe, sortedDiscussions } = storeToRefs(store);
 const { notebooks } = storeToRefs(notebookStore);
-const { ownedDataStores, sharedDataStores, availableVectorizers } = storeToRefs(dataStore);
+const { ownedDataStores, sharedDataStores, availableVectorizers, userPersonalities, publicPersonalities } = storeToRefs(dataStore);
+const { friends, socialGroups } = storeToRefs(socialStore);
 const hasActiveVectorizers = computed(() => Array.isArray(availableVectorizers.value) && availableVectorizers.value.length > 0);
 const { flows } = storeToRefs(flowStore);
+
+const newsArticles = ref([]);
+const isLoadingNews = ref(false);
+
+async function fetchNewsArticlesList() {
+    isLoadingNews.value = true;
+    try {
+        const response = await apiClient.get('/api/news');
+        newsArticles.value = Array.isArray(response.data) ? response.data : [];
+    } catch (e) {
+        newsArticles.value = [];
+    } finally {
+        isLoadingNews.value = false;
+    }
+}
 
 const activeDiscussion = computed(() => store.activeDiscussion);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
@@ -84,10 +104,82 @@ const isStarredVisible = ref(false);
 const isRootDragOver = ref(false);
 
 const isUploadingArtefact = ref(false);
+const isRefreshingTab = ref(false);
 const uploadingMessage = ref('Processing files...');
 const artefactFileInput = ref(null);
 const bundleFileInput = ref(null);
 const currentUploadPdfMode = ref('text_images');
+
+async function handleRefresh() {
+    isRefreshingTab.value = true;
+    try {
+        switch (activeTab.value) {
+            case 'chat':
+                await Promise.allSettled([
+                    store.fetchDiscussions(),
+                    store.fetchDiscussionGroups()
+                ]);
+                uiStore.addNotification('Discussions refreshed.', 'success');
+                break;
+            case 'notes':
+                await notesStore.fetchNotes();
+                uiStore.addNotification('Notes refreshed.', 'success');
+                break;
+            case 'skills':
+                uiStore.addNotification('Skills refreshed.', 'success');
+                break;
+            case 'artefacts':
+                if (store.currentDiscussionId) {
+                    await store.fetchArtefacts(store.currentDiscussionId);
+                }
+                uiStore.addNotification('Artefacts refreshed.', 'success');
+                break;
+            case 'news':
+                await fetchNewsArticlesList();
+                uiStore.addNotification('News articles refreshed.', 'success');
+                break;
+            case 'feed':
+                await Promise.allSettled([
+                    socialStore.fetchFeed(),
+                    socialStore.fetchFriends(),
+                    socialStore.fetchSocialGroups()
+                ]);
+                uiStore.addNotification('Feed & Social channels refreshed.', 'success');
+                break;
+            case 'personalities':
+                await dataStore.fetchPersonalities();
+                uiStore.addNotification('Personalities refreshed.', 'success');
+                break;
+            case 'images':
+                await Promise.allSettled([
+                    imageStore.fetchAlbums(),
+                    imageStore.fetchImages()
+                ]);
+                uiStore.addNotification('Image albums refreshed.', 'success');
+                break;
+            case 'notebooks':
+                await notebookStore.fetchNotebooks();
+                uiStore.addNotification('Notebooks refreshed.', 'success');
+                break;
+            case 'data':
+                await dataStore.fetchDataStores();
+                uiStore.addNotification('Data stores refreshed.', 'success');
+                break;
+            case 'flows':
+                await flowStore.fetchFlows();
+                uiStore.addNotification('Workflows refreshed.', 'success');
+                break;
+            default:
+                await store.fetchDiscussions();
+                break;
+        }
+    } catch (e) {
+        console.error("Refresh failed:", e);
+        uiStore.addNotification('Failed to refresh list.', 'error');
+    } finally {
+        isRefreshingTab.value = false;
+    }
+}
 
 function triggerArtefactFileUpload(mode = 'text_images') { 
     currentUploadPdfMode.value = mode;
@@ -188,18 +280,35 @@ onMounted(() => {
     if (notesStore.notes.length === 0) notesStore.fetchNotes();
     if (notebookStore.notebooks.length === 0) notebookStore.fetchNotebooks();
     if (dataStore.ownedDataStores.length === 0) dataStore.fetchDataStores();
+    if (dataStore.userPersonalities.length === 0 && dataStore.publicPersonalities.length === 0) dataStore.fetchPersonalities();
     if (imageStore.albums.length === 0) imageStore.fetchAlbums();
     imageStore.fetchImages();
     if (flowStore.flows.length === 0) flowStore.fetchFlows();
+    if (socialStore.friends.length === 0) socialStore.fetchFriends();
+    if (socialStore.socialGroups.length === 0) socialStore.fetchSocialGroups();
+    fetchNewsArticlesList();
 });
 
 function handleTabClick(tab) {
     activeTab.value = tab;
-    if (tab === 'chat' || tab === 'notes' || tab === 'skills' || tab === 'artefacts') {
+    if (tab === 'feed') {
+        uiStore.setMainView('feed');
+        if (route.path !== '/') {
+            router.push('/');
+        }
+    } else if (tab === 'news') {
+        if (!route.path.startsWith('/news')) {
+            router.push('/news');
+        }
+    } else if (tab === 'chat' || tab === 'notes' || tab === 'skills' || tab === 'artefacts') {
         if (route.path !== '/') {
             router.push('/');
         }
         uiStore.setMainView('chat');
+    } else if (tab === 'personalities') {
+        if (!route.path.startsWith('/personality-studio')) {
+            router.push('/personality-studio');
+        }
     } else if (tab === 'notebooks') {
         if (!route.path.startsWith('/notebooks') && !route.path.startsWith('/notebook-studio')) {
             router.push('/notebooks');
@@ -223,7 +332,13 @@ function handleTabClick(tab) {
 
 // Watch route changes to automatically select the correct tab
 watch(() => route.path, (path) => {
-    if (path.startsWith('/flow-studio')) {
+    if (path.startsWith('/profile')) {
+        activeTab.value = 'feed';
+    } else if (path.startsWith('/news')) {
+        activeTab.value = 'news';
+    } else if (path.startsWith('/personality-studio')) {
+        activeTab.value = 'personalities';
+    } else if (path.startsWith('/flow-studio')) {
         activeTab.value = 'flows';
     } else if (path.startsWith('/notebooks') || path.startsWith('/notebook-studio')) {
         activeTab.value = 'notebooks';
@@ -232,9 +347,91 @@ watch(() => route.path, (path) => {
     } else if (path.startsWith('/image-studio')) {
         activeTab.value = 'images';
     } else if (path === '/' || path.startsWith('/chat')) {
-        activeTab.value = 'chat';
+        activeTab.value = uiStore.mainView === 'feed' ? 'feed' : 'chat';
     }
 }, { immediate: true });
+
+watch(() => uiStore.mainView, (view) => {
+    if (route.path === '/') {
+        activeTab.value = view === 'feed' ? 'feed' : 'chat';
+    }
+});
+
+const filteredUserPersonalities = computed(() => {
+    const list = Array.isArray(userPersonalities.value) ? userPersonalities.value : [];
+    if (!searchTerm.value) return list;
+    const q = searchTerm.value.toLowerCase();
+    return list.filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q));
+});
+
+const filteredPublicPersonalities = computed(() => {
+    const list = Array.isArray(publicPersonalities.value) ? publicPersonalities.value : [];
+    if (!searchTerm.value) return list;
+    const q = searchTerm.value.toLowerCase();
+    return list.filter(p => (p.name || '').toLowerCase().includes(q) || (p.category || '').toLowerCase().includes(q) || (p.description || '').toLowerCase().includes(q));
+});
+
+async function handleSelectPersonality(personality) {
+    if (!personality) return;
+    await authStore.updateUserPreferences({ active_personality_id: personality.id });
+    if (!route.path.startsWith('/personality-studio')) {
+        router.push('/personality-studio');
+    }
+    if (window.innerWidth < 768) uiStore.closeSidebar();
+}
+
+function handleEditPersonality(personality) {
+    uiStore.openModal('personalityEditor', { personality });
+}
+
+const filteredNewsArticles = computed(() => {
+    const list = Array.isArray(newsArticles.value) ? newsArticles.value : [];
+    if (!searchTerm.value) return list;
+    const q = searchTerm.value.toLowerCase();
+    return list.filter(a => (a.title || '').toLowerCase().includes(q) || (a.content || '').toLowerCase().includes(q));
+});
+
+function handleSelectNewsArticle(article) {
+    if (route.path !== '/news') {
+        router.push('/news');
+    }
+    setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('lollms:select-news-article', { detail: { id: article.id } }));
+    }, 100);
+    if (window.innerWidth < 768) uiStore.closeSidebar();
+}
+
+const filteredFriends = computed(() => {
+    const list = Array.isArray(friends.value) ? friends.value : [];
+    if (!searchTerm.value) return list;
+    const q = searchTerm.value.toLowerCase();
+    return list.filter(f => (f.username || '').toLowerCase().includes(q) || (f.first_name || '').toLowerCase().includes(q) || (f.family_name || '').toLowerCase().includes(q));
+});
+
+const filteredSocialGroups = computed(() => {
+    const list = Array.isArray(socialGroups.value) ? socialGroups.value : [];
+    if (!searchTerm.value) return list;
+    const q = searchTerm.value.toLowerCase();
+    return list.filter(g => (g.displayName || g.display_name || g.name || '').toLowerCase().includes(q));
+});
+
+function selectGeneralFeed() {
+    uiStore.setMainView('feed');
+    if (route.path !== '/') router.push('/');
+    if (window.innerWidth < 768) uiStore.closeSidebar();
+}
+
+function selectFriendFeed(friend) {
+    router.push(`/profile/${friend.username}`);
+    if (window.innerWidth < 768) uiStore.closeSidebar();
+}
+
+function selectGroupFeed(group) {
+    socialStore.fetchSocialGroupFeed(group.id);
+    uiStore.setMainView('feed');
+    if (route.path !== '/') router.push('/');
+    if (window.innerWidth < 768) uiStore.closeSidebar();
+}
 
 const filteredSharedDiscussions = computed(() => {
     if (!searchTerm.value) return sharedWithMe.value;
@@ -337,6 +534,13 @@ async function handleRootDrop(event) {
 }
 
 async function handleNewItem() { 
+    if (route.path.startsWith('/personality-studio')) {
+        uiStore.openModal('personalityEditor', { 
+            personality: { id: null, name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null } 
+        });
+        if (window.innerWidth < 768) uiStore.closeSidebar();
+        return;
+    }
     if (activeTab.value === 'chat') {
         store.createNewDiscussion(store.currentGroupId); 
         if (window.innerWidth < 768) uiStore.closeSidebar();
@@ -495,7 +699,7 @@ function handleCopyDiscussionMarkdown() {
                 </div>
             </div>
 
-            <!-- Tab Switcher -->
+                        <!-- Tab Switcher -->
             <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto custom-scrollbar pb-1">
                 <button 
                     @click="handleTabClick('chat')" 
@@ -505,6 +709,25 @@ function handleCopyDiscussionMarkdown() {
                 >
                     <IconMessage class="w-3.5 h-3.5 mb-0.5" />
                     <span>CHAT</span>
+                </button>
+                <button 
+                    v-if="user && user.user_ui_level >= 2"
+                    @click="handleTabClick('feed')" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'feed' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Feed"
+                >
+                    <IconHome class="w-3.5 h-3.5 mb-0.5" />
+                    <span>FEED</span>
+                </button>
+                <button 
+                    @click="handleTabClick('news')" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'news' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Articles & News"
+                >
+                    <IconFileText class="w-3.5 h-3.5 mb-0.5" />
+                    <span>NEWS</span>
                 </button>
                 <button 
                     @click="handleTabClick('notes')" 
@@ -532,6 +755,15 @@ function handleCopyDiscussionMarkdown() {
                 >
                     <IconFileText class="w-3.5 h-3.5 mb-0.5" />
                     <span>ART</span>
+                </button>
+                <button 
+                    @click="handleTabClick('personalities')" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'personalities' ? 'bg-white dark:bg-gray-900/50 text-amber-600 dark:text-amber-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Personality Studio"
+                >
+                    <IconUser class="w-3.5 h-3.5 mb-0.5" />
+                    <span>PERS</span>
                 </button>
                 <button 
                     @click="handleTabClick('images')" 
@@ -577,18 +809,19 @@ function handleCopyDiscussionMarkdown() {
                     <button @click="isSearchVisible = !isSearchVisible" class="btn-icon-flat" title="Search" :class="{'bg-slate-100 dark:bg-gray-700': isSearchVisible}">
                         <IconMagnifyingGlass class="h-4 w-4" />
                     </button>
-                    <button v-if="user && user.user_ui_level >= 2" @click="goToFeed" class="btn-icon-flat" title="Go to Feed">
-                        <IconHome class="h-4 w-4" />
+                    <button v-if="activeTab !== 'notebooks' && activeTab !== 'data' && activeTab !== 'flows' && activeTab !== 'personalities' && activeTab !== 'news' && activeTab !== 'feed'" @click="handleNewGroup" class="btn-icon-flat" :title="activeTab === 'images' ? 'New Album' : 'New Group'">
+                        <IconFolder class="w-4 h-4" />
                     </button>
-                    
-                    <router-link to="/news" class="btn-icon-flat" title="News">
-                        <IconFileText class="h-4 w-4" />
-                    </router-link>
                     <button v-if="activeTab !== 'notebooks' && activeTab !== 'data' && activeTab !== 'flows'" @click="handleNewGroup" class="btn-icon-flat" :title="activeTab === 'images' ? 'New Album' : 'New Group'">
                         <IconFolder class="w-4 h-4" />
                     </button>
                     <button v-if="activeTab === 'chat' && user && user.user_ui_level >= 4" @click="showToolbox = !showToolbox" class="btn-icon-flat" :class="{ 'bg-slate-100 dark:bg-gray-700': showToolbox }" title="Toggle Toolbox">
                         <IconAdjustmentsHorizontal class="h-4 w-4" />
+                    </button>
+
+                    <!-- Universal Refresh Button -->
+                    <button @click="handleRefresh" class="btn-icon-flat" :title="`Refresh ${activeTab}`" :disabled="isRefreshingTab">
+                        <IconRefresh class="h-4 w-4" :class="{'animate-spin text-blue-500': isRefreshingTab}" />
                     </button>
 
                     <!-- Sorting Tool -->
@@ -661,7 +894,7 @@ function handleCopyDiscussionMarkdown() {
                     </div>
                 </DropdownMenu>
 
-                <button v-else @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'skills' ? 'New Skill' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook')))))">
+                <button v-else @click="handleNewItem()" class="btn-primary-flat !px-2.5" :title="route.path.startsWith('/personality-studio') ? 'New Personality' : (activeTab === 'chat' ? 'New Discussion' : (activeTab === 'notes' ? 'New Note' : (activeTab === 'skills' ? 'New Skill' : (activeTab === 'data' ? 'New Data Store' : (activeTab === 'images' ? 'New Album' : (activeTab === 'flows' ? 'New Workflow' : 'New Notebook'))))))">
                     <IconPlus class="h-4 w-4" stroke-width="2.5" />
                 </button>
             </div>
@@ -803,6 +1036,212 @@ function handleCopyDiscussionMarkdown() {
             <!-- ARTEFACTS TAB -->
             <template v-else-if="activeTab === 'artefacts'">
                 <ArtefactGlobalList :search-term="searchTerm" />
+            </template>
+
+            <!-- NEWS TAB -->
+            <template v-else-if="activeTab === 'news'">
+                <div class="space-y-2 mb-3">
+                    <button @click="fetchNewsArticlesList" class="w-full flex items-center space-x-3 text-left px-3 py-2 rounded-lg text-xs font-bold text-blue-700 dark:text-blue-300 bg-blue-50/70 hover:bg-blue-100 dark:bg-blue-900/30 dark:hover:bg-blue-900/40 transition-colors">
+                        <IconRefresh class="w-4 h-4 shrink-0" :class="{'animate-spin': isLoadingNews}" />
+                        <span>Refresh News</span>
+                    </button>
+                </div>
+
+                <div v-if="isLoadingNews" class="text-center p-4 text-xs text-gray-500">
+                    <IconAnimateSpin class="w-5 h-5 text-blue-500 mx-auto mb-2 animate-spin" />
+                    <span>Loading news articles...</span>
+                </div>
+                <div v-else-if="filteredNewsArticles.length === 0" class="empty-state-flat">
+                    <p class="text-sm font-medium text-slate-600 dark:text-gray-300 mb-1">
+                        {{ searchTerm ? 'No news match your search' : 'No news articles available' }}
+                    </p>
+                    <p class="text-xs text-slate-500 dark:text-gray-400">
+                        {{ searchTerm ? 'Try different keywords' : 'Configure RSS feeds in Admin panel' }}
+                    </p>
+                </div>
+                <div v-else class="space-y-1">
+                    <div v-for="article in filteredNewsArticles" :key="article.id"
+                         @click="handleSelectNewsArticle(article)"
+                         class="group flex items-start justify-between p-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700 shadow-xs">
+                        <div class="flex items-start gap-2.5 min-w-0">
+                            <div class="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-900/30 flex items-center justify-center shrink-0 mt-0.5 border border-blue-200 dark:border-blue-800">
+                                <IconFileText class="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-xs font-bold text-slate-800 dark:text-gray-200 line-clamp-2 leading-tight">{{ article.title }}</span>
+                                <span v-if="article.publication_date" class="text-[9px] text-gray-400 mt-1 font-mono">
+                                    {{ new Date(article.publication_date).toLocaleDateString() }}
+                                </span>
+                            </div>
+                        </div>
+                        <a v-if="article.url" :href="article.url" target="_blank" @click.stop class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-500 transition-opacity shrink-0" title="Open source URL">
+                            <IconShare class="w-3.5 h-3.5" />
+                        </a>
+                    </div>
+                </div>
+            </template>
+
+            <!-- FEED TAB -->
+            <template v-else-if="activeTab === 'feed'">
+                <div class="space-y-3">
+                    <!-- General Feed Button -->
+                    <button @click="selectGeneralFeed"
+                            class="w-full text-left p-2.5 rounded-xl flex items-center justify-between transition-all border shadow-xs"
+                            :class="uiStore.mainView === 'feed' ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-800 dark:text-blue-200 border-blue-200 dark:border-blue-800 font-bold' : 'hover:bg-gray-100 dark:hover:bg-gray-800 border-transparent hover:border-gray-200 dark:hover:border-gray-700 text-gray-800 dark:text-gray-200'">
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            <div class="w-7 h-7 rounded-lg bg-blue-100/60 dark:bg-blue-900/40 flex items-center justify-center shrink-0 border border-blue-200 dark:border-blue-800">
+                                <IconHome class="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                            </div>
+                            <div class="flex flex-col min-w-0">
+                                <span class="text-xs">Main Community Feed</span>
+                                <span class="text-[9px] text-gray-400">All public posts & updates</span>
+                            </div>
+                        </div>
+                        <IconChevronRight class="w-4 h-4 text-gray-400 shrink-0" />
+                    </button>
+
+                    <!-- By Friends Section -->
+                    <div class="space-y-1.5 pt-1">
+                        <div class="flex items-center justify-between px-2">
+                            <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                Friends ({{ filteredFriends.length }})
+                            </h3>
+                            <router-link to="/friends" class="text-[10px] text-blue-500 hover:underline">Manage</router-link>
+                        </div>
+
+                        <div v-if="filteredFriends.length === 0" class="p-3 text-center text-xs text-gray-400 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
+                            {{ searchTerm ? 'No friends match search' : 'No friends added yet' }}
+                        </div>
+                        <div v-else class="space-y-1">
+                            <div v-for="friend in filteredFriends" :key="friend.id"
+                                 @click="selectFriendFeed(friend)"
+                                 class="group flex items-center justify-between p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+                                 :class="{'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800 font-bold': route.params.username === friend.username}">
+                                <div class="flex items-center gap-2.5 min-w-0">
+                                    <div class="w-7 h-7 rounded-full overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 border border-gray-200 dark:border-gray-600">
+                                        <img v-if="friend.icon" :src="friend.icon" class="w-full h-full object-cover" />
+                                        <IconUser v-else class="w-4 h-4 text-gray-500" />
+                                    </div>
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="text-xs text-slate-800 dark:text-gray-200 font-medium truncate">{{ friend.username }}</span>
+                                        <span v-if="friend.first_name || friend.family_name" class="text-[9px] text-gray-400 truncate">{{ [friend.first_name, friend.family_name].filter(Boolean).join(' ') }}</span>
+                                    </div>
+                                </div>
+                                <IconChevronRight class="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- By Social Groups Section -->
+                    <div v-if="socialGroups.length > 0 || !searchTerm" class="space-y-1.5 pt-1">
+                        <div class="flex items-center justify-between px-2">
+                            <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                Groups ({{ filteredSocialGroups.length }})
+                            </h3>
+                        </div>
+
+                        <div v-if="filteredSocialGroups.length === 0" class="p-3 text-center text-xs text-gray-400 bg-gray-50 dark:bg-gray-800/40 rounded-xl">
+                            {{ searchTerm ? 'No groups match search' : 'No social groups' }}
+                        </div>
+                        <div v-else class="space-y-1">
+                            <div v-for="group in filteredSocialGroups" :key="group.id"
+                                 @click="selectGroupFeed(group)"
+                                 class="group flex items-center justify-between p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700">
+                                <div class="flex items-center gap-2.5 min-w-0">
+                                    <div class="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-900/30 flex items-center justify-center shrink-0 border border-purple-200 dark:border-purple-800">
+                                        <IconShare class="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                                    </div>
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="text-xs text-slate-800 dark:text-gray-200 font-medium truncate">{{ group.displayName || group.display_name || group.name }}</span>
+                                        <span class="text-[9px] text-gray-400 truncate">{{ group.members?.length || 0 }} members</span>
+                                    </div>
+                                </div>
+                                <IconChevronRight class="w-3.5 h-3.5 text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- PERSONALITIES TAB -->
+            <template v-else-if="activeTab === 'personalities'">
+                <div class="space-y-2 mb-3">
+                    <button @click="handleNewItem" class="w-full flex items-center space-x-3 text-left px-3 py-2 rounded-lg text-xs font-bold text-amber-700 dark:text-amber-300 bg-amber-50/70 hover:bg-amber-100 dark:bg-amber-950/30 dark:hover:bg-amber-900/40 transition-colors">
+                        <IconPlus class="w-4 h-4 shrink-0" />
+                        <span>New Personality</span>
+                    </button>
+                </div>
+
+                <div v-if="filteredUserPersonalities.length === 0 && filteredPublicPersonalities.length === 0" class="empty-state-flat">
+                    <p class="text-sm font-medium text-slate-600 dark:text-gray-300 mb-1">
+                        {{ searchTerm ? 'No personalities found' : 'No personalities yet' }}
+                    </p>
+                    <p class="text-xs text-slate-500 dark:text-gray-400">
+                        Click "+ New Personality" to create one
+                    </p>
+                </div>
+
+                <div v-else class="space-y-4">
+                    <!-- Personal Section -->
+                    <div v-if="filteredUserPersonalities.length > 0">
+                        <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5 px-2">
+                            Personal ({{ filteredUserPersonalities.length }})
+                        </h3>
+                        <div class="space-y-1">
+                            <div v-for="p in filteredUserPersonalities" :key="p.id" 
+                                 @click="handleSelectPersonality(p)"
+                                 class="group flex items-center justify-between p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+                                 :class="{'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60 font-bold': user?.active_personality_id === p.id}">
+                                <div class="flex items-center gap-2.5 min-w-0">
+                                    <div class="w-7 h-7 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 border border-gray-200 dark:border-gray-600">
+                                        <img v-if="p.icon_base64" :src="p.icon_base64" class="w-full h-full object-cover" />
+                                        <IconUser v-else class="w-4 h-4 text-amber-500" />
+                                    </div>
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="text-xs text-slate-800 dark:text-gray-200 truncate">{{ p.name }}</span>
+                                        <span v-if="p.category" class="text-[9px] text-gray-400 truncate">{{ p.category }}</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1 shrink-0">
+                                    <IconCheckCircle v-if="user?.active_personality_id === p.id" class="w-4 h-4 text-emerald-500" />
+                                    <button @click.stop="handleEditPersonality(p)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-500 transition-opacity" title="Edit Personality">
+                                        <IconPencil class="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Public / System Section -->
+                    <div v-if="filteredPublicPersonalities.length > 0">
+                        <h3 class="text-[10px] font-black uppercase tracking-wider text-gray-400 dark:text-gray-500 mb-1.5 px-2">
+                            Public ({{ filteredPublicPersonalities.length }})
+                        </h3>
+                        <div class="space-y-1">
+                            <div v-for="p in filteredPublicPersonalities" :key="p.id" 
+                                 @click="handleSelectPersonality(p)"
+                                 class="group flex items-center justify-between p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-all border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+                                 :class="{'bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800/60 font-bold': user?.active_personality_id === p.id}">
+                                <div class="flex items-center gap-2.5 min-w-0">
+                                    <div class="w-7 h-7 rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700 flex items-center justify-center shrink-0 border border-gray-200 dark:border-gray-600">
+                                        <img v-if="p.icon_base64" :src="p.icon_base64" class="w-full h-full object-cover" />
+                                        <IconUser v-else class="w-4 h-4 text-amber-500" />
+                                    </div>
+                                    <div class="flex flex-col min-w-0">
+                                        <span class="text-xs text-slate-800 dark:text-gray-200 truncate">{{ p.name }}</span>
+                                        <span v-if="p.category" class="text-[9px] text-gray-400 truncate">{{ p.category }}</span>
+                                    </div>
+                                </div>
+                                <div class="flex items-center gap-1 shrink-0">
+                                    <IconCheckCircle v-if="user?.active_personality_id === p.id" class="w-4 h-4 text-emerald-500" />
+                                    <button @click.stop="handleEditPersonality(p)" class="opacity-0 group-hover:opacity-100 p-1 text-gray-400 hover:text-blue-500 transition-opacity" title="Inspect Personality">
+                                        <IconEye class="w-3.5 h-3.5" />
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </template>
 
             <!-- IMAGES TAB -->
