@@ -51,9 +51,14 @@ const filteredTree = computed(() => {
     };
 });
 
+import { useRouter } from 'vue-router';
+const router = useRouter();
+
 function handleNoteClick(note) {
-    // Open the editor modal to allow reading/updating without force-adding to context
-    uiStore.openModal('noteEditor', { note });
+    if (!note) return;
+    notesStore.activeNoteId = note.id;
+    router.push({ path: '/notes-studio', query: { noteId: note.id } });
+    window.dispatchEvent(new CustomEvent('lollms:select-note', { detail: { id: note.id } }));
 }
 
 function handleNewSubgroup(parentGroup) {

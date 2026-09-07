@@ -44,9 +44,13 @@ const filteredSkills = computed(() => {
     return skillsStore.skills.filter(s => s.name.toLowerCase().includes(term) || (s.description && s.description.toLowerCase().includes(term)));
 });
 
+import { useRouter } from 'vue-router';
+const router = useRouter();
+
 function editSkill(skill) {
-    // Open the editor modal to allow reading/updating without force-adding to context
-    uiStore.openModal('skillEditor', { skill });
+    if (!skill) return;
+    router.push({ path: '/skills-studio', query: { skillId: skill.id } });
+    window.dispatchEvent(new CustomEvent('lollms:select-skill', { detail: { id: skill.id } }));
 }
 
 async function deleteSkill(skill) {

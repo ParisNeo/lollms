@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-07 20:56]
+
+- fix(ssrf): update security imports to include Dict and Li...
+
 ## [2026-09-07 20:35]
 
 - `refactor: build esm deps for assets -- remove unused UI components from dist'`

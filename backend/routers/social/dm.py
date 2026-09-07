@@ -10,7 +10,7 @@ from PIL import Image
 from fastapi import APIRouter, Depends, HTTPException, status, Form, File, UploadFile, Body
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, desc, func, update, and_
+from sqlalchemy import or_, desc, func, update, and_, select, exists, cast, String
 from werkzeug.utils import secure_filename
 from pydantic import BaseModel, Field
 
@@ -603,7 +603,8 @@ async def clean_conversation_history(
 async def get_dm_attachment(
     username: str, 
     filename: str, 
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
     s_username = secure_filename(username)
     s_filename = secure_filename(filename)
@@ -613,6 +614,34 @@ async def get_dm_attachment(
 
     if not file_path.is_relative_to(dm_assets_path) or not file_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
+
+    # Enforce object-level authorization (IDOR protection)
+    is_owner = (current_user.username == s_username)
+    is_admin = getattr(current_user, 'is_admin', False)
+
+    if not is_owner and not is_admin:
+        user_group_ids = select(DBConversationMember.conversation_id).where(
+            DBConversationMember.user_id == current_user.id
+        )
+
+        has_access = db.query(
+            exists().where(
+                and_(
+                    or_(
+                        DBDirectMessage.receiver_id == current_user.id,
+                        DBDirectMessage.sender_id == current_user.id,
+                        DBDirectMessage.conversation_id.in_(user_group_ids)
+                    ),
+                    or_(
+                        cast(DBDirectMessage.media, String).contains(s_filename),
+                        cast(DBDirectMessage.image_references, String).contains(s_filename)
+                    )
+                )
+            )
+        ).scalar()
+
+        if not has_access:
+            raise HTTPException(status_code=403, detail="You do not have permission to access this attachment.")
 
     return FileResponse(str(file_path))
 

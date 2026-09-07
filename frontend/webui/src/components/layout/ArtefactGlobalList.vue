@@ -11,7 +11,15 @@ import IconFolder from '../../assets/icons/IconFolder.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
+import { useRouter } from 'vue-router';
+const router = useRouter();
 
+function handleSelect(artefact) {
+    if (!artefact) return;
+    const artId = artefact.id || artefact.title;
+    router.push({ path: '/artefacts-studio', query: { artefactId: artId } });
+    window.dispatchEvent(new CustomEvent('lollms:select-artefact', { detail: { id: artId } }));
+}
 const props = defineProps({
     searchTerm: { type: String, default: '' }
 });

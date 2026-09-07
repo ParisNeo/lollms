@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Tuple, Any
+from typing import Optional, Tuple, Any, Dict, List
 import secrets
 import smtplib
 import subprocess
@@ -13,7 +13,8 @@ import tempfile
 import os
 import socket
 import ipaddress
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
+import requests
 import pipmaster as pm
 pm.ensure_packages("bleach")
 import bleach
@@ -58,40 +59,125 @@ ALLOWED_ATTRS = {
     'iframe': _filter_iframe_attrs
 }
 
-def validate_url(url: str):
+BLOCKED_IP_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),          # IPv4 loopback
+    ipaddress.ip_network("10.0.0.0/8"),           # RFC 1918 private
+    ipaddress.ip_network("172.16.0.0/12"),        # RFC 1918 private
+    ipaddress.ip_network("192.168.0.0/16"),       # RFC 1918 private
+    ipaddress.ip_network("169.254.0.0/16"),       # Link-local / Cloud Metadata (169.254.169.254)
+    ipaddress.ip_network("100.64.0.0/10"),        # Shared address space / CGNAT
+    ipaddress.ip_network("0.0.0.0/8"),            # Current network
+    ipaddress.ip_network("224.0.0.0/4"),          # Multicast
+    ipaddress.ip_network("240.0.0.0/4"),          # Reserved
+    ipaddress.ip_network("::1/128"),              # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),             # IPv6 Unique Local Address
+    ipaddress.ip_network("fe80::/10"),            # IPv6 Link-local
+    ipaddress.ip_network("::ffff:0:0/96"),        # IPv4-mapped IPv6
+]
+
+def is_ip_blocked(ip: Any) -> bool:
+    """Checks if an IP address falls inside any blocked/private network range."""
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+
+    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        return True
+
+    for network in BLOCKED_IP_NETWORKS:
+        if ip in network:
+            return True
+
+    return False
+
+def validate_url(url: str) -> str:
     """
     Validates a URL to prevent SSRF attacks.
-    Ensures the scheme is http/https and the host is not a private/local IP.
+    Ensures the scheme is http/https and the host does not resolve to private/local/metadata IPs.
     Raises ValueError on violation.
     """
     try:
         parsed = urlparse(url)
-        if parsed.scheme not in ('http', 'https'):
+        if parsed.scheme.lower() not in ('http', 'https'):
             raise ValueError(f"Invalid scheme: {parsed.scheme}")
 
         hostname = parsed.hostname
         if not hostname:
-             raise ValueError("Invalid hostname")
+            raise ValueError("Invalid hostname")
+
+        clean_host = hostname.strip("[]")
+        try:
+            ip = ipaddress.ip_address(clean_host)
+            if is_ip_blocked(ip):
+                raise ValueError(f"Access to local/private IP {hostname} is forbidden.")
+            return url
+        except ValueError as e:
+            if "forbidden" in str(e):
+                raise
 
         try:
-            ip = ipaddress.ip_address(hostname)
-            if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
-                raise ValueError(f"Access to local/private IP {hostname} is forbidden.")
-            if ip.is_multicast or ip.is_reserved:
-                 raise ValueError(f"Access to restricted IP {hostname} is forbidden.")
-        except ValueError:
-            try:
-                addr_info = socket.getaddrinfo(hostname, None)
-                for family, _, _, _, sockaddr in addr_info:
-                    ip_str = sockaddr[0]
-                    ip = ipaddress.ip_address(ip_str)
-                    if ip.is_private or ip.is_loopback or ip.is_link_local or str(ip) == "169.254.169.254":
-                         raise ValueError(f"Domain {hostname} resolves to private IP {ip_str}.")
-            except socket.gaierror:
-                pass 
+            addr_info = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            if not addr_info:
+                raise ValueError(f"Could not resolve hostname '{hostname}'.")
+            for family, _, _, _, sockaddr in addr_info:
+                ip_str = sockaddr[0]
+                ip = ipaddress.ip_address(ip_str)
+                if is_ip_blocked(ip):
+                    raise ValueError(f"Domain {hostname} resolves to private IP {ip_str}.")
+        except socket.gaierror as e:
+            raise ValueError(f"DNS resolution failed for hostname '{hostname}': {e}")
 
+        return url
     except Exception as e:
+        if isinstance(e, ValueError):
+            raise
         raise ValueError(f"URL validation failed: {str(e)}")
+
+def safe_requests_get(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: int = 5,
+    max_redirects: int = 5,
+    max_response_size: int = 524288,
+    **kwargs
+) -> requests.Response:
+    """
+    Executes an HTTP GET request with robust SSRF and redirect protection:
+    - Validates the initial URL against private/metadata IPs.
+    - Disables automatic redirects (allow_redirects=False).
+    - Iterates manually over redirects, re-validating the Location header at every hop.
+    - Limits maximum download size and response time.
+    """
+    current_url = validate_url(url)
+    redirect_count = 0
+    session = requests.Session()
+    kwargs["allow_redirects"] = False
+
+    while True:
+        resp = session.get(
+            current_url,
+            headers=headers,
+            timeout=timeout,
+            stream=True,
+            **kwargs
+        )
+
+        if resp.status_code in (301, 302, 303, 307, 308):
+            redirect_count += 1
+            if redirect_count > max_redirects:
+                resp.close()
+                raise ValueError(f"Too many redirects (exceeded maximum limit of {max_redirects}).")
+
+            location = resp.headers.get("Location")
+            if not location:
+                resp.close()
+                raise ValueError("Redirect response missing Location header.")
+
+            next_url = urljoin(current_url, location)
+            current_url = validate_url(next_url)
+            resp.close()
+            continue
+
+        return resp
 
 def sanitize_content(content: str) -> str:
     """
@@ -319,8 +405,33 @@ def _get_full_html_email(body: str, background_color: Optional[str]) -> str:
 </html>
 """
 
+EMAIL_RE = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+
+def validate_email_address(email: str) -> str:
+    """
+    Validates an email address to prevent CLI argument injection, CRLF header injection,
+    and malformed recipients.
+    """
+    if not email or not isinstance(email, str):
+        raise ValueError("Recipient email address cannot be empty.")
+
+    cleaned = email.strip()
+    if '\n' in cleaned or '\r' in cleaned or '\0' in cleaned:
+        raise ValueError("Invalid email address: contains newline or control characters.")
+
+    if cleaned.startswith('-'):
+        raise ValueError("Invalid email address: leading hyphen is forbidden.")
+
+    if not EMAIL_RE.match(cleaned):
+        raise ValueError(f"Invalid email address format: '{cleaned}'")
+
+    return cleaned
+
 def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], text_content: str):
     """Sends an email using a configured SMTP server. It can be text-only or multipart."""
+    safe_email = validate_email_address(to_email)
+    safe_subject = subject.replace("\n", " ").replace("\r", " ").strip()
+
     from backend.settings import settings
     smtp_host = settings.get("smtp_host")
     smtp_port = settings.get("smtp_port", 587)
@@ -341,30 +452,31 @@ def _send_email_smtp(to_email: str, subject: str, html_content: Optional[str], t
     else:
         msg = MIMEText(text_content, 'plain', 'utf-8')
 
-    msg['Subject'] = subject
+    msg['Subject'] = safe_subject
     msg['From'] = from_email
-    msg['To'] = to_email
+    msg['To'] = safe_email
 
     try:
         with smtplib.SMTP(smtp_host, smtp_port) as server:
             if use_tls:
                 server.starttls()
             server.login(smtp_user, smtp_password)
-            server.sendmail(from_email, [to_email], msg.as_string())
-        print(f"INFO: Email (SMTP) sent to {to_email}")
+            server.sendmail(from_email, [safe_email], msg.as_string())
+        print(f"INFO: Email (SMTP) sent to {safe_email}")
     except Exception as e:
         print(f"CRITICAL: Failed to send SMTP email. Error: {e}")
         raise
 
 def _send_email_gmail(to_email: str, subject: str, html_content: Optional[str], text_content: str):
     """Sends an email using Gmail's SMTP servers with pre-configured host/port."""
+    safe_email = validate_email_address(to_email)
+    safe_subject = subject.replace("\n", " ").replace("\r", " ").strip()
+
     from backend.settings import settings
     smtp_host = "smtp.gmail.com"
     smtp_port = 587
     smtp_user = settings.get("smtp_user")
     smtp_password = settings.get("smtp_password")
-    # For Gmail, the 'From' header is generally overwritten by the authenticated user,
-    # but we set it for correctness. We rely on smtp_user as the sender.
     from_email = smtp_user 
     use_tls = True
 
@@ -380,58 +492,59 @@ def _send_email_gmail(to_email: str, subject: str, html_content: Optional[str], 
     else:
         msg = MIMEText(text_content, 'plain', 'utf-8')
 
-    msg['Subject'] = subject
+    msg['Subject'] = safe_subject
     msg['From'] = from_email
-    msg['To'] = to_email
+    msg['To'] = safe_email
 
     try:
         with smtplib.SMTP(smtp_host, smtp_port) as server:
             if use_tls:
                 server.starttls()
             server.login(smtp_user, smtp_password)
-            server.sendmail(from_email, [to_email], msg.as_string())
-        print(f"INFO: Email (Gmail) sent to {to_email}")
+            server.sendmail(from_email, [safe_email], msg.as_string())
+        print(f"INFO: Email (Gmail) sent to {safe_email}")
     except Exception as e:
         print(f"CRITICAL: Failed to send Gmail email. Error: {e}")
         raise
 
 def _send_email_system_mail_text(to_email: str, subject: str, text_content: str):
-    """Sends a plain text email using system commands (sendmail, mailx, or mail)."""
-    safe_subject = subject.replace("\n", " ").replace("\r", " ")
+    """Sends a plain text email using system commands (sendmail, mailx, or mail) with argument injection guards."""
+    safe_email = validate_email_address(to_email)
+    safe_subject = subject.replace("\n", " ").replace("\r", " ").strip()
 
     # 1. Try sendmail first
     if shutil.which("sendmail"):
         full_email = (
-            f"To: {to_email}\n"
+            f"To: {safe_email}\n"
             f"Subject: {safe_subject}\n"
             f"Content-Type: text/plain; charset=utf-8\n"
             f"\n"
             f"{text_content}"
         )
-        command = ["sendmail", "-t"]
+        command = ["sendmail", "-t", "-i", "--"]
         try:
             subprocess.run(command, input=full_email, capture_output=True, text=True, check=True, encoding="utf-8")
-            print(f"INFO: Email (Text system mail) sent to {to_email} via sendmail.")
+            print(f"INFO: Email (Text system mail) sent to {safe_email} via sendmail.")
             return
         except Exception as e:
             print(f"WARNING: sendmail failed: {e}")
 
     # 2. Try mailx
     if shutil.which("mailx"):
-        command = ["mailx", "-s", safe_subject, to_email]
+        command = ["mailx", "-s", safe_subject, "--", safe_email]
         try:
             subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding="utf-8")
-            print(f"INFO: Email (Text system mail) sent to {to_email} via mailx.")
+            print(f"INFO: Email (Text system mail) sent to {safe_email} via mailx.")
             return
         except Exception as e:
             print(f"WARNING: mailx failed: {e}")
 
     # 3. Try standard mail
     if shutil.which("mail"):
-        command = ["mail", "-s", safe_subject, to_email]
+        command = ["mail", "-s", safe_subject, "--", safe_email]
         try:
             subprocess.run(command, input=text_content, capture_output=True, text=True, check=True, encoding="utf-8")
-            print(f"INFO: Email (Text system mail) sent to {to_email} via mail.")
+            print(f"INFO: Email (Text system mail) sent to {safe_email} via mail.")
             return
         except Exception as e:
             print(f"ERROR: mail command failed: {e}")
@@ -448,20 +561,19 @@ def _send_email_system_mail_html(to_email: str, subject: str, html_content: str,
             print(f"WARNING: sendmail HTML delivery failed: {ex}. Falling back to system text mail.")
             return _send_email_system_mail_text(to_email, subject, text_content)
 
-    # If sendmail is absent, use system text command fallback
     return _send_email_system_mail_text(to_email, subject, text_content)
 
 def _send_email_sendmail_html(to_email: str, subject: str, html_content: str, text_content: str):
     """Send HTML email using sendmail (more reliable for MIME)."""
-    
     if not shutil.which("sendmail"):
         raise FileNotFoundError("The 'sendmail' command not found.")
-    
-    safe_subject = subject.replace("\n", " ").replace("\r", " ")
+
+    safe_email = validate_email_address(to_email)
+    safe_subject = subject.replace("\n", " ").replace("\r", " ").strip()
     boundary = f"----=_NextPart_{secrets.token_hex(16)}"
-    
+
     full_email = (
-        f"To: {to_email}\n"
+        f"To: {safe_email}\n"
         f"Subject: {safe_subject}\n"
         f"MIME-Version: 1.0\n"
         f"Content-Type: multipart/alternative; boundary=\"{boundary}\"\n"
@@ -477,10 +589,8 @@ def _send_email_sendmail_html(to_email: str, subject: str, html_content: str, te
         f"{html_content}\n\n"
         f"--{boundary}--\n"
     )
-    
-    # Use -t to read headers from the input (To, Subject, etc.)
-    command = ["sendmail", "-t"]
-    
+
+    command = ["sendmail", "-t", "-i", "--"]
     try:
         process = subprocess.run(
             command,
@@ -490,7 +600,7 @@ def _send_email_sendmail_html(to_email: str, subject: str, html_content: str, te
             check=True,
             encoding="utf-8"
         )
-        print(f"INFO: Email sent via sendmail to {to_email}.")
+        print(f"INFO: Email sent via sendmail to {safe_email}.")
     except subprocess.CalledProcessError as e:
         print(f"ERROR: Sendmail command failed.\nSTDOUT: {e.stdout}\nSTDERR: {e.stderr}")
         raise
@@ -503,50 +613,51 @@ def _send_email_outlook(to_email: str, subject: str, body: str):
         print("win32com.client not installed. Please install pywin32.")
         return
 
+    safe_email = validate_email_address(to_email)
+    safe_subject = subject.replace("\n", " ").replace("\r", " ").strip()
+
     try:
         outlook = win32com.client.Dispatch("Outlook.Application")
         mail = outlook.CreateItem(0)
-        mail.To = to_email
-        mail.Subject = subject
-        # Check if the body contains HTML tags.  If so, treat it as HTML.
+        mail.To = safe_email
+        mail.Subject = safe_subject
         if "<" in body and ">" in body:
-            mail.HTMLBody = body  # Use HTMLBody for HTML content
+            mail.HTMLBody = body
         else:
-            mail.Body = body  # Use Body for plain text
+            mail.Body = body
         mail.Send()
-        print(f"INFO: Email sent using Outlook to {to_email}")
+        print(f"INFO: Email sent using Outlook to {safe_email}")
     except Exception as e:
         print(f"ERROR: Failed to send email using Outlook. Error: {e}")
-
 
 def send_generic_email(to_email: str, subject: str, body: str, background_color: Optional[str] = "#f4f4f4", send_as_text: bool = False):
     """
     Prepares and sends a generic email, handling both HTML and plain text modes correctly.
     """
+    safe_email = validate_email_address(to_email)
+    safe_subject = subject.replace("\n", " ").replace("\r", " ").strip()
+
     from backend.settings import settings
     recovery_mode = settings.get("password_recovery_mode", "manual")
-    
-    # Prepare HTML wrapper if needed
+
     html_body = _get_full_html_email(body, background_color) if not send_as_text else None
-    
-    # Normalize mode casing and aliases
     recovery_mode = str(recovery_mode).lower().strip()
 
     if recovery_mode in ("smtp", "automatic"):
         text_content = _convert_html_to_text(body)
-        _send_email_smtp(to_email, subject, html_body, text_content)
+        _send_email_smtp(safe_email, safe_subject, html_body, text_content)
     elif recovery_mode == "gmail":
         text_content = _convert_html_to_text(body)
-        _send_email_gmail(to_email, subject, html_body, text_content)
+        _send_email_gmail(safe_email, safe_subject, html_body, text_content)
     elif recovery_mode == "system_mail":
         text_content = _convert_html_to_text(body)
         if send_as_text:
-             _send_email_system_mail_text(to_email, subject, text_content)
+             _send_email_system_mail_text(safe_email, safe_subject, text_content)
         else:
-             _send_email_system_mail_html(to_email, subject, html_body, text_content)
+             _send_email_system_mail_html(safe_email, safe_subject, html_body, text_content)
     elif recovery_mode == "outlook":
         if platform.system() == "Windows":
-            _send_email_outlook(to_email, subject, body)
+            _send_email_outlook(safe_email, safe_subject, body)
         else:
             print("Outlook integration is only supported on Windows.")
     else:

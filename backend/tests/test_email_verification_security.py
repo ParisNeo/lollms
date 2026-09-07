@@ -7,10 +7,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 import pytest
 from unittest.mock import MagicMock, patch
 from fastapi import HTTPException
-from backend.security import generate_verification_code, send_verification_code_email, send_password_reset_email
+from backend.security import generate_verification_code, send_verification_code_email, send_password_reset_email, validate_email_address
 
 class TestEmailSecurityAndVerification:
-    """Regression tests validating password reset email fixes and the new Email 2FA feature."""
+    """Regression tests validating password reset email fixes, CLI argument injection prevention, and Email 2FA."""
 
     def test_generate_verification_code_is_six_digits(self):
         code = generate_verification_code(6)
@@ -39,10 +39,35 @@ class TestEmailSecurityAndVerification:
     @patch('subprocess.run')
     def test_system_mail_text_command_resolution(self, mock_subproc, mock_which):
         from backend.security import _send_email_system_mail_text
-        
-        # Test when sendmail is present
+
+        # Test when sendmail is present (guarded with -i and -- delimiter)
         mock_which.side_effect = lambda cmd: "/usr/sbin/sendmail" if cmd == "sendmail" else None
         _send_email_system_mail_text("dest@example.com", "Subject Test", "Body Content")
         mock_subproc.assert_called()
         cmd_called = mock_subproc.call_args[0][0]
-        assert cmd_called == ["sendmail", "-t"]
+        assert cmd_called == ["sendmail", "-t", "-i", "--"]
+
+        # Test when mailx is present (guarded with -- delimiter before recipient)
+        mock_which.side_effect = lambda cmd: "/usr/bin/mailx" if cmd == "mailx" else None
+        _send_email_system_mail_text("dest@example.com", "Subject Test", "Body Content")
+        mock_subproc.assert_called()
+        cmd_called = mock_subproc.call_args[0][0]
+        assert cmd_called == ["mailx", "-s", "Subject Test", "--", "dest@example.com"]
+
+    @pytest.mark.parametrize("invalid_email", [
+        "-a /etc/passwd",
+        "--config=/tmp/malicious",
+        "-v",
+        "user@example.com\nBcc: victim@example.com",
+        "user@example.com\r\nSubject: Injected",
+        "plainaddress",
+        "@missingusername.com",
+        "user@.com"
+    ])
+    def test_validate_email_address_blocks_injection(self, invalid_email):
+        with pytest.raises(ValueError):
+            validate_email_address(invalid_email)
+
+    def test_validate_email_address_allows_valid(self):
+        assert validate_email_address("alice@example.com") == "alice@example.com"
+        assert validate_email_address("user.name+tag@sub.domain.org") == "user.name+tag@sub.domain.org"

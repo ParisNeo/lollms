@@ -54,6 +54,27 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/notes-studio',
+    alias: ['/notes'],
+    name: 'NotesStudio',
+    component: () => import('../views/NotesStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/skills-studio',
+    alias: ['/skills'],
+    name: 'SkillsStudio',
+    component: () => import('../views/SkillsStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/artefacts-studio',
+    alias: ['/artefacts'],
+    name: 'ArtefactsStudio',
+    component: () => import('../views/ArtefactsStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/personality-studio',
     name: 'PersonalityStudio',
     component: () => import('../views/PersonalityStudioView.vue'),

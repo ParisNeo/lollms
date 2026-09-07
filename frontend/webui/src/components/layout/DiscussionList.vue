@@ -33,7 +33,6 @@ import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue'; 
 import IconCopy from '../../assets/icons/IconCopy.vue';
 import IconMenu from '../../assets/icons/IconMenu.vue';
-import IconArrowLeft from '../../assets/icons/IconArrowLeft.vue';
 import IconFolder from '../../assets/icons/IconFolder.vue';
 import IconFileText from '../../assets/icons/IconFileText.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue'; 
@@ -113,65 +112,42 @@ const currentUploadPdfMode = ref('text_images');
 async function handleRefresh() {
     isRefreshingTab.value = true;
     try {
-        switch (activeTab.value) {
-            case 'chat':
-                await Promise.allSettled([
-                    store.fetchDiscussions(),
-                    store.fetchDiscussionGroups()
-                ]);
-                uiStore.addNotification('Discussions refreshed.', 'success');
-                break;
-            case 'notes':
-                await notesStore.fetchNotes();
-                uiStore.addNotification('Notes refreshed.', 'success');
-                break;
-            case 'skills':
-                uiStore.addNotification('Skills refreshed.', 'success');
-                break;
-            case 'artefacts':
-                if (store.currentDiscussionId) {
-                    await store.fetchArtefacts(store.currentDiscussionId);
-                }
-                uiStore.addNotification('Artefacts refreshed.', 'success');
-                break;
-            case 'news':
-                await fetchNewsArticlesList();
-                uiStore.addNotification('News articles refreshed.', 'success');
-                break;
-            case 'feed':
-                await Promise.allSettled([
-                    socialStore.fetchFeed(),
-                    socialStore.fetchFriends(),
-                    socialStore.fetchSocialGroups()
-                ]);
-                uiStore.addNotification('Feed & Social channels refreshed.', 'success');
-                break;
-            case 'personalities':
-                await dataStore.fetchPersonalities();
-                uiStore.addNotification('Personalities refreshed.', 'success');
-                break;
-            case 'images':
-                await Promise.allSettled([
-                    imageStore.fetchAlbums(),
-                    imageStore.fetchImages()
-                ]);
-                uiStore.addNotification('Image albums refreshed.', 'success');
-                break;
-            case 'notebooks':
-                await notebookStore.fetchNotebooks();
-                uiStore.addNotification('Notebooks refreshed.', 'success');
-                break;
-            case 'data':
-                await dataStore.fetchDataStores();
-                uiStore.addNotification('Data stores refreshed.', 'success');
-                break;
-            case 'flows':
-                await flowStore.fetchFlows();
-                uiStore.addNotification('Workflows refreshed.', 'success');
-                break;
-            default:
-                await store.fetchDiscussions();
-                break;
+        if (activeTab.value === 'chat') {
+            await Promise.allSettled([store.fetchDiscussions(), store.fetchDiscussionGroups()]);
+            uiStore.addNotification('Discussions refreshed.', 'success');
+        } else if (activeTab.value === 'notes') {
+            await notesStore.fetchNotes();
+            uiStore.addNotification('Notes refreshed.', 'success');
+        } else if (activeTab.value === 'skills') {
+            const { useSkillsStore } = await import('../../stores/skills');
+            await useSkillsStore().fetchSkills();
+            uiStore.addNotification('Skills refreshed.', 'success');
+        } else if (activeTab.value === 'artefacts') {
+            if (store.currentDiscussionId) await store.fetchArtefacts(store.currentDiscussionId);
+            uiStore.addNotification('Artefacts refreshed.', 'success');
+        } else if (activeTab.value === 'news') {
+            await fetchNewsArticlesList();
+            uiStore.addNotification('News articles refreshed.', 'success');
+        } else if (activeTab.value === 'feed') {
+            await Promise.allSettled([socialStore.fetchFeed(), socialStore.fetchFriends(), socialStore.fetchSocialGroups()]);
+            uiStore.addNotification('Feed & channels refreshed.', 'success');
+        } else if (activeTab.value === 'personalities') {
+            await dataStore.fetchPersonalities();
+            uiStore.addNotification('Personalities refreshed.', 'success');
+        } else if (activeTab.value === 'images') {
+            await Promise.allSettled([imageStore.fetchAlbums(), imageStore.fetchImages()]);
+            uiStore.addNotification('Images refreshed.', 'success');
+        } else if (activeTab.value === 'notebooks') {
+            await notebookStore.fetchNotebooks();
+            uiStore.addNotification('Notebooks refreshed.', 'success');
+        } else if (activeTab.value === 'data') {
+            await dataStore.fetchDataStores();
+            uiStore.addNotification('Data stores refreshed.', 'success');
+        } else if (activeTab.value === 'flows') {
+            await flowStore.fetchFlows();
+            uiStore.addNotification('Workflows refreshed.', 'success');
+        } else {
+            await store.fetchDiscussions();
         }
     } catch (e) {
         console.error("Refresh failed:", e);
@@ -293,38 +269,28 @@ function handleTabClick(tab) {
     activeTab.value = tab;
     if (tab === 'feed') {
         uiStore.setMainView('feed');
-        if (route.path !== '/') {
-            router.push('/');
-        }
+        if (route.path !== '/') router.push('/');
     } else if (tab === 'news') {
-        if (!route.path.startsWith('/news')) {
-            router.push('/news');
-        }
-    } else if (tab === 'chat' || tab === 'notes' || tab === 'skills' || tab === 'artefacts') {
-        if (route.path !== '/') {
-            router.push('/');
-        }
+        if (!route.path.startsWith('/news')) router.push('/news');
+    } else if (tab === 'notes') {
+        if (!route.path.startsWith('/notes')) router.push('/notes-studio');
+    } else if (tab === 'skills') {
+        if (!route.path.startsWith('/skills')) router.push('/skills-studio');
+    } else if (tab === 'artefacts') {
+        if (!route.path.startsWith('/artefacts')) router.push('/artefacts-studio');
+    } else if (tab === 'chat') {
+        if (route.path !== '/') router.push('/');
         uiStore.setMainView('chat');
     } else if (tab === 'personalities') {
-        if (!route.path.startsWith('/personality-studio')) {
-            router.push('/personality-studio');
-        }
+        if (!route.path.startsWith('/personality-studio')) router.push('/personality-studio');
     } else if (tab === 'notebooks') {
-        if (!route.path.startsWith('/notebooks') && !route.path.startsWith('/notebook-studio')) {
-            router.push('/notebooks');
-        }
+        if (!route.path.startsWith('/notebooks') && !route.path.startsWith('/notebook-studio')) router.push('/notebooks');
     } else if (tab === 'data') {
-        if (!route.path.startsWith('/datastores')) {
-            router.push('/datastores');
-        }
+        if (!route.path.startsWith('/datastores')) router.push('/datastores');
     } else if (tab === 'flows') {
-        if (!route.path.startsWith('/flow-studio')) {
-            router.push('/flow-studio');
-        }
+        if (!route.path.startsWith('/flow-studio')) router.push('/flow-studio');
     } else if (tab === 'images') {
-        if (!route.path.startsWith('/image-studio')) {
-            router.push('/image-studio');
-        }
+        if (!route.path.startsWith('/image-studio')) router.push('/image-studio');
         imageStore.fetchAlbums();
         imageStore.fetchImages();
     }
@@ -336,6 +302,12 @@ watch(() => route.path, (path) => {
         activeTab.value = 'feed';
     } else if (path.startsWith('/news')) {
         activeTab.value = 'news';
+    } else if (path.startsWith('/notes')) {
+        activeTab.value = 'notes';
+    } else if (path.startsWith('/skills')) {
+        activeTab.value = 'skills';
+    } else if (path.startsWith('/artefacts')) {
+        activeTab.value = 'artefacts';
     } else if (path.startsWith('/personality-studio')) {
         activeTab.value = 'personalities';
     } else if (path.startsWith('/flow-studio')) {
@@ -392,12 +364,10 @@ const filteredNewsArticles = computed(() => {
 });
 
 function handleSelectNewsArticle(article) {
-    if (route.path !== '/news') {
-        router.push('/news');
-    }
+    router.push({ path: '/news', query: { articleId: article.id } });
     setTimeout(() => {
         window.dispatchEvent(new CustomEvent('lollms:select-news-article', { detail: { id: article.id } }));
-    }, 100);
+    }, 50);
     if (window.innerWidth < 768) uiStore.closeSidebar();
 }
 
@@ -497,6 +467,8 @@ function handleNewGroup() {
         uiStore.openModal('discussionGroup', { parentGroup: null });
     } else if (activeTab.value === 'notes') {
         uiStore.openModal('noteGroup', { parentGroup: null });
+    } else if (activeTab.value === 'images') {
+        handleNewItem();
     }
 }
 
@@ -534,7 +506,7 @@ async function handleRootDrop(event) {
 }
 
 async function handleNewItem() { 
-    if (route.path.startsWith('/personality-studio')) {
+    if (route.path.startsWith('/personality-studio') || activeTab.value === 'personalities') {
         uiStore.openModal('personalityEditor', { 
             personality: { id: null, name: '', category: '', description: '', prompt_text: '', is_public: false, icon_base64: null } 
         });
@@ -545,14 +517,25 @@ async function handleNewItem() {
         store.createNewDiscussion(store.currentGroupId); 
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'artefacts') {
-        // [FIX] Open Create Artefact modal when on the Files/Artefacts tab
-        uiStore.openModal('createArtefact', { isLibraryOnly: true });
+        if (route.path.startsWith('/artefacts')) {
+            router.push('/artefacts-studio');
+        } else {
+            uiStore.openModal('createArtefact', { isLibraryOnly: true });
+        }
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notes') {
-        uiStore.openModal('noteEditor');
+        if (!route.path.startsWith('/notes')) {
+            router.push('/notes-studio');
+        } else {
+            uiStore.openModal('noteEditor');
+        }
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'skills') {
-        uiStore.openModal('skillEditor');
+        if (!route.path.startsWith('/skills')) {
+            router.push('/skills-studio');
+        } else {
+            uiStore.openModal('skillEditor');
+        }
         if (window.innerWidth < 768) uiStore.closeSidebar();
     } else if (activeTab.value === 'notebooks') {
         uiStore.openModal('notebookWizard');
@@ -669,37 +652,8 @@ function handleCopyDiscussionMarkdown() {
         <input type="file" ref="artefactFileInput" @change="handleArtefactFileUpload" multiple class="hidden">
         <input type="file" ref="bundleFileInput" @change="handleBundleImport" accept=".json" class="hidden">
 
-        <div class="p-4 border-b border-slate-200 dark:border-gray-700 shrink-0 space-y-3">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-3 min-w-0 grow">
-                    <button @click="uiStore.toggleSidebar" class="p-1 rounded text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors md:hidden" title="Toggle Menu">
-                        <IconMenu class="w-5 h-5" />
-                    </button>
-                    <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
-                    <div class="min-w-0 grow">
-                        <h1 class="text-base font-semibold text-slate-900 dark:text-gray-100 truncate" :title="welcomeText">{{ welcomeText }}</h1>
-                        <p class="text-xs text-slate-500 dark:text-gray-400 truncate" :title="welcomeSlogan">{{ welcomeSlogan }}</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-1 shrink-0">
-                    <button 
-                        @click="uiStore.toggleSidebarPin" 
-                        class="btn-icon-flat hidden md:inline-flex" 
-                        :class="{'!text-blue-600 !bg-blue-50 dark:!bg-blue-900/30': uiStore.isSidebarPinned}"
-                        :title="uiStore.isSidebarPinned ? 'Sidebar pinned: Auto-collapse disabled' : 'Pin sidebar: Keep open permanently'"
-                    >
-                        <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform duration-200" :class="{'rotate-45 opacity-60': !uiStore.isSidebarPinned}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                            <line x1="12" y1="17" x2="12" y2="22"></line>
-                            <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
-                        </svg>
-                    </button>
-                    <button @click="uiStore.toggleSidebar" class="btn-icon-flat hidden md:inline-flex" title="Collapse sidebar">
-                        <IconArrowLeft class="h-5 h-5" />
-                    </button>
-                </div>
-            </div>
-
-                        <!-- Tab Switcher -->
+        <div class="p-2.5 border-b border-slate-200 dark:border-gray-700 shrink-0 space-y-2">
+            <!-- Studio Tab Switcher (Directly at top of sidebar - zero wasted space) -->
             <div class="flex space-x-1 bg-slate-100 dark:bg-gray-800 p-1 rounded-lg overflow-x-auto custom-scrollbar pb-1">
                 <button 
                     @click="handleTabClick('chat')" 
@@ -809,10 +763,7 @@ function handleCopyDiscussionMarkdown() {
                     <button @click="isSearchVisible = !isSearchVisible" class="btn-icon-flat" title="Search" :class="{'bg-slate-100 dark:bg-gray-700': isSearchVisible}">
                         <IconMagnifyingGlass class="h-4 w-4" />
                     </button>
-                    <button v-if="activeTab !== 'notebooks' && activeTab !== 'data' && activeTab !== 'flows' && activeTab !== 'personalities' && activeTab !== 'news' && activeTab !== 'feed'" @click="handleNewGroup" class="btn-icon-flat" :title="activeTab === 'images' ? 'New Album' : 'New Group'">
-                        <IconFolder class="w-4 h-4" />
-                    </button>
-                    <button v-if="activeTab !== 'notebooks' && activeTab !== 'data' && activeTab !== 'flows'" @click="handleNewGroup" class="btn-icon-flat" :title="activeTab === 'images' ? 'New Album' : 'New Group'">
+                    <button v-if="activeTab === 'chat' || activeTab === 'notes' || activeTab === 'images'" @click="handleNewGroup" class="btn-icon-flat" :title="activeTab === 'images' ? 'New Album' : 'New Group'">
                         <IconFolder class="w-4 h-4" />
                     </button>
                     <button v-if="activeTab === 'chat' && user && user.user_ui_level >= 4" @click="showToolbox = !showToolbox" class="btn-icon-flat" :class="{ 'bg-slate-100 dark:bg-gray-700': showToolbox }" title="Toggle Toolbox">

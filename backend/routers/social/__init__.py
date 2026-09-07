@@ -12,7 +12,7 @@ from PIL import Image
 from werkzeug.utils import secure_filename
 
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_, and_, exists, select, insert, delete, func
+from sqlalchemy import or_, and_, exists, select, insert, delete, func, cast, String
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, HttpUrl
@@ -42,7 +42,7 @@ from backend.session import (
 )
 from backend.discussion import get_user_discussion
 from backend.routers.social.mentions import mentions_router
-from backend.security import sanitize_content, validate_url
+from backend.security import sanitize_content, validate_url, safe_requests_get
 from backend.ws_manager import manager
 
 social_router = APIRouter(
@@ -342,10 +342,11 @@ async def upload_post_media(
 async def get_social_media_file(
     username: str,
     filename: str,
-    current_user: UserAuthDetails = Depends(get_current_active_user)
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
 ):
     """
-    Serves stored social post media with path containment checks and nosniff protections.
+    Serves stored social post media with path containment checks, object-level authorization, and nosniff protections.
     """
     s_username = secure_filename(username)
     s_filename = secure_filename(filename)
@@ -355,6 +356,42 @@ async def get_social_media_file(
 
     if not target_file.is_relative_to(user_social_path) or not target_file.is_file():
         raise HTTPException(status_code=404, detail="Media asset not found.")
+
+    is_owner = (current_user.username == s_username)
+    is_admin = getattr(current_user, 'is_admin', False)
+
+    if not is_owner and not is_admin:
+        # Locate post associated with this media asset
+        post = db.query(DBPost).filter(
+            cast(DBPost.media, String).contains(s_filename),
+            DBPost.moderation_status != 'flagged'
+        ).first()
+
+        if not post:
+            raise HTTPException(status_code=404, detail="Associated post not found.")
+
+        # Evaluate visibility permissions for current user
+        if post.author_id != current_user.id and post.visibility != PostVisibility.public:
+            if post.visibility == PostVisibility.followers:
+                is_following = db.query(exists().where(
+                    and_(follows_table.c.follower_id == current_user.id, follows_table.c.following_id == post.author_id)
+                )).scalar()
+                if not is_following:
+                    raise HTTPException(status_code=403, detail="You must follow this user to access this media.")
+            elif post.visibility == PostVisibility.friends:
+                are_friends = db.query(exists().where(
+                    and_(
+                        or_(
+                            and_(DBFriendship.user1_id == current_user.id, DBFriendship.user2_id == post.author_id),
+                            and_(DBFriendship.user1_id == post.author_id, DBFriendship.user2_id == current_user.id)
+                        ),
+                        DBFriendship.status == FriendshipStatus.ACCEPTED
+                    )
+                )).scalar()
+                if not are_friends:
+                    raise HTTPException(status_code=403, detail="You must be friends with this user to access this media.")
+            else:
+                raise HTTPException(status_code=403, detail="You do not have permission to access this media.")
 
     return FileResponse(
         str(target_file),
@@ -390,7 +427,13 @@ async def extract_link_preview(
         headers = {
             "User-Agent": "LoLLMs-Platform-Bot/2.1 (+https://github.com/ParisNeo/lollms)"
         }
-        resp = requests.get(raw_url, headers=headers, timeout=4, stream=True)
+        resp = safe_requests_get(
+            raw_url,
+            headers=headers,
+            timeout=4,
+            max_redirects=3,
+            max_response_size=524288
+        )
         resp.raise_for_status()
 
         # Read only up to 512KB to prevent memory exhaustion from massive files

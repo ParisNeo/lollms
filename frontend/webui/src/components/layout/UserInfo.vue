@@ -25,6 +25,9 @@ import IconSquares2x2 from '../../assets/icons/IconSquares2x2.vue';
 import IconMessage from '../../assets/icons/IconMessage.vue';
 import IconInfo from '../../assets/icons/IconInfo.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconFileText from '../../assets/icons/IconFileText.vue';
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -44,6 +47,10 @@ const isTtiConfigured = computed(() => !!user.value?.tti_binding_model_name);
 
 // Highlight Logic
 const isDiscussionActive = computed(() => route.path === '/' && uiStore.mainView === 'chat');
+const isNotesStudioActive = computed(() => route.path.startsWith('/notes'));
+const isSkillsStudioActive = computed(() => route.path.startsWith('/skills'));
+const isArtefactsStudioActive = computed(() => route.path.startsWith('/artefacts'));
+const isNewsStudioActive = computed(() => route.path.startsWith('/news'));
 const isNotebooksActive = computed(() => route.path.startsWith('/notebooks') || route.path.startsWith('/notebook-studio'));
 const isImageStudioActive = computed(() => route.path.startsWith('/image-studio'));
 const isVoicesStudioActive = computed(() => route.path.startsWith('/voices-studio'));
@@ -209,69 +216,109 @@ const vOnClickOutside = {
                         leave-from-class="opacity-100 translate-x-0"
                         leave-to-class="opacity-0 translate-x-full"
                     >
-                        <div v-if="activeSubMenu === 'studios'" class="w-full py-2 flex flex-col h-full bg-white dark:bg-gray-800">
-                            <button @click="activeSubMenu = null" class="menu-item flex items-center gap-3 text-gray-500 font-bold mb-1">
+                        <div v-if="activeSubMenu === 'studios'" class="w-full py-2 flex flex-col h-full bg-white dark:bg-gray-800 overflow-y-auto max-h-[440px] custom-scrollbar">
+                            <button @click="activeSubMenu = null" class="menu-item flex items-center gap-3 text-gray-500 font-bold mb-1 sticky top-0 bg-white dark:bg-gray-800 z-10 border-b dark:border-gray-700">
                                 <IconArrowLeft class="h-4 w-4" />
                                 <span>Back</span>
                             </button>
-                            <div class="px-4 py-2 text-[10px] font-black uppercase text-gray-400 tracking-widest border-b dark:border-gray-700 mb-1">Studios</div>
-                            
+                            <div class="px-4 py-1.5 text-[10px] font-black uppercase text-gray-400 tracking-widest">LoLLMs Studios</div>
+
                             <!-- Discussion Studio -->
                             <button @click="openDiscussionStudio" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isDiscussionActive}">
-                                <IconMessage class="h-5 w-5 text-indigo-500" />
-                                <div class="flex flex-col text-left">
-                                    <span class="font-bold">Discussion Studio</span>
+                                <IconMessage class="h-5 w-5 text-blue-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Discussion Studio</span>
                                     <span class="text-[10px] opacity-60">Chat & Generation</span>
                                 </div>
                             </button>
 
-                            <router-link to="/personality-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isPersonalityStudioActive}">
-                                <IconUserCircle class="h-5 w-5 text-orange-500" />
-                                <div class="flex flex-col">
-                                    <span class="font-bold">Personality Studio</span>
-                                    <span class="text-[10px] opacity-60">AI Character Design</span>
+                            <!-- Notes Studio -->
+                            <router-link to="/notes-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isNotesStudioActive}">
+                                <IconPencil class="h-5 w-5 text-amber-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Notes Studio</span>
+                                    <span class="text-[10px] opacity-60">Research & Documentation</span>
                                 </div>
                             </router-link>
 
+                            <!-- Skills Studio -->
+                            <router-link to="/skills-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isSkillsStudioActive}">
+                                <IconSparkles class="h-5 w-5 text-teal-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Skills Studio</span>
+                                    <span class="text-[10px] opacity-60">AI Capabilities & Tools</span>
+                                </div>
+                            </router-link>
+
+                            <!-- Artefacts Studio -->
+                            <router-link to="/artefacts-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isArtefactsStudioActive}">
+                                <IconFileText class="h-5 w-5 text-blue-600 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Artefacts Studio</span>
+                                    <span class="text-[10px] opacity-60">Live Apps, SVG & Code</span>
+                                </div>
+                            </router-link>
+
+                            <!-- Notebook Studio -->
                             <router-link to="/notebooks" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isNotebooksActive}">
-                                <IconServer class="h-5 w-5 text-blue-500" />
-                                <div class="flex flex-col">
-                                    <span class="font-bold">Notebook Studio</span>
+                                <IconServer class="h-5 w-5 text-purple-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Notebook Studio</span>
                                     <span class="text-[10px] opacity-60">Research & Writing</span>
                                 </div>
                             </router-link>
 
-                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isImageStudioActive}">
-                                <IconPhoto class="h-5 w-5 text-purple-500" />
-                                <div class="flex flex-col">
-                                    <span class="font-bold">Image Studio</span>
-                                    <span class="text-[10px] opacity-60">Visual Creation</span>
-                                </div>
-                            </router-link>
-
-                            <router-link v-if="isTtsConfigured || isSttConfigured" to="/voices-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isVoicesStudioActive}">
-                                <IconMicrophone class="w-5 h-5 text-pink-500" />
-                                <div class="flex flex-col">
-                                    <span class="font-bold">Voices Studio</span>
-                                    <span class="text-[10px] opacity-60">
-                                        {{ isTtsConfigured && isSttConfigured ? 'TTS, STT & Translation' : (isTtsConfigured ? 'TTS & Voice Design' : 'STT & Transcription') }}
-                                    </span>
-                                </div>
-                            </router-link>
-
+                            <!-- Data Studio -->
                             <router-link to="/datastores" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isDataStoresActive}">
-                                <IconDatabase class="h-5 w-5 text-green-500" />
-                                <div class="flex flex-col">
-                                    <span class="font-bold">Data Studio</span>
+                                <IconDatabase class="h-5 w-5 text-green-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Data Studio</span>
                                     <span class="text-[10px] opacity-60">RAG & Knowledge</span>
                                 </div>
                             </router-link>
 
+                            <!-- Flow Studio -->
                             <router-link to="/flow-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isFlowStudioActive}">
-                                <IconShare class="h-5 w-5 text-cyan-500" />
-                                <div class="flex flex-col">
-                                    <span class="font-bold">Flow Studio</span>
+                                <IconShare class="h-5 w-5 text-cyan-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Flow Studio</span>
                                     <span class="text-[10px] opacity-60">Workflows & Logic</span>
+                                </div>
+                            </router-link>
+
+                            <!-- Image Studio -->
+                            <router-link v-if="isTtiConfigured" to="/image-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isImageStudioActive}">
+                                <IconPhoto class="h-5 w-5 text-pink-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Image Studio</span>
+                                    <span class="text-[10px] opacity-60">Visual Creation</span>
+                                </div>
+                            </router-link>
+
+                            <!-- Voices Studio -->
+                            <router-link v-if="isTtsConfigured || isSttConfigured" to="/voices-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isVoicesStudioActive}">
+                                <IconMicrophone class="w-5 h-5 text-pink-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Voices Studio</span>
+                                    <span class="text-[10px] opacity-60">TTS & Audio</span>
+                                </div>
+                            </router-link>
+
+                            <!-- Personality Studio -->
+                            <router-link to="/personality-studio" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isPersonalityStudioActive}">
+                                <IconUserCircle class="h-5 w-5 text-orange-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">Personality Studio</span>
+                                    <span class="text-[10px] opacity-60">AI Character Design</span>
+                                </div>
+                            </router-link>
+
+                            <!-- News Studio -->
+                            <router-link to="/news" @click="closeMenu" class="menu-item flex items-center gap-3" :class="{'bg-blue-50 dark:bg-blue-900/20': isNewsStudioActive}">
+                                <IconBookOpen class="h-5 w-5 text-gray-500 shrink-0" />
+                                <div class="flex flex-col text-left min-w-0">
+                                    <span class="font-bold truncate">News Studio</span>
+                                    <span class="text-[10px] opacity-60">Curated Articles & Feeds</span>
                                 </div>
                             </router-link>
                         </div>

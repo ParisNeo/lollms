@@ -23,6 +23,8 @@ import IconShare from '../../assets/icons/IconShare.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
+import IconPencil from '../../assets/icons/IconPencil.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const hasActiveVectorizers = computed(() => Array.isArray(dataStore.availableVectorizers) && dataStore.availableVectorizers.length > 0);
 
@@ -167,20 +169,11 @@ async function handlePlusClick() {
       <DiscussionList v-if="isSidebarOpen" class="h-full" />
 
       <!-- Collapsed Content -->
-      <div v-else class="h-full flex flex-col items-center py-4 space-y-3">
-        <!-- Collapsed Toggle -->
-        <button 
-          @click="uiStore.toggleSidebar" 
-          class="p-2 rounded-lg text-slate-500 dark:text-gray-400 hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors mb-2" 
-          title="Expand Sidebar"
-        >
-          <IconMenu class="w-5 h-5" />
-        </button>
-
-        <!-- Quick Actions -->
+      <div v-else class="h-full flex flex-col items-center py-3 space-y-2.5">
+        <!-- Quick Actions (Master toggle resides in Global Header) -->
         <button 
           @click="handlePlusClick" 
-          class="w-10 h-10 flex items-center justify-center bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 transition-colors" 
+          class="w-10 h-10 flex items-center justify-center bg-blue-600 text-white rounded-xl shadow-xs hover:bg-blue-700 transition-all active:scale-95" 
           :title="plusButtonTitle"
         >
           <IconPlus class="w-5 h-5" />
@@ -204,7 +197,7 @@ async function handlePlusClick() {
         </button>
 
         <!-- Sovereign Studio Dock (Collapsed) -->
-        <div class="w-full flex flex-col items-center py-2 gap-2 border-t border-b border-gray-150 dark:border-gray-800">
+        <div class="w-full flex flex-col items-center py-2 gap-1.5 border-t border-b border-gray-150 dark:border-gray-800 overflow-y-auto custom-scrollbar">
             <span class="text-[8px] font-black tracking-widest text-gray-400 select-none uppercase mb-1">Studios</span>
 
             <router-link
@@ -215,6 +208,33 @@ async function handlePlusClick() {
               @click="uiStore.setMainView('chat')"
             >
                 <IconChatBubbleLeftRight class="w-5 h-5 text-blue-600" />
+            </router-link>
+
+            <router-link
+              to="/notes-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Notes Studio"
+              active-class="bg-amber-100/50 text-amber-600 dark:bg-amber-900/20"
+            >
+                <IconPencil class="w-5 h-5 text-amber-500" />
+            </router-link>
+
+            <router-link
+              to="/skills-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Skills Studio"
+              active-class="bg-teal-100/50 text-teal-600 dark:bg-teal-900/20"
+            >
+                <IconSparkles class="w-5 h-5 text-teal-500" />
+            </router-link>
+
+            <router-link
+              to="/artefacts-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Artefacts Studio"
+              active-class="bg-blue-100/50 text-blue-600 dark:bg-blue-900/20"
+            >
+                <IconFileText class="w-5 h-5 text-blue-500" />
             </router-link>
 
             <router-link

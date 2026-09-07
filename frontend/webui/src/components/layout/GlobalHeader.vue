@@ -280,22 +280,39 @@ async function handleRefreshModels() {
 </script>
 
 <template>
-  <header class="shrink-0 bg-bg-card border-b border-border-main h-14 flex items-center justify-between px-3 sm:px-4 z-[50] relative shadow-sm transition-colors duration-500">
-    
-    <!-- Left: Logo & Sidebar Toggle & Model Selector -->
-    <div class="flex items-center gap-2 sm:gap-4 min-w-0">
-        <!-- Logo / Home Link -->
-        <router-link to="/" class="flex items-center gap-2 shrink-0 group">
-             <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 shrink-0 object-contain rounded-md transition-transform group-hover:scale-110" @error="($event.target.src=logoDefault)">
-             <span class="hidden md:inline font-black text-lg tracking-tighter text-primary">LoLLMs</span>
-        </router-link>
+  <header class="shrink-0 bg-bg-card border-b border-border-main h-14 flex items-center justify-between pl-0 pr-3 sm:pr-4 z-[50] relative shadow-sm transition-colors duration-500">
 
-        <!-- Sidebar Toggle -->
+    <!-- Left: Unified Primary Logo & Sidebar Controls & Model Selector -->
+    <div class="flex items-center gap-1.5 sm:gap-2.5 min-w-0 h-full">
+        <!-- Sidebar Toggle (Spans exact w-16 width of the collapsed sidebar) -->
         <button v-if="showMainSidebarToggle" @click="uiStore.toggleSidebar" 
-                class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-                title="Toggle Sidebar">
+                class="w-16 h-14 flex items-center justify-center shrink-0 border-r border-border-main text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800/60 transition-colors"
+                :title="uiStore.isSidebarOpen ? 'Collapse Sidebar' : 'Open Sidebar'">
             <IconMenu class="w-5 h-5" />
         </button>
+
+        <!-- Sidebar Pin Button (when sidebar is open) -->
+        <button 
+            v-if="showMainSidebarToggle && uiStore.isSidebarOpen"
+            @click="uiStore.toggleSidebarPin" 
+            class="p-1.5 rounded-xl transition-colors hidden md:inline-flex ml-1" 
+            :class="uiStore.isSidebarPinned ? 'text-blue-600 bg-blue-50 dark:bg-blue-900/30' : 'text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:hover:bg-gray-700'"
+            :title="uiStore.isSidebarPinned ? 'Sidebar pinned: Auto-collapse disabled' : 'Pin sidebar: Keep open permanently'"
+        >
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 transition-transform duration-200" :class="{'rotate-45 opacity-60': !uiStore.isSidebarPinned}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="17" x2="12" y2="22"></line>
+                <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+            </svg>
+        </button>
+
+        <!-- Master Logo & App Identity -->
+        <router-link to="/" class="flex items-center gap-2 shrink-0 group mr-1" :class="{'ml-3 sm:ml-4': !showMainSidebarToggle, 'ml-2': showMainSidebarToggle}">
+             <img :src="logoSrc" alt="LoLLMs Logo" class="h-8 w-8 shrink-0 object-contain rounded-lg transition-transform group-hover:scale-105" @error="($event.target.src=logoDefault)">
+             <div class="hidden sm:flex flex-col leading-none">
+                 <span class="font-black text-base tracking-tighter text-primary">LoLLMs</span>
+                 <span class="text-[8px] font-bold text-text-dim tracking-widest uppercase">Studio Hub</span>
+             </div>
+        </router-link>
 
         <div class="h-6 w-px bg-gray-200 dark:border-gray-700 hidden sm:block"></div>
 
