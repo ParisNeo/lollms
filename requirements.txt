@@ -7,15 +7,15 @@ fastapi==0.129.0
 uvicorn[standard]==0.37.0
 sse_starlette==3.0.2
 websockets==15.0.1
-werkzeug==3.1.3
-python-multipart==0.0.20
+werkzeug==3.1.6
+python-multipart==0.0.31
 
 # --- Configuration & Utility ---
 toml==0.10.2
 packaging==25.0
 jsonschema==4.25.1
 psutil==7.1.0
-filelock==3.19.1
+filelock==3.20.3
 pyyaml==6.0.3
 
 # --- Authentication, Cryptography & Security ---
@@ -24,8 +24,8 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 argon2-cffi==25.1.0
 python-jose[cryptography]==3.5.0
-Authlib==1.6.5
-bleach==6.3.0
+Authlib==1.6.12
+bleach==6.4.0
 
 # --- LoLLMs Ecosystem & Client Library ---
 lollms-client==1.18.4
@@ -38,14 +38,14 @@ tiktoken==0.11.0
 pydantic==2.12.5
 pydantic[email]==2.12.5
 numpy==2.2.6
-Pillow==11.3.0
+Pillow==12.3.0
 
 # --- SafeStore & Vector / Graph Engine ---
 safe_store==3.5.5
 wcwidth==0.2.14
 
 # --- Document Parsing, Ingestion & Office Formats ---
-pypdf==6.1.1
+pypdf==6.16.1
 PyMuPDF==1.26.4
 python-docx==1.2.0
 docx2python==3.5.0
@@ -61,7 +61,7 @@ markdown_pdf==1.10
 latex2mathml==3.78.1
 weasyprint>=60.0
 xhtml2pdf>=0.2.15
-pyzipper==0.3.6
+pyzipper==0.4.0
 
 # --- Audio & Hardware Diagnostics ---
 pydub==0.25.1
