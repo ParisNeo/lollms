@@ -894,6 +894,7 @@ def _get_modality_models(
             deduped_models.append(m)
 
     return sorted(deduped_models, key=lambda x: x.name)
+
 def _get_modality_models_list(binding_record, binding_type: str) -> List[BindingModel]:
     try:
         models_list = []
@@ -1160,8 +1161,106 @@ async def install_tti_binding_zoo(
     return task
 
 # TTS
+@bindings_management_router.get("/tts-bindings/available_types", response_model=List[Dict])
+async def get_available_tts_binding_types():
+    try:
+        names = list_bindings("tts")
+        desc_list = []
+        for name in names:
+            try:
+                raw = get_binding_desc(name, "tts")
+                desc_list.append(_normalize_binding_desc(name, raw, "tts"))
+            except Exception:
+                desc_list.append(_normalize_binding_desc(name, None, "tts"))
+        return desc_list
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Failed to get available TTS binding types: {e}")
+
 @bindings_management_router.get("/tts-bindings", response_model=List[TTSBindingPublicAdmin])
-async def get_all_tts_bindings(db: Session = Depends(get_db)): return db.query(DBTTSBinding).all()
+async def get_all_tts_bindings(db: Session = Depends(get_db)):
+    return db.query(DBTTSBinding).all()
+
+@bindings_management_router.post("/tts-bindings", response_model=TTSBindingPublicAdmin, status_code=201)
+async def create_tts_binding(
+    binding_data: TTSBindingCreate,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    if db.query(DBTTSBinding).filter(DBTTSBinding.alias == binding_data.alias).first():
+        raise HTTPException(status_code=400, detail="A TTS binding with this alias already exists.")
+
+    if binding_data.config:
+        binding_data.config = _process_binding_config(binding_data.name, binding_data.config, "tts")
+
+    new_binding = DBTTSBinding(**binding_data.model_dump())
+    try:
+        db.add(new_binding)
+        db.commit()
+        db.refresh(new_binding)
+        invalidate_model_cache(db)
+        manager.broadcast_sync({"type": "bindings_updated"})
+        return new_binding
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="A TTS binding with this alias already exists.")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@bindings_management_router.put("/tts-bindings/{binding_id}", response_model=TTSBindingPublicAdmin)
+async def update_tts_binding(
+    binding_id: int,
+    update_data: TTSBindingUpdate,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    binding_to_update = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding_to_update:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+
+    if update_data.alias and update_data.alias != binding_to_update.alias:
+        if db.query(DBTTSBinding).filter(DBTTSBinding.alias == update_data.alias).first():
+            raise HTTPException(status_code=400, detail="A TTS binding with the new alias already exists.")
+
+    update_dict = update_data.model_dump(exclude_unset=True)
+
+    if 'config' in update_dict and update_dict['config'] is not None:
+        binding_name = update_dict.get('name', binding_to_update.name)
+        update_dict['config'] = _process_binding_config(binding_name, update_dict['config'], "tts")
+
+    for key, value in update_dict.items():
+        setattr(binding_to_update, key, value)
+
+    try:
+        db.commit()
+        db.refresh(binding_to_update)
+        invalidate_model_cache(db)
+        manager.broadcast_sync({"type": "bindings_updated"})
+        return binding_to_update
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@bindings_management_router.delete("/tts-bindings/{binding_id}", response_model=Dict[str, str])
+async def delete_tts_binding(
+    binding_id: int,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    binding_to_delete = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding_to_delete:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+
+    try:
+        db.delete(binding_to_delete)
+        db.commit()
+        invalidate_model_cache(db)
+        manager.broadcast_sync({"type": "bindings_updated"})
+        return {"message": "TTS Binding deleted successfully."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
 @bindings_management_router.get("/tts-bindings/{binding_id}/models", response_model=List[BindingModel])
 async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db)):
@@ -1170,26 +1269,127 @@ async def get_tts_binding_models(binding_id: int, db: Session = Depends(get_db))
     return _get_modality_models_list(binding, "tts")
 
 @bindings_management_router.put("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
-async def update_tts_model_alias(binding_id: int, payload: TtsModelAliasUpdate, db: Session = Depends(get_db)):
+async def update_tts_model_alias(
+    binding_id: int,
+    payload: TtsModelAliasUpdate,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
     binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTS Binding not found.")
-    if binding.model_aliases is None: binding.model_aliases = {}
-    binding.model_aliases[payload.original_model_name] = payload.alias.model_dump()
+    if binding.model_aliases is None:
+        binding.model_aliases = {}
+    elif isinstance(binding.model_aliases, str):
+        try:
+            binding.model_aliases = json.loads(binding.model_aliases)
+        except Exception:
+            binding.model_aliases = {}
+
+    alias_dict = payload.alias.model_dump()
+    alias_dict["binding_profile_name"] = binding.alias
+    target_key = payload.new_model_name or payload.original_model_name
+    alias_dict["model_name"] = target_key
+
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
+
+    binding.model_aliases[target_key] = alias_dict
     flag_modified(binding, "model_aliases")
-    db.commit(); db.refresh(binding)
+    db.commit()
+    db.refresh(binding)
+    invalidate_model_cache(db)
     manager.broadcast_sync({"type": "bindings_updated"})
     return binding
 
 @bindings_management_router.delete("/tts-bindings/{binding_id}/alias", response_model=TTSBindingPublicAdmin)
-async def delete_tts_model_alias(binding_id: int, payload: ModelAliasDelete, db: Session = Depends(get_db)):
+async def delete_tts_model_alias(
+    binding_id: int,
+    payload: ModelAliasDelete,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
     binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
     if not binding: raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    if binding.model_aliases is None:
+        binding.model_aliases = {}
+    elif isinstance(binding.model_aliases, str):
+        try:
+            binding.model_aliases = json.loads(binding.model_aliases)
+        except Exception:
+            binding.model_aliases = {}
+
     if binding.model_aliases and payload.original_model_name in binding.model_aliases:
         del binding.model_aliases[payload.original_model_name]
         flag_modified(binding, "model_aliases")
-    db.commit(); db.refresh(binding)
+    db.commit()
+    db.refresh(binding)
+    invalidate_model_cache(db)
     manager.broadcast_sync({"type": "bindings_updated"})
     return binding
+
+@bindings_management_router.post("/tts-bindings/{binding_id}/execute_command", response_model=TaskInfo, status_code=202)
+async def execute_tts_binding_command(
+    binding_id: int,
+    payload: BindingCommandRequest,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+
+    binding_data = {
+        "id": binding.id,
+        "name": binding.name,
+        "alias": binding.alias,
+        "config": binding.config,
+        "default_model_name": binding.default_model_name,
+        "model_aliases": binding.model_aliases
+    }
+    task = task_manager.submit_task(
+        name=f"Execute {payload.command_name} on {binding.alias}",
+        target=_execute_binding_command_task,
+        args=("tts", binding_data, payload.command_name, payload.parameters, current_admin.username),
+        description=f"Executing {payload.command_name} on TTS binding {binding.alias}",
+        owner_username=current_admin.username
+    )
+    return task
+
+@bindings_management_router.get("/tts-bindings/{binding_id}/zoo", response_model=List[Dict[str, Any]])
+async def get_tts_binding_zoo(binding_id: int, db: Session = Depends(get_db)):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+    return _get_binding_zoo(binding, "tts")
+
+@bindings_management_router.post("/tts-bindings/{binding_id}/zoo/install", response_model=TaskInfo, status_code=202)
+async def install_tts_binding_zoo(
+    binding_id: int,
+    payload: ZooInstallRequest,
+    current_admin: UserAuthDetails = Depends(get_current_admin_user),
+    db: Session = Depends(get_db)
+):
+    binding = db.query(DBTTSBinding).filter(DBTTSBinding.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="TTS Binding not found.")
+
+    binding_data = {
+        "id": binding.id,
+        "name": binding.name,
+        "alias": binding.alias,
+        "config": binding.config,
+        "default_model_name": binding.default_model_name,
+        "model_aliases": binding.model_aliases
+    }
+    task = task_manager.submit_task(
+        name=f"Install model from zoo on {binding.alias}",
+        target=_install_from_zoo_task,
+        args=("tts", binding_data, payload.index),
+        description=f"Installing zoo model index {payload.index} for TTS binding {binding.alias}",
+        owner_username=current_admin.username
+    )
+    return task
 
 # STT
 @bindings_management_router.get("/stt-bindings", response_model=List[STTBindingPublicAdmin])

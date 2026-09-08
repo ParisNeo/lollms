@@ -808,9 +808,58 @@ def build_lollms_client_from_params(
             user_overrides=stt_params or {}
         )
 
+        # 1. Resolve Primary LLM Binding
         primary_binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
         primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
         actual_model = target_model_name or (primary_binding.default_model_name if primary_binding else "")
+
+        # 2. Resolve Primary TTS Binding
+        target_tts_alias = tts_binding_alias or (user_db.tts_binding_model_name.split('/')[0] if user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name else None)
+        if not target_tts_alias:
+            def_tts_name = settings.get("default_tts_binding_model")
+            if def_tts_name and '/' in def_tts_name:
+                target_tts_alias = def_tts_name.split('/')[0]
+        if not target_tts_alias:
+            def_tts_b = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).order_by(DBTTSBinding.id).first()
+            if def_tts_b:
+                target_tts_alias = def_tts_b.alias
+
+        primary_tts_binding = db.query(DBTTSBinding).filter(DBTTSBinding.alias == target_tts_alias, DBTTSBinding.is_active == True).first() if target_tts_alias else None
+        primary_tts_config = primary_tts_binding.config.copy() if primary_tts_binding and primary_tts_binding.config else {}
+        if tts_params:
+            primary_tts_config.update(tts_params)
+
+        # 3. Resolve Primary TTI Binding
+        target_tti_alias = tti_binding_alias or (user_db.tti_binding_model_name.split('/')[0] if user_db.tti_binding_model_name and '/' in user_db.tti_binding_model_name else None)
+        if not target_tti_alias:
+            def_tti_name = settings.get("default_tti_binding_model")
+            if def_tti_name and '/' in def_tti_name:
+                target_tti_alias = def_tti_name.split('/')[0]
+        if not target_tti_alias:
+            def_tti_b = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+            if def_tti_b:
+                target_tti_alias = def_tti_b.alias
+
+        primary_tti_binding = db.query(DBTTIBinding).filter(DBTTIBinding.alias == target_tti_alias, DBTTIBinding.is_active == True).first() if target_tti_alias else None
+        primary_tti_config = primary_tti_binding.config.copy() if primary_tti_binding and primary_tti_binding.config else {}
+        if tti_params:
+            primary_tti_config.update(tti_params)
+
+        # 4. Resolve Primary STT Binding
+        target_stt_alias = stt_binding_alias or (user_db.stt_binding_model_name.split('/')[0] if user_db.stt_binding_model_name and '/' in user_db.stt_binding_model_name else None)
+        if not target_stt_alias:
+            def_stt_name = settings.get("default_stt_binding_model")
+            if def_stt_name and '/' in def_stt_name:
+                target_stt_alias = def_stt_name.split('/')[0]
+        if not target_stt_alias:
+            def_stt_b = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
+            if def_stt_b:
+                target_stt_alias = def_stt_b.alias
+
+        primary_stt_binding = db.query(DBSTTBinding).filter(DBSTTBinding.alias == target_stt_alias, DBSTTBinding.is_active == True).first() if target_stt_alias else None
+        primary_stt_config = primary_stt_binding.config.copy() if primary_stt_binding and primary_stt_binding.config else {}
+        if stt_params:
+            primary_stt_config.update(stt_params)
 
         found_alias_ctx = None
         if primary_binding and primary_binding.model_aliases:
@@ -875,7 +924,13 @@ def build_lollms_client_from_params(
             "stt_binding_profiles": stt_binding_profiles,
             "stt_model_profiles": stt_model_profiles,
             "llm_binding_name": primary_binding.name if primary_binding else None,
-            "llm_binding_config": primary_config
+            "llm_binding_config": primary_config,
+            "tts_binding_name": primary_tts_binding.name if primary_tts_binding else None,
+            "tts_binding_config": primary_tts_config,
+            "tti_binding_name": primary_tti_binding.name if primary_tti_binding else None,
+            "tti_binding_config": primary_tti_config,
+            "stt_binding_name": primary_stt_binding.name if primary_stt_binding else None,
+            "stt_binding_config": primary_stt_config
         }
 
         if load_llm and load_mcp:

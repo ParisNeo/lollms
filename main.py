@@ -99,6 +99,15 @@ from backend.routers.discussion import build_discussions_router
 
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
+import io
+
+# Fix Windows cp1252 console encoding crash with ascii_colors Unicode characters
+if os.name == 'nt':
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    if sys.stdout and hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
+    if sys.stderr and hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8')
 from backend.tasks.news_tasks import _scrape_rss_feeds_task, _cleanup_old_news_articles_task
 from backend.tasks.social_tasks import _generate_feed_post_task 
 from backend.tasks.system_tasks import _prune_old_tasks_task

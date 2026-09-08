@@ -1,12 +1,15 @@
 # backend/routers/discussion/generation/tts.py
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from fastapi import APIRouter, Depends, HTTPException, Body, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
-from typing import Optional
+from typing import Optional, Any
 from pydantic import BaseModel, Field
 from pathlib import Path
+from werkzeug.utils import secure_filename
 import re
+import io
+import base64
 
 from backend.db import get_db
 from backend.session import get_current_active_user, build_lollms_client_from_params, get_user_data_root
@@ -20,16 +23,39 @@ executor = ThreadPoolExecutor(max_workers=50)
 class TTSRequest(BaseModel):
     text: str
     voice: Optional[str] = None
-    model: Optional[str] = None # For bindings that support multiple models
+    model: Optional[str] = None
     language: Optional[str] = Field(default="en", description="The language code for the text (e.g., 'en', 'fr', 'de')")
 
 def _clean_text_for_tts(text: str) -> str:
-    if not text: return ""
-    # Remove markdown bold/italic (*) and headers (#)
-    text = re.sub(r'[*#]', '', text)
-    # Remove unicode emojis (Supplementary Multilingual Plane)
-    text = re.sub(r'[\U00010000-\U0010ffff]', '', text)
-    return text.strip()
+    if not text:
+        return ""
+    # Strip markdown formatting
+    cleaned = re.sub(r'[*#_`~>\[\]()]', '', text)
+    # Strip emojis
+    cleaned = re.sub(r'[\U00010000-\U0010ffff]', '', cleaned)
+    # Normalize whitespaces
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    return cleaned.strip()
+
+def _normalize_raw_tts_output(raw_output: Any) -> bytes:
+    if isinstance(raw_output, bytes):
+        return raw_output
+    if hasattr(raw_output, 'read') and callable(raw_output.read):
+        return raw_output.read()
+    if isinstance(raw_output, io.BytesIO):
+        return raw_output.getvalue()
+    if isinstance(raw_output, str):
+        if raw_output.startswith("data:audio"):
+            b64_part = raw_output.split(",", 1)[1] if "," in raw_output else raw_output
+            return base64.b64decode(b64_part)
+        file_p = Path(raw_output)
+        if file_p.exists() and file_p.is_file():
+            return file_p.read_bytes()
+        try:
+            return base64.b64decode(raw_output)
+        except Exception:
+            pass
+    raise ValueError("TTS engine did not produce valid audio data.")
 
 def build_tts_router(router: APIRouter):
     @router.post("/generate_tts")
@@ -40,7 +66,7 @@ def build_tts_router(router: APIRouter):
     ):
         """
         Generates text-to-speech audio from the provided text using the user's configured TTS binding.
-        It prioritizes the user's active custom voice if one is set.
+        Prioritizes the active custom voice if configured.
         """
         loop = asyncio.get_running_loop()
         try:
@@ -50,33 +76,27 @@ def build_tts_router(router: APIRouter):
             )
 
             if not lc.tts:
-                raise HTTPException(status_code=400, detail="Text-to-Speech (TTS) is not configured for this user.")
-            
+                raise HTTPException(status_code=400, detail="Text-to-Speech (TTS) is not configured or active.")
+
             voice_to_use = request_data.voice
-            language_to_use = None
+            language_to_use = request_data.language
             db_user = db.query(DBUser).filter(DBUser.id == current_user.id).first()
-            
+
             if db_user and db_user.active_voice_id and not voice_to_use:
                 active_voice = db.query(DBUserVoice).filter(DBUserVoice.id == db_user.active_voice_id).first()
                 if active_voice:
                     user_voices_path = get_user_data_root(current_user.username) / "voices"
-                    voice_file_path = user_voices_path / Path(active_voice.file_path)
+                    voice_file_path = user_voices_path / Path(secure_filename(active_voice.file_path))
                     if voice_file_path.exists():
                         voice_to_use = str(voice_file_path.resolve())
-                        language_to_use = active_voice.language # Prioritize voice's language
-                        print(f"INFO: Using active voice '{active_voice.alias}' with language '{language_to_use}'.")
-                    else:
-                        print(f"WARNING: Active voice file not found for user {current_user.username}: {voice_file_path}")
+                        if not language_to_use:
+                            language_to_use = active_voice.language
 
-            # If language is still not set, use user's preference (unless 'auto')
             if not language_to_use and db_user and db_user.ai_response_language and db_user.ai_response_language.lower() != "auto":
                 language_to_use = db_user.ai_response_language
 
-            # Final fallback to English if no other language is determined
             if not language_to_use:
                 language_to_use = 'en'
-                print(f"INFO: TTS language not specified, falling back to default 'en'.")
-
 
             model_to_use = request_data.model
             if not model_to_use:
@@ -85,8 +105,9 @@ def build_tts_router(router: APIRouter):
                     _, model_name = user_tts_model_full.split('/', 1)
                     model_to_use = model_name
 
-            # Clean text before sending to TTS engine
             cleaned_text = _clean_text_for_tts(request_data.text)
+            if not cleaned_text:
+                raise HTTPException(status_code=400, detail="Input text for speech generation is empty.")
 
             def _generate():
                 return lc.tts.generate_audio(
@@ -96,7 +117,8 @@ def build_tts_router(router: APIRouter):
                     language=language_to_use
                 )
 
-            audio_bytes = await loop.run_in_executor(executor, _generate)
+            raw_audio = await loop.run_in_executor(executor, _generate)
+            audio_bytes = _normalize_raw_tts_output(raw_audio)
 
             return Response(
                 content=audio_bytes,
@@ -104,8 +126,7 @@ def build_tts_router(router: APIRouter):
                 headers={"Content-Disposition": "attachment; filename=generated_audio.wav"}
             )
 
-        except HTTPException as e:
-            raise e
+        except HTTPException:
+            raise
         except Exception as e:
-            print(f"TTS generation failed: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")

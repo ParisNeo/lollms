@@ -16,7 +16,7 @@ export const useVoicesStore = defineStore('voices', () => {
         isLoading.value = true;
         try {
             const response = await apiClient.get('/api/voices-studio');
-            voices.value = response.data;
+            voices.value = response.data || [];
         } catch (error) {
             console.error("Failed to fetch voices:", error);
             voices.value = [];
@@ -33,7 +33,7 @@ export const useVoicesStore = defineStore('voices', () => {
             return URL.createObjectURL(response.data);
         } catch (error) {
             console.error(`Failed to fetch audio for voice ${voiceId}:`, error);
-            uiStore.addNotification('Could not load voice audio.', 'error');
+            uiStore.addNotification('Could not load voice audio waveform.', 'error');
             return null;
         }
     }
@@ -45,10 +45,12 @@ export const useVoicesStore = defineStore('voices', () => {
             });
             voices.value.push(response.data);
             emit('user-voices-changed');
-            uiStore.addNotification('Voice created successfully!', 'success');
+            uiStore.addNotification(`Voice profile '${response.data.alias}' created!`, 'success');
             return response.data;
         } catch (error) {
-            // Handled globally
+            const msg = error.response?.data?.detail || 'Failed to create voice profile.';
+            uiStore.addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -62,9 +64,12 @@ export const useVoicesStore = defineStore('voices', () => {
                 voices.value[index] = response.data;
             }
             emit('user-voices-changed');
-            uiStore.addNotification('Voice updated successfully!', 'success');
+            uiStore.addNotification('Voice parameters updated successfully!', 'success');
+            return response.data;
         } catch (error) {
-            // Handled globally
+            const msg = error.response?.data?.detail || 'Failed to update voice profile.';
+            uiStore.addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -72,14 +77,17 @@ export const useVoicesStore = defineStore('voices', () => {
         const formData = new FormData();
         formData.append('file', audioBlob, 'new_reference.wav');
         try {
-            await apiClient.post(`/api/voices-studio/${voiceId}/replace_audio`, formData, {
+            const response = await apiClient.post(`/api/voices-studio/${voiceId}/replace_audio`, formData, {
                 headers: { 'Content-Type': 'multipart/form-data' }
             });
             await fetchVoices();
             emit('user-voices-changed');
             uiStore.addNotification('Voice reference audio updated.', 'success');
+            return response.data;
         } catch (error) {
-            // Handled globally
+            const msg = error.response?.data?.detail || 'Failed to replace reference audio.';
+            uiStore.addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -88,9 +96,11 @@ export const useVoicesStore = defineStore('voices', () => {
             await apiClient.delete(`/api/voices-studio/${voiceId}`);
             voices.value = voices.value.filter(v => v.id !== voiceId);
             emit('user-voices-changed');
-            uiStore.addNotification('Voice deleted.', 'success');
+            uiStore.addNotification('Voice profile deleted.', 'success');
         } catch (error) {
-            // Handled globally
+            const msg = error.response?.data?.detail || 'Failed to delete voice profile.';
+            uiStore.addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -100,9 +110,11 @@ export const useVoicesStore = defineStore('voices', () => {
             if (authStore.user) {
                 authStore.user.active_voice_id = response.data.active_voice_id;
             }
-            uiStore.addNotification('Active voice set.', 'success');
+            uiStore.addNotification('Global active speech voice updated!', 'success');
         } catch (error) {
-            // Handled globally
+            const msg = error.response?.data?.detail || 'Failed to set active voice.';
+            uiStore.addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -111,7 +123,20 @@ export const useVoicesStore = defineStore('voices', () => {
             const response = await apiClient.post('/api/voices-studio/test', payload);
             return response.data;
         } catch (error) {
+            const msg = error.response?.data?.detail || 'Text-to-Speech synthesis failed.';
+            uiStore.addNotification(msg, 'error');
             return null;
+        }
+    }
+
+    async function synthesizeSpeech(payload) {
+        try {
+            const response = await apiClient.post('/api/voices-studio/synthesize', payload);
+            return response.data;
+        } catch (error) {
+            const msg = error.response?.data?.detail || 'Speech synthesis failed.';
+            uiStore.addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -120,6 +145,8 @@ export const useVoicesStore = defineStore('voices', () => {
             const response = await apiClient.post('/api/voices-studio/apply-effects', payload);
             return response.data;
         } catch (error) {
+            const msg = error.response?.data?.detail || 'Audio effects processing failed.';
+            uiStore.addNotification(msg, 'error');
             return null;
         }
     }
@@ -131,8 +158,8 @@ export const useVoicesStore = defineStore('voices', () => {
             });
             return response.data;
         } catch (error) {
-            console.error("Audio-to-Audio translation failed:", error);
-            uiStore.addNotification(error.response?.data?.detail || "Audio translation pipeline failed.", "error");
+            const msg = error.response?.data?.detail || 'Audio translation pipeline failed.';
+            uiStore.addNotification(msg, 'error');
             throw error;
         }
     }
@@ -142,9 +169,12 @@ export const useVoicesStore = defineStore('voices', () => {
             const response = await apiClient.post(`/api/voices-studio/${voiceId}/duplicate`);
             voices.value.push(response.data);
             emit('user-voices-changed');
-            uiStore.addNotification('Voice duplicated!', 'success');
+            uiStore.addNotification(`Voice duplicated as '${response.data.alias}'`, 'success');
+            return response.data;
         } catch (error) {
-            // Handled globally
+            const msg = error.response?.data?.detail || 'Failed to duplicate voice.';
+            uiStore.addNotification(msg, 'error');
+            throw error;
         }
     }
 
@@ -159,6 +189,7 @@ export const useVoicesStore = defineStore('voices', () => {
         deleteVoice,
         setActiveVoice,
         testVoice,
+        synthesizeSpeech,
         applyEffects,
         audioToAudioTranslate,
         duplicateVoice,

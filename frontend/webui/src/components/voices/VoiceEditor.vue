@@ -33,28 +33,28 @@
             <h3 class="font-semibold">Audio Effects</h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div>
-                    <label class="block text-sm font-medium">Pitch: {{ form.pitch.toFixed(2) }}</label>
+                    <label class="block text-sm font-medium">Pitch: {{ Number(form.pitch || 1.0).toFixed(2) }}</label>
                     <input type="range" min="0.5" max="2.0" step="0.01" v-model.number="form.pitch" class="w-full">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium">Speed: {{ form.speed.toFixed(2) }}</label>
+                    <label class="block text-sm font-medium">Speed: {{ Number(form.speed || 1.0).toFixed(2) }}</label>
                     <input type="range" min="0.5" max="3.0" step="0.01" v-model.number="form.speed" class="w-full">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium">Gain (dB): {{ form.gain.toFixed(1) }}</label>
+                    <label class="block text-sm font-medium">Gain (dB): {{ Number(form.gain || 0.0).toFixed(1) }}</label>
                     <input type="range" min="-20" max="20" step="0.1" v-model.number="form.gain" class="w-full">
                 </div>
             </div>
             <div class="border-t dark:border-gray-600 pt-4">
                 <details class="space-y-4">
-                    <summary class="cursor-pointer text-sm font-medium">Reverb (Experimental)</summary>
+                    <summary class="cursor-pointer text-sm font-medium">Reverb (Spatial Delay & Attenuation)</summary>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
                         <div>
                             <label class="block text-sm font-medium">Delay (ms): {{ form.reverb_params.delay }}</label>
                             <input type="range" min="0" max="200" step="1" v-model.number="form.reverb_params.delay" class="w-full">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium">Attenuation (dB): {{ form.reverb_params.attenuation.toFixed(1) }}</label>
+                            <label class="block text-sm font-medium">Attenuation (dB): {{ Number(form.reverb_params.attenuation || 0.0).toFixed(1) }}</label>
                             <input type="range" min="0" max="20" step="0.1" v-model.number="form.reverb_params.attenuation" class="w-full">
                         </div>
                     </div>
@@ -73,7 +73,7 @@
       <div class="p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg space-y-4">
         <h3 class="font-semibold">Audio Waveform</h3>
         
-        <AudioEditor :audio-url="referenceAudioUrl" @trimmed="handleTrim" />
+        <AudioEditor :audio-url="referenceAudioUrl" :voice="form" @trimmed="handleTrim" />
         
         <div class="flex items-center gap-3">
             <div class="grow"></div>
@@ -214,8 +214,8 @@ async function handleTrim(trimData) {
             currentAudioBlob.value = blob;
             referenceAudioUrl.value = URL.createObjectURL(blob);
             isPreviewingSynth.value = true;
+            uiStore.addNotification("Trim applied. Use 'Set as Reference' to save.", "info");
         }
-        uiStore.addNotification("Trim applied. Use 'Set as Reference' to save.", "info");
     } catch(e) {
         console.error("Trim/Effects error:", e);
         uiStore.addNotification("Failed to apply trim.", "error");
@@ -254,8 +254,8 @@ async function handleApplyEffects() {
             currentAudioBlob.value = blob;
             referenceAudioUrl.value = URL.createObjectURL(blob);
             isPreviewingSynth.value = true;
+            uiStore.addNotification("Effects applied. Use 'Set as Reference' to save.", "info");
         }
-        uiStore.addNotification("Effects applied. Use 'Set as Reference' to save.", "info");
     } catch(e) {
         console.error("Apply Effects error:", e);
         uiStore.addNotification("Failed to apply effects.", "error");
@@ -284,6 +284,7 @@ async function handleSynthesize() {
             currentAudioBlob.value = blob;
             referenceAudioUrl.value = URL.createObjectURL(blob);
             isPreviewingSynth.value = true;
+            uiStore.addNotification("Synthesis test preview generated!", "success");
         }
     } finally {
         isSynthesizing.value = false;
