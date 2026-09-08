@@ -3,11 +3,17 @@ import { ref } from 'vue';
 import apiClient from '../services/api';
 import { useUiStore } from './ui';
 
+import { computed } from 'vue';
+
 export const useSkillsStore = defineStore('skills', () => {
     const uiStore = useUiStore();
-    
+
     const skills = ref([]);
     const isLoading = ref(false);
+
+    // Filtered categories
+    const systemSkills = computed(() => (skills.value || []).filter(s => s.is_system));
+    const userSkills = computed(() => (skills.value || []).filter(s => !s.is_system));
 
     async function fetchSkills() {
         isLoading.value = true;
@@ -122,6 +128,8 @@ export const useSkillsStore = defineStore('skills', () => {
 
     return {
         skills,
+        systemSkills,
+        userSkills,
         isLoading,
         fetchSkills,
         createSkill,

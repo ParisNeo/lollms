@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { useAuthStore } from '../../stores/auth';
 import { useSkillsStore } from '../../stores/skills';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useUiStore } from '../../stores/ui';
@@ -18,9 +19,12 @@ const props = defineProps({
     searchTerm: { type: String, default: '' }
 });
 
+const authStore = useAuthStore();
 const skillsStore = useSkillsStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
+
+const isAdmin = computed(() => authStore.isAdmin);
 
 const fileInput = ref(null);
 const activeMenuId = ref(null);
@@ -38,10 +42,18 @@ onMounted(() => {
     skillsStore.fetchSkills();
 });
 
-const filteredSkills = computed(() => {
+const filteredSystemSkills = computed(() => {
+    const list = skillsStore.systemSkills || [];
+    if (!props.searchTerm) return list;
     const term = props.searchTerm.toLowerCase();
-    if (!term) return skillsStore.skills;
-    return skillsStore.skills.filter(s => s.name.toLowerCase().includes(term) || (s.description && s.description.toLowerCase().includes(term)));
+    return list.filter(s => s.name.toLowerCase().includes(term) || (s.description && s.description.toLowerCase().includes(term)) || (s.category && s.category.toLowerCase().includes(term)));
+});
+
+const filteredUserSkills = computed(() => {
+    const list = skillsStore.userSkills || [];
+    if (!props.searchTerm) return list;
+    const term = props.searchTerm.toLowerCase();
+    return list.filter(s => s.name.toLowerCase().includes(term) || (s.description && s.description.toLowerCase().includes(term)) || (s.category && s.category.toLowerCase().includes(term)));
 });
 
 import { useRouter } from 'vue-router';
@@ -112,55 +124,109 @@ async function handleFileImport(event) {
         </div>
 
         <div v-if="skillsStore.isLoading" class="text-center p-4 text-gray-500">Loading skills...</div>
-        <div v-else-if="filteredSkills.length === 0" class="empty-state-flat">
+        <div v-else-if="filteredSystemSkills.length === 0 && filteredUserSkills.length === 0" class="empty-state-flat">
             <p class="text-base font-medium text-slate-600 dark:text-gray-300 mb-2">
                  {{ searchTerm ? 'No matches found' : 'No skills yet' }}
             </p>
              <p class="text-sm text-slate-500 dark:text-gray-400">
-                Create a new skill to teach the AI new capabilities.
+                Create a skill or install one from the Skills Zoo.
             </p>
         </div>
-        <div v-else class="space-y-1 flex-1 overflow-y-auto custom-scrollbar pr-1">
-                        <div v-for="skill in filteredSkills" :key="skill.id" 
-                 class="group flex items-center gap-3 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors mb-1"
-                 @click="editSkill(skill)">
-                
-                <div class="flex items-center gap-2 min-w-0 grow">
-                    <div class="w-8 h-8 rounded bg-green-50 dark:bg-green-900/30 text-green-600 shrink-0 border border-green-100 dark:border-green-800 flex items-center justify-center overflow-hidden">
-                        <IconSparkles class="w-4 h-4" />
-                    </div>
-                    <div class="flex flex-col min-w-0 leading-tight">
-                        <span class="text-xs font-bold text-slate-700 dark:text-gray-200 truncate">{{ skill.name }}</span>
-                        <span class="text-[9px] text-gray-500 truncate uppercase tracking-tighter">{{ skill.category || 'Uncategorized' }}</span>
-                    </div>
+        <div v-else class="space-y-4 flex-1 overflow-y-auto custom-scrollbar pr-1">
+
+            <!-- 🌐 SECTION 1: SYSTEM SKILLS -->
+            <div v-if="filteredSystemSkills.length > 0">
+                <div class="flex items-center justify-between px-2 py-1 mb-1">
+                    <span class="text-[10px] font-black uppercase tracking-wider text-indigo-600 dark:text-indigo-400 flex items-center gap-1.5">
+                        <span>🌐 System Skills</span>
+                        <span class="px-1.5 py-0.2 rounded-full bg-indigo-100 dark:bg-indigo-900/40 text-[9px] font-bold">{{ filteredSystemSkills.length }}</span>
+                    </span>
                 </div>
 
-                <!-- Compact Menu at end of row -->
-                <div @click.stop class="opacity-0 group-hover:opacity-100 transition-opacity">
-                    <DropdownMenu title="Options" buttonClass="p-1 text-gray-400 hover:text-gray-600">
-                        <template #icon>
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                            <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
-                            </svg>
-                        </template>
-                        <button @click="addToContext(skill)" class="menu-item text-blue-600">
-                            <IconArrowUpTray class="w-4 h-4 mr-2"/> Add to Discussion
-                        </button>
-                        <button @click="uiStore.openModal('shareDiscussion', { title: skill.name, content: skill.content })" class="menu-item">
-                            <IconUserCircle class="h-4 w-4 mr-2"/> Share with Friend
-                        </button>
-                        <button @click="uiStore.openModal('shareDiscussion', { title: skill.name, content: skill.content, isGroupShare: true })" class="menu-item">
-                            <IconShare class="h-4 w-4 mr-2"/> Share with Group
-                        </button>
-                        <div class="menu-divider"></div>
-                        <button @click="deleteSkill(skill)" class="menu-item text-red-500 font-bold">
-                            <IconTrash class="w-4 h-4 mr-2"/> Remove
-                        </button>
-                    </DropdownMenu>
+                <div class="space-y-1">
+                    <div v-for="skill in filteredSystemSkills" :key="skill.id" 
+                         class="group flex items-center gap-3 p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+                         @click="editSkill(skill)">
+
+                        <div class="flex items-center gap-2 min-w-0 grow">
+                            <div class="w-7 h-7 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 shrink-0 border border-indigo-100 dark:border-indigo-800 flex items-center justify-center overflow-hidden">
+                                <IconSparkles class="w-3.5 h-3.5" />
+                            </div>
+                            <div class="flex flex-col min-w-0 leading-tight">
+                                <span class="text-xs font-bold text-slate-700 dark:text-gray-200 truncate">{{ skill.name }}</span>
+                                <span class="text-[9px] text-gray-500 truncate uppercase tracking-tighter">{{ skill.category || 'System' }}</span>
+                            </div>
+                        </div>
+
+                        <div @click.stop class="opacity-0 group-hover:opacity-100 transition-opacity">
+                            <DropdownMenu title="Options" buttonClass="p-1 text-gray-400 hover:text-gray-600">
+                                <template #icon>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                                    </svg>
+                                </template>
+                                <button @click="addToContext(skill)" class="menu-item text-blue-600">
+                                    <IconArrowUpTray class="w-4 h-4 mr-2"/> Add to Discussion
+                                </button>
+                                <button @click="uiStore.openModal('shareDiscussion', { title: skill.name, content: skill.content })" class="menu-item">
+                                    <IconUserCircle class="w-4 h-4 mr-2"/> Share with Friend
+                                </button>
+                                <div class="menu-divider"></div>
+                                <button v-if="isAdmin" @click="deleteSkill(skill)" class="menu-item text-red-500 font-bold">
+                                    <IconTrash class="w-4 h-4 mr-2"/> Remove
+                                </button>
+                            </DropdownMenu>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <!-- Click-away overlay -->
-            <div v-if="activeMenuId" class="fixed inset-0 z-10" @click="closeMenu"></div>
+
+            <!-- 👤 SECTION 2: MY SKILLS (PERSONAL) -->
+            <div v-if="filteredUserSkills.length > 0 || filteredSystemSkills.length === 0">
+                <div class="flex items-center justify-between px-2 py-1 mb-1">
+                    <span class="text-[10px] font-black uppercase tracking-wider text-teal-600 dark:text-teal-400 flex items-center gap-1.5">
+                        <span>👤 My Skills</span>
+                        <span class="px-1.5 py-0.2 rounded-full bg-teal-100 dark:bg-teal-900/40 text-[9px] font-bold">{{ filteredUserSkills.length }}</span>
+                    </span>
+                </div>
+
+                <div class="space-y-1">
+                    <div v-for="skill in filteredUserSkills" :key="skill.id" 
+                         class="group flex items-center gap-3 p-1.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer transition-colors border border-transparent hover:border-gray-200 dark:hover:border-gray-700"
+                         @click="editSkill(skill)">
+
+                        <div class="flex items-center gap-2 min-w-0 grow">
+                            <div class="w-7 h-7 rounded-lg bg-teal-50 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 shrink-0 border border-teal-100 dark:border-teal-800 flex items-center justify-center overflow-hidden">
+                                <IconSparkles class="w-3.5 h-3.5" />
+                            </div>
+                            <div class="flex flex-col min-w-0 leading-tight">
+                                <span class="text-xs font-bold text-slate-700 dark:text-gray-200 truncate">{{ skill.name }}</span>
+                                <span class="text-[9px] text-gray-500 truncate uppercase tracking-tighter">{{ skill.category || 'Personal' }}</span>
+                            </div>
+                        </div>
+
+                        <div @click.stop class="opacity-0 group-hover:opacity-100 transition-opacity">
+                            <DropdownMenu title="Options" buttonClass="p-1 text-gray-400 hover:text-gray-600">
+                                <template #icon>
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                                    </svg>
+                                </template>
+                                <button @click="addToContext(skill)" class="menu-item text-blue-600">
+                                    <IconArrowUpTray class="w-4 h-4 mr-2"/> Add to Discussion
+                                </button>
+                                <button @click="uiStore.openModal('shareDiscussion', { title: skill.name, content: skill.content })" class="menu-item">
+                                    <IconUserCircle class="w-4 h-4 mr-2"/> Share with Friend
+                                </button>
+                                <div class="menu-divider"></div>
+                                <button @click="deleteSkill(skill)" class="menu-item text-red-500 font-bold">
+                                    <IconTrash class="w-4 h-4 mr-2"/> Remove
+                                </button>
+                            </DropdownMenu>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </template>

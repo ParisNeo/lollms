@@ -796,24 +796,39 @@ def pull_repo_task(task: Task, repo_id: int, repo_model, root_path: Path, item_t
         repo_path = root_path / repo.name
         command = ["git", "clone", repo.url, str(repo_path)] if not repo_path.exists() else ["git", "pull"]
         cwd = str(root_path) if not repo_path.exists() else str(repo_path)
-        
-        process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
-        task.process = process
-        
-        for line in iter(process.stdout.readline, ''):
-            if task.cancellation_event.is_set():
-                process.terminate()
-                break
-            task.log(line.strip(), "GIT_STDOUT")
-        process.wait()
-        if process.returncode != 0:
-            raise Exception(f"Git operation failed. Stderr: {process.stderr.read().strip()}")
-        
+
+        try:
+            process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
+            task.process = process
+
+            for line in iter(process.stdout.readline, ''):
+                if task.cancellation_event.is_set():
+                    process.terminate()
+                    break
+                task.log(line.strip(), "GIT_STDOUT")
+            process.wait()
+            if process.returncode != 0:
+                err_text = process.stderr.read().strip()
+                if item_type == 'skill':
+                    task.log(f"Git sync notice for skill repo: {err_text}. Ensuring local skills library is seeded.", "WARNING")
+                    from backend.zoo_cache import ensure_skills_zoo_seeded
+                    ensure_skills_zoo_seeded(repo_path)
+                else:
+                    raise Exception(f"Git operation failed. Stderr: {err_text}")
+        except Exception as git_err:
+            if item_type == 'skill':
+                task.log(f"Remote git sync skipped ({git_err}). Ensuring local skills library is active.", "INFO")
+                from backend.zoo_cache import ensure_skills_zoo_seeded
+                ensure_skills_zoo_seeded(repo_path)
+            else:
+                raise git_err
+
         repo.last_pulled_at = datetime.datetime.now(datetime.timezone.utc)
         db_session.commit()
-        
-        from backend.zoo_cache import refresh_repo_cache
+
+        from backend.zoo_cache import force_build_full_cache, refresh_repo_cache
         refresh_repo_cache(repo.name, item_type)
+        force_build_full_cache()
         task.set_progress(100)
         return {"message": "Repository pulled successfully."}
     except Exception as e:

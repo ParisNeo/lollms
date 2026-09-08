@@ -15,6 +15,8 @@ class Skill(Base):
     category = Column(String, nullable=True)
     language = Column(String, nullable=True, default="markdown")
     content = Column(Text, nullable=False)
+    author = Column(String, nullable=True, default="Community")
+    version = Column(String, nullable=True, default="1.0.0")
     owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())

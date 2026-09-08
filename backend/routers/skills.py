@@ -22,15 +22,19 @@ skills_router = APIRouter(
     dependencies=[Depends(get_current_active_user)]
 )
 
+from sqlalchemy import or_
+
 class SkillBase(BaseModel):
     name: str
     content: str
     description: Optional[str] = None
     category: Optional[str] = None
     language: Optional[str] = "markdown"
+    author: Optional[str] = None
+    version: Optional[str] = "1.0.0"
 
 class SkillCreate(SkillBase):
-    pass
+    is_system: bool = False
 
 class SkillUpdate(BaseModel):
     name: Optional[str] = None
@@ -38,79 +42,129 @@ class SkillUpdate(BaseModel):
     description: Optional[str] = None
     category: Optional[str] = None
     language: Optional[str] = None
+    author: Optional[str] = None
+    version: Optional[str] = None
+    is_system: Optional[bool] = None
 
 class SkillPublic(SkillBase):
     id: str
+    is_system: bool = False
+    owner_user_id: Optional[int] = None
     created_at: Optional[datetime.datetime] = None
     updated_at: Optional[datetime.datetime] = None
 
     class Config:
         from_attributes = True
 
+def _to_skill_public(s: DBSkill) -> SkillPublic:
+    return SkillPublic(
+        id=s.id,
+        name=s.name,
+        description=s.description,
+        category=s.category or "Development",
+        language=s.language or "markdown",
+        content=s.content,
+        author=s.author or ("System" if s.owner_user_id is None else "Personal"),
+        version=s.version or "1.0.0",
+        is_system=(s.owner_user_id is None),
+        owner_user_id=s.owner_user_id,
+        created_at=s.created_at,
+        updated_at=s.updated_at
+    )
+
 @skills_router.get("", response_model=List[SkillPublic])
 def get_skills(current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    skills = db.query(DBSkill).filter(DBSkill.owner_user_id == current_user.id).order_by(DBSkill.name).all()
-    return skills
+    # Return both User Skills (owned by current_user) and System Skills (owner_user_id is None)
+    skills = db.query(DBSkill).filter(
+        or_(DBSkill.owner_user_id == current_user.id, DBSkill.owner_user_id.is_(None))
+    ).order_by(DBSkill.name).all()
+    return [_to_skill_public(s) for s in skills]
 
 @skills_router.post("", response_model=SkillPublic, status_code=status.HTTP_201_CREATED)
 def create_skill(skill: SkillCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    # Check if a skill with the same name already exists for this user
+    # Support creating System Skills if admin requests it
+    is_admin = getattr(current_user, "is_admin", False)
+    target_owner_id = None if (is_admin and skill.is_system) else current_user.id
+    target_author = skill.author or ("System" if target_owner_id is None else current_user.username)
+
     existing_skill = db.query(DBSkill).filter(
-        DBSkill.owner_user_id == current_user.id,
+        DBSkill.owner_user_id == target_owner_id,
         DBSkill.name == skill.name
     ).first()
 
     if existing_skill:
-        # Update existing skill in-place instead of creating a duplicate
         existing_skill.content = skill.content
-        if skill.description:
-            existing_skill.description = skill.description
-        if skill.category:
-            existing_skill.category = skill.category
-        if skill.language:
-            existing_skill.language = skill.language
+        if skill.description: existing_skill.description = skill.description
+        if skill.category: existing_skill.category = skill.category
+        if skill.language: existing_skill.language = skill.language
+        existing_skill.author = target_author
+        existing_skill.version = skill.version or existing_skill.version
         existing_skill.updated_at = datetime.datetime.now()
-        try:
-            db.commit()
-            db.refresh(existing_skill)
-            return existing_skill
-        except IntegrityError:
-            db.rollback()
-            raise HTTPException(status_code=400, detail="Error updating existing skill.")
+        db.commit()
+        db.refresh(existing_skill)
+        return _to_skill_public(existing_skill)
 
-    new_skill = DBSkill(**skill.model_dump(), owner_user_id=current_user.id)
+    data = skill.model_dump()
+    data.pop("is_system", None)
+    new_skill = DBSkill(**data, owner_user_id=target_owner_id, author=target_author)
     db.add(new_skill)
     try:
         db.commit()
         db.refresh(new_skill)
-        return new_skill
+        return _to_skill_public(new_skill)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=400, detail="Error creating skill.")
 
 @skills_router.put("/{skill_id}", response_model=SkillPublic)
 def update_skill(skill_id: str, skill_update: SkillUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    skill = db.query(DBSkill).filter(DBSkill.id == skill_id, DBSkill.owner_user_id == current_user.id).first()
+    skill = db.query(DBSkill).filter(DBSkill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    
+
+    is_admin = getattr(current_user, "is_admin", False)
+    is_system = (skill.owner_user_id is None)
+
+    # Permissions: System skills can only be edited by admins; User skills by their owner or admins
+    if is_system and not is_admin:
+        raise HTTPException(status_code=403, detail="Only administrators can edit System Skills.")
+    if not is_system and skill.owner_user_id != current_user.id and not is_admin:
+        raise HTTPException(status_code=403, detail="You do not have permission to edit this skill.")
+
     update_data = skill_update.model_dump(exclude_unset=True)
+    if "is_system" in update_data:
+        if is_admin:
+            skill.owner_user_id = None if update_data.pop("is_system") else current_user.id
+        else:
+            update_data.pop("is_system", None)
+
     for key, value in update_data.items():
-        setattr(skill, key, value)
-    
+        if hasattr(skill, key):
+            setattr(skill, key, value)
+
     try:
         db.commit()
         db.refresh(skill)
-        return skill
+        return _to_skill_public(skill)
     except IntegrityError:
         db.rollback()
         raise HTTPException(status_code=400, detail="Error updating skill.")
 
 @skills_router.delete("/{skill_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_skill(skill_id: str, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    skill = db.query(DBSkill).filter(DBSkill.id == skill_id, DBSkill.owner_user_id == current_user.id).first()
+    skill = db.query(DBSkill).filter(DBSkill.id == skill_id).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
+
+    is_admin = getattr(current_user, "is_admin", False)
+    is_system = (skill.owner_user_id is None)
+
+    is_authorized = is_admin or (not is_system and skill.owner_user_id == current_user.id)
+
+    if not is_authorized:
+        detail_msg = "Only administrators can delete System Skills." if is_system else "You do not have permission to delete this skill."
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=detail_msg)
+
     db.delete(skill)
     db.commit()
 

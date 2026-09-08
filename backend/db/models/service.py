@@ -69,6 +69,16 @@ class PersonalityZooRepository(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     is_deletable = Column(Boolean, default=True, nullable=False)
 
+class SkillZooRepository(Base):
+    __tablename__ = "skill_zoo_repositories"
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, unique=True, nullable=False)
+    url = Column(String, unique=True, nullable=False)
+    type = Column(String, default="git", nullable=False)
+    last_pulled_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    is_deletable = Column(Boolean, default=True, nullable=False)
+
 class App(Base):
     __tablename__ = "apps"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()), index=True)

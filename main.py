@@ -29,7 +29,7 @@ from backend.lollms_init_watcher import lollms_init_watcher
 from backend.config import (
     APP_SETTINGS, APP_VERSION, APP_DB_URL,
     INITIAL_ADMIN_USER_CONFIG, SERVER_CONFIG,
-    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH
+    APPS_ZOO_ROOT_PATH, MCPS_ZOO_ROOT_PATH, PROMPTS_ZOO_ROOT_PATH, PERSONALITIES_ZOO_ROOT_PATH, SKILLS_ZOO_ROOT_PATH
 )
 from backend.db import init_database, get_db, session as db_session_module
 from backend.db.base import Base, TaskStatus
@@ -38,7 +38,7 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.prompt import SavedPrompt as DBSavedPrompt
 from backend.db.models.config import LLMBinding as DBLLMBinding
-from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository
+from backend.db.models.service import AppZooRepository as DBAppZooRepository, App as DBApp, MCP as DBMCP, MCPZooRepository as DBMCPZooRepository, PromptZooRepository as DBPromptZooRepository, PersonalityZooRepository as DBPersonalityZooRepository, SkillZooRepository as DBSkillZooRepository
 from backend.db.models.connections import WebSocketConnection
 from backend.db.models.db_task import DBTask
 from backend.security import get_password_hash as hash_password
@@ -76,6 +76,7 @@ from backend.routers.zoos.apps_zoo import apps_zoo_router
 from backend.routers.zoos.mcps_zoo import mcps_zoo_router
 from backend.routers.zoos.prompts_zoo import prompts_zoo_router
 from backend.routers.zoos.personalities_zoo import personalities_zoo_router
+from backend.routers.zoos.skills_zoo import skills_zoo_router
 from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
@@ -215,6 +216,7 @@ def run_one_time_startup_tasks(lock: Lock):
         ("MCP Zoo repository setup", False),
         ("Prompt Zoo repository setup", False),
         ("Personality Zoo repository setup", False),
+        ("Skill Zoo repository setup", False),
         ("Filesystem‑DB synchronization", False),
         ("Stale WebSocket & task cleanup", False),
         ("Autostart & cleanup", False)
@@ -441,6 +443,28 @@ def run_one_time_startup_tasks(lock: Lock):
             db_for_personalities.close()
 
     try:
+        db_for_skills = next(get_db())
+        skill_zoo_name = "lollms_skills_zoo"
+        skill_zoo_url = "https://github.com/ParisNeo/lollms_skills_zoo.git"
+        skill_zoo_repo_path = SKILLS_ZOO_ROOT_PATH / skill_zoo_name
+
+        if not db_for_skills.query(DBSkillZooRepository).filter(
+            or_(DBSkillZooRepository.name == skill_zoo_name, DBSkillZooRepository.url == skill_zoo_url)
+        ).first():
+            default_skill_repo = DBSkillZooRepository(name=skill_zoo_name, url=skill_zoo_url, is_deletable=False)
+            db_for_skills.add(default_skill_repo)
+            db_for_skills.commit()
+        if not skill_zoo_repo_path.exists():
+            subprocess.run(["git", "clone", skill_zoo_url, str(skill_zoo_repo_path)], check=True)
+        steps[8] = (steps[8][0], True)
+        render_steps_panel()
+    except Exception as e:
+        trace_exception(e)
+    finally:
+        if db_for_skills:
+            db_for_skills.close()
+
+    try:
         db_for_sync = next(get_db())
         synchronize_filesystem_and_db(db_for_sync)
         steps[8] = (steps[8][0], True)
@@ -611,6 +635,7 @@ app.include_router(apps_zoo_router)
 app.include_router(mcps_zoo_router)
 app.include_router(prompts_zoo_router)
 app.include_router(personalities_zoo_router)
+app.include_router(skills_zoo_router)
 app.include_router(tasks_router)
 app.include_router(help_router)
 app.include_router(prompts_router)

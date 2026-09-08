@@ -5,6 +5,7 @@ import { storeToRefs } from 'pinia';
 import { useSkillsStore } from '../stores/skills';
 import { useDiscussionsStore } from '../stores/discussions';
 import { useUiStore } from '../stores/ui';
+import { useAuthStore } from '../stores/auth';
 import PageViewLayout from '../components/layout/PageViewLayout.vue';
 import CodeMirrorComponent from '../components/ui/CodeMirrorComponent/index.vue';
 
@@ -22,8 +23,10 @@ const router = useRouter();
 const skillsStore = useSkillsStore();
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
+const authStore = useAuthStore();
 
 const { skills, isLoading } = storeToRefs(skillsStore);
+const isAdmin = computed(() => authStore.isAdmin);
 
 const selectedSkillId = ref(null);
 const isSaving = ref(false);
@@ -33,7 +36,9 @@ const form = ref({
     name: '',
     category: 'Development',
     description: '',
-    content: ''
+    content: '',
+    is_system: false,
+    author: ''
 });
 
 const selectedSkill = computed(() => {
@@ -48,18 +53,22 @@ function selectSkill(skill) {
         name: skill.name || '',
         category: skill.category || 'Development',
         description: skill.description || '',
-        content: skill.content || ''
+        content: skill.content || '',
+        is_system: Boolean(skill.is_system),
+        author: skill.author || ''
     };
     router.replace({ query: { ...route.query, skillId: skill.id } });
 }
 
-function createNewSkill() {
+function createNewSkill(asSystem = false) {
     selectedSkillId.value = null;
     form.value = {
-        name: 'New Skill',
+        name: asSystem ? 'New System Skill' : 'New Skill',
         category: 'Development',
         description: 'Describe what this skill teaches the AI...',
-        content: `<skill name="new_skill">\n  <description>Skill functionality overview</description>\n  <instructions>\n    Step-by-step cognitive directives for the model\n  </instructions>\n</skill>`
+        is_system: asSystem && isAdmin.value,
+        author: asSystem ? 'System' : (authStore.user?.username || 'Personal'),
+        content: `---\nname: New Skill\ndescription: Describe what this skill does here\n---\n\n# Instructions\n\nStep-by-step cognitive directives for the model go here...`
     };
 }
 
@@ -71,22 +80,22 @@ async function saveSkill() {
 
     isSaving.value = true;
     try {
+        const payload = {
+            name: form.value.name,
+            category: form.value.category,
+            description: form.value.description,
+            content: form.value.content,
+            is_system: Boolean(form.value.is_system),
+            author: form.value.author
+        };
+
         if (selectedSkillId.value) {
-            await skillsStore.updateSkill(selectedSkillId.value, {
-                name: form.value.name,
-                category: form.value.category,
-                description: form.value.description,
-                content: form.value.content
-            });
+            await skillsStore.updateSkill(selectedSkillId.value, payload);
             uiStore.addNotification('Skill updated successfully.', 'success');
         } else {
-            const created = await skillsStore.createSkill({
-                name: form.value.name,
-                category: form.value.category,
-                description: form.value.description,
-                content: form.value.content
-            });
+            const created = await skillsStore.createSkill(payload);
             if (created && created.id) selectedSkillId.value = created.id;
+            uiStore.addNotification('Skill created successfully.', 'success');
         }
         await skillsStore.fetchSkills();
     } catch (e) {
@@ -188,16 +197,31 @@ watch(() => route.query.skillId, (newId) => {
                         <div class="w-8 h-8 rounded-xl bg-teal-50 dark:bg-teal-900/30 text-teal-600 flex items-center justify-center shrink-0 border border-teal-200 dark:border-teal-800">
                             <IconSparkles class="w-4 h-4" />
                         </div>
-                        <div class="flex items-center gap-3 min-w-0">
-                            <input v-model="form.name" type="text" class="input-field text-sm font-bold w-60 sm:w-80" placeholder="Skill Name..." required />
-                            <input v-model="form.category" type="text" class="input-field text-xs w-40 hidden sm:block" placeholder="Category (e.g. Code)" />
+                        <div class="flex items-center gap-2 min-w-0">
+                            <input v-model="form.name" type="text" class="input-field text-sm font-bold w-52 sm:w-72" placeholder="Skill Name..." required />
+                            <input v-model="form.category" type="text" class="input-field text-xs w-32 hidden sm:block" placeholder="Category" />
+
+                            <!-- System Skill Indicator / Admin Toggle -->
+                            <div v-if="isAdmin" class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-bold shrink-0 cursor-pointer"
+                                 :class="form.is_system ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-950/40 dark:border-indigo-800 dark:text-indigo-300' : 'bg-gray-50 border-gray-200 text-gray-600 dark:bg-gray-800 dark:border-gray-700'"
+                                 @click="form.is_system = !form.is_system"
+                                 title="Toggle System Skill (Available to all users)">
+                                <span>{{ form.is_system ? '🌐 System' : '👤 Personal' }}</span>
+                            </div>
+                            <span v-else-if="form.is_system" class="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-50 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-300 border border-indigo-200 shrink-0">
+                                🌐 System Skill
+                            </span>
                         </div>
                     </div>
 
                     <div class="flex items-center gap-2 shrink-0">
-                        <button @click="createNewSkill" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="New Skill">
+                        <button @click="createNewSkill(false)" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="New Personal Skill">
                             <IconPlus class="w-3.5 h-3.5" />
                             <span class="hidden md:inline">New</span>
+                        </button>
+                        <button v-if="isAdmin" @click="createNewSkill(true)" class="btn btn-secondary btn-sm flex items-center gap-1.5 border-indigo-300 text-indigo-600 dark:text-indigo-400" title="Create a System Skill manually">
+                            <IconPlus class="w-3.5 h-3.5" />
+                            <span class="hidden md:inline">+ System Skill</span>
                         </button>
                         <button @click="triggerImport" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Import skill">
                             <IconArrowDownTray class="w-3.5 h-3.5" />

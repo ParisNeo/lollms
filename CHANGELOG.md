@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-08 11:33]
+
+- fix(database): update migration with new schema migrations and fix exception handling for validation
+
 ## [2026-09-08 06:07]
 
 - `fix(dist): update and remove stale asset files for frontend distribution`

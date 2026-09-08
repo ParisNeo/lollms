@@ -374,6 +374,7 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         except Exception as e:
             print(f"WARNING: Could not remove deprecated global settings. Error: {e}")
             connection.rollback()
+
     # ------------------ NEW MIGRATION FOR FLOWS ------------------
     if not inspector.has_table("flows"):
         print("INFO: Creating 'flows' table.")
@@ -1417,6 +1418,29 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
     if not inspector.has_table("skills"):
         from backend.db.models.skill import Skill
         Skill.__table__.create(connection)
+        connection.commit()
+    else:
+        # --- UPGRADE SKILLS TABLE ---
+        skills_columns_db = [col['name'] for col in inspector.get_columns('skills')]
+        new_skill_cols = {
+            "author": "VARCHAR",
+            "version": "VARCHAR",
+            "language": "VARCHAR DEFAULT 'markdown'",
+            "created_at": "DATETIME",
+            "updated_at": "DATETIME"
+        }
+        for col_name, col_sql_def in new_skill_cols.items():
+            if col_name not in skills_columns_db:
+                try:
+                    connection.execute(text(f"ALTER TABLE skills ADD COLUMN {col_name} {col_sql_def}"))
+                    connection.commit()
+                    print(f"INFO: Added '{col_name}' column to 'skills' table.")
+                except Exception as e:
+                    connection.rollback()
+                    print(f"WARNING: Failed to add column {col_name} to skills table: {e}")
+
+        # Ensure index on name exists
+        connection.execute(text("CREATE INDEX IF NOT EXISTS ix_skills_name ON skills (name)"))
         connection.commit()
 
     if not inspector.has_table("saved_artefacts"):

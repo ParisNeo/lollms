@@ -50,6 +50,7 @@ const PersonalityZoo = defineAsyncComponent(() => import('./zoos/PersonalitiesMa
 const PromptZoo = defineAsyncComponent(() => import('./zoos/PromptsManagement.vue'));
 const McpZoo = defineAsyncComponent(() => import('./zoos/McpsManagement.vue'));
 const AppZoo = defineAsyncComponent(() => import('./zoos/AppsManagement.vue'));
+const SkillZoo = defineAsyncComponent(() => import('./zoos/SkillsManagement.vue'));
 
 // Engine Bindings
 const LLMBindingsSettings = defineAsyncComponent(() => import('./bindings/LLMBindingsSettings.vue'));
@@ -103,6 +104,7 @@ function handleDashboardNavigation(payload) {
         <PromptZoo v-else-if="activeTab === 'prompts' || activeTab === 'prompts_zoo'" />
         <McpZoo v-else-if="activeTab === 'mcps' || activeTab === 'mcps_zoo'" />
         <AppZoo v-else-if="activeTab === 'apps' || activeTab === 'apps_zoo'" />
+        <SkillZoo v-else-if="activeTab === 'skills_zoo'" />
 
         <!-- 6. BINDINGS & ENGINES -->
         <LLMBindingsSettings v-else-if="activeTab === 'llm_bindings' || activeTab === 'llm'" />

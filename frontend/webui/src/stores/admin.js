@@ -104,6 +104,10 @@ export const useAdminStore = defineStore('admin', () => {
     const isLoadingZooPrompts = ref(false);
     const zooPersonalities = ref({ items: [], total: 0, pages: 1, categories: [] });
     const isLoadingZooPersonalities = ref(false);
+    const zooSkills = ref({ items: [], total: 0, pages: 1, categories: [] });
+    const isLoadingZooSkills = ref(false);
+    const skillZooRepositories = ref([]);
+    const isLoadingSkillZooRepositories = ref(false);
     const installedApps = ref([]);
     const isLoadingInstalledApps = ref(false);
 
@@ -145,6 +149,9 @@ export const useAdminStore = defineStore('admin', () => {
         searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'name', sortOrder: 'asc', currentPage: 1, pageSize: 24
     }));
     const personalityFilters = reactive(getStoredFilters('lollms-personality-filters', {
+        searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'name', sortOrder: 'asc', currentPage: 1, pageSize: 24
+    }));
+    const skillFilters = reactive(getStoredFilters('lollms-skill-filters', {
         searchQuery: '', selectedCategory: 'All', installationStatusFilter: 'All', selectedRepository: 'All', sortKey: 'name', sortOrder: 'asc', currentPage: 1, pageSize: 24
     }));
 
@@ -439,7 +446,7 @@ export const useAdminStore = defineStore('admin', () => {
                 search_query: personalityFilters.searchQuery || undefined,
                 installation_status: personalityFilters.installationStatusFilter !== 'All' ? personalityFilters.installationStatusFilter : undefined,
             };
-            
+
             if (personalityFilters.selectedCategory === 'Starred') {
                 params.starred_names = JSON.parse(localStorage.getItem('starredPersonalities') || '[]');
             }
@@ -450,6 +457,60 @@ export const useAdminStore = defineStore('admin', () => {
     }
     async function installZooPersonality(payload) { const res = await apiClient.post('/api/personalities_zoo/install', payload); tasksStore.addTask(res.data); }
     async function fetchPersonalityReadme(repo, folder) { const res = await apiClient.get('/api/personalities_zoo/readme', { params: { repository: repo, folder_name: folder } }); return res.data; }
+
+    async function fetchZooSkills(force=false) {
+        isLoadingZooSkills.value = true;
+        try {
+            const params = {
+                page: skillFilters.currentPage, page_size: skillFilters.pageSize, sort_by: skillFilters.sortKey, sort_order: skillFilters.sortOrder,
+                category: skillFilters.selectedCategory !== 'All' ? skillFilters.selectedCategory : undefined,
+                repository: skillFilters.selectedRepository !== 'All' ? skillFilters.selectedRepository : undefined,
+                search_query: skillFilters.searchQuery || undefined,
+                installation_status: skillFilters.installationStatusFilter !== 'All' ? skillFilters.installationStatusFilter : undefined,
+            };
+            const [cat_res, items_res] = await Promise.all([
+                apiClient.get('/api/skills_zoo/categories'),
+                apiClient.get('/api/skills_zoo/available', { params })
+            ]);
+            zooSkills.value = { ...items_res.data, categories: cat_res.data };
+        } finally {
+            isLoadingZooSkills.value = false;
+        }
+    }
+    async function installZooSkill(payload) {
+        const res = await apiClient.post('/api/skills_zoo/install', payload);
+        tasksStore.addTask(res.data);
+        uiStore.addNotification(`Skill '${payload.folder_name}' installation started.`, 'info');
+    }
+    async function fetchSkillReadme(repo, folder) {
+        const res = await apiClient.get('/api/skills_zoo/readme', { params: { repository: repo, folder_name: folder } });
+        return res.data;
+    }
+    async function fetchSkillZooRepositories(force=false) {
+        if (!force && skillZooRepositories.value.length > 0) return;
+        isLoadingSkillZooRepositories.value = true;
+        try {
+            const res = await apiClient.get('/api/skills_zoo/repositories');
+            skillZooRepositories.value = res.data;
+        } finally {
+            isLoadingSkillZooRepositories.value = false;
+        }
+    }
+    async function addSkillZooRepository(payload) {
+        const res = await apiClient.post('/api/skills_zoo/repositories', payload);
+        skillZooRepositories.value.push(res.data);
+    }
+    async function deleteSkillZooRepository(repoId) {
+        await apiClient.delete(`/api/skills_zoo/repositories/${repoId}`);
+        skillZooRepositories.value = skillZooRepositories.value.filter(r => r.id !== repoId);
+    }
+    async function pullSkillZooRepository(repoId) {
+        const res = await apiClient.post(`/api/skills_zoo/repositories/${repoId}/pull`);
+        tasksStore.addTask(res.data);
+    }
+    async function pullAllSkillZooRepositories() {
+        for (const repo of skillZooRepositories.value) await pullSkillZooRepository(repo.id);
+    }
     
     async function fetchBindingZoo(id) { const r = await apiClient.get(`/api/admin/bindings/${id}/zoo`); return r.data; }
     async function installLlmFromZoo(id, index) { const r = await apiClient.post(`/api/admin/bindings/${id}/zoo/install`, { index }); tasksStore.addTask(r.data); return r.data; }
@@ -619,6 +680,7 @@ export const useAdminStore = defineStore('admin', () => {
         }
         if (taskName.includes('prompt')) { fetchZooPrompts(true); }
         if (taskName.includes('personality')) { fetchZooPersonalities(true); }
+        if (taskName.includes('skill')) { fetchZooSkills(true); }
 
         if (taskName.includes('purge unused temporary files') && task.status === 'completed') {
             const message = task.result?.message || 'Purge completed successfully.';
@@ -656,6 +718,7 @@ export const useAdminStore = defineStore('admin', () => {
     watch(mcpFilters, (newFilters) => { localStorage.setItem('lollms-mcp-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(promptFilters, (newFilters) => { localStorage.setItem('lollms-prompt-filters', JSON.stringify(newFilters)); }, { deep: true });
     watch(personalityFilters, (newFilters) => { localStorage.setItem('lollms-personality-filters', JSON.stringify(newFilters)); }, { deep: true });
+    watch(skillFilters, (newFilters) => { localStorage.setItem('lollms-skill-filters', JSON.stringify(newFilters)); }, { deep: true });
 
     return {
         // State
@@ -671,6 +734,7 @@ export const useAdminStore = defineStore('admin', () => {
         ragBindings, isLoadingRagBindings, availableRagBindingTypes, availableRagVectorizers,
         zooRepositories, isLoadingZooRepositories, mcpZooRepositories, isLoadingMcpZooRepositories, promptZooRepositories, isLoadingPromptZooRepositories, personalityZooRepositories, isLoadingPersonalityZooRepositories,
         zooApps, isLoadingZooApps, zooMcps, isLoadingZooMcps, zooPrompts, isLoadingZooPrompts, zooPersonalities, isLoadingZooPersonalities,
+        zooSkills, isLoadingZooSkills, skillFilters, skillZooRepositories, isLoadingSkillZooRepositories,
         installedApps, isLoadingInstalledApps,
         systemStatus, isLoadingSystemStatus, connectedUsers, isLoadingConnectedUsers, serverInfo, isLoadingServerInfo, globalGenerationStats, isLoadingGlobalGenerationStats, modelUsageStats, isLoadingModelUsageStats,
         funFacts, isLoadingFunFacts, funFactCategories, isLoadingFunFactCategories, newsArticles, isLoadingNewsArticles,
@@ -704,6 +768,8 @@ export const useAdminStore = defineStore('admin', () => {
         fetchZooMcps, installZooMcp, fetchMcpReadme,
         fetchZooPrompts, installZooPrompt, fetchPromptReadme,
         fetchZooPersonalities, installZooPersonality, fetchPersonalityReadme,
+        fetchZooSkills, installZooSkill, fetchSkillReadme,
+        fetchSkillZooRepositories, addSkillZooRepository, deleteSkillZooRepository, pullSkillZooRepository, pullAllSkillZooRepositories,
         
         createSystemPrompt, updateSystemPrompt, deleteSystemPrompt, updateSystemPromptFromZoo, generateSystemPrompt,
         fetchInstalledApps, fetchNextAvailablePort, startApp, stopApp, restartApp, updateApp, uninstallApp, updateInstalledApp, fetchAppLog, fetchAppConfigSchema, fetchAppConfig, updateAppConfig, fetchAppEnv, updateAppEnv,

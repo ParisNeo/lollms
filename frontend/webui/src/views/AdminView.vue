@@ -64,6 +64,7 @@ const sections = [
   { type: 'link', id: 'prompts', name: 'Prompts Zoo', icon: markRaw(IconSparkles) },
   { type: 'link', id: 'mcps', name: 'MCPs Zoo', icon: markRaw(IconMcp) },
   { type: 'link', id: 'apps', name: 'Apps Zoo', icon: markRaw(IconSquares2x2) },
+  { type: 'link', id: 'skills_zoo', name: 'Skills Zoo', icon: markRaw(IconSparkles) },
 
   { type: 'divider', label: 'Bindings & Engines' },
   { type: 'link', id: 'llm_bindings', name: 'LLM (Text)', icon: markRaw(IconCpuChip) },
