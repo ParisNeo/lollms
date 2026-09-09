@@ -83,31 +83,31 @@
                 <template v-else>
                     <!-- Python Snippets -->
                     <template v-if="language === 'python'">
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'def my_function():\n    pass' })" title="Function" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">New Function</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'class MyClass:\n    def __init__(self):\n        pass' })" title="Class" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">New Class</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'for i in range(10):\n    print(i)' })" title="For Loop" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">For Loop</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'if __name__ == \'__main__\':\n    main()' })" title="Main block" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Main block</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.python.function)" title="Function" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">New Function</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.python.classDef)" title="Class" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">New Class</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.python.forLoop)" title="For Loop" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">For Loop</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.python.mainBlock)" title="Main block" icon="python" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Main block</span></ToolbarButton>
                     </template>
 
                     <!-- HTML Snippets -->
                     <template v-else-if="language === 'html'">
-                        <ToolbarButton @click="$emit('format', 'insert', { code: '<div>\n    \n</div>' })" title="Div" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Div Block</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: '<img src=\'URL\' alt=\'description\' />' })" title="Image" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Image Tag</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: '<script>\n    \n</script>' })" title="Script" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Script Tag</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: '<!-- comment -->' })" title="Comment" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Comment</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.html.div)" title="Div" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Div Block</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.html.image)" title="Image" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Image Tag</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.html.script)" title="Script" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Script Tag</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.html.comment)" title="Comment" icon="html5" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Comment</span></ToolbarButton>
                     </template>
 
                     <!-- JS/TS Snippets -->
                     <template v-else-if="language === 'javascript' || language === 'typescript'">
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'console.log();' })" title="Log" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Console Log</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'const myFunc = () => {\n    \n};' })" title="Arrow" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Arrow Function</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'async function fetchData() {\n    const res = await fetch(url);\n    return res.json();\n}' })" title="Fetch" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Async Fetch</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.javascript.log)" title="Log" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Console Log</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.javascript.arrow)" title="Arrow" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Arrow Function</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.javascript.asyncFetch)" title="Fetch" icon="javascript" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Async Fetch</span></ToolbarButton>
                     </template>
 
                     <!-- Mermaid Snippets -->
                     <template v-else-if="language === 'mermaid'">
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'A[Start] --> B(Process)\nB --> C{Decision}\nC -->|Yes| D[End]\nC -->|No| E[End]' })" title="Flowchart" icon="mermaid" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Flowchart</span></ToolbarButton>
-                        <ToolbarButton @click="$emit('format', 'insert', { code: 'sequenceDiagram\n    Alice->>John: Hello John, how are you?\n    John-->>Alice: Great!' })" title="Sequence" icon="mermaid" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Sequence</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.mermaid.flowchart)" title="Flowchart" icon="mermaid" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Flowchart</span></ToolbarButton>
+                        <ToolbarButton @click="insertSnippet(snippets.mermaid.sequence)" title="Sequence" icon="mermaid" collection="languages" :button-class="toolbarMenuItemClass"><span class="ml-2">Sequence</span></ToolbarButton>
                     </template>
 
                     <div v-else class="px-3 py-2 text-xs text-gray-500 italic">No specific snippets for this language.</div>
@@ -147,7 +147,7 @@
 import { computed } from 'vue';
 import { useAuthStore } from '../../../stores/auth';
 import ToolbarButton from '../ToolbarButton.vue';
-import DropdownMenu from '../DropdownMenu/DropdownMenu.vue';
+import DropdownMenu from '../DropDownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../DropDownMenu/DropdownSubmenu.vue';
 
 const props = defineProps({
@@ -160,9 +160,37 @@ const props = defineProps({
 
 const isMarkdown = computed(() => props.language?.toLowerCase() === 'markdown');
 
-defineEmits(['format', 'insert-link', 'insert-image', 'import', 'export', 'set-mode', 'toggle-wrapping']);
+const emit = defineEmits(['format', 'insert-link', 'insert-image', 'import', 'export', 'set-mode', 'toggle-wrapping']);
 
 const authStore = useAuthStore();
+
+const snippets = {
+    python: {
+        function: 'def my_function():\n    pass',
+        classDef: 'class MyClass:\n    def __init__(self):\n        pass',
+        forLoop: 'for i in range(10):\n    print(i)',
+        mainBlock: "if __name__ == '__main__':\n    main()"
+    },
+    html: {
+        div: '<div>\n    \n</div>',
+        image: '<img src="URL" alt="description" />',
+        script: '<' + 'script>\n    \n</' + 'script>',
+        comment: '<!-- comment -->'
+    },
+    javascript: {
+        log: 'console.log();',
+        arrow: 'const myFunc = () => {\n    \n};',
+        asyncFetch: 'async function fetchData() {\n    const res = await fetch(url);\n    return res.json();\n}'
+    },
+    mermaid: {
+        flowchart: 'A[Start] --> B(Process)\nB --> C{Decision}\nC -->|Yes| D[End]\nC -->|No| E[End]',
+        sequence: 'sequenceDiagram\n    Alice->>John: Hello John, how are you?\n    John-->>Alice: Great!'
+    }
+};
+
+function insertSnippet(code) {
+    emit('format', 'insert', { code });
+}
 
 const toolbarButtonBaseClass = computed(() => {
     return ['toolbar-btn', props.buttonClass || 'p-1.5 bg-transparent rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400 dark:text-gray-200 flex items-center justify-center h-8 px-2.5'];

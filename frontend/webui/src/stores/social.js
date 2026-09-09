@@ -992,6 +992,24 @@ export const useSocialStore = defineStore('social', () => {
         fetchPendingRequests, fetchBlockedUsers, fetchUserProfile, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, removeFriend, blockUser, unblockUser,
         handleNewDm, handleNewComment, handleIncomingFriendRequest, markConversationAsRead,
         fetchFeed, fetchUserPosts, uploadPostMedia, fetchLinkPreview, createPost, updatePost, togglePinPost, deletePost, fetchComments, createComment, deleteComment,
+        async generatePostDraft(payload) {
+            try {
+                const response = await apiClient.post('/api/social/generate-post-draft', payload);
+                return response.data;
+            } catch (error) {
+                console.error("Failed to generate post draft:", error);
+                const status = error.response?.status;
+                const detail = error.response?.data?.detail;
+                if (status === 429) {
+                    useUiStore().addNotification(detail || "Model rate limit reached. Please wait or select another model.", "warning", 8000);
+                } else if (status === 405) {
+                    useUiStore().addNotification("Please restart the LoLLMs backend server to activate the new post generation endpoint.", "warning", 8000);
+                } else {
+                    useUiStore().addNotification(detail || "AI post generation failed.", "error");
+                }
+                throw error;
+            }
+        },
         followUser, unfollowUser, toggleLike, searchForMentions,
         fetchSocialGroups, createSocialGroup, fetchSocialGroupDetails, updateSocialGroup, deleteSocialGroup, addMemberToSocialGroup, removeMemberFromSocialGroup, fetchSocialGroupFeed,
         handleNewPost(post) {

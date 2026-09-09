@@ -73,7 +73,7 @@ feedparser==6.0.10
 aioredis==2.0.1
 
 # --- Web Intelligence, Scraping & Knowledge Tools ---
-ScrapeMaster==0.8.0
+ScrapeMaster==0.8.5
 duckduckgo-search==8.1.1
 arxiv==2.3.1
 google-api-python-client==2.184.0

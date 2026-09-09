@@ -45,3 +45,15 @@ class PostPublic(PostBase):
     comments: List[CommentPublic] = []
     like_count: int = 0
     has_liked: bool = False
+
+class GeneratePostDraftRequest(BaseModel):
+    topic: str = Field(..., min_length=2, max_length=2000, description="The topic, brief, or request for the post.")
+    use_websearch: bool = Field(default=False, description="Whether to fetch real-time web search information to back the post.")
+    search_provider: Optional[str] = Field(default="ddg", description="Search provider: 'ddg', 'google', or 'arxiv'")
+    tone: Optional[str] = Field(default="engaging", description="Tone of the post: 'engaging', 'informative', 'humorous', 'technical', or 'concise'")
+    include_hashtags: bool = Field(default=True, description="Whether to include relevant hashtags.")
+
+class GeneratePostDraftResponse(BaseModel):
+    content: str
+    sources: Optional[List[str]] = Field(default_factory=list)
+    tools_used: Optional[List[str]] = Field(default_factory=list)

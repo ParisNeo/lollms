@@ -266,11 +266,45 @@ const parsedMarkdown = (content) => {
 };
 
 const parseSpecialBlock = (rawBlock, match = null) => {
+    if (!rawBlock) return { type: 'content', content: '' };
+
+    // 1. Direct and robust check for <processing> tags
+    if (rawBlock.includes('<processing')) {
+        const procMatch = rawBlock.match(/<processing\b([^>]*)>([\s\S]*?)(?:<\/processing>(?:\s*<!--\s*status:([a-zA-Z0-9_-]+)\s*-->)?|$)/i);
+        if (procMatch) {
+            const attrsStr = procMatch[1] || '';
+            const rawInner = procMatch[2] || '';
+            let statusMeta = procMatch[3] || null;
+
+            const innerStatusMatch = rawInner.match(/<!--\s*status:([a-zA-Z0-9_-]+)\s*-->/i);
+            if (innerStatusMatch) {
+                statusMeta = statusMeta || innerStatusMatch[1];
+            }
+            const cleanInner = rawInner.replace(/<!--\s*status:[a-zA-Z0-9_-]+\s*-->/gi, '').trim();
+
+            const typeMatch = attrsStr.match(/type=["']([^"']*)["']/i);
+            const titleMatch = attrsStr.match(/title=["']([^"']*)["']/i);
+            const pType = typeMatch ? typeMatch[1] : 'process';
+            const title = titleMatch ? titleMatch[1] : (pType ? pType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Processing');
+            const isClosed = rawBlock.includes('</processing>');
+
+            return { 
+                type: 'processing', 
+                pType, 
+                title, 
+                statusContent: cleanInner, 
+                isClosed, 
+                status: statusMeta,
+                raw: rawBlock 
+            };
+        }
+    }
+
     if (!match) {
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\b([^>]*?)>()()([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)|(<owl>[\s\S]*?(?:<\/owl>|$))/;
+        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\b([^>]*)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)|(<owl>[\s\S]*?(?:<\/owl>|$))/;
         match = regex.exec(rawBlock);
     }
-    
+
     if (!match) return { type: 'content', content: rawBlock };
 
     if (match[1]) {
@@ -413,20 +447,24 @@ const parseSpecialBlock = (rawBlock, match = null) => {
     else if (match[19]) {
         const raw = match[19];
         const attrsStr = match[20] || '';
-        const inner = match[23] || '';
+        const inner = match[21] || '';
+
+        const innerStatusMatch = inner.match(/<!--\s*status:([a-zA-Z0-9_-]+)\s*-->/i);
+        const cleanInner = inner.replace(/<!--\s*status:[a-zA-Z0-9_-]+\s*-->/gi, '').trim();
 
         const typeMatch = attrsStr.match(/type=["']([^"']*)["']/i);
         const titleMatch = attrsStr.match(/title=["']([^"']*)["']/i);
         const pType = typeMatch ? typeMatch[1] : 'process';
-        const title = titleMatch ? titleMatch[1] : 'Processing';
+        const title = titleMatch ? titleMatch[1] : (pType ? pType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Processing');
         const isClosed = raw.trim().endsWith('</processing>');
 
         return { 
             type: 'processing', 
             pType, 
             title, 
-            statusContent: inner, 
+            statusContent: cleanInner, 
             isClosed, 
+            status: innerStatusMatch ? innerStatusMatch[1] : null,
             raw 
         };
     }
@@ -672,7 +710,7 @@ const messageParts = computed(() => {
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
-                { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b([^>]*?)>()()([\s\S]*?)(?:<\/processing>|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b[^>]*>[\s\S]*?(?:<\/processing>(?:\s*<!--\s*status:[a-zA-Z0-9_-]+\s*-->)?|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<tool_call[^>]*>([\s\S]*?)(?:<\/tool_call>|$))/gi },
@@ -1471,6 +1509,7 @@ function onMermaidReady({ svg }, partIndex) {
                :title="part.title"
                :status-content="part.statusContent"
                :is-closed="part.isClosed"
+               :status="part.status"
           />
 
           <!-- Active Tool Execution -->

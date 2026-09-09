@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-09 21:57]
+
+- ---
+
 ## [2026-09-08 22:58]
 
 - fix(config): refactor session client for better LLM binding resolution
