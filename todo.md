@@ -1,3 +1,6 @@
+## HOT:
+- discussions names are not shown, instead I see New Discussion with a uuid.
+
 new ui:
 
 - OK - add edit button to bubbles
