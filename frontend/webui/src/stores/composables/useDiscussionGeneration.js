@@ -215,6 +215,11 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     break;
 
                 case 'finalize':
+                    if (data.new_title && currentDiscussionId.value) {
+                        if (discussions.value[currentDiscussionId.value]) {
+                            discussions.value[currentDiscussionId.value].title = data.new_title;
+                        }
+                    }
                     if (data.data && data.data.ai_message) {
                         const finalAi = data.data.ai_message;
                         messageToUpdate.id = finalAi.id;

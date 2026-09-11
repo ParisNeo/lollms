@@ -2193,9 +2193,39 @@ def build_llm_generation_router(router: APIRouter):
                         }
                     }
 
-                    # Trigger auto-title if discussion was newly created
-                    if current_user.auto_title and discussion_obj.metadata.get('title',"").startswith("New Discussion"):
-                        finalize_payload["new_title"] = discussion_obj.auto_title()
+                    current_title = (discussion_obj.metadata or {}).get('title', '')
+                    is_placeholder_title = (
+                        not current_title 
+                        or current_title.startswith("New Discussion") 
+                        or current_title.startswith("Discussion ") 
+                        or current_title == "Untitled"
+                    )
+
+                    # Auto-title on first conversation turn or when requested by user settings
+                    if is_placeholder_title or current_user.auto_title:
+                        new_title = None
+                        try:
+                            new_title = discussion_obj.auto_title()
+                        except Exception as e:
+                            print(f"Warning: auto_title() failed: {e}")
+
+                        if not new_title or new_title.startswith("New Discussion") or new_title.startswith("Discussion "):
+                            clean_prompt = re.sub(r'[*#_`~>\[\]()]', '', prompt).strip().split('\n')[0]
+                            if clean_prompt:
+                                new_title = clean_prompt[:40].strip() + ("..." if len(clean_prompt) > 40 else "")
+
+                        if new_title:
+                            discussion_obj.set_metadata_item('title', new_title)
+                            discussion_obj.commit()
+                            finalize_payload["new_title"] = new_title
+
+                            manager.send_personal_message_sync({
+                                "type": "discussion_updated",
+                                "data": {
+                                    "discussion_id": discussion_id,
+                                    "title": new_title
+                                }
+                            }, current_user.id)
 
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(finalize_payload)) + "\n")
 

@@ -94,7 +94,7 @@ def _bootstrap_global_settings(connection):
         "default_llm_ctx_size": { "value": 32000, "type": "integer", "description": "Default context size (in tokens) for new users.", "category": "Defaults" },
         "default_llm_temperature": { "value": 0.7, "type": "float", "description": "Default generation temperature for new users.", "category": "Defaults" },
         "default_user_ui_level": { "value": 0, "type": "integer", "description": "Default UI level for new users (0: Beginner, 2: Intermediate, 4: Expert).", "category": "Defaults" },
-        "default_auto_title": { "value": False, "type": "boolean", "description": "Enable automatic discussion title generation for new users by default.", "category": "Defaults" },
+        "default_auto_title": { "value": True, "type": "boolean", "description": "Enable automatic discussion title generation for new users by default.", "category": "Defaults" },
         "default_safe_store_vectorizer": { "value": "default_st", "type": "string", "description": "Default vectorizer alias or name for newly created datastores.", "category": "RAG" },
         "restrict_vectorizers_to_aliases": { "value": False, "type": "boolean", "description": "If enabled, users can only choose from the admin-defined RAG Bindings when creating a new Data Store.", "category": "RAG" },
         "default_chunk_size": { "value": 2048, "type": "integer", "description": "The default number of characters per text chunk for RAG indexing.", "category": "RAG" },

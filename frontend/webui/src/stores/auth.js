@@ -349,6 +349,9 @@ export const useAuthStore = defineStore('auth', () => {
                     break;
                 case 'discussion_updated':
                     getDiscussionsStore().then(async s => {
+                        if (data.data?.discussion_id && data.data?.title && s.discussions[data.data.discussion_id]) {
+                            s.discussions[data.data.discussion_id].title = data.data.title;
+                        }
                         if (s.currentDiscussionId === data.data.discussion_id) {
                             await s.fetchArtefacts(data.data.discussion_id);
                             await s.fetchContextStatus(data.data.discussion_id);

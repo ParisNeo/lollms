@@ -32,6 +32,7 @@ from backend.session import (get_current_active_user,
                              get_user_discussion_assets_path,
                              get_user_lollms_client
                             )
+from backend.ws_manager import manager
 from backend.routers.discussion.artefacts import build_artefacts_router
 from backend.routers.discussion.context import build_context_router
 from backend.routers.discussion.data_zone import build_datazone_router
@@ -81,20 +82,81 @@ def build_discussions_router():
         # Get set of discussion IDs that the current user has shared
         owned_shared_ids = {row[0] for row in db.query(SharedDiscussionLink.discussion_id).filter(SharedDiscussionLink.owner_user_id == db_user.id).distinct().all()}
 
+        def _parse_meta(d_entry):
+            raw = d_entry.get('discussion_metadata') if isinstance(d_entry, dict) else getattr(d_entry, 'discussion_metadata', None)
+            if raw is None and isinstance(d_entry, dict):
+                raw = d_entry.get('metadata')
+            if isinstance(raw, str):
+                try:
+                    return json.loads(raw)
+                except Exception:
+                    return {}
+            elif isinstance(raw, dict):
+                return raw
+            return {}
+
+        def _is_placeholder_title(t):
+            if not t or not isinstance(t, str):
+                return True
+            s = t.strip()
+            return s == "" or s == "Untitled" or s.startswith("New Discussion") or s.startswith("Discussion ")
+
+        # Batch self-heal placeholder titles for discussions with existing user messages
+        healed_titles = {}
+        placeholder_ids = [
+            d['id'] for d in discussions_from_db 
+            if isinstance(d, dict) and 'id' in d and _is_placeholder_title(_parse_meta(d).get('title') or d.get('title'))
+        ]
+
+        if placeholder_ids:
+            try:
+                with dm.get_session() as s_dm:
+                    user_msgs = s_dm.query(
+                        dm.MessageModel.discussion_id,
+                        dm.MessageModel.content
+                    ).filter(
+                        dm.MessageModel.discussion_id.in_(placeholder_ids),
+                        dm.MessageModel.sender_type == 'user'
+                    ).order_by(dm.MessageModel.created_at.asc()).all()
+
+                    first_msg_map = {}
+                    for d_id, content in user_msgs:
+                        if d_id not in first_msg_map and content and content.strip():
+                            first_msg_map[d_id] = content.strip()
+
+                    if first_msg_map:
+                        for d_id, content in first_msg_map.items():
+                            clean_line = re.sub(r'[*#_`~>\[\]()]', '', content).strip().split('\n')[0].strip()
+                            if clean_line:
+                                new_title = clean_line[:40].strip() + ("..." if len(clean_line) > 40 else "")
+                                healed_titles[d_id] = new_title
+                                disc_rec = s_dm.query(dm.DiscussionModel).filter(dm.DiscussionModel.id == d_id).first()
+                                if disc_rec:
+                                    meta_dict = _parse_meta({'discussion_metadata': disc_rec.discussion_metadata})
+                                    meta_dict['title'] = new_title
+                                    disc_rec.discussion_metadata = meta_dict
+                        s_dm.commit()
+            except Exception as heal_err:
+                print(f"Warning: Self-healing placeholder titles: {heal_err}")
+
         infos = []
         for disc_data in discussions_from_db:
             try:
                 disc_id = disc_data['id']
-                metadata = disc_data.get('discussion_metadata', {})
+                metadata = _parse_meta(disc_data)
                 is_shared_by_me = disc_id in owned_shared_ids
-
-                # Direct JSON/dictionary inspection instead of loading the full LollmsDiscussion class
-                # This prevents triggering 50 SQLite database attachments per API request
                 has_art = bool(metadata.get("has_artefacts", False))
+
+                resolved_title = (
+                    healed_titles.get(disc_id)
+                    or metadata.get('title')
+                    or disc_data.get('title')
+                    or f"Discussion {disc_id[:8]}"
+                )
 
                 info = DiscussionInfo(
                     id=disc_id,
-                    title=metadata.get('title', f"Discussion {disc_id[:8]}"),
+                    title=resolved_title,
                     is_starred=(disc_id in starred_ids),
                     rag_datastore_ids=metadata.get('rag_datastore_ids'),
                     active_tools=metadata.get('active_tools', []),
@@ -438,6 +500,23 @@ def build_discussions_router():
 
         try:
             new_title = discussion_obj.auto_title()
+            if not new_title or new_title.startswith("New Discussion") or new_title.startswith("Discussion "):
+                branch = discussion_obj.get_branch(discussion_obj.active_branch_id)
+                first_user = next((m for m in branch if m.sender_type == 'user'), None)
+                if first_user and first_user.content:
+                    clean_p = re.sub(r'[*#_`~>\[\]()]', '', first_user.content).strip().split('\n')[0]
+                    new_title = clean_p[:40].strip() + ("..." if len(clean_p) > 40 else "")
+
+            if new_title:
+                discussion_obj.set_metadata_item('title', new_title)
+                discussion_obj.commit()
+                manager.send_personal_message_sync({
+                    "type": "discussion_updated",
+                    "data": {
+                        "discussion_id": discussion_id,
+                        "title": new_title
+                    }
+                }, current_user.id)
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to generate title: {e}")
@@ -445,16 +524,17 @@ def build_discussions_router():
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
         metadata = discussion_obj.metadata or {}
-        
+
         return DiscussionInfo(
             id=discussion_id,
-            title=new_title,
+            title=new_title or metadata.get('title', "Untitled"),
             is_starred=is_starred,
             rag_datastore_ids=metadata.get('rag_datastore_ids'),
             active_tools=metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            last_activity_at=discussion_obj.updated_at,
+            has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
 
 
@@ -568,7 +648,16 @@ def build_discussions_router():
     @router.put("/{discussion_id}/title", response_model=DiscussionInfo)
     async def update_discussion_title(discussion_id: str, title_update: DiscussionTitleUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        discussion_obj.set_metadata_item('title',title_update.title)
+        discussion_obj.set_metadata_item('title', title_update.title)
+        discussion_obj.commit()
+
+        manager.send_personal_message_sync({
+            "type": "discussion_updated",
+            "data": {
+                "discussion_id": discussion_id,
+                "title": title_update.title
+            }
+        }, current_user.id)
 
         db_user = db.query(DBUser).filter(DBUser.username == current_user.username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=db_user.id, discussion_id=discussion_id).first() is not None
@@ -580,7 +669,8 @@ def build_discussions_router():
             active_tools=discussion_obj.metadata.get('active_tools', []),
             active_branch_id=discussion_obj.active_branch_id,
             created_at=discussion_obj.created_at,
-            last_activity_at=discussion_obj.updated_at
+            last_activity_at=discussion_obj.updated_at,
+            has_artefacts=len(discussion_obj.list_artefacts()) > 0
         )
 
     @router.delete("/{discussion_id}", status_code=200)

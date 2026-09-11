@@ -238,7 +238,10 @@ export function useDiscussionCore(state, stores, getActions) {
         const originalTitle = discussions.value[discussionId].title;
         discussions.value[discussionId].title = newTitle;
         try {
-            await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
+            const res = await apiClient.put(`/api/discussions/${discussionId}/title`, { title: newTitle });
+            if (res.data?.title) {
+                discussions.value[discussionId].title = res.data.title;
+            }
             uiStore.addNotification('Discussion renamed.', 'success');
         } catch (error) {
             discussions.value[discussionId].title = originalTitle;
