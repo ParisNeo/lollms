@@ -5,7 +5,45 @@
                 <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
                 {{ language }}
             </div>
-            <span>{{ charCount }} characters</span>
+
+            <!-- Token Count Badge -->
+            <button 
+                v-if="showTokens"
+                @click="$emit('toggle-tokens')"
+                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-bold text-[10px] border border-purple-200 dark:border-purple-800 transition-all hover:scale-105 cursor-pointer"
+                :title="tokenCount ? `${tokenCount} tokens (~${(charCount / Math.max(1, tokenCount)).toFixed(1)} chars/token). Click to toggle visualizer.` : 'Tokenizing...'"
+            >
+                <span v-if="isTokenizing" class="w-1.5 h-1.5 rounded-full bg-purple-500 animate-ping"></span>
+                <span v-else class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
+                <span>{{ isTokenizing ? 'Tokenizing...' : `${tokenCount} tokens` }}</span>
+                <span v-if="tokenCount && charCount > 0" class="opacity-60 text-[9px] font-mono font-normal">
+                    (~{{ (charCount / tokenCount).toFixed(1) }} c/t)
+                </span>
+            </button>
+
+            <span v-else>{{ charCount }} characters</span>
+
+            <!-- Runnable Engine Indicator -->
+            <button 
+                v-if="isRunnable"
+                @click="$emit('run-code')" 
+                class="hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 font-bold text-[9px] uppercase tracking-wider border border-emerald-200 dark:border-emerald-800 hover:scale-105 cursor-pointer"
+                :title="language.toLowerCase().includes('python') ? 'Python Pyodide Execution Ready (Ctrl+Enter)' : 'JavaScript Sandbox Ready (Ctrl+Enter)'"
+            >
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                <span>{{ language.toLowerCase().includes('python') ? 'Pyodide Ready' : 'JS Sandbox' }}</span>
+            </button>
+
+            <!-- Minimap Toggle Button -->
+            <button 
+                @click="$emit('toggle-minimap')"
+                class="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border transition-all cursor-pointer select-none"
+                :class="showMinimap ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-800' : 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 hover:text-gray-600'"
+                :title="showMinimap ? 'Hide Code Minimap' : 'Show Code Minimap'"
+            >
+                <span class="w-1.5 h-1.5 rounded-full" :class="showMinimap ? 'bg-blue-500' : 'bg-gray-400'"></span>
+                <span>Minimap</span>
+            </button>
 
             <!-- Actions Group -->
             <div class="flex items-center gap-0.5">
@@ -47,10 +85,15 @@ const props = defineProps({
     modelValue: { type: String, required: true },
     language: { type: String, default: 'markdown' },
     allowedModes: { type: String, default: 'both' },
-    currentMode: { type: String, default: 'edit' }
+    currentMode: { type: String, default: 'edit' },
+    tokenCount: { type: Number, default: null },
+    showTokens: { type: Boolean, default: false },
+    isTokenizing: { type: Boolean, default: false },
+    isRunnable: { type: Boolean, default: false },
+    showMinimap: { type: Boolean, default: true }
 });
 
-defineEmits(['set-mode']);
+defineEmits(['set-mode', 'toggle-tokens', 'run-code', 'toggle-minimap']);
 
 const uiStore = useUiStore();
 const justCopied = ref(false);

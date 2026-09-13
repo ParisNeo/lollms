@@ -31,8 +31,18 @@
             </template>
 
             <!-- Code/Specialized Insertion Group -->
+            <!-- Code Folding & Language Tools -->
             <DropdownMenu :title="isMarkdown ? 'Insert Code Block' : 'Language Tools'" icon="code" :button-class="toolbarButtonBaseClass" collection="ui">
-                
+                <button @click="$emit('fold-all')" :class="toolbarMenuItemClass">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                    <span>Fold All Code</span>
+                </button>
+                <button @click="$emit('unfold-all')" :class="toolbarMenuItemClass">
+                    <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
+                    <span>Unfold All Code</span>
+                </button>
+                <div class="my-1 border-t border-gray-200 dark:border-gray-600"></div>
+
                 <!-- IF MARKDOWN: Original Lang selection with fences -->
                 <template v-if="isMarkdown">
                     <ToolbarButton @click="$emit('format', 'codeblock')" title="Generic Code Block" icon="terminal" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Generic Code</span></ToolbarButton>
@@ -129,9 +139,102 @@
                 </DropdownSubmenu>
                 <ToolbarButton @click="$emit('insert-image')" title="Image" icon="image" collection="ui" :button-class="toolbarMenuItemClass"><span class="ml-2">Insert Image</span></ToolbarButton>
             </DropdownMenu>
-            
+
             <div class="border-l border-gray-300 dark:border-gray-600 h-5 mx-1"></div>
-            
+
+            <!-- Format Document Action (Table auto-align for markdown, beautify for JSON/HTML/Python/JS) -->
+            <button 
+                @click="$emit('format-doc')" 
+                :class="toolbarButtonBaseClass" 
+                :title="isMarkdown ? 'Format & Auto-Align Tables' : `Format ${language.toUpperCase()}`"
+            >
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h10M4 18h16"></path></svg>
+                <span class="ml-1 text-[11px] font-bold">Format</span>
+            </button>
+
+            <!-- Prompt to Change Button -->
+            <button 
+                @click="$emit('ai-custom-prompt')" 
+                :class="[toolbarButtonBaseClass, 'text-purple-600 dark:text-purple-300 font-bold bg-purple-50/80 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/60 hover:bg-purple-100 dark:hover:bg-purple-900/50 shadow-xs']"
+                title="Input a prompt specifying what needs to be changed (shows split diff)"
+            >
+                <IconSparkles class="w-3.5 h-3.5 text-purple-500" />
+                <span class="ml-1 text-[11px] font-bold">Prompt to Change</span>
+            </button>
+
+            <!-- Adaptive LoLLMs AI Copilot Menu -->
+            <DropdownMenu title="LoLLMs AI Copilot" :button-class="[toolbarButtonBaseClass, 'text-purple-600 dark:text-purple-300 font-bold hover:bg-purple-50 dark:hover:bg-purple-950/40']">
+                <template #icon>
+                    <IconAnimateSpin v-if="isGeneratingAi" class="w-3.5 h-3.5 animate-spin" />
+                    <IconSparkles v-else class="w-3.5 h-3.5" />
+                </template>
+
+                <!-- Universal Custom Prompt Item (Always at top of menu) -->
+                <button @click="$emit('ai-custom-prompt')" :class="[toolbarMenuItemClass, 'font-bold text-purple-600 dark:text-purple-300 border-b border-gray-200 dark:border-gray-700 pb-2 mb-1.5']">
+                    <span class="text-purple-500 mr-2 text-sm">✨</span>
+                    <span>Prompt What to Change...</span>
+                </button>
+
+                <!-- Python AI Menu -->
+                <template v-if="isPython">
+                    <button @click="$emit('ai-action', 'refactor')" :class="toolbarMenuItemClass"><span class="font-bold text-blue-600 mr-2">⚡</span><span>Refactor (PEP 8 & Types)</span></button>
+                    <button @click="$emit('ai-action', 'docstrings')" :class="toolbarMenuItemClass"><span class="text-amber-500 mr-2">📝</span><span>Add Docstrings & Typing</span></button>
+                    <button @click="$emit('ai-action', 'fix')" :class="toolbarMenuItemClass"><span class="text-red-500 mr-2">🐛</span><span>Fix Bugs & Security</span></button>
+                    <button @click="$emit('ai-action', 'explain')" :class="toolbarMenuItemClass"><span class="text-indigo-500 mr-2">💡</span><span>Explain Complexity & Flow</span></button>
+                </template>
+
+                <!-- JS / TS AI Menu -->
+                <template v-else-if="isJs">
+                    <button @click="$emit('ai-action', 'refactor')" :class="toolbarMenuItemClass"><span class="font-bold text-blue-600 mr-2">⚡</span><span>Refactor (Modern ES6+)</span></button>
+                    <button @click="$emit('ai-action', 'typescript')" :class="toolbarMenuItemClass"><span class="text-blue-500 mr-2">🏷️</span><span>Convert to TypeScript</span></button>
+                    <button @click="$emit('ai-action', 'fix')" :class="toolbarMenuItemClass"><span class="text-red-500 mr-2">🐛</span><span>Fix Bugs & Async Issues</span></button>
+                    <button @click="$emit('ai-action', 'explain')" :class="toolbarMenuItemClass"><span class="text-indigo-500 mr-2">💡</span><span>Explain Logic</span></button>
+                </template>
+
+                <!-- HTML / SVG / XML AI Menu -->
+                <template v-else-if="isHtml">
+                    <button @click="$emit('ai-action', 'refactor')" :class="toolbarMenuItemClass"><span class="font-bold text-blue-600 mr-2">⚡</span><span>Optimize & Clean Markup</span></button>
+                    <button @click="$emit('ai-action', 'accessibility')" :class="toolbarMenuItemClass"><span class="text-emerald-500 mr-2">♿</span><span>Make Accessible (ARIA / a11y)</span></button>
+                    <button @click="$emit('ai-action', 'explain')" :class="toolbarMenuItemClass"><span class="text-indigo-500 mr-2">💡</span><span>Explain Structure</span></button>
+                </template>
+
+                <!-- JSON AI Menu -->
+                <template v-else-if="isJson">
+                    <button @click="$emit('ai-action', 'fix')" :class="toolbarMenuItemClass"><span class="text-emerald-500 mr-2">🛠️</span><span>Fix Malformed JSON</span></button>
+                    <button @click="$emit('ai-action', 'schema')" :class="toolbarMenuItemClass"><span class="text-blue-500 mr-2">📋</span><span>Generate JSON Schema</span></button>
+                </template>
+
+                <!-- Markdown AI Menu (Default) -->
+                <template v-else>
+                    <button @click="$emit('ai-action', 'polish')" :class="toolbarMenuItemClass"><span class="text-purple-500 mr-2">✨</span><span>Polish & Improve Writing</span></button>
+                    <button @click="$emit('ai-action', 'toc')" :class="toolbarMenuItemClass"><span class="text-blue-500 mr-2">📑</span><span>Generate Table of Contents</span></button>
+                    <button @click="$emit('ai-action', 'summary')" :class="toolbarMenuItemClass"><span class="text-amber-500 mr-2">📋</span><span>Executive Summary</span></button>
+                </template>
+            </DropdownMenu>
+
+            <!-- Code Execution Button (Pyodide for Python, Web Sandbox for JS) -->
+            <button 
+                v-if="isRunnable"
+                @click="$emit('run-code')" 
+                :disabled="isRunningCode" 
+                :class="[toolbarButtonBaseClass, 'text-emerald-600 dark:text-emerald-400 font-bold hover:bg-emerald-50 dark:hover:bg-emerald-950/40']" 
+                :title="isPython ? 'Run Python code in Pyodide (Ctrl+Enter)' : 'Run JavaScript sandbox (Ctrl+Enter)'"
+            >
+                <IconAnimateSpin v-if="isRunningCode" class="w-3.5 h-3.5 animate-spin" />
+                <IconPlayCircle v-else class="w-3.5 h-3.5" />
+                <span class="ml-1 text-[11px] font-bold">Run</span>
+            </button>
+
+            <ToolbarButton 
+                :title="showMinimap ? 'Hide Code Minimap' : 'Show Code Minimap'" 
+                @click="$emit('toggle-minimap')" 
+                icon="layout" 
+                :button-class="[toolbarButtonBaseClass, {'bg-blue-100 dark:bg-blue-800/50 text-blue-600 dark:text-blue-300 font-bold': showMinimap}]" 
+                collection="ui"
+            >
+                <span class="ml-1 text-[11px] font-bold tracking-tight">Minimap</span>
+            </ToolbarButton>
+
             <ToolbarButton 
                 :title="isWrappingEnabled ? 'Disable Text Wrapping' : 'Enable Text Wrapping'" 
                 @click="$emit('toggle-wrapping')" 
@@ -139,6 +242,17 @@
                 :button-class="[toolbarButtonBaseClass, {'bg-blue-100 dark:bg-blue-800/50': isWrappingEnabled}]" 
                 collection="ui"
             />
+
+            <!-- Tokenizer Inspector Button -->
+            <ToolbarButton 
+                :title="showTokens ? 'Hide Colored Tokens' : 'Show Tokens (Tokenize with LLM)'" 
+                @click="$emit('toggle-tokens')" 
+                icon="code" 
+                :button-class="[toolbarButtonBaseClass, {'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-300 font-bold': showTokens}]" 
+                collection="ui"
+            >
+                <span class="ml-1 text-[11px] font-bold tracking-tight">Tokens</span>
+            </ToolbarButton>
         </div>
     </div>
 </template>
@@ -149,6 +263,9 @@ import { useAuthStore } from '../../../stores/auth';
 import ToolbarButton from '../ToolbarButton.vue';
 import DropdownMenu from '../DropDownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../DropDownMenu/DropdownSubmenu.vue';
+import IconPlayCircle from '../../../assets/icons/IconPlayCircle.vue';
+import IconSparkles from '../../../assets/icons/IconSparkles.vue';
+import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 
 const props = defineProps({
     toolbarClass: { type: [String, Object, Array], default: '' },
@@ -156,11 +273,27 @@ const props = defineProps({
     language: { type: String, default: 'markdown' },
     currentMode: { type: String, default: 'edit' },
     isWrappingEnabled: { type: Boolean, default: true },
+    showTokens: { type: Boolean, default: false },
+    isTokenizing: { type: Boolean, default: false },
+    isRunnable: { type: Boolean, default: false },
+    isRunningCode: { type: Boolean, default: false },
+    isGeneratingAi: { type: Boolean, default: false },
+    showMinimap: { type: Boolean, default: true }
 });
 
-const isMarkdown = computed(() => props.language?.toLowerCase() === 'markdown');
+const langKey = computed(() => (props.language || '').toLowerCase().trim());
+const isMarkdown = computed(() => langKey.value === 'markdown' || langKey.value === 'md' || !langKey.value);
+const isPython = computed(() => langKey.value === 'python' || langKey.value === 'py');
+const isJs = computed(() => ['javascript', 'typescript', 'js', 'ts'].includes(langKey.value));
+const isHtml = computed(() => ['html', 'xml', 'svg'].includes(langKey.value));
+const isJson = computed(() => langKey.value === 'json');
 
-const emit = defineEmits(['format', 'insert-link', 'insert-image', 'import', 'export', 'set-mode', 'toggle-wrapping']);
+const emit = defineEmits([
+    'format', 'insert-link', 'insert-image', 'import', 'export', 
+    'set-mode', 'toggle-wrapping', 'toggle-tokens', 'run-code', 
+    'format-doc', 'ai-action', 'fold-all', 'unfold-all', 'open-ai-helper',
+    'ai-custom-prompt', 'toggle-minimap'
+]);
 
 const authStore = useAuthStore();
 

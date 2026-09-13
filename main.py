@@ -45,8 +45,11 @@ from backend.security import get_password_hash as hash_password
 from backend.migration_utils import LegacyDiscussion
 from backend.session import (
     get_user_data_root, get_user_discussion_path, user_sessions,
-    build_lollms_client_from_params, get_user_lollms_client
+    build_lollms_client_from_params, get_user_lollms_client,
+    get_current_active_user
 )
+from backend.models.user import UserAuthDetails
+from pydantic import BaseModel, Field
 from lollms_client import LollmsDataManager
 from backend.settings import settings
 
@@ -663,6 +666,51 @@ app.include_router(lollms_v1_router)
 app.include_router(flow_studio_router)
 app.include_router(skills_router)
 
+class GenerateTextRequest(BaseModel):
+    prompt: str
+    max_new_tokens: Optional[int] = Field(default=1024, alias="max_new_tokens")
+    temperature: Optional[float] = 0.2
+
+@app.post("/api/lollms/generate")
+async def lollms_generate(
+    request: GenerateTextRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    try:
+        user_model_full = current_user.lollms_model_name
+        binding_alias = None
+        model_name = None
+        if user_model_full and '/' in user_model_full:
+            binding_alias, model_name = user_model_full.split('/', 1)
+
+        lc = build_lollms_client_from_params(
+            username=current_user.username,
+            binding_alias=binding_alias,
+            model_name=model_name,
+            load_llm=True
+        )
+
+        def _run_gen():
+            try:
+                return lc.generate_text(
+                    prompt=request.prompt,
+                    max_new_tokens=request.max_new_tokens,
+                    temperature=request.temperature
+                )
+            except TypeError:
+                return lc.generate_text(
+                    prompt=request.prompt,
+                    n_predict=request.max_new_tokens,
+                    temperature=request.temperature
+                )
+
+        generated_text = await asyncio.to_thread(_run_gen)
+        return {"generated_text": generated_text}
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=str(e))
+
 add_ui_routes(app)
 
 # Silence benign WinError 10054 connection reset tracebacks from Windows Proactor EventLoop
@@ -766,44 +814,5 @@ if __name__ == "__main__":
     
     content += f"[green]Using {workers} Workers[/green]"
     ASCIIColors.panel(content, f"LoLLMs Platform (v{APP_VERSION})")
-
-    from pydantic import BaseModel, Field
-    from backend.session import get_current_active_user, UserAuthDetails
-
-    class GenerateTextRequest(BaseModel):
-        prompt: str
-        max_new_tokens: Optional[int] = Field(default=1024, alias="max_new_tokens")
-        temperature: Optional[float] = 0.2
-
-    @app.post("/api/lollms/generate")
-    async def lollms_generate(
-        request: GenerateTextRequest,
-        current_user: UserAuthDetails = Depends(get_current_active_user),
-        db: Session = Depends(get_db)
-    ):
-        try:
-            user_model_full = current_user.lollms_model_name
-            binding_alias = None
-            model_name = None
-            if user_model_full and '/' in user_model_full:
-                binding_alias, model_name = user_model_full.split('/', 1)
-
-            lc = build_lollms_client_from_params(
-                username=current_user.username,
-                binding_alias=binding_alias,
-                model_name=model_name,
-                load_llm=True
-            )
-
-            generated_text = await asyncio.to_thread(
-                lc.generate_text,
-                prompt=request.prompt,
-                n_predict=request.max_new_tokens,
-                temperature=request.temperature
-            )
-            return {"generated_text": generated_text}
-        except Exception as e:
-            trace_exception(e)
-            raise HTTPException(status_code=500, detail=str(e))
 
     uvicorn.run("main:app", host=host_setting, port=int(port_setting), reload=False, workers=workers, timeout_keep_alive=600, **ssl_params)

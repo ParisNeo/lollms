@@ -19,6 +19,7 @@ import useEventBus from '../../services/eventBus';
 import DropdownMenu from '../ui/DropdownMenu/DropdownMenu.vue';
 import DropdownSubmenu from '../ui/DropdownMenu/DropdownSubmenu.vue';
 import AuthenticatedImage from '../ui/AuthenticatedImage.vue';
+import IconChevronRight from '../../assets/icons/IconChevronRight.vue';
 
 // Icons
 import IconPlus from '../../assets/icons/IconPlus.vue';

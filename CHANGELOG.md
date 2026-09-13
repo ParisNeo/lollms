@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-13 23:18]
+
+- Fix: Removed frontend assets from scope and focus on backend/routers/discussion/utils.py
+
 ## [2026-09-11 00:07]
 
 - fix(llm): update LLM generation context settings to 32K

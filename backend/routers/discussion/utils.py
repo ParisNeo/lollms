@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Union
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
@@ -33,6 +33,21 @@ from ascii_colors import trace_exception
 class TokenizeRequest(BaseModel):
     text: str
 
+class TokenItem(BaseModel):
+    index: int
+    id: Union[int, str]
+    text: str
+    start: int
+    end: int
+
+class TokenizeDetailRequest(BaseModel):
+    text: str
+
+class TokenizeDetailResponse(BaseModel):
+    token_count: int
+    characters_count: int
+    tokens: List[TokenItem]
+
 class LatexCompilationRequest(BaseModel):
     code: str
 
@@ -50,6 +65,99 @@ def build_utils_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
             raise HTTPException(status_code=500, detail=f"Failed to tokenize text: {e}")
+
+    @router.post("/tokenize-details", response_model=TokenizeDetailResponse)
+    async def tokenize_text_details(
+        request: TokenizeDetailRequest,
+        current_user: UserAuthDetails = Depends(get_current_active_user)
+    ):
+        """
+        Tokenizes text using the user's active LLM client and computes exact character
+        boundary offsets [start, end] and token IDs for syntax highlighting.
+        """
+        raw_text = request.text
+        if not raw_text:
+            return TokenizeDetailResponse(token_count=0, characters_count=0, tokens=[])
+
+        try:
+            lc = get_user_lollms_client(current_user.username)
+            raw_tokens = lc.tokenize(raw_text)
+        except Exception as e:
+            trace_exception(e)
+            raise HTTPException(status_code=500, detail=f"Failed to tokenize text: {e}")
+
+        token_pieces = []
+        token_ids = []
+
+        if raw_tokens and isinstance(raw_tokens[0], str):
+            token_pieces = raw_tokens
+            token_ids = list(range(len(raw_tokens)))
+        elif raw_tokens:
+            token_ids = raw_tokens
+            detok_fn = None
+            if hasattr(lc, 'detokenize') and callable(lc.detokenize):
+                detok_fn = lc.detokenize
+            elif hasattr(lc, 'binding') and hasattr(lc.binding, 'detokenize') and callable(lc.binding.detokenize):
+                detok_fn = lc.binding.detokenize
+
+            if detok_fn:
+                for tid in raw_tokens:
+                    try:
+                        piece = detok_fn([tid]) if isinstance(tid, int) else str(tid)
+                        if isinstance(piece, bytes):
+                            piece = piece.decode('utf-8', errors='replace')
+                        token_pieces.append(str(piece))
+                    except Exception:
+                        try:
+                            piece = detok_fn(tid)
+                            if isinstance(piece, bytes):
+                                piece = piece.decode('utf-8', errors='replace')
+                            token_pieces.append(str(piece))
+                        except Exception:
+                            token_pieces.append(str(tid))
+            else:
+                token_pieces = [str(tid) for tid in raw_tokens]
+        else:
+            return TokenizeDetailResponse(token_count=0, characters_count=len(raw_text), tokens=[])
+
+        tokens_result = []
+        cur_pos = 0
+        text_len = len(raw_text)
+
+        for idx, piece in enumerate(token_pieces):
+            if not piece:
+                continue
+
+            clean_piece = piece.replace(' ', ' ').replace('Ġ', ' ')
+
+            if cur_pos < text_len and raw_text.startswith(clean_piece, cur_pos):
+                start = cur_pos
+                end = cur_pos + len(clean_piece)
+                cur_pos = end
+            else:
+                found = raw_text.find(clean_piece, cur_pos)
+                if found != -1 and (found - cur_pos) <= 8:
+                    start = found
+                    end = found + len(clean_piece)
+                    cur_pos = end
+                else:
+                    start = min(cur_pos, text_len)
+                    end = min(text_len, cur_pos + max(1, len(clean_piece)))
+                    cur_pos = end
+
+            tokens_result.append(TokenItem(
+                index=idx,
+                id=token_ids[idx] if idx < len(token_ids) else idx,
+                text=clean_piece,
+                start=start,
+                end=end
+            ))
+
+        return TokenizeDetailResponse(
+            token_count=len(raw_tokens),
+            characters_count=text_len,
+            tokens=tokens_result
+        )
     
     @router.post("/{discussion_id}/compile-latex", response_model=Dict[str, Optional[str]])
     async def compile_latex_code(
