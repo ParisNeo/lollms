@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-15 23:04]
+
+- fix(downloader): enable URL validation and SSRF protection for image downloads
+
 ## [2026-09-13 23:18]
 
 - Fix: Removed frontend assets from scope and focus on backend/routers/discussion/utils.py

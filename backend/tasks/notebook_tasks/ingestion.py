@@ -6,7 +6,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from backend.db.models.notebook import Notebook as DBNotebook
 from backend.db.models.user import User as DBUser
 from backend.task_manager import Task
-from backend.security import validate_url
+from backend.security import validate_url, safe_requests_get
 from ascii_colors import trace_exception
 
 def handle_partial_notebook(db, notebook_id, username):
@@ -350,11 +350,10 @@ def _ingest_notebook_sources_task(
                         task.log(f"Downloading PDF: {pdf_url}")
                         try:
                             try:
-                                validate_url(pdf_url)
+                                response = safe_requests_get(pdf_url, timeout=30)
                             except ValueError as e:
                                 task.log(f"SSRF protection blocked pdf_url {pdf_url}: {e}", "WARNING")
                                 continue
-                            response = requests.get(pdf_url, stream=True, timeout=30)
                             if response.status_code == 200:
                                 import tempfile
                                 import os

@@ -2,9 +2,12 @@
 import apiClient from '../../services/api';
 
 export function useDiscussionExports(state, stores, getActions) {
+    const { currentDiscussionId, messages, discussions } = state;
+
     const uiStore = {
         addNotification(...args) { return stores.uiStore.addNotification(...args); },
-        showConfirmation(...args) { return stores.uiStore.showConfirmation(...args); }
+        showConfirmation(...args) { return stores.uiStore.showConfirmation(...args); },
+        copyToClipboard(...args) { return stores.uiStore.copyToClipboard(...args); }
     };
     const authStore = {
         get user() { return stores.authStore.user; }
@@ -156,12 +159,12 @@ export function useDiscussionExports(state, stores, getActions) {
     }
 
     async function compileLatexCode({ code }) {
-        if (!state.currentDiscussionId.value) {
+        if (!currentDiscussionId.value) {
             uiStore.addNotification('No active discussion selected.', 'error');
             throw new Error('No active discussion.');
         }
         try {
-            const response = await apiClient.post(`/api/discussions/${state.currentDiscussionId.value}/compile-latex`, { code });
+            const response = await apiClient.post(`/api/discussions/${currentDiscussionId.value}/compile-latex`, { code });
             if (response.data.pdf_b64) {
                 uiStore.addNotification('LaTeX compiled successfully!', 'success');
             }

@@ -537,7 +537,7 @@ def md2_to_html(md_text: str) -> str:
     ]
     return markdown2.markdown(md_text, extras=extras)
 
-from backend.security import validate_url as _validate_url
+from backend.security import validate_url as _validate_url, safe_requests_get
 
 def _download_image_to_temp(src: str) -> str:
     if src.startswith("data:"):
@@ -552,16 +552,15 @@ def _download_image_to_temp(src: str) -> str:
         tf.write(data)
         tf.flush(); tf.close()
         return tf.name
-    
-    # SECURITY: Validate URL before making request
+
+    # SECURITY: Validate URL and safely download with multi-hop redirect SSRF protection
     try:
-        _validate_url(src)
-    except ValueError as e:
+        r = safe_requests_get(src, timeout=10)
+        r.raise_for_status()
+    except Exception as e:
         print(f"SSRF Protection prevented access to: {src}. Reason: {e}")
         raise e
 
-    r = requests.get(src, timeout=10)
-    r.raise_for_status()
     ext = os.path.splitext(src)[1] or ".png"
     tf = tempfile.NamedTemporaryFile(delete=False, suffix=ext)
     tf.write(r.content)

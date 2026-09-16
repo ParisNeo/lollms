@@ -455,6 +455,21 @@ async def toggle_dm_reaction(
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
 
+    is_participant = (
+        current_user.is_admin
+        or msg.sender_id == current_user.id
+        or msg.receiver_id == current_user.id
+    )
+
+    if not is_participant and msg.conversation_id:
+        is_participant = db.query(DBConversationMember).filter_by(
+            conversation_id=msg.conversation_id,
+            user_id=current_user.id
+        ).first() is not None
+
+    if not is_participant:
+        raise HTTPException(status_code=404, detail="Message not found")
+
     emoji = payload.emoji.strip()
     current_reactions = dict(msg.reactions or {})
 
