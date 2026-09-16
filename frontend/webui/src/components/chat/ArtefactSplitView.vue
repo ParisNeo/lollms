@@ -535,12 +535,41 @@ async function handlePushToLibrary(type) {
             uiStore.addNotification("Saved to global Notes library.", "success");
         } else if (type === 'skill') {
             const cleanTitle = title.value.replace(/\.md$/i, '').replace(/\.txt$/i, '');
+            if (skillsStore.skills.length === 0) {
+                await skillsStore.fetchSkills();
+            }
+            const existing = skillsStore.skills.find(s => s.name.toLowerCase() === cleanTitle.toLowerCase());
+            let finalName = cleanTitle;
+            let overwrite = true;
+
+            if (existing) {
+                const choice = await uiStore.showConfirmation({
+                    title: 'Skill Already Exists',
+                    message: `A skill named "${cleanTitle}" already exists in your Skills Studio library. Do you want to update the existing skill or save a new version / copy?`,
+                    confirmText: 'Update Existing',
+                    cancelText: 'Save as New Version'
+                });
+
+                if (choice.confirmed) {
+                    overwrite = true;
+                    finalName = cleanTitle;
+                } else {
+                    overwrite = false;
+                    let vCount = 2;
+                    while (skillsStore.skills.some(s => s.name.toLowerCase() === `${cleanTitle} (v${vCount})`.toLowerCase())) {
+                        vCount++;
+                    }
+                    finalName = `${cleanTitle} (v${vCount})`;
+                }
+            }
+
             await skillsStore.createSkill({
-                name: cleanTitle,
+                name: finalName,
                 content: dbContent.value,
                 category: artefactGroup.value?.versions[0]?.category || 'General',
-                description: artefactGroup.value?.versions[0]?.description || `Skill: ${cleanTitle}`
-            });
+                description: artefactGroup.value?.versions[0]?.description || `Skill: ${finalName}`
+            }, overwrite);
+
             await skillsStore.fetchSkills();
             if (discussionsStore.currentDiscussionId !== 'saved') {
                 await discussionsStore.updateArtefact({
@@ -550,7 +579,7 @@ async function handlePushToLibrary(type) {
                     updateInPlace: false
                 });
             }
-            uiStore.addNotification("Saved to global Skills library.", "success");
+            uiStore.addNotification(`Saved "${finalName}" to Skills Studio!`, "success");
         }
     } catch (e) {
         console.error("Library export failed:", e);
@@ -755,15 +784,7 @@ function download() {
 
             <!-- Primary Action Button -->
             <div class="flex gap-1">
-                <button v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" @click="handlePushToLibrary('note')" class="btn btn-warning btn-sm h-8 flex items-center gap-2 shadow-sm" :disabled="isSaving || isLiveUpdating">
-                    <IconPencil class="w-3.5 h-3.5" />
-                    <span>Save Note</span>
-                </button>
-                <button v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" @click="handlePushToLibrary('skill')" class="btn btn-success btn-sm h-8 flex items-center gap-2 shadow-sm" :disabled="isSaving || isLiveUpdating">
-                    <IconSparkles class="w-3.5 h-3.5" />
-                    <span>Save Skill</span>
-                </button>
-                <button v-else @click="handleSave()" class="btn btn-primary btn-sm h-8 flex items-center gap-2 shadow-lg shadow-blue-500/10" :disabled="isSaving || isLiveUpdating">
+                <button @click="handleSave()" class="btn btn-primary btn-sm h-8 flex items-center gap-2 shadow-lg shadow-blue-500/10" :disabled="isSaving || isLiveUpdating" :title="`Save new version v${(artefactGroup?.versions[0]?.version || 0) + 1} to discussion workspace`">
                     <IconRefresh v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
                     <IconPencil v-else class="w-3.5 h-3.5" />
                     <span>Save v{{ (artefactGroup?.versions[0]?.version || 0) + 1 }}</span>

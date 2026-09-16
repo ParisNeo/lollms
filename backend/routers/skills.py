@@ -5,7 +5,7 @@ from typing import List, Optional
 import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, Query
 from sqlalchemy.exc import IntegrityError
 from pydantic import BaseModel
 
@@ -81,32 +81,46 @@ def get_skills(current_user: UserAuthDetails = Depends(get_current_active_user),
     return [_to_skill_public(s) for s in skills]
 
 @skills_router.post("", response_model=SkillPublic, status_code=status.HTTP_201_CREATED)
-def create_skill(skill: SkillCreate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
+def create_skill(
+    skill: SkillCreate, 
+    overwrite: bool = Query(True),
+    current_user: UserAuthDetails = Depends(get_current_active_user), 
+    db: Session = Depends(get_db)
+):
     # Support creating System Skills if admin requests it
     is_admin = getattr(current_user, "is_admin", False)
     target_owner_id = None if (is_admin and skill.is_system) else current_user.id
     target_author = skill.author or ("System" if target_owner_id is None else current_user.username)
 
-    existing_skill = db.query(DBSkill).filter(
-        DBSkill.owner_user_id == target_owner_id,
-        DBSkill.name == skill.name
-    ).first()
+    if overwrite:
+        existing_skill = db.query(DBSkill).filter(
+            DBSkill.owner_user_id == target_owner_id,
+            DBSkill.name == skill.name
+        ).first()
 
-    if existing_skill:
-        existing_skill.content = skill.content
-        if skill.description: existing_skill.description = skill.description
-        if skill.category: existing_skill.category = skill.category
-        if skill.language: existing_skill.language = skill.language
-        existing_skill.author = target_author
-        existing_skill.version = skill.version or existing_skill.version
-        existing_skill.updated_at = datetime.datetime.now()
-        db.commit()
-        db.refresh(existing_skill)
-        return _to_skill_public(existing_skill)
+        if existing_skill:
+            existing_skill.content = skill.content
+            if skill.description: existing_skill.description = skill.description
+            if skill.category: existing_skill.category = skill.category
+            if skill.language: existing_skill.language = skill.language
+            existing_skill.author = target_author
+            existing_skill.version = skill.version or existing_skill.version
+            existing_skill.updated_at = datetime.datetime.now(datetime.timezone.utc)
+            db.commit()
+            db.refresh(existing_skill)
+            return _to_skill_public(existing_skill)
 
     data = skill.model_dump()
     data.pop("is_system", None)
-    new_skill = DBSkill(**data, owner_user_id=target_owner_id, author=target_author)
+    data.pop("author", None)
+    data.pop("owner_user_id", None)
+
+    new_skill = DBSkill(
+        **data, 
+        owner_user_id=target_owner_id, 
+        author=target_author,
+        version=skill.version or "1.0.0"
+    )
     db.add(new_skill)
     try:
         db.commit()

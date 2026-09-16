@@ -28,11 +28,13 @@ export const useSkillsStore = defineStore('skills', () => {
         }
     }
 
-    async function createSkill(skillData) {
+    async function createSkill(skillData, overwrite = true) {
         try {
-            console.log("[SkillsStore] Creating/updating skill:", skillData);
-            const response = await apiClient.post('/api/skills', skillData);
-            const index = skills.value.findIndex(s => s.id === response.data.id || s.name.toLowerCase() === response.data.name.toLowerCase());
+            console.log("[SkillsStore] Creating/updating skill:", skillData, "overwrite:", overwrite);
+            const response = await apiClient.post('/api/skills', skillData, {
+                params: { overwrite }
+            });
+            const index = skills.value.findIndex(s => s.id === response.data.id || (overwrite && s.name.toLowerCase() === response.data.name.toLowerCase()));
             if (index !== -1) {
                 skills.value[index] = response.data;
             } else {
@@ -42,7 +44,8 @@ export const useSkillsStore = defineStore('skills', () => {
             uiStore.addNotification('Skill saved to your library!', 'success');
             return response.data;
         } catch (error) {
-            uiStore.addNotification('Failed to create skill.', 'error');
+            const msg = error.response?.data?.detail || 'Failed to save skill.';
+            uiStore.addNotification(msg, 'error');
             throw error;
         }
     }
