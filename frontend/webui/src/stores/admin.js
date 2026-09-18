@@ -545,6 +545,13 @@ export const useAdminStore = defineStore('admin', () => {
     async function updateSystemPromptFromZoo(promptId) { const response = await apiClient.post(`/api/prompts_zoo/installed/${promptId}/update`); tasksStore.addTask(response.data); }
     async function generateSystemPrompt(prompt) { const res = await apiClient.post('/api/prompts_zoo/generate_from_prompt', { prompt }); tasksStore.addTask(res.data); return res.data; }
 
+    async function autoCreateProfilesForBinding(bindingId, modality = 'llm') {
+        const res = await apiClient.post(`/api/admin/bindings/${bindingId}/auto-create-profiles`, null, {
+            params: { modality }
+        });
+        return res.data;
+    }
+
     async function fetchInstalledApps(force=false) { if(!force && installedApps.value.length > 0) return; isLoadingInstalledApps.value = true; try { const res = await apiClient.get('/api/apps_zoo/installed'); installedApps.value = res.data; } finally { isLoadingInstalledApps.value = false; } }
     async function fetchNextAvailablePort(port = null) { const params = port ? { port } : {}; const res = await apiClient.get('/api/apps_zoo/get-next-available-port', { params }); return res.data.port; }
     async function startApp(appId) { const res = await apiClient.post(`/api/apps_zoo/installed/${appId}/start`); tasksStore.addTask(res.data); }
@@ -752,6 +759,7 @@ export const useAdminStore = defineStore('admin', () => {
         fetchGlobalSettings, updateGlobalSettings, fetchAiBotSettings, updateAiBotSettings, triggerBatchModeration, triggerFullRemoderation,
         uploadWelcomeLogo, removeWelcomeLogo, uploadSslFile, importOpenWebUIData, fetchAdminAvailableLollmsModels, generateIconForModel,
         
+        autoCreateProfilesForBinding,
         fetchBindings, fetchAvailableBindingTypes, addBinding, updateBinding, deleteBinding, fetchBindingModels, getModelCtxSize, saveModelAlias, deleteModelAlias, executeBindingCommand,
         fetchTtiBindings, fetchAvailableTtiBindingTypes, addTtiBinding, updateTtiBinding, deleteTtiBinding, fetchTtiBindingModels, saveTtiModelAlias, deleteTtiModelAlias, executeTtiBindingCommand,
         fetchTtsBindings, fetchAvailableTtsBindingTypes, addTtsBinding, updateTtsBinding, deleteTtsBinding, fetchTtsBindingModels, saveTtsModelAlias, deleteTtsModelAlias, executeTtsBindingCommand,

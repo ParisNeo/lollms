@@ -337,15 +337,51 @@ def _generate_model_icon_task(task: Task, username: str, prompt: str):
 # --- Admin API Routes ---
 
 @bindings_management_router.get("/universal-profiles", response_model=Dict[str, Any])
-async def get_all_universal_profiles(db: Session = Depends(get_db)):
+async def get_all_universal_profiles(
+    modality: str = Query("llm", description="Modality type: 'llm', 'tti', 'tts', 'stt'"),
+    db: Session = Depends(get_db)
+):
     """
-    Returns all configured universal model profiles across all active bindings.
-    Used by the Smart Router composition matrix, policy modals, and dashboard.
+    Returns all configured universal model profiles across all active bindings of the specified modality.
+    Used by the Universal Profiles manager, Smart Router composition matrix, policy modals, and dashboard.
     """
     profiles = {}
-    active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+    binding_cls = DBLLMBinding
+    if modality == "tti":
+        binding_cls = DBTTIBinding
+    elif modality == "tts":
+        binding_cls = DBTTSBinding
+    elif modality == "stt":
+        binding_cls = DBSTTBinding
+
+    active_bindings = db.query(binding_cls).filter(binding_cls.is_active == True).all()
 
     for binding in active_bindings:
+        # Check live server connectivity and detected engine models
+        is_online = True
+        raw_models = []
+        try:
+            config = _get_effective_config(binding)
+            service = _get_binding_instance(modality, binding.name, config)
+            if service and hasattr(service, 'list_models'):
+                raw_list = service.list_models() or []
+                for r in raw_list:
+                    mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                    if mid:
+                        raw_models.append(mid)
+            elif service is None:
+                if "mock" in binding.name.lower() or "test" in binding.name.lower():
+                    is_online = True
+                    raw_models = [binding.default_model_name] if binding.default_model_name else []
+                else:
+                    is_online = False
+        except Exception:
+            if "mock" in binding.name.lower() or "test" in binding.name.lower():
+                is_online = True
+                raw_models = [binding.default_model_name] if binding.default_model_name else []
+            else:
+                is_online = False
+
         aliases = binding.model_aliases or {}
         if isinstance(aliases, str):
             try: aliases = json.loads(aliases)
@@ -355,17 +391,41 @@ async def get_all_universal_profiles(db: Session = Depends(get_db)):
             if not isinstance(alias_data, dict):
                 alias_data = {"title": str(alias_data)}
             cfg = alias_data.get("alias", {}) if "alias" in alias_data else alias_data
+            target_model = cfg.get("model_name") or orig_name
+
+            # Health check: Binding server must be online, and target model must exist on that server
+            if not is_online:
+                is_available = False
+            elif raw_models and target_model not in raw_models and binding.name != 'smart_router':
+                is_available = False
+            else:
+                is_available = True
 
             prof_id = f"{binding.alias}/{orig_name}"
             profiles[prof_id] = {
                 "id": prof_id,
+                "binding_id": binding.id,
                 "binding_alias": binding.alias,
                 "binding_name": binding.name,
-                "model_name": cfg.get("model_name") or orig_name,
+                "original_model_name": orig_name,
+                "model_name": target_model,
                 "title": cfg.get("title") or cfg.get("name") or orig_name,
+                "name": cfg.get("name") or cfg.get("title") or orig_name,
                 "description": cfg.get("description", ""),
+                "icon": cfg.get("icon"),
                 "vision_enabled": bool(cfg.get("vision_enabled", cfg.get("has_vision", False))),
+                "has_vision": bool(cfg.get("vision_enabled", cfg.get("has_vision", False))),
                 "forced_context_size": cfg.get("forced_context_size", cfg.get("ctx_size")),
+                "ctx_size": cfg.get("forced_context_size", cfg.get("ctx_size")),
+                "temperature": cfg.get("temperature"),
+                "top_k": cfg.get("top_k"),
+                "top_p": cfg.get("top_p"),
+                "repeat_penalty": cfg.get("repeat_penalty"),
+                "repeat_last_n": cfg.get("repeat_last_n"),
+                "reasoning_activation": cfg.get("reasoning_activation", False),
+                "reasoning_effort": cfg.get("reasoning_effort"),
+                "reasoning_summary": cfg.get("reasoning_summary", False),
+                "allow_parameters_override": cfg.get("allow_parameters_override", True),
                 "routing_config": cfg.get("routing_config", {
                     "description": cfg.get("description") or cfg.get("title") or orig_name,
                     "complexity_tier": 2,
@@ -373,31 +433,148 @@ async def get_all_universal_profiles(db: Session = Depends(get_db)):
                     "avg_latency_ms": 200,
                     "priority": 1
                 }),
-                "vlm_model_profile": cfg.get("vlm_model_profile")
+                "vlm_model_profile": cfg.get("vlm_model_profile"),
+                "selected_model_profiles": cfg.get("selected_model_profiles", []),
+                "routing_strategy": cfg.get("routing_strategy", "balanced"),
+                "is_binding_default": (orig_name == binding.default_model_name),
+                "is_online": is_online,
+                "is_available": is_available
             }
 
-        # Include default model as profile if not aliased
+        # Include default model as profile if not explicitly aliased
         if binding.default_model_name and f"{binding.alias}/{binding.default_model_name}" not in profiles:
             def_id = f"{binding.alias}/{binding.default_model_name}"
+            def_available = is_online and (not raw_models or binding.default_model_name in raw_models)
             profiles[def_id] = {
                 "id": def_id,
+                "binding_id": binding.id,
                 "binding_alias": binding.alias,
                 "binding_name": binding.name,
+                "original_model_name": binding.default_model_name,
                 "model_name": binding.default_model_name,
                 "title": binding.default_model_name,
+                "name": binding.default_model_name,
                 "description": f"Default model for {binding.alias}",
+                "icon": None,
                 "vision_enabled": False,
+                "has_vision": False,
                 "forced_context_size": None,
+                "ctx_size": None,
                 "routing_config": {
                     "description": f"Default engine model {binding.default_model_name}",
                     "complexity_tier": 2,
                     "cost_per_1k_tokens": 0.0,
                     "avg_latency_ms": 200,
                     "priority": 1
-                }
+                },
+                "is_binding_default": True,
+                "is_online": is_online,
+                "is_available": def_available
             }
 
     return {"profiles": profiles, "count": len(profiles)}
+
+@bindings_management_router.post("/bindings/{binding_id}/auto-create-profiles", response_model=Dict[str, Any])
+async def auto_create_profiles_for_binding(
+    binding_id: int,
+    modality: str = Query("llm"),
+    db: Session = Depends(get_db),
+    current_admin: UserAuthDetails = Depends(get_current_admin_user)
+):
+    """
+    Scans all models detected on the specified physical binding connection and automatically
+    generates a Universal Model Profile for each model.
+    """
+    binding_cls = DBLLMBinding if modality == "llm" else DBTTIBinding
+    binding = db.query(binding_cls).filter(binding_cls.id == binding_id).first()
+    if not binding:
+        raise HTTPException(status_code=404, detail="Binding connection not found.")
+
+    models_list = _get_modality_models_list(binding, modality)
+    raw_model_names = [m.original_model_name for m in models_list]
+
+    if not raw_model_names:
+        try:
+            config = _get_effective_config(binding)
+            service = _get_binding_instance(modality, binding.name, config)
+            if service and hasattr(service, 'list_models'):
+                raw = service.list_models() or []
+                for item in raw:
+                    mid = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
+                    if mid and mid not in raw_model_names:
+                        raw_model_names.append(mid)
+        except Exception as e:
+            trace_exception(e)
+
+    if not raw_model_names:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"No models found on '{binding.alias}'. Ensure the connection is active and the remote server is running."
+        )
+
+    aliases = binding.model_aliases or {}
+    if isinstance(aliases, str):
+        try: aliases = json.loads(aliases)
+        except Exception: aliases = {}
+    if not isinstance(aliases, dict):
+        aliases = {}
+
+    created_count = 0
+    vision_keywords = {"vision", "vl", "llava", "omni", "pixtral", "qwen-vl", "minicpm-v", "4o"}
+
+    for m_name in raw_model_names:
+        already_aliased = False
+        if m_name in aliases:
+            already_aliased = True
+        else:
+            for k, val in aliases.items():
+                v_dict = val.get("alias", val) if isinstance(val, dict) else {}
+                if v_dict.get("model_name") == m_name:
+                    already_aliased = True
+                    break
+
+        if already_aliased:
+            continue
+
+        clean_title = m_name.replace(":", " ").replace("-", " ").replace("_", " ").title()
+        has_vision = any(vk in m_name.lower() for vk in vision_keywords)
+
+        alias_dict = {
+            "binding_profile_name": binding.alias,
+            "model_name": m_name,
+            "title": clean_title,
+            "name": clean_title,
+            "description": f"Profile for {m_name} on {binding.alias}",
+            "vision_enabled": has_vision,
+            "has_vision": has_vision,
+            "forced_context_size": None,
+            "ctx_size": None,
+            "temperature": 0.7,
+            "allow_parameters_override": True,
+            "routing_config": {
+                "description": clean_title,
+                "complexity_tier": 2,
+                "cost_per_1k_tokens": 0.0,
+                "avg_latency_ms": 200,
+                "priority": 1
+            }
+        }
+        aliases[m_name] = alias_dict
+        created_count += 1
+
+    if created_count > 0:
+        binding.model_aliases = aliases
+        flag_modified(binding, "model_aliases")
+        db.commit()
+        db.refresh(binding)
+        invalidate_model_cache(db)
+        manager.broadcast_sync({"type": "bindings_updated"})
+
+    return {
+        "message": f"Successfully created {created_count} universal profile(s) for '{binding.alias}'.",
+        "created_count": created_count,
+        "total_profiles": len(aliases)
+    }
 
 @bindings_management_router.post("/bindings/migrate-and-heal", response_model=Dict[str, Any])
 async def trigger_migration_and_healing(
@@ -648,14 +825,16 @@ async def update_model_alias(binding_id: int, payload: ModelAliasUpdate, db: Ses
 
     alias_dict = payload.alias.model_dump()
     alias_dict["binding_profile_name"] = binding.alias
-    target_key = payload.original_model_name
+    target_key = payload.new_model_name or payload.original_model_name
 
     if payload.alias.model_name:
         alias_dict["model_name"] = payload.alias.model_name
-    elif payload.new_model_name and payload.new_model_name != payload.original_model_name:
-        alias_dict["model_name"] = payload.new_model_name
     else:
         alias_dict["model_name"] = alias_dict.get("model_name") or target_key
+
+    if payload.new_model_name and payload.new_model_name != payload.original_model_name:
+        if payload.original_model_name in binding.model_aliases:
+            del binding.model_aliases[payload.original_model_name]
 
     binding.model_aliases[target_key] = alias_dict
     flag_modified(binding, "model_aliases")

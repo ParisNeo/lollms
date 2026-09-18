@@ -5,7 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LoLLMs</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    
+
+    <!-- Guard against Chromium DevTools SoftNav instrumentation bug (Chromium Issue 543499029 / 555794190) -->
+    <script>
+        window.addEventListener('error', function(event) {
+            if (event && event.message && event.message.includes("reading 'startTime'") && 
+               (!event.filename || event.filename.includes('VM') || event.filename.includes('<anonymous>'))) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                return true;
+            }
+        }, true);
+    </script>
+
     <!-- External libraries -->
     
     <!-- KaTeX for Math Rendering -->
@@ -18,12 +30,12 @@
     <script defer src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
 
     <!-- The main application script, a module handled by Vite -->
-  <script type="module" crossorigin src="/assets/index-BYD3pgmR.js"></script>
+  <script type="module" crossorigin src="/assets/index-CHYiUhXX.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-hePW80VL.js">
-  <link rel="modulepreload" crossorigin href="/assets/app-stores-slp3XFpW.js">
-  <link rel="modulepreload" crossorigin href="/assets/vendor-CG6H5BZq.js">
+  <link rel="modulepreload" crossorigin href="/assets/app-stores-IPWNKP7K.js">
+  <link rel="modulepreload" crossorigin href="/assets/vendor-W2yGNgBE.js">
   <link rel="stylesheet" crossorigin href="/assets/app-stores-vZfuLwq2.css">
-  <link rel="stylesheet" crossorigin href="/assets/index-D38dyQ7A.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-55IuxByD.css">
 </head>
 <body>
     <!-- The Vue application will mount here -->

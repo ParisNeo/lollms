@@ -94,12 +94,19 @@ def test_list_models_returns_universal_profiles():
 
     model_ids = [m["id"] for m in data["data"]]
     assert "test_llm/mock_model" in model_ids
-    assert "Mock Model 8B" in model_ids
 
     for item in data["data"]:
         assert item["object"] == "model"
         assert "created" in item
         assert "owned_by" in item
+
+def test_auto_create_profiles_endpoint():
+    client = TestClient(app)
+    # Target test_llm binding (id=1)
+    response = client.post("/api/admin/bindings/1/auto-create-profiles?modality=llm")
+    assert response.status_code == 200
+    res_data = response.json()
+    assert "total_profiles" in res_data
 
 def test_chat_completions_structured_output_json_schema():
     client = TestClient(app)

@@ -88,22 +88,30 @@ async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session
         all_models = []
         created_time = int(time.time())
 
-        # Build authoritative Universal LLM Profiles from active bindings
         try:
-            _, model_profiles, _ = _build_universal_profiles_for_modality(
-                db=db,
-                binding_model_cls=DBLLMBinding,
-                active_binding_alias=None,
-                active_model_name=None,
-                user_overrides={}
-            )
-        except Exception as e:
-            trace_exception(e)
-            model_profiles = {}
+            from backend.routers.admin.bindings_management import get_all_universal_profiles
+            profiles_dict = asyncio.run(get_all_universal_profiles(modality="llm", db=db))
+            model_profiles = profiles_dict.get("profiles", {})
+        except Exception:
+            try:
+                _, model_profiles, _ = _build_universal_profiles_for_modality(
+                    db=db,
+                    binding_model_cls=DBLLMBinding,
+                    active_binding_alias=None,
+                    active_model_name=None,
+                    user_overrides={}
+                )
+            except Exception as e:
+                trace_exception(e)
+                model_profiles = {}
 
         for prof_id, prof_info in model_profiles.items():
+            if prof_info.get("is_available") is False:
+                continue
+
             title = prof_info.get("title") or prof_info.get("name") or prof_id
-            binding_alias = prof_info.get("binding_profile_name", "lollms")
+            binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
+
             all_models.append({
                 "id": prof_id,
                 "name": title,
@@ -111,14 +119,6 @@ async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session
                 "created": created_time,
                 "owned_by": binding_alias
             })
-            if title and title != prof_id and not any(m["id"] == title for m in all_models):
-                all_models.append({
-                    "id": title,
-                    "name": title,
-                    "object": "model",
-                    "created": created_time,
-                    "owned_by": binding_alias
-                })
 
         unique_models = {m["id"]: m for m in all_models}
         return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}

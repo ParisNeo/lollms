@@ -32,72 +32,24 @@ class ModelInfo(BaseModel):
 async def get_lollms_models(
     db: Session = Depends(get_db)
 ):
+    """
+    Returns only verified active Universal Profiles where the connection server is online
+    and the underlying model is present.
+    """
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    profiles_dict = await get_all_universal_profiles(modality="llm", db=db)
+    model_profiles = profiles_dict.get("profiles", {})
+
     all_models = []
-    active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-    model_display_mode = settings.get("model_display_mode", "mixed")
-
-    for binding in active_bindings:
-        try:
-            raw_model_names = []
-            if binding.name != 'smart_router' and binding.alias != 'smart_router':
-                try:
-                    models_from_binding = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config)
-                    if isinstance(models_from_binding, list):
-                        for item in models_from_binding:
-                            model_id = None
-                            if isinstance(item, str): model_id = item
-                            elif isinstance(item, dict): model_id = item.get("name") or item.get("id") or item.get("model_name")
-                            if model_id: raw_model_names.append(model_id)
-                except Exception as b_err:
-                    print(f"WARNING: list_llm_binding_models failed for '{binding.alias}': {b_err}")
-
-            model_aliases = binding.model_aliases or {}
-            if isinstance(model_aliases, str):
-                try:
-                    model_aliases = json.loads(model_aliases)
-                except Exception:
-                    model_aliases = {}
-            if not isinstance(model_aliases, dict):
-                model_aliases = {}
-
-            if (binding.name == 'smart_router' or binding.alias == 'smart_router') and not model_aliases:
-                model_aliases = {"auto": {"title": "Auto Smart Router", "description": "Dynamic multi-model smart router", "routing_strategy": "balanced"}}
-
-            for model_name in raw_model_names:
-                alias_data = model_aliases.get(model_name)
-
-                if model_display_mode == 'aliased' and not alias_data:
-                    continue
-
-                display_name = f"{binding.alias}/{model_name}"
-
-                if alias_data and (model_display_mode == 'mixed' or model_display_mode == 'aliased'):
-                    alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else {"title": str(alias_data)}
-                    display_name = alias_dict.get('title') or alias_dict.get('name') or model_name
-
-                alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else alias_data
-                model_info = {
-                    "id": f"{binding.alias}/{model_name}",
-                    "name": display_name,
-                    "alias": alias_dict
-                }
-                all_models.append(model_info)
-
-            # Include configured aliases/routing groups not in raw_model_names (including Smart Router groups)
-            for orig_name, alias_data in model_aliases.items():
-                full_id = f"{binding.alias}/{orig_name}"
-                if not any(m["id"] == full_id for m in all_models):
-                    alias_dict = alias_data.get('alias', alias_data) if isinstance(alias_data, dict) else {"title": str(alias_data)}
-                    display_name = alias_dict.get('title') or alias_dict.get('name') or orig_name
-                    all_models.append({
-                        "id": full_id,
-                        "name": display_name,
-                        "alias": alias_dict
-                    })
-
-        except Exception as e:
-            print(f"WARNING: Could not fetch models from binding '{binding.alias}': {e}")
+    for prof_id, prof_info in model_profiles.items():
+        if prof_info.get("is_available") is False:
             continue
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "alias": prof_info
+        })
 
     return sorted(all_models, key=lambda x: x['name'])
 

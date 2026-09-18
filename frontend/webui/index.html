@@ -5,7 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LoLLMs</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
-    
+
+    <!-- Guard against Chromium DevTools SoftNav instrumentation bug (Chromium Issue 543499029 / 555794190) -->
+    <script>
+        window.addEventListener('error', function(event) {
+            if (event && event.message && event.message.includes("reading 'startTime'") && 
+               (!event.filename || event.filename.includes('VM') || event.filename.includes('<anonymous>'))) {
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                return true;
+            }
+        }, true);
+    </script>
+
     <!-- External libraries -->
     
     <!-- KaTeX for Math Rendering -->

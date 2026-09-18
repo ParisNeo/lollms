@@ -21,8 +21,8 @@ import IconArrowPath from '../../../assets/icons/IconArrowPath.vue';
 import apiClient from '../../../services/api';
 
 const props = defineProps({
-    binding: { type: Object, required: true },
-    bindingType: { type: String, required: true } // 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm', 'rag'
+    binding: { type: Object, required: false, default: null },
+    bindingType: { type: String, default: 'llm' } // 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm', 'rag'
 });
 
 const uiStore = useUiStore();
@@ -30,9 +30,33 @@ const adminStore = useAdminStore();
 const dataStore = useDataStore();
 const tasksStore = useTasksStore();
 const { 
+    bindings, ttiBindings, ttsBindings, sttBindings,
     globalSettings, availableBindingTypes, availableTtiBindingTypes, 
-    availableTtsBindingTypes, ttiBindings 
+    availableTtsBindingTypes
 } = storeToRefs(adminStore);
+
+// Cross-Binding vs Single-Binding Mode
+const isCrossBindingMode = computed(() => !props.binding);
+
+const activeBindingList = computed(() => {
+    switch (props.bindingType) {
+        case 'tti': return ttiBindings.value.filter(b => b.is_active);
+        case 'tts': return ttsBindings.value.filter(b => b.is_active);
+        case 'stt': return sttBindings.value.filter(b => b.is_active);
+        default: return bindings.value.filter(b => b.is_active);
+    }
+});
+
+const selectedBindingFilter = ref('ALL');
+const targetBindingId = ref(null);
+
+const currentActiveBinding = computed(() => {
+    if (props.binding) return props.binding;
+    if (targetBindingId.value) {
+        return activeBindingList.value.find(b => b.id === targetBindingId.value) || activeBindingList.value[0] || null;
+    }
+    return activeBindingList.value[0] || null;
+});
 const { tasks } = storeToRefs(tasksStore);
 
 const isLoading = ref(true);
@@ -53,16 +77,49 @@ const modelParameters = ref([]);
 const allUniversalProfiles = ref({});
 
 const isSmartRouter = computed(() => {
-    return props.binding?.name === 'smart_router' || props.binding?.alias === 'smart_router';
+    const b = currentActiveBinding.value;
+    return b?.name === 'smart_router' || b?.alias === 'smart_router';
 });
 
 const isTtiConfigured = computed(() => ttiBindings.value && ttiBindings.value.some(b => b.is_active));
 
+const isAutoCreating = ref(false);
+
+async function handleAutoCreateProfiles() {
+    const activeB = currentActiveBinding.value;
+    if (!activeB) return;
+    isAutoCreating.value = true;
+    try {
+        const res = await adminStore.autoCreateProfilesForBinding(activeB.id, props.bindingType);
+        uiStore.addNotification(res.message || `Created profiles for ${activeB.alias}`, 'success');
+        await Promise.allSettled([
+            fetchModels(),
+            fetchUniversalProfiles()
+        ]);
+    } catch (e) {
+        console.error(e);
+        uiStore.addNotification(e.response?.data?.detail || 'Failed to auto-create profiles.', 'error');
+    } finally {
+        isAutoCreating.value = false;
+    }
+}
+
 function isProfileModelMissing(item) {
-    if (!item || isSmartRouter.value) return false;
-    if (!models.value || models.value.length === 0 || isLoading.value) return false;
-    const targetModel = item.alias?.model_name || item.original_model_name;
-    return !models.value.some(m => m && m.original_model_name === targetModel);
+    if (!item) return false;
+    const prof = item.alias || item;
+    // Direct flags from backend live health verification
+    if (prof.is_available === false || prof.is_online === false) return true;
+    if (!prof.model_name && !item.original_model_name) return true;
+    if (isSmartRouter.value || prof.binding_name === 'smart_router') {
+        const selected = prof.selected_model_profiles || [];
+        return selected.length === 0;
+    }
+    const targetModel = prof.model_name || item.original_model_name;
+    if (models.value && models.value.length > 0) {
+        const hasMatchingModel = models.value.some(m => (m.original_model_name || m) === targetModel);
+        if (!hasMatchingModel) return true;
+    }
+    return false;
 }
 
 const availableVisionProfiles = computed(() => {
@@ -180,6 +237,27 @@ watch(currentIconGenerationTask, (newTask) => {
 });
 
 const configuredAliases = computed(() => {
+    if (isCrossBindingMode.value) {
+        const list = [];
+        for (const [profId, prof] of Object.entries(allUniversalProfiles.value)) {
+            if (selectedBindingFilter.value !== 'ALL' && prof.binding_alias !== selectedBindingFilter.value) {
+                continue;
+            }
+            list.push({
+                original_model_name: prof.original_model_name || prof.model_name || profId.split('/')[1] || profId,
+                binding_id: prof.binding_id,
+                binding_alias: prof.binding_alias,
+                id: profId,
+                alias: {
+                    ...prof,
+                    title: prof.title || prof.name || profId,
+                    model_name: prof.model_name
+                }
+            });
+        }
+        return list.sort((a, b) => (a.alias.title || '').localeCompare(b.alias.title || ''));
+    }
+
     let aliases = props.binding?.model_aliases || {};
     if (typeof aliases === 'string') {
         try { aliases = JSON.parse(aliases); } catch (e) { aliases = {}; }
@@ -189,6 +267,8 @@ const configuredAliases = computed(() => {
         const data = typeof alias_data === 'object' ? alias_data : { title: String(alias_data) };
         return {
             original_model_name: model_name,
+            binding_id: props.binding.id,
+            binding_alias: props.binding.alias,
             alias: data
         };
     }).sort((a, b) => (a.alias.title || '').localeCompare(b.alias.title || ''));
@@ -221,17 +301,25 @@ const filteredModelParameters = computed(() => {
 });
 
 function selectModelByName(modelName) {
+    const foundInConfigured = configuredAliases.value.find(c => c.original_model_name === modelName || c.id === modelName);
+    if (foundInConfigured) {
+        selectModel(foundInConfigured);
+        return;
+    }
     const model = models.value.find(m => m.original_model_name === modelName);
     if (model) {
         selectModel(model);
     } else {
-        let aliases = props.binding.model_aliases || {};
+        const activeB = currentActiveBinding.value;
+        let aliases = activeB?.model_aliases || {};
         if (typeof aliases === 'string') {
             try { aliases = JSON.parse(aliases); } catch (e) { aliases = {}; }
         }
         const synthesizedModel = {
             original_model_name: modelName,
-            alias: aliases[modelName]
+            binding_id: activeB?.id,
+            binding_alias: activeB?.alias,
+            alias: aliases[modelName] || {}
         };
         selectModel(synthesizedModel);
     }
@@ -245,20 +333,42 @@ const globalDefaultModel = computed(() => {
     return setting ? setting.value : null;
 });
 
-const isCurrentBindingDefault = computed(() => selectedModel.value && props.binding && selectedModel.value.original_model_name === props.binding.default_model_name);
-const isCurrentGlobalDefault = computed(() => selectedModel.value && props.binding && `${props.binding.alias}/${selectedModel.value.original_model_name}` === globalDefaultModel.value);
+const isCurrentBindingDefault = computed(() => {
+    const activeB = currentActiveBinding.value;
+    return Boolean(selectedModel.value && activeB && selectedModel.value.original_model_name === activeB.default_model_name);
+});
+
+const isCurrentGlobalDefault = computed(() => {
+    const activeB = currentActiveBinding.value;
+    return Boolean(selectedModel.value && activeB && `${activeB.alias}/${selectedModel.value.original_model_name}` === globalDefaultModel.value);
+});
+
 const isCurrentBeginnerDefault = computed(() => {
-    if (!selectedModel.value || !props.binding || props.bindingType !== 'llm') return false;
-    const fullModelName = `${props.binding.alias}/${selectedModel.value.original_model_name}`;
+    const activeB = currentActiveBinding.value;
+    if (!selectedModel.value || !activeB || props.bindingType !== 'llm') return false;
+    const fullModelName = `${activeB.alias}/${selectedModel.value.original_model_name}`;
     const setting = globalSettings.value.find(s => s.key === 'default_lollms_model_name_beginner');
     return setting ? setting.value === fullModelName : false;
 });
-const isBindingDefault = (modelName) => props.binding && modelName === props.binding.default_model_name;
-const isGlobalDefault = (modelName) => props.binding && `${props.binding.alias}/${modelName}` === globalDefaultModel.value;
+
+function isBindingDefault(itemOrName) {
+    const modelName = (typeof itemOrName === 'object' && itemOrName !== null) ? itemOrName.original_model_name : itemOrName;
+    const bAlias = (typeof itemOrName === 'object' && itemOrName !== null) ? itemOrName.binding_alias : currentActiveBinding.value?.alias;
+    const targetB = activeBindingList.value.find(b => b.alias === bAlias) || currentActiveBinding.value;
+    return Boolean(targetB && modelName && targetB.default_model_name === modelName);
+}
+
+function isGlobalDefault(itemOrName) {
+    const modelName = (typeof itemOrName === 'object' && itemOrName !== null) ? itemOrName.original_model_name : itemOrName;
+    const bAlias = (typeof itemOrName === 'object' && itemOrName !== null) ? itemOrName.binding_alias : currentActiveBinding.value?.alias;
+    return Boolean(bAlias && modelName && `${bAlias}/${modelName}` === globalDefaultModel.value);
+}
 
 async function fetchUniversalProfiles() {
     try {
-        const res = await apiClient.get('/api/admin/universal-profiles');
+        const res = await apiClient.get('/api/admin/universal-profiles', {
+            params: { modality: props.bindingType }
+        });
         allUniversalProfiles.value = res.data.profiles || {};
     } catch (e) {
         console.error("Failed to fetch universal profiles:", e);
@@ -283,18 +393,19 @@ async function forceRefreshModels() {
 }
 
 async function fetchModels() {
-    if (!props.binding) { isLoading.value = false; models.value = []; return; }
+    const targetBinding = currentActiveBinding.value;
+    if (!targetBinding) { isLoading.value = false; models.value = []; return; }
     isLoading.value = true;
     try {
         let res = [];
         switch (props.bindingType) {
-            case 'llm': res = await adminStore.fetchBindingModels(props.binding.id); break;
-            case 'tti': res = await adminStore.fetchTtiBindingModels(props.binding.id); break;
-            case 'tts': res = await adminStore.fetchTtsBindingModels(props.binding.id); break;
-            case 'stt': res = await adminStore.fetchSttBindingModels(props.binding.id); break;
-            case 'ttv': res = await adminStore.fetchTtvBindingModels(props.binding.id); break;
-            case 'ttm': res = await adminStore.fetchTtmBindingModels(props.binding.id); break;
-            case 'rag': res = await adminStore.fetchRagBindingModels(props.binding.id); break;
+            case 'llm': res = await adminStore.fetchBindingModels(targetBinding.id); break;
+            case 'tti': res = await adminStore.fetchTtiBindingModels(targetBinding.id); break;
+            case 'tts': res = await adminStore.fetchTtsBindingModels(targetBinding.id); break;
+            case 'stt': res = await adminStore.fetchSttBindingModels(targetBinding.id); break;
+            case 'ttv': res = await adminStore.fetchTtvBindingModels(targetBinding.id); break;
+            case 'ttm': res = await adminStore.fetchTtmBindingModels(targetBinding.id); break;
+            case 'rag': res = await adminStore.fetchRagBindingModels(targetBinding.id); break;
             default: res = [];
         }
         models.value = Array.isArray(res) ? res : [];
@@ -309,14 +420,22 @@ function selectModel(model) {
     selectedModel.value = model;
     associatedModel.value = model.original_model_name;
     customTargetModel.value = false;
+
+    if (model.binding_id) {
+        targetBindingId.value = model.binding_id;
+    } else if (model.binding_alias) {
+        const matchedBinding = activeBindingList.value.find(b => b.alias === model.binding_alias);
+        if (matchedBinding) targetBindingId.value = matchedBinding.id;
+    }
+
     const rawAlias = (model.alias && typeof model.alias === 'object') ? model.alias : {};
     const newForm = { 
         ...getInitialFormState(), 
         ...rawAlias,
         title: rawAlias.title || rawAlias.name || (props.bindingType === 'llm' ? model.original_model_name : ''),
         model_name: rawAlias.model_name || model.original_model_name,
-        has_vision: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
-        vision_enabled: rawAlias.vision_enabled ?? rawAlias.has_vision ?? true,
+        has_vision: rawAlias.vision_enabled ?? rawAlias.has_vision ?? false,
+        vision_enabled: rawAlias.vision_enabled ?? rawAlias.has_vision ?? false,
         ctx_size: rawAlias.forced_context_size ?? rawAlias.ctx_size ?? null,
         forced_context_size: rawAlias.forced_context_size ?? rawAlias.ctx_size ?? null,
         routing_strategy: rawAlias.routing_strategy || 'balanced',
@@ -336,13 +455,17 @@ function selectModel(model) {
     }
 
     form.value = newForm;
+    fetchModels();
 }
 
 function addNewProfile() {
     const defaultKey = `profile_${Date.now().toString(36)}`;
     const defaultTargetModel = (models.value && models.value.length > 0) ? models.value[0].original_model_name : '';
+    const activeB = currentActiveBinding.value;
     const newProfile = {
         original_model_name: defaultKey,
+        binding_id: activeB?.id,
+        binding_alias: activeB?.alias,
         alias: {
             title: isSmartRouter.value ? 'New Smart Routing Group' : 'New Model Profile',
             model_name: defaultTargetModel,
@@ -370,10 +493,11 @@ function toggleProfileInGroup(profId) {
 }
 
 async function fetchCtxSize() {
-    if (!selectedModel.value || !props.binding || props.bindingType !== 'llm') return;
+    const activeB = currentActiveBinding.value;
+    if (!selectedModel.value || !activeB || props.bindingType !== 'llm') return;
     isFetchingCtxSize.value = true;
     try {
-        const size = await adminStore.getModelCtxSize(props.binding.id, selectedModel.value.original_model_name);
+        const size = await adminStore.getModelCtxSize(activeB.id, selectedModel.value.original_model_name);
         if (size !== null) {
             form.value.ctx_size = size;
             form.value.forced_context_size = size;
@@ -404,7 +528,8 @@ async function generateIcon() {
 }
 
 async function saveAlias() {
-    if (!selectedModel.value || !props.binding) return;
+    const activeB = currentActiveBinding.value;
+    if (!selectedModel.value || !activeB) return;
     isSaving.value = true;
     try {
         const payload = { ...form.value };
@@ -428,26 +553,23 @@ async function saveAlias() {
                 const value = payload[key];
                 payload[key] = (value === '' || value === null || isNaN(parseFloat(value))) ? null : Number(value);
             });
-            await adminStore.saveModelAlias(props.binding.id, aliasPayload);
+            await adminStore.saveModelAlias(activeB.id, aliasPayload);
         } else if (props.bindingType === 'tti') {
-            await adminStore.saveTtiModelAlias(props.binding.id, aliasPayload);
+            await adminStore.saveTtiModelAlias(activeB.id, aliasPayload);
         } else if (props.bindingType === 'tts') {
-            await adminStore.saveTtsModelAlias(props.binding.id, aliasPayload);
+            await adminStore.saveTtsModelAlias(activeB.id, aliasPayload);
         } else if (props.bindingType === 'stt') {
-            await adminStore.saveSttModelAlias(props.binding.id, aliasPayload);
+            await adminStore.saveSttModelAlias(activeB.id, aliasPayload);
         } else if (props.bindingType === 'ttv') {
-            await adminStore.saveTtvModelAlias(props.binding.id, aliasPayload);
+            await adminStore.saveTtvModelAlias(activeB.id, aliasPayload);
         } else if (props.bindingType === 'ttm') {
-            await adminStore.saveTtmModelAlias(props.binding.id, aliasPayload);
+            await adminStore.saveTtmModelAlias(activeB.id, aliasPayload);
         } else if (props.bindingType === 'rag') {
-            await adminStore.saveRagModelAlias(props.binding.id, aliasPayload);
+            await adminStore.saveRagModelAlias(activeB.id, aliasPayload);
         }
         await fetchModels();
         await fetchUniversalProfiles();
-        const targetModelName = associatedModel.value || selectedModel.value.original_model_name;
-        const updatedModel = models.value.find(m => m.original_model_name === targetModelName);
-        if (updatedModel) selectModel(updatedModel);
-        uiStore.addNotification('Profile saved successfully.', 'success');
+        uiStore.addNotification('Universal profile saved successfully.', 'success');
     } catch (e) {
         console.error("Save alias failed:", e);
         uiStore.addNotification(e.response?.data?.detail || 'Failed to save model profile.', 'error');
@@ -456,34 +578,30 @@ async function saveAlias() {
     }
 }
 
-async function deleteSpecificAlias(modelKey) {
-    if (!props.binding) return;
-    let aliases = props.binding.model_aliases || {};
-    if (typeof aliases === 'string') {
-        try { aliases = JSON.parse(aliases); } catch (e) { aliases = {}; }
-    }
-    const profileTitle = aliases[modelKey]?.title || modelKey;
+async function deleteSpecificAlias(modelKey, bindingId = null) {
+    const targetBId = bindingId || currentActiveBinding.value?.id;
+    if (!targetBId) return;
 
     if (await uiStore.showConfirmation({ 
         title: 'Delete Profile?', 
-        message: `Remove the profile configuration for '${profileTitle}'?`, 
+        message: `Remove the profile configuration for '${modelKey}'?`, 
         confirmText: 'Delete' 
     })) {
         isSaving.value = true;
         try {
             switch (props.bindingType) {
-                case 'llm': await adminStore.deleteModelAlias(props.binding.id, modelKey); break;
-                case 'tti': await adminStore.deleteTtiModelAlias(props.binding.id, modelKey); break;
-                case 'tts': await adminStore.deleteTtsModelAlias(props.binding.id, modelKey); break;
-                case 'stt': await adminStore.deleteSttModelAlias(props.binding.id, modelKey); break;
-                case 'ttv': await adminStore.deleteTtvModelAlias(props.binding.id, modelKey); break;
-                case 'ttm': await adminStore.deleteTtmModelAlias(props.binding.id, modelKey); break;
-                case 'rag': await adminStore.deleteRagModelAlias(props.binding.id, modelKey); break;
+                case 'llm': await adminStore.deleteModelAlias(targetBId, modelKey); break;
+                case 'tti': await adminStore.deleteTtiModelAlias(targetBId, modelKey); break;
+                case 'tts': await adminStore.deleteTtsModelAlias(targetBId, modelKey); break;
+                case 'stt': await adminStore.deleteSttModelAlias(targetBId, modelKey); break;
+                case 'ttv': await adminStore.deleteTtvModelAlias(targetBId, modelKey); break;
+                case 'ttm': await adminStore.deleteTtmModelAlias(targetBId, modelKey); break;
+                case 'rag': await adminStore.deleteRagModelAlias(targetBId, modelKey); break;
             }
             await fetchModels();
             await fetchUniversalProfiles();
             if (selectedModel.value && selectedModel.value.original_model_name === modelKey) {
-                const remaining = configuredAliases.value[0] || models.value[0] || null;
+                const remaining = configuredAliases.value[0] || null;
                 if (remaining) {
                     selectModel(remaining);
                 } else {
@@ -502,33 +620,35 @@ async function deleteSpecificAlias(modelKey) {
 }
 
 async function deleteAlias() {
-    if (!selectedModel.value || !props.binding) return;
-    await deleteSpecificAlias(selectedModel.value.original_model_name);
+    if (!selectedModel.value) return;
+    await deleteSpecificAlias(selectedModel.value.original_model_name, selectedModel.value.binding_id);
 }
 
 async function setAsBindingDefault() {
-    if (!selectedModel.value || !props.binding) return;
+    const activeB = currentActiveBinding.value;
+    if (!selectedModel.value || !activeB) return;
     isSettingBindingDefault.value = true;
     try {
         const payload = { default_model_name: selectedModel.value.original_model_name };
         switch (props.bindingType) {
-            case 'llm': await adminStore.updateBinding(props.binding.id, payload); break;
-            case 'tti': await adminStore.updateTtiBinding(props.binding.id, payload); break;
-            case 'tts': await adminStore.updateTtsBinding(props.binding.id, payload); break;
-            case 'stt': await adminStore.updateSttBinding(props.binding.id, payload); break;
-            case 'rag': await adminStore.updateRagBinding(props.binding.id, payload); break;
+            case 'llm': await adminStore.updateBinding(activeB.id, payload); break;
+            case 'tti': await adminStore.updateTtiBinding(activeB.id, payload); break;
+            case 'tts': await adminStore.updateTtsBinding(activeB.id, payload); break;
+            case 'stt': await adminStore.updateSttBinding(activeB.id, payload); break;
+            case 'rag': await adminStore.updateRagBinding(activeB.id, payload); break;
         }
-        uiStore.addNotification('Binding default profile updated.', 'success');
+        uiStore.addNotification(`Default profile updated for '${activeB.alias}'.`, 'success');
     } finally {
         isSettingBindingDefault.value = false;
     }
 }
 
 async function setAsGlobalDefault() {
-    if (!selectedModel.value || !props.binding) return;
+    const activeB = currentActiveBinding.value;
+    if (!selectedModel.value || !activeB) return;
     isSettingGlobalDefault.value = true;
     try {
-        const fullModelName = `${props.binding.alias}/${selectedModel.value.original_model_name}`;
+        const fullModelName = `${activeB.alias}/${selectedModel.value.original_model_name}`;
         if (props.bindingType === 'rag') {
             await adminStore.updateGlobalSettings({ 'default_safe_store_vectorizer': fullModelName });
             uiStore.addNotification('Global default RAG vectorizer profile updated.', 'success');
@@ -545,10 +665,11 @@ async function setAsGlobalDefault() {
 }
 
 async function setAsBeginnerDefault() {
-    if (!selectedModel.value || !props.binding || props.bindingType !== 'llm') return;
+    const activeB = currentActiveBinding.value;
+    if (!selectedModel.value || !activeB || props.bindingType !== 'llm') return;
     isSettingBeginnerDefault.value = true;
     try {
-        const fullModelName = `${props.binding.alias}/${selectedModel.value.original_model_name}`;
+        const fullModelName = `${activeB.alias}/${selectedModel.value.original_model_name}`;
         const response = await adminStore.setAsBeginnerDefault(fullModelName);
         await adminStore.fetchGlobalSettings(true);
         uiStore.addNotification(response.message || 'Default model profile for beginners updated.', 'success');
@@ -582,13 +703,37 @@ function handleFileChange(event) {
     event.target.value = '';
 }
 
-onMounted(() => {
-    fetchModels();
-    fetchUniversalProfiles();
+onMounted(async () => {
+    if (isCrossBindingMode.value) {
+        if (activeBindingList.value.length > 0 && !targetBindingId.value) {
+            targetBindingId.value = activeBindingList.value[0].id;
+        }
+    }
+    await Promise.allSettled([
+        fetchModels(),
+        fetchUniversalProfiles()
+    ]);
+    if (!selectedModel.value && configuredAliases.value.length > 0) {
+        selectModel(configuredAliases.value[0]);
+    }
+});
+
+watch(activeBindingList, (list) => {
+    if (list && list.length > 0 && !targetBindingId.value) {
+        targetBindingId.value = list[0].id;
+        fetchModels();
+    }
+}, { immediate: true });
+
+watch(configuredAliases, (newAliases) => {
+    if (!selectedModel.value && newAliases.length > 0) {
+        selectModel(newAliases[0]);
+    }
 });
 
 watch(() => props.binding, (newBinding) => {
     if (newBinding) {
+        targetBindingId.value = newBinding.id;
         selectedModel.value = null;
         form.value = getInitialFormState();
         fetchModels();
@@ -608,6 +753,17 @@ watch(() => props.binding, (newBinding) => {
         <div v-else class="flex grow overflow-hidden">
             <!-- Sidebar: Configured Profiles / Routing Groups -->
             <div class="w-1/3 border-r dark:border-gray-700/80 pr-4 flex flex-col min-w-[260px]">
+                <!-- Connection Filter in Cross-Binding Mode -->
+                <div v-if="isCrossBindingMode" class="mb-3">
+                    <label class="block text-[9px] font-black uppercase tracking-wider text-gray-400 mb-1">Filter by Connection</label>
+                    <select v-model="selectedBindingFilter" class="input-field text-xs w-full">
+                        <option value="ALL">🌐 All Connections ({{ allUniversalProfiles ? Object.keys(allUniversalProfiles).length : 0 }})</option>
+                        <option v-for="b in activeBindingList" :key="b.id" :value="b.alias">
+                            {{ b.alias }} ({{ b.name }})
+                        </option>
+                    </select>
+                </div>
+
                 <div class="flex items-center justify-between gap-2 mb-3">
                      <div class="relative grow">
                         <input type="text" v-model="searchTerm" placeholder="Search profiles..." class="input-field text-xs w-full pl-8" />
@@ -618,6 +774,11 @@ watch(() => props.binding, (newBinding) => {
                      <button @click="forceRefreshModels" :disabled="isRefreshing || isLoading" class="btn btn-secondary btn-xs flex items-center gap-1 shrink-0 h-8 px-2" title="Force refresh available engine models">
                         <IconArrowPath class="w-3.5 h-3.5 text-gray-600 dark:text-gray-300" :class="{'animate-spin text-blue-500': isRefreshing || isLoading}" />
                         <span class="hidden sm:inline">Refresh</span>
+                     </button>
+                     <button @click="handleAutoCreateProfiles" :disabled="isAutoCreating || !currentActiveBinding" class="btn btn-secondary btn-xs flex items-center gap-1 shrink-0 h-8 px-2 text-purple-600 dark:text-purple-300" title="Automatically create profiles for all models detected on this connection">
+                        <IconAnimateSpin v-if="isAutoCreating" class="w-3.5 h-3.5 animate-spin" />
+                        <IconSparkles v-else class="w-3.5 h-3.5 text-purple-500" />
+                        <span>Auto-Profiles</span>
                      </button>
                      <button @click="addNewProfile" class="btn btn-primary btn-xs flex items-center gap-1 shrink-0 h-8" :title="isSmartRouter ? 'Add New Smart Router Group' : 'Add New Model Profile'">
                         <IconPlus class="w-3.5 h-3.5" />
@@ -655,20 +816,25 @@ watch(() => props.binding, (newBinding) => {
                                             <IconCpuChip v-else class="w-4 h-4" />
                                         </div>
                                         <div class="min-w-0">
-                                            <p class="font-bold text-xs truncate" :class="isProfileModelMissing(item) ? 'text-rose-950 dark:text-rose-100' : 'text-gray-900 dark:text-white'">{{ item.alias?.title || item.original_model_name }}</p>
+                                            <div class="flex items-center gap-1.5">
+                                                <span v-if="isCrossBindingMode && item.binding_alias" class="text-[8px] font-mono px-1 py-0.2 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 font-bold uppercase shrink-0">
+                                                    {{ item.binding_alias }}
+                                                </span>
+                                                <p class="font-bold text-xs truncate" :class="isProfileModelMissing(item) ? 'text-rose-950 dark:text-rose-100' : 'text-gray-900 dark:text-white'">{{ item.alias?.title || item.original_model_name }}</p>
+                                            </div>
                                             <p class="text-[9px] truncate font-mono" :class="isProfileModelMissing(item) ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-gray-500 opacity-60'">
                                                 {{ isSmartRouter ? `Strategy: ${item.alias?.routing_strategy || 'balanced'}` : (item.alias?.model_name ? `→ ${item.alias.model_name}` : item.original_model_name) }}
                                             </p>
                                         </div>
                                     </div>
                                     <div class="shrink-0 flex items-center gap-1.5 pl-2">
-                                        <span v-if="isProfileModelMissing(item)" class="text-[8px] font-black uppercase px-1 py-0.2 rounded bg-rose-200/80 dark:bg-rose-900 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-700" title="Model not found in engine">Missing</span>
+                                        <span v-if="isProfileModelMissing(item)" class="text-[8px] font-black uppercase px-1.5 py-0.5 rounded bg-rose-200 dark:bg-rose-900/80 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-700" title="Model unavailable on server or binding is offline">Offline</span>
                                         <IconEye v-if="item.alias?.vision_enabled || item.alias?.has_vision" class="w-3.5 h-3.5 text-blue-500" title="Vision Enabled" />
-                                        <span v-if="isBindingDefault(item.original_model_name)" class="w-2 h-2 rounded-full bg-blue-500" title="Binding Default"></span>
-                                        <span v-if="isGlobalDefault(item.original_model_name)" class="w-2 h-2 rounded-full bg-emerald-500" title="Global Default"></span>
+                                        <span v-if="isBindingDefault(item)" class="w-2 h-2 rounded-full bg-blue-500" title="Binding Default"></span>
+                                        <span v-if="isGlobalDefault(item)" class="w-2 h-2 rounded-full bg-emerald-500" title="Global Default"></span>
                                     </div>
                                 </button>
-                                <button @click.stop="deleteSpecificAlias(item.original_model_name)"
+                                <button @click.stop="deleteSpecificAlias(item.original_model_name, item.binding_id)"
                                         type="button"
                                         class="p-2 rounded-xl text-gray-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors shrink-0"
                                         title="Delete profile">
@@ -736,6 +902,23 @@ watch(() => props.binding, (newBinding) => {
                     </div>
 
                     <form @submit.prevent="saveAlias" class="space-y-6 pb-6">
+
+                        <!-- Cross-Binding Target Selector -->
+                        <div v-if="isCrossBindingMode" class="p-4 bg-blue-50/40 dark:bg-blue-950/20 rounded-2xl border border-blue-200 dark:border-blue-800/60 flex items-center justify-between gap-4">
+                            <div>
+                                <label class="block text-xs font-black uppercase text-blue-900 dark:text-blue-200 tracking-wider">
+                                    Assigned Physical Connection *
+                                </label>
+                                <p class="text-[10px] text-blue-700 dark:text-blue-300 mt-0.5">
+                                    Which physical engine server executes this universal profile.
+                                </p>
+                            </div>
+                            <select v-model="targetBindingId" @change="fetchModels" class="input-field text-xs font-bold w-64">
+                                <option v-for="b in activeBindingList" :key="b.id" :value="b.id">
+                                    {{ b.alias }} ({{ b.name }})
+                                </option>
+                            </select>
+                        </div>
 
                         <!-- Identity -->
                         <div class="flex gap-4 p-4 bg-gray-50 dark:bg-gray-900/40 rounded-2xl border border-gray-100 dark:border-gray-800">
@@ -814,7 +997,7 @@ watch(() => props.binding, (newBinding) => {
 
                             <div class="space-y-2 max-h-72 overflow-y-auto custom-scrollbar pr-1">
                                 <div v-for="(prof, profId) in allUniversalProfiles" :key="profId"
-                                     v-show="prof.binding_alias !== binding.alias"
+                                     v-show="prof.binding_alias !== (currentActiveBinding?.alias || '')"
                                      @click="toggleProfileInGroup(profId)"
                                      class="p-3 bg-white dark:bg-gray-800 rounded-xl border cursor-pointer transition-all flex items-center justify-between gap-4"
                                      :class="(form.selected_model_profiles.length === 0 || form.selected_model_profiles.includes(profId)) ? 'border-purple-500 ring-2 ring-purple-500/20 shadow-xs' : 'border-gray-200 dark:border-gray-700 opacity-60'">

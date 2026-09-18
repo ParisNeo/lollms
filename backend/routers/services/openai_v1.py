@@ -828,29 +828,37 @@ async def list_models(
 
     def _fetch_models():
         """
-        Queries available LLM profiles from active bindings and database.
-        Returns a list of OpenAI-compatible model objects.
+        Queries available LLM profiles from active bindings.
+        Returns only working Universal Profiles where the connection server is active and the model is available.
         """
         all_models = []
         created_time = int(time.time())
 
-        # 1. Build authoritative Universal LLM Profiles from active bindings
+        # Retrieve universal profiles with live connection health verification
         try:
-            _, model_profiles, _ = _build_universal_profiles_for_modality(
-                db=db,
-                binding_model_cls=DBLLMBinding,
-                active_binding_alias=None,
-                active_model_name=None,
-                user_overrides={}
-            )
-        except Exception as e:
-            ASCIIColors.warning(f"Error building universal profiles: {e}")
-            model_profiles = {}
+            from backend.routers.admin.bindings_management import get_all_universal_profiles
+            profiles_dict = asyncio.run(get_all_universal_profiles(modality="llm", db=db))
+            model_profiles = profiles_dict.get("profiles", {})
+        except Exception:
+            try:
+                _, model_profiles, _ = _build_universal_profiles_for_modality(
+                    db=db,
+                    binding_model_cls=DBLLMBinding,
+                    active_binding_alias=None,
+                    active_model_name=None,
+                    user_overrides={}
+                )
+            except Exception as e:
+                ASCIIColors.warning(f"Error building universal profiles: {e}")
+                model_profiles = {}
 
-        # 2. Add all model profiles to all_models
         for prof_id, prof_info in model_profiles.items():
+            # Exclude unavailable models or dead servers so clients only see working endpoints
+            if prof_info.get("is_available") is False:
+                continue
+
             title = prof_info.get("title") or prof_info.get("name") or prof_id
-            binding_alias = prof_info.get("binding_profile_name", "lollms")
+            binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
 
             all_models.append({
                 "id": prof_id,
@@ -859,40 +867,6 @@ async def list_models(
                 "created": created_time,
                 "owned_by": binding_alias
             })
-
-            # If title is distinct from prof_id, also expose title alias as a model ID
-            # so clients requesting either "binding/model" or "Profile Title" succeed
-            if title and title != prof_id and not any(m["id"] == title for m in all_models):
-                all_models.append({
-                    "id": title,
-                    "name": title,
-                    "object": "model",
-                    "created": created_time,
-                    "owned_by": binding_alias
-                })
-
-        # 3. Also check for raw models from active bindings that might not have an explicit profile yet
-        active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-        for binding in active_bindings:
-            if binding.name != 'smart_router' and binding.alias != 'smart_router':
-                try:
-                    from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
-                    raw_models = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config)
-                    if isinstance(raw_models, list):
-                        for item in raw_models:
-                            m_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
-                            if m_id:
-                                full_raw_id = f"{binding.alias}/{m_id}"
-                                if not any(m["id"] == full_raw_id for m in all_models):
-                                    all_models.append({
-                                        "id": full_raw_id,
-                                        "name": full_raw_id,
-                                        "object": "model",
-                                        "created": created_time,
-                                        "owned_by": binding.alias
-                                    })
-                except Exception:
-                    pass
 
         return all_models
 

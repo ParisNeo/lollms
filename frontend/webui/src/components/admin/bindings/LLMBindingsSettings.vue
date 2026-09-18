@@ -39,6 +39,52 @@ const commandParams = ref({});
 const activeTab = ref('settings');
 const hasZoo = ref(false);
 
+// Two-World Architecture: Top-Level Tab ('bindings' = Physical Connections, 'profiles' = Universal Usable Profiles)
+const primaryViewTab = ref('bindings');
+
+// Raw Engine Models for viewing in Connection layer
+const connectionRawModels = ref([]);
+const isLoadingConnectionModels = ref(false);
+const isAutoCreatingProfiles = ref(false);
+const connectionModelSearch = ref('');
+
+async function handleAutoCreateProfilesForCurrent() {
+    if (!editingBinding.value) return;
+    isAutoCreatingProfiles.value = true;
+    try {
+        const res = await adminStore.autoCreateProfilesForBinding(editingBinding.value.id, 'llm');
+        uiStore.addNotification(res.message || `Created profiles for ${editingBinding.value.alias}`, 'success');
+        await Promise.allSettled([
+            fetchConnectionModels(editingBinding.value.id),
+            fetchUniversalProfiles(),
+            dataStore.fetchAvailableLollmsModels()
+        ]);
+    } catch (e) {
+        uiStore.addNotification(e.response?.data?.detail || 'Failed to auto-create profiles.', 'error');
+    } finally {
+        isAutoCreatingProfiles.value = false;
+    }
+}
+
+const filteredConnectionModels = computed(() => {
+    if (!connectionModelSearch.value) return connectionRawModels.value;
+    const q = connectionModelSearch.value.toLowerCase();
+    return connectionRawModels.value.filter(m => (m.original_model_name || m.name || m).toLowerCase().includes(q));
+});
+
+async function fetchConnectionModels(bindingId) {
+    if (!bindingId) return;
+    isLoadingConnectionModels.value = true;
+    try {
+        const res = await adminStore.fetchBindingModels(bindingId);
+        connectionRawModels.value = Array.isArray(res) ? res : [];
+    } catch {
+        connectionRawModels.value = [];
+    } finally {
+        isLoadingConnectionModels.value = false;
+    }
+}
+
 // Smart Router Model Profiles Selection State
 const allUniversalProfiles = ref({});
 const isSmartRouterBinding = computed(() => {
@@ -184,6 +230,7 @@ function showEditForm(binding) {
 
     fetchUniversalProfiles();
     checkZooAvailability(binding.id);
+    fetchConnectionModels(binding.id);
 
     const bType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
     if (bType && bType.commands && Array.isArray(bType.commands)) {
@@ -208,6 +255,11 @@ function showEditForm(binding) {
     isFormVisible.value = true;
     activeTab.value = 'settings';
     window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function switchToProfilesWithModel(modelName) {
+    hideForm();
+    primaryViewTab.value = 'profiles';
 }
 
 async function executeCommand(cmd, bindingId, params) {
@@ -307,7 +359,60 @@ async function handleHealProfiles() {
 </script>
 
 <template>
-    <div class="space-y-8">
+    <div class="space-y-6">
+        <!-- ── TWO-TIER DOGMA ROOT TABS (Connections vs Universal Profiles) ── -->
+        <div v-if="!isFormVisible" class="flex items-center justify-between border-b border-gray-200 dark:border-gray-700/80 pb-3 flex-wrap gap-3">
+            <div class="flex items-center gap-2 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs font-bold">
+                <button 
+                    @click="primaryViewTab = 'bindings'" 
+                    class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 cursor-pointer select-none"
+                    :class="primaryViewTab === 'bindings' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                >
+                    <IconCpuChip class="w-4 h-4" />
+                    <span>Physical Bindings ({{ bindings.length }})</span>
+                </button>
+                <button 
+                    @click="primaryViewTab = 'profiles'" 
+                    class="px-4 py-2 rounded-lg transition-all flex items-center gap-2 cursor-pointer select-none"
+                    :class="primaryViewTab === 'profiles' ? 'bg-white dark:bg-gray-700 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                >
+                    <IconSparkles class="w-4 h-4 text-purple-500" />
+                    <span>Universal Model Profiles</span>
+                </button>
+            </div>
+
+            <div class="flex items-center gap-2">
+                <button @click="handleHealProfiles" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Heal orphaned user preferences and migrate legacy aliases">
+                    <IconSparkles class="w-3.5 h-3.5 text-purple-500" />
+                    <span>Sync & Heal</span>
+                </button>
+                <button @click="openPolicyModal" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Force models or set system defaults for users">
+                    <IconCpuChip class="w-3.5 h-3.5 text-blue-500" />
+                    <span>⚡ Policy & Defaults</span>
+                </button>
+                <button v-if="primaryViewTab === 'bindings'" @click="showAddForm" class="btn btn-primary btn-sm flex items-center gap-1.5 shadow-sm">
+                    <span>+ Add Binding</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- SECTION 2: UNIVERSAL MODEL PROFILES (ACROSS ALL BINDINGS) -->
+        <div v-if="primaryViewTab === 'profiles' && !isFormVisible" class="bg-white dark:bg-gray-850 p-5 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-sm">
+            <div class="mb-4">
+                <h3 class="text-lg font-black text-gray-900 dark:text-white flex items-center gap-2">
+                    <IconSparkles class="w-5 h-5 text-purple-500" />
+                    <span>Universal Model Profiles Catalog</span>
+                </h3>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    Declarative model execution layer. Configure final usable models, routing rules, sampling parameters, and vision companions across all physical bindings.
+                </p>
+            </div>
+            <BindingModelsManager binding-type="llm" />
+        </div>
+
+        <!-- SECTION 1: PHYSICAL BINDINGS (CONNECTIONS & SETTINGS) -->
+        <div v-else-if="primaryViewTab === 'bindings' || isFormVisible" class="space-y-6">
+
         <!-- EDIT / ADD FORM VIEW -->
         <div v-if="isFormVisible" class="bg-white dark:bg-gray-800 shadow-md rounded-2xl p-6 border border-gray-100 dark:border-gray-700">
             <div class="flex justify-between items-center mb-6 pb-3 border-b dark:border-gray-700">
@@ -317,7 +422,7 @@ async function handleHealProfiles() {
                 </div>
                 <div v-if="isEditMode" class="flex gap-2 text-xs font-bold overflow-x-auto p-1 bg-gray-100 dark:bg-gray-700/50 rounded-xl">
                     <button @click="activeTab = 'settings'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'settings', 'text-gray-500': activeTab !== 'settings'}" class="px-3 py-1.5 rounded-lg transition-all">Connection Settings</button>
-                    <button @click="activeTab = 'models'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'models', 'text-gray-500': activeTab !== 'models'}" class="px-3 py-1.5 rounded-lg transition-all">Universal Profiles</button>
+                    <button @click="activeTab = 'raw_models'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'raw_models', 'text-gray-500': activeTab !== 'raw_models'}" class="px-3 py-1.5 rounded-lg transition-all">Detected Models ({{ connectionRawModels.length }})</button>
                     <button v-if="hasZoo" @click="activeTab = 'zoo'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'zoo', 'text-gray-500': activeTab !== 'zoo'}" class="px-3 py-1.5 rounded-lg transition-all">Models Zoo</button>
                     <button v-if="hasCommands" @click="activeTab = 'commands'" :class="{'bg-white dark:bg-gray-600 text-blue-600 shadow-sm': activeTab === 'commands', 'text-gray-500': activeTab !== 'commands'}" class="px-3 py-1.5 rounded-lg transition-all">Commands</button>
                 </div>
@@ -439,9 +544,50 @@ async function handleHealProfiles() {
                 </form>
             </div>
 
-            <!-- Profiles Tab -->
-            <div v-else-if="activeTab === 'models'">
-                <BindingModelsManager :binding="editingBinding" binding-type="llm" />
+            <!-- Detected Models Tab (Just viewing the raw models list on this physical connection) -->
+            <div v-else-if="activeTab === 'raw_models'" class="space-y-4">
+                <div class="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl border dark:border-gray-700">
+                    <div>
+                        <h4 class="font-bold text-sm text-gray-900 dark:text-white">Detected Models on '{{ editingBinding.alias }}'</h4>
+                        <p class="text-xs text-gray-500">Raw model endpoints discovered on this physical server/connection.</p>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button @click="handleAutoCreateProfilesForCurrent" :disabled="isAutoCreatingProfiles" class="btn btn-primary btn-xs flex items-center gap-1.5 shadow-sm">
+                            <IconAnimateSpin v-if="isAutoCreatingProfiles" class="w-3.5 h-3.5 animate-spin" />
+                            <IconSparkles v-else class="w-3.5 h-3.5" />
+                            <span>Auto-Create Profiles for All Models</span>
+                        </button>
+                        <button @click="fetchConnectionModels(editingBinding.id)" :disabled="isLoadingConnectionModels" class="btn btn-secondary btn-xs flex items-center gap-1">
+                            <IconArrowDownTray class="w-3.5 h-3.5" :class="{'animate-spin text-blue-500': isLoadingConnectionModels}" />
+                            <span>Probe Models</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="relative">
+                    <input type="text" v-model="connectionModelSearch" placeholder="Filter detected models..." class="input-field text-xs w-full" />
+                </div>
+
+                <div v-if="isLoadingConnectionModels" class="text-center py-12 text-xs text-gray-400">
+                    Probing connection for models...
+                </div>
+                <div v-else-if="filteredConnectionModels.length === 0" class="text-center py-12 text-xs text-gray-400 border-2 border-dashed rounded-xl">
+                    No models detected on this binding. Check connection parameters or verify the remote service is running.
+                </div>
+                <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
+                    <div v-for="m in filteredConnectionModels" :key="m.original_model_name || m.name || m" class="p-3 bg-gray-50 dark:bg-gray-800/80 rounded-xl border dark:border-gray-700 flex items-center justify-between gap-2">
+                        <div class="min-w-0">
+                            <p class="text-xs font-mono font-bold text-gray-800 dark:text-gray-200 truncate">{{ m.original_model_name || m.name || m }}</p>
+                        </div>
+                        <button @click="switchToProfilesWithModel(m.original_model_name || m.name || m)" class="btn btn-secondary btn-xs shrink-0 text-purple-600 dark:text-purple-400" title="Create a Universal Profile using this model">
+                            + Profile
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2">
+                    <button type="button" @click="hideForm" class="btn btn-secondary text-xs">Close</button>
+                </div>
             </div>
 
             <!-- Zoo Tab -->
@@ -519,27 +665,21 @@ async function handleHealProfiles() {
                 <div>
                     <h2 class="text-xl font-black tracking-tight text-gray-900 dark:text-white flex items-center gap-2">
                         <IconCpuChip class="w-6 h-6 text-blue-500" />
-                        <span>LLM Universal Bindings</span>
+                        <span>Physical LLM Connections</span>
                         <span class="text-xs font-bold px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/40 dark:text-blue-300">
                             {{ bindings.length }} Connections
                         </span>
                     </h2>
-                    <p class="text-xs text-gray-500 mt-0.5">Manage connection engines, universal model profiles, and smart routing policies.</p>
+                    <p class="text-xs text-gray-500 mt-0.5">Manage hardware servers, network endpoints, and model weights drivers.</p>
                 </div>
 
                 <div class="flex items-center gap-2">
-                    <button @click="handleHealProfiles" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Heal orphaned user preferences and migrate legacy aliases">
-                        <IconSparkles class="w-3.5 h-3.5 text-purple-500" />
-                        <span>Sync & Heal</span>
+                    <button @click="primaryViewTab = 'profiles'" class="btn btn-secondary btn-sm flex items-center gap-1.5 text-purple-600 dark:text-purple-400" title="Switch to Universal Model Profiles">
+                        <IconSparkles class="w-3.5 h-3.5" />
+                        <span>View Model Profiles</span>
                     </button>
-
-                    <button @click="openPolicyModal" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Force models or set system defaults for users">
-                        <IconCpuChip class="w-3.5 h-3.5 text-blue-500" />
-                        <span>⚡ Policy & Defaults</span>
-                    </button>
-
                     <button @click="showAddForm" class="btn btn-primary btn-sm flex items-center gap-1.5 shadow-sm">
-                        <span>+ Add Engine Binding</span>
+                        <span>+ Add Connection</span>
                     </button>
                 </div>
             </div>
@@ -585,11 +725,12 @@ async function handleHealProfiles() {
                     </div>
 
                     <div class="border-t dark:border-gray-700/60 pt-3 mt-4 flex justify-between items-center text-xs">
-                        <span class="text-blue-500 font-bold text-[10px] uppercase tracking-wider group-hover:underline">Configure Profiles &rarr;</span>
+                        <span class="text-blue-500 font-bold text-[10px] uppercase tracking-wider group-hover:underline">Configure Connection &rarr;</span>
                         <button @click.stop="handleDelete(binding)" class="text-rose-500 hover:text-rose-700 font-bold text-[10px] uppercase">Delete</button>
                     </div>
                 </div>
             </div>
+        </div>
         </div>
     </div>
 </template>
