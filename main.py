@@ -706,6 +706,20 @@ async def lollms_generate(
                 )
 
         generated_text = await asyncio.to_thread(_run_gen)
+
+        from backend.db.models.generation_metric import record_generation_metric
+        est_prompt_tokens = len(request.prompt) // 4
+        est_completion_tokens = len(generated_text) // 4
+        record_generation_metric(
+            db=db,
+            user_id=current_user.id,
+            username=current_user.username,
+            model_name=model_name or "unknown",
+            binding_name=binding_alias,
+            prompt_tokens=est_prompt_tokens,
+            completion_tokens=est_completion_tokens,
+            source="api"
+        )
         return {"generated_text": generated_text}
     except Exception as e:
         trace_exception(e)

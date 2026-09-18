@@ -433,7 +433,12 @@ async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(g
     alias, name = resolve_model_name(db, request.model)
     loop = asyncio.get_running_loop()
 
-    # Check alias configuration for context size override (forced by admin)
+    # 1. Check global forced context size
+    force_mode = settings.get("force_model_mode", "disabled")
+    if force_mode == "force_always" and settings.get("force_context_size"):
+        return ContextSizeResponse(context_size=int(settings.get("force_context_size")))
+
+    # 2. Check profile alias configuration
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == alias).first()
     if binding:
         model_aliases = binding.model_aliases or {}
@@ -444,17 +449,28 @@ async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(g
                 model_aliases = {}
 
         alias_info = model_aliases.get(name)
-        # If alias exists and has a context size set, use it preferentially
-        if alias_info:
-             alias_config = alias_info.get('alias', {}) if 'alias' in alias_info else alias_info
-             ctx_size = alias_config.get('ctx_size')
-             if ctx_size:
-                  return ContextSizeResponse(context_size=int(ctx_size))
+        if not alias_info:
+            for k, val in model_aliases.items():
+                v_dict = val.get('alias', val) if isinstance(val, dict) else {}
+                if k == name or v_dict.get('title') == name or v_dict.get('name') == name:
+                    alias_info = val
+                    break
 
+        if alias_info:
+            alias_config = alias_info.get('alias', {}) if isinstance(alias_info, dict) and 'alias' in alias_info else (alias_info if isinstance(alias_info, dict) else {})
+            ctx_size = alias_config.get('forced_context_size') or alias_config.get('ctx_size')
+            if ctx_size and int(ctx_size) > 1:
+                return ContextSizeResponse(context_size=int(ctx_size))
+
+    # 3. Check user preference
+    if getattr(user, 'llm_ctx_size', None) and int(user.llm_ctx_size) > 1:
+        return ContextSizeResponse(context_size=int(user.llm_ctx_size))
+
+    # 4. Engine probe fallback
     def _get_ctx_size():
         lc = build_lollms_client_from_params(user.username, alias, name, load_llm=True)
         context_size = lc.get_ctx_size(name)
-        return ContextSizeResponse(context_size=context_size if context_size else lc.llm.default_ctx_size)
+        return ContextSizeResponse(context_size=context_size if context_size else getattr(lc.llm, 'default_ctx_size', 4096))
 
     return await loop.run_in_executor(executor, _get_ctx_size)
 

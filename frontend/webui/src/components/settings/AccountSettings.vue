@@ -7,6 +7,17 @@ import apiClient from '../../services/api';
 import UserAvatar from '../ui/Cards/UserAvatar.vue';
 import IconEye from '../../assets/icons/IconEye.vue';
 import IconEyeOff from '../../assets/icons/IconEyeOff.vue';
+import IconSparkles from '../../assets/icons/IconSparkles.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+
+// Chart components for personal stats
+import { Line, Doughnut } from 'vue-chartjs';
+import {
+  Chart as ChartJS, Title, Tooltip, Legend, LineElement, BarElement, ArcElement, CategoryScale, LinearScale, PointElement, TimeScale, Filler
+} from 'chart.js';
+import 'chartjs-adapter-date-fns';
+
+ChartJS.register(Title, Tooltip, Legend, LineElement, BarElement, ArcElement, CategoryScale, LinearScale, PointElement, TimeScale, Filler);
 
 const authStore = useAuthStore();
 const uiStore = useUiStore();
@@ -38,6 +49,142 @@ const showNewPassword = ref(false);
 const isUploadingIcon = ref(false);
 const fileInput = ref(null);
 
+// Personal Telemetry & Usage State
+const personalStats = ref(null);
+const isLoadingPersonalStats = ref(false);
+const statsRangeDays = ref(30);
+
+async function fetchPersonalStats() {
+    isLoadingPersonalStats.value = true;
+    try {
+        const res = await apiClient.get('/api/users/me/stats', {
+            params: { days: statsRangeDays.value }
+        });
+        personalStats.value = res.data;
+    } catch (e) {
+        console.error("Failed to load personal stats:", e);
+    } finally {
+        isLoadingPersonalStats.value = false;
+    }
+}
+
+// Interactive curve toggles for personal chart
+const personalCurves = ref({
+    total: true,
+    webui: true,
+    api: true
+});
+
+const personalChartData = computed(() => {
+    if (!personalStats.value) return { labels: [], datasets: [] };
+    const datasets = [];
+
+    const allDates = [
+        ...(personalStats.value.tokens_per_day || []).map(t => t.date),
+        ...(personalStats.value.messages_per_day || []).map(t => t.date)
+    ];
+    const uniqueDates = Array.from(new Set(allDates)).sort();
+
+    if (personalCurves.value.total) {
+        const tokens = personalStats.value.tokens_per_day || [];
+        datasets.push({
+            label: 'Total Tokens',
+            data: tokens.map(t => ({ x: t.date, y: t.count })),
+            borderColor: '#10B981',
+            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+            fill: true,
+            tension: 0.2,
+            pointRadius: 3
+        });
+    }
+
+    if (personalCurves.value.webui) {
+        const webuiToks = personalStats.value.webui_tokens_per_day || [];
+        datasets.push({
+            label: 'WebUI Tokens',
+            data: webuiToks.map(t => ({ x: t.date, y: t.count })),
+            borderColor: '#3B82F6',
+            fill: false,
+            tension: 0.2,
+            pointRadius: 3
+        });
+    }
+
+    if (personalCurves.value.api) {
+        const apiToks = personalStats.value.api_tokens_per_day || [];
+        datasets.push({
+            label: 'API Tokens',
+            data: apiToks.map(t => ({ x: t.date, y: t.count })),
+            borderColor: '#8B5CF6',
+            fill: false,
+            tension: 0.2,
+            pointRadius: 3
+        });
+    }
+
+    return {
+        labels: uniqueDates,
+        datasets
+    };
+});
+
+const personalChartOptions = computed(() => ({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+        legend: { display: false },
+        tooltip: { mode: 'index', intersect: false }
+    },
+    scales: {
+        x: {
+            type: 'time',
+            time: { unit: 'day', tooltipFormat: 'MMM d, yyyy' },
+            grid: { color: uiStore.currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' },
+            ticks: { color: uiStore.currentTheme === 'dark' ? '#cbd5e1' : '#4b5563' }
+        },
+        y: {
+            beginAtZero: true,
+            grid: { color: uiStore.currentTheme === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)' },
+            ticks: { color: uiStore.currentTheme === 'dark' ? '#cbd5e1' : '#4b5563' }
+        }
+    }
+}));
+
+const personalSourceDoughnutData = computed(() => {
+    const sb = personalStats.value?.source_breakdown;
+    const webui = sb?.webui_tokens || 0;
+    const api = sb?.api_tokens || 0;
+
+    return {
+        labels: ['WebUI Chat', 'API Tokens'],
+        datasets: [{
+            data: [webui, api],
+            backgroundColor: ['#3B82F6', '#8B5CF6'],
+            borderWidth: 0
+        }]
+    };
+});
+
+const personalSourceDoughnutOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '70%',
+    plugins: {
+        legend: { display: false },
+        tooltip: {
+            callbacks: {
+                label: function(context) {
+                    const label = context.label || '';
+                    const val = context.raw || 0;
+                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                    const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+                    return ` ${label}: ${val.toLocaleString()} tokens (${pct}%)`;
+                }
+            }
+        }
+    }
+};
+
 const isAdmin = computed(() => authStore.isAdmin);
 const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
 const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
@@ -55,7 +202,10 @@ function populateProfileForm() {
     }
 }
 
-onMounted(populateProfileForm);
+onMounted(() => {
+    populateProfileForm();
+    fetchPersonalStats();
+});
 
 watch(user, populateProfileForm, { deep: true });
 watch(profileForm, (newVal) => {
@@ -180,6 +330,130 @@ async function handleGenerateAvatar() {
 
 <template>
     <div v-if="user" class="space-y-10">
+        <!-- ── PERSONAL USAGE & ENVIRONMENTAL TELEMETRY SECTION ── -->
+        <div class="bg-white dark:bg-gray-800 shadow-md rounded-3xl border border-gray-100 dark:border-gray-700/80 p-6 space-y-6">
+            <div class="flex items-center justify-between flex-wrap gap-4 border-b dark:border-gray-700 pb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-2xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold">
+                        <IconSparkles class="w-5 h-5" />
+                    </div>
+                    <div>
+                        <h2 class="text-xl font-black text-gray-900 dark:text-white">Your AI Usage & Eco Footprint</h2>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">Track your personal token volume, compute energy, and estimated carbon impact.</p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-1 bg-gray-100 dark:bg-gray-900/60 p-1 rounded-xl text-xs font-bold">
+                    <button @click="statsRangeDays = 7; fetchPersonalStats();" class="px-3 py-1 rounded-lg transition-all" :class="statsRangeDays === 7 ? 'bg-white dark:bg-gray-700 text-purple-600 shadow-xs' : 'text-gray-500'">7D</button>
+                    <button @click="statsRangeDays = 30; fetchPersonalStats();" class="px-3 py-1 rounded-lg transition-all" :class="statsRangeDays === 30 ? 'bg-white dark:bg-gray-700 text-purple-600 shadow-xs' : 'text-gray-500'">30D</button>
+                    <button @click="statsRangeDays = 90; fetchPersonalStats();" class="px-3 py-1 rounded-lg transition-all" :class="statsRangeDays === 90 ? 'bg-white dark:bg-gray-700 text-purple-600 shadow-xs' : 'text-gray-500'">90D</button>
+                </div>
+            </div>
+
+            <!-- Metric Cards Grid -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border dark:border-gray-700">
+                    <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Total Sum Tokens</span>
+                    <p class="text-xl font-black font-mono text-purple-600 dark:text-purple-400 mt-1">
+                        {{ (personalStats?.total_tokens || 0).toLocaleString() }}
+                    </p>
+                    <p class="text-[10px] text-gray-400 mt-0.5">{{ personalStats?.total_prompt_tokens?.toLocaleString() || 0 }} in / {{ personalStats?.total_completion_tokens?.toLocaleString() || 0 }} out</p>
+                </div>
+
+                <div class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border dark:border-gray-700">
+                    <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Energy Used</span>
+                    <p class="text-xl font-black font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                        {{ personalStats?.total_energy_kwh ?? 0 }} <span class="text-xs font-normal text-gray-500">kWh</span>
+                    </p>
+                    <p class="text-[10px] text-gray-400 mt-0.5">GPU Compute draw</p>
+                </div>
+
+                <div class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border dark:border-gray-700">
+                    <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Estimated CO2</span>
+                    <p class="text-xl font-black font-mono text-teal-600 dark:text-teal-400 mt-1">
+                        {{ personalStats?.total_co2_g ?? 0 }} <span class="text-xs font-normal text-gray-500">g</span>
+                    </p>
+                    <p class="text-[10px] text-gray-400 mt-0.5">~{{ personalStats?.co2_equivalents?.car_km ?? 0 }} km in car</p>
+                </div>
+
+                <div class="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl border dark:border-gray-700">
+                    <span class="text-[10px] font-black uppercase text-gray-400 tracking-wider">Phone Charges</span>
+                    <p class="text-xl font-black font-mono text-blue-600 dark:text-blue-400 mt-1">
+                        {{ personalStats?.co2_equivalents?.smartphone_charges ?? 0 }}
+                    </p>
+                    <p class="text-[10px] text-gray-400 mt-0.5">Charge cycles</p>
+                </div>
+            </div>
+
+            <!-- WebUI vs. API Source Ratio Breakdown Section -->
+            <div class="p-5 bg-gray-50/70 dark:bg-gray-900/40 rounded-2xl border dark:border-gray-700/80">
+                <div class="flex items-center justify-between border-b dark:border-gray-700 pb-3 mb-4">
+                    <span class="text-xs font-black uppercase tracking-wider text-gray-700 dark:text-gray-300">Consumption Channels & Ratio</span>
+                    <span class="text-xs font-mono text-gray-400">WebUI {{ personalStats?.source_breakdown?.webui_ratio || 0 }}% / API {{ personalStats?.source_breakdown?.api_ratio || 0 }}%</span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 items-center">
+                    <div class="h-36 relative flex items-center justify-center">
+                        <Doughnut :data="personalSourceDoughnutData" :options="personalSourceDoughnutOptions" />
+                        <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
+                            <span class="text-[8px] font-bold uppercase text-gray-400">Ratio</span>
+                            <span class="text-xs font-bold font-mono">{{ personalStats?.source_breakdown?.webui_ratio || 0 }}% / {{ personalStats?.source_breakdown?.api_ratio || 0 }}%</span>
+                        </div>
+                    </div>
+
+                    <div class="sm:col-span-2 grid grid-cols-2 gap-3">
+                        <div class="p-3 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
+                            <div class="flex items-center gap-1.5 text-xs font-bold text-blue-600">
+                                <span class="w-2.5 h-2.5 rounded-full bg-blue-500"></span>
+                                WebUI Chat
+                            </div>
+                            <p class="text-lg font-black font-mono mt-1">{{ (personalStats?.source_breakdown?.webui_tokens || 0).toLocaleString() }} <span class="text-[10px] font-normal text-gray-400">tokens</span></p>
+                            <p class="text-[10px] text-gray-400">{{ personalStats?.source_breakdown?.webui_requests || 0 }} messages</p>
+                        </div>
+
+                        <div class="p-3 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700">
+                            <div class="flex items-center gap-1.5 text-xs font-bold text-purple-600">
+                                <span class="w-2.5 h-2.5 rounded-full bg-purple-500"></span>
+                                API Calls
+                            </div>
+                            <p class="text-lg font-black font-mono mt-1">{{ (personalStats?.source_breakdown?.api_tokens || 0).toLocaleString() }} <span class="text-[10px] font-normal text-gray-400">tokens</span></p>
+                            <p class="text-[10px] text-gray-400">{{ personalStats?.source_breakdown?.api_requests || 0 }} requests</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Usage Plot with Curve Selector -->
+            <div class="space-y-3 pt-2">
+                <div class="flex items-center justify-between flex-wrap gap-2 text-xs">
+                    <div class="flex items-center gap-3 select-none">
+                        <label class="flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400 cursor-pointer">
+                            <input type="checkbox" v-model="personalCurves.total" class="rounded text-emerald-600 w-3.5 h-3.5">
+                            <span>Total</span>
+                        </label>
+                        <label class="flex items-center gap-1 font-bold text-blue-600 dark:text-blue-400 cursor-pointer">
+                            <input type="checkbox" v-model="personalCurves.webui" class="rounded text-blue-600 w-3.5 h-3.5">
+                            <span>WebUI</span>
+                        </label>
+                        <label class="flex items-center gap-1 font-bold text-purple-600 dark:text-purple-400 cursor-pointer">
+                            <input type="checkbox" v-model="personalCurves.api" class="rounded text-purple-600 w-3.5 h-3.5">
+                            <span>API</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="h-64">
+                    <div v-if="isLoadingPersonalStats" class="h-full flex items-center justify-center">
+                        <IconAnimateSpin class="w-8 h-8 text-purple-500 animate-spin" />
+                    </div>
+                    <div v-else-if="!personalStats || personalStats.tokens_per_day.length === 0" class="h-full flex flex-col items-center justify-center text-center p-4 border-2 border-dashed rounded-2xl border-gray-200 dark:border-gray-700">
+                        <p class="text-xs text-gray-400">No token activity recorded in the selected time range.</p>
+                    </div>
+                    <Line v-else :data="personalChartData" :options="personalChartOptions" />
+                </div>
+            </div>
+        </div>
+
         <!-- User Profile Section -->
         <div class="bg-white dark:bg-gray-800 shadow-md rounded-lg">
             <div class="p-4 sm:p-6">

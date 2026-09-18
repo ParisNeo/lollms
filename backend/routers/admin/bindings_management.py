@@ -357,30 +357,35 @@ async def get_all_universal_profiles(
     active_bindings = db.query(binding_cls).filter(binding_cls.is_active == True).all()
 
     for binding in active_bindings:
-        # Check live server connectivity and detected engine models
+        # Check live server connectivity and detected engine models without heavy weight allocation
         is_online = True
         raw_models = []
         try:
-            config = _get_effective_config(binding)
-            service = _get_binding_instance(modality, binding.name, config)
-            if service and hasattr(service, 'list_models'):
-                raw_list = service.list_models() or []
-                for r in raw_list:
-                    mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
-                    if mid:
-                        raw_models.append(mid)
-            elif service is None:
-                if "mock" in binding.name.lower() or "test" in binding.name.lower():
-                    is_online = True
-                    raw_models = [binding.default_model_name] if binding.default_model_name else []
-                else:
-                    is_online = False
+            if modality == "llm":
+                from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
+                raw_list = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config or {})
+                if isinstance(raw_list, list):
+                    for r in raw_list:
+                        mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                        if mid: raw_models.append(mid)
+            elif modality == "tti":
+                from lollms_client.lollms_tti_binding import list_binding_models as list_tti_binding_models
+                raw_list = list_tti_binding_models(tti_binding_name=binding.name, tti_binding_config=binding.config or {})
+                if isinstance(raw_list, list):
+                    for r in raw_list:
+                        mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                        if mid: raw_models.append(mid)
+
+            if not raw_models and binding.name != 'smart_router':
+                config = _get_effective_config(binding)
+                service = _get_binding_instance(modality, binding.name, config)
+                if service and hasattr(service, 'list_models'):
+                    raw_list = service.list_models() or []
+                    for r in raw_list:
+                        mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                        if mid: raw_models.append(mid)
         except Exception:
-            if "mock" in binding.name.lower() or "test" in binding.name.lower():
-                is_online = True
-                raw_models = [binding.default_model_name] if binding.default_model_name else []
-            else:
-                is_online = False
+            pass
 
         aliases = binding.model_aliases or {}
         if isinstance(aliases, str):
@@ -393,8 +398,8 @@ async def get_all_universal_profiles(
             cfg = alias_data.get("alias", {}) if "alias" in alias_data else alias_data
             target_model = cfg.get("model_name") or orig_name
 
-            # Health check: Binding server must be online, and target model must exist on that server
-            if not is_online:
+            # Health check: Only mark unavailable if server returned an explicit model list and model is missing
+            if not binding.is_active:
                 is_available = False
             elif raw_models and target_model not in raw_models and binding.name != 'smart_router':
                 is_available = False

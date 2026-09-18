@@ -45,6 +45,7 @@ from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.files import extract_text_from_file_bytes 
 from backend.utils import track_service_usage, check_rate_limit, get_system_cache, set_system_cache
+from backend.db.models.generation_metric import record_generation_metric
 
 # --- Router Definition ---
 openai_v1_router = APIRouter(prefix="/v1")
@@ -1381,6 +1382,18 @@ async def chat_completions(
             if reasoning_content:
                 reasoning_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(reasoning_content))
 
+            # Record generation telemetry
+            record_generation_metric(
+                db=db,
+                user_id=user.id,
+                username=user.username,
+                model_name=request.model,
+                binding_name=binding_alias,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                source="openai_v1"
+            )
+
             return ChatCompletionResponse(
                 id=f"chatcmpl-{uuid.uuid4().hex}",
                 model=request.model,
@@ -1809,22 +1822,39 @@ async def get_model_context_size(
 ):
     binding_alias, model_name = resolve_model_name(db, request.model)
     loop = asyncio.get_running_loop()
-    
-    # 1. Check alias configuration for context size override (forced by admin)
+
+    # 1. Check global forced context size
+    force_mode = settings.get("force_model_mode", "disabled")
+    if force_mode == "force_always" and settings.get("force_context_size"):
+        return ContextSizeResponse(context_size=int(settings.get("force_context_size")))
+
+    # 2. Check profile alias configuration
     binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
     if binding:
         model_aliases = binding.model_aliases or {}
         if isinstance(model_aliases, str):
-            try: model_aliases = json.loads(model_aliases)
-            except: model_aliases = {}
-        
+            try:
+                model_aliases = json.loads(model_aliases)
+            except Exception:
+                model_aliases = {}
+
         alias_info = model_aliases.get(model_name)
-        # If alias exists and has a context size set, use it preferentially
+        if not alias_info:
+            for k, val in model_aliases.items():
+                v_dict = val.get('alias', val) if isinstance(val, dict) else {}
+                if k == model_name or v_dict.get('title') == model_name or v_dict.get('name') == model_name:
+                    alias_info = val
+                    break
+
         if alias_info:
-             alias_config = alias_info.get('alias', {}) if 'alias' in alias_info else alias_info
-             ctx_size = alias_config.get('ctx_size')
-             if ctx_size:
-                  return ContextSizeResponse(context_size=int(ctx_size))
+            alias_config = alias_info.get('alias', {}) if isinstance(alias_info, dict) and 'alias' in alias_info else (alias_info if isinstance(alias_info, dict) else {})
+            ctx_size = alias_config.get('forced_context_size') or alias_config.get('ctx_size')
+            if ctx_size and int(ctx_size) > 1:
+                return ContextSizeResponse(context_size=int(ctx_size))
+
+    # 3. Check user preference
+    if getattr(user, 'llm_ctx_size', None) and int(user.llm_ctx_size) > 1:
+        return ContextSizeResponse(context_size=int(user.llm_ctx_size))
 
     try:
         lc = await loop.run_in_executor(
@@ -1837,7 +1867,7 @@ async def get_model_context_size(
             )
         )
         ctx_size = await loop.run_in_executor(executor, lambda: lc.get_ctx_size(model_name))
-        return ContextSizeResponse(context_size=ctx_size or lc.llm.default_ctx_size)
+        return ContextSizeResponse(context_size=ctx_size or getattr(lc.llm, 'default_ctx_size', 4096))
     except HTTPException as e:
         raise e
     except Exception as e:

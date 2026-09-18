@@ -24,6 +24,7 @@ from backend.session import (
 )
 from backend.settings import settings
 from backend.utils import track_service_usage, check_rate_limit
+from backend.db.models.generation_metric import record_generation_metric
 from lollms_client import MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
 from backend.routers.services.openai_v1 import (
@@ -211,4 +212,14 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
         prompt_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(str(openai_messages)))
         completion_tokens = await loop.run_in_executor(executor, lambda: lc.count_tokens(res_content))
         
+        record_generation_metric(
+            db=db,
+            user_id=user.id,
+            username=user.username,
+            model_name=request.model,
+            binding_name=binding_alias,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            source="ollama_v1"
+        )
         return ChatCompletionResponse(model=request.model, choices=[ChatCompletionResponseChoice(index=0, message=ChatMessage(role="assistant", content=content, tool_calls=tool_calls), finish_reason="tool_calls" if tool_calls else "stop")], usage=UsageInfo(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens, total_tokens=prompt_tokens + completion_tokens))

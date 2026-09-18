@@ -52,19 +52,44 @@ def build_context_router(router: APIRouter):
                 except Exception:
                     pass
 
-            # Ensure discussion max_context_size is healthy (> 1)
-            if not getattr(discussion, 'max_context_size', None) or discussion.max_context_size <= 1:
-                if getattr(discussion, 'lollms_client', None):
-                    try:
-                        ctx = discussion.lollms_client.get_ctx_size()
-                        if ctx and int(ctx) > 1:
-                            discussion.max_context_size = int(ctx)
-                    except Exception:
-                        pass
-                if not getattr(discussion, 'max_context_size', None) or discussion.max_context_size <= 1:
-                    cfg_ctx = getattr(discussion.lollms_client, 'llm_binding_config', {}).get('ctx_size') if getattr(discussion, 'lollms_client', None) else None
-                    discussion.max_context_size = int(cfg_ctx) if cfg_ctx and int(cfg_ctx) > 1 else 4096
+            # Resolve authoritative context size from profile/user/binding settings
+            resolved_ctx = None
+            lc = getattr(discussion, 'lollms_client', None)
 
+            if lc:
+                profiles = getattr(lc, 'llm_model_profiles', {})
+                if isinstance(profiles, dict):
+                    for p in profiles.values():
+                        if isinstance(p, dict) and p.get('is_default'):
+                            p_ctx = p.get('forced_context_size') or p.get('ctx_size')
+                            if p_ctx and int(p_ctx) > 1:
+                                resolved_ctx = int(p_ctx)
+                                break
+                    if not resolved_ctx and profiles:
+                        first_p = next(iter(profiles.values()), {})
+                        if isinstance(first_p, dict):
+                            p_ctx = first_p.get('forced_context_size') or first_p.get('ctx_size')
+                            if p_ctx and int(p_ctx) > 1:
+                                resolved_ctx = int(p_ctx)
+
+                if not resolved_ctx:
+                    cfg_ctx = getattr(lc, 'llm_binding_config', {}).get('ctx_size')
+                    if cfg_ctx and int(cfg_ctx) > 1:
+                        resolved_ctx = int(cfg_ctx)
+
+            if not resolved_ctx and getattr(current_user, 'llm_ctx_size', None):
+                if int(current_user.llm_ctx_size) > 1:
+                    resolved_ctx = int(current_user.llm_ctx_size)
+
+            if not resolved_ctx and lc:
+                try:
+                    ctx = lc.get_ctx_size()
+                    if ctx and int(ctx) > 1:
+                        resolved_ctx = int(ctx)
+                except Exception:
+                    pass
+
+            discussion.max_context_size = resolved_ctx or 4096
             status = discussion.get_context_status()
 
             # Guard against status returning max_tokens <= 1

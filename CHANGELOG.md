@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-18 17:14]
+
+- backend/db/base.py: remove a stale cancelled entry (commented-out) from the `TaskStatus` enum.
+
 ## [2026-09-18 09:28]
 
 - fix(model_upgrade): update OpenAI v1 API module to implement new model profile fetching feature

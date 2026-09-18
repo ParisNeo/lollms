@@ -84,6 +84,7 @@ const isSmartRouter = computed(() => {
 const isTtiConfigured = computed(() => ttiBindings.value && ttiBindings.value.some(b => b.is_active));
 
 const isAutoCreating = ref(false);
+const modelsByBinding = ref({});
 
 async function handleAutoCreateProfiles() {
     const activeB = currentActiveBinding.value;
@@ -107,18 +108,32 @@ async function handleAutoCreateProfiles() {
 function isProfileModelMissing(item) {
     if (!item) return false;
     const prof = item.alias || item;
-    // Direct flags from backend live health verification
+
+    // 1. Explicit backend availability flag
     if (prof.is_available === false || prof.is_online === false) return true;
-    if (!prof.model_name && !item.original_model_name) return true;
-    if (isSmartRouter.value || prof.binding_name === 'smart_router') {
+
+    // 2. Missing target model name
+    const targetModel = prof.model_name || item.original_model_name;
+    if (!targetModel) return true;
+
+    // 3. Smart router pool check
+    if (prof.binding_name === 'smart_router' || item.binding_alias === 'smart_router') {
         const selected = prof.selected_model_profiles || [];
         return selected.length === 0;
     }
-    const targetModel = prof.model_name || item.original_model_name;
-    if (models.value && models.value.length > 0) {
-        const hasMatchingModel = models.value.some(m => (m.original_model_name || m) === targetModel);
-        if (!hasMatchingModel) return true;
+
+    // 4. Verify binding connection is active
+    const bAlias = item.binding_alias || prof.binding_alias;
+    if (bAlias && activeBindingList.value.length > 0) {
+        const bindingRecord = activeBindingList.value.find(b => b.alias === bAlias);
+        if (!bindingRecord || !bindingRecord.is_active) return true;
     }
+
+    // 5. Scoped check: Only compare against models of the profile's OWN binding
+    if (bAlias && modelsByBinding.value[bAlias] && modelsByBinding.value[bAlias].length > 0) {
+        return !modelsByBinding.value[bAlias].some(m => (m.original_model_name || m.name || m) === targetModel);
+    }
+
     return false;
 }
 
@@ -408,7 +423,11 @@ async function fetchModels() {
             case 'rag': res = await adminStore.fetchRagBindingModels(targetBinding.id); break;
             default: res = [];
         }
-        models.value = Array.isArray(res) ? res : [];
+        const modelList = Array.isArray(res) ? res : [];
+        models.value = modelList;
+        if (targetBinding.alias) {
+            modelsByBinding.value[targetBinding.alias] = modelList;
+        }
     } catch (e) {
         models.value = [];
     } finally {

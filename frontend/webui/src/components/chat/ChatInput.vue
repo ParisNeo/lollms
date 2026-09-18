@@ -252,15 +252,17 @@ const canEnableHerd = computed(() => {
 
 const showContextBar = computed(() => user.value?.show_token_counter && activeDiscussionContextStatus.value);
 const maxTokens = computed(() => {
+    const activeModel = dataStore.availableLLMModelsGrouped?.flatMap(g => g.items)?.find(m => m.id === user.value?.lollms_model_name);
+    const modelCtx = activeModel?.forced_context_size || activeModel?.ctx_size || activeModel?.alias?.forced_context_size || activeModel?.alias?.ctx_size || user.value?.llm_ctx_size;
+    if (modelCtx && Number(modelCtx) > 1) {
+        return Number(modelCtx);
+    }
+
     const rawMax = activeDiscussionContextStatus.value?.max_tokens;
     if (rawMax && Number(rawMax) > 1) {
         return Number(rawMax);
     }
-    const activeModel = dataStore.availableLLMModelsGrouped?.flatMap(g => g.items)?.find(m => m.id === user.value?.lollms_model_name);
-    const modelCtx = activeModel?.forced_context_size || activeModel?.ctx_size;
-    if (modelCtx && Number(modelCtx) > 1) {
-        return Number(modelCtx);
-    }
+
     return 4096;
 });
 

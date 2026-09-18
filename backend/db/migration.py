@@ -1415,6 +1415,62 @@ def run_schema_migrations_and_bootstrap(connection, inspector):
         Note.__table__.create(connection)
         connection.commit()    
 
+    if not inspector.has_table("generation_metrics"):
+        from backend.db.models.generation_metric import GenerationMetric
+        GenerationMetric.__table__.create(connection)
+        connection.commit()
+
+    # Backfill historical WebUI assistant messages into generation_metrics if table is empty
+    try:
+        metric_count = connection.execute(text("SELECT COUNT(id) FROM generation_metrics")).scalar() or 0
+        if metric_count == 0:
+            from backend.db.models.generation_metric import KWH_PER_TOKEN, CO2_G_PER_KWH
+            users_root = APP_DATA_DIR / USERS_DIR_NAME
+            if users_root.exists():
+                user_records = connection.execute(text("SELECT id, username FROM users")).fetchall()
+                user_id_map = {row[1]: row[0] for row in user_records}
+                for u_dir in users_root.iterdir():
+                    if u_dir.is_dir():
+                        d_db = u_dir / "discussions.db"
+                        if d_db.exists():
+                            try:
+                                import sqlite3
+                                u_name = u_dir.name
+                                u_id = user_id_map.get(u_name)
+                                conn_disc = sqlite3.connect(str(d_db))
+                                cur = conn_disc.cursor()
+                                cur.execute("SELECT model_name, binding_name, tokens, created_at, content FROM messages WHERE sender_type = 'assistant'")
+                                rows = cur.fetchall()
+                                conn_disc.close()
+                                for m_row in rows:
+                                    m_name = m_row[0] or "glm-4-flash"
+                                    b_name = m_row[1] or "chat"
+                                    toks = m_row[2] or (len(m_row[4]) // 4 if m_row[4] else 50)
+                                    c_at = m_row[3] or datetime.now().isoformat()
+                                    if toks > 0:
+                                        kwh = toks * KWH_PER_TOKEN
+                                        co2 = kwh * CO2_G_PER_KWH
+                                        connection.execute(text("""
+                                            INSERT INTO generation_metrics (user_id, username, model_name, binding_name, prompt_tokens, completion_tokens, total_tokens, energy_kwh, co2_g, source, created_at)
+                                            VALUES (:u_id, :u_name, :m_name, :b_name, :p_toks, :c_toks, :tot_toks, :kwh, :co2, 'chat', :c_at)
+                                        """), {
+                                            "u_id": u_id,
+                                            "u_name": u_name,
+                                            "m_name": m_name,
+                                            "b_name": b_name,
+                                            "p_toks": toks // 3,
+                                            "c_toks": toks,
+                                            "tot_toks": toks + (toks // 3),
+                                            "kwh": kwh,
+                                            "co2": co2,
+                                            "c_at": c_at
+                                        })
+                                connection.commit()
+                            except Exception:
+                                pass
+    except Exception:
+        pass
+
     if not inspector.has_table("skills"):
         from backend.db.models.skill import Skill
         Skill.__table__.create(connection)

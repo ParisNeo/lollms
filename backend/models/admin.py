@@ -305,14 +305,51 @@ class UserActivityStat(BaseModel):
     date: datetime.date
     count: int
 
+class SourceConsumptionBreakdown(BaseModel):
+    webui_tokens: int = 0
+    api_tokens: int = 0
+    total_tokens: int = 0
+    webui_requests: int = 0
+    api_requests: int = 0
+    total_requests: int = 0
+    webui_ratio: float = 0.0
+    api_ratio: float = 0.0
+    webui_energy_kwh: float = 0.0
+    api_energy_kwh: float = 0.0
+    webui_co2_g: float = 0.0
+    api_co2_g: float = 0.0
+
 class UserStats(BaseModel):
     tasks_per_day: List[UserActivityStat]
     messages_per_day: List[UserActivityStat]
+    tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    webui_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    api_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    total_tokens: int = 0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_energy_kwh: float = 0.0
+    total_co2_g: float = 0.0
+    co2_equivalents: Dict[str, float] = Field(default_factory=dict)
+    top_models: List[Dict[str, Any]] = Field(default_factory=list)
+    source_breakdown: SourceConsumptionBreakdown = Field(default_factory=SourceConsumptionBreakdown)
 
 class GlobalGenerationStats(BaseModel):
-    generations_per_day: List[UserActivityStat]
-    mean_per_weekday: Dict[str, float]
-    variance_per_weekday: Dict[str, float]
+    generations_per_day: List[UserActivityStat] = Field(default_factory=list)
+    tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    webui_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    api_tokens_per_day: List[UserActivityStat] = Field(default_factory=list)
+    webui_generations_per_day: List[UserActivityStat] = Field(default_factory=list)
+    api_generations_per_day: List[UserActivityStat] = Field(default_factory=list)
+    mean_per_weekday: Dict[str, float] = Field(default_factory=dict)
+    variance_per_weekday: Dict[str, float] = Field(default_factory=dict)
+    total_tokens: int = 0
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    total_energy_kwh: float = 0.0
+    total_co2_g: float = 0.0
+    co2_equivalents: Dict[str, float] = Field(default_factory=dict)
+    source_breakdown: SourceConsumptionBreakdown = Field(default_factory=SourceConsumptionBreakdown)
 
 class UserForAdminPanel(BaseModel):
     model_config = ConfigDict(from_attributes=True)

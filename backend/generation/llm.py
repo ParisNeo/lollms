@@ -45,6 +45,7 @@ from ascii_colors import ASCIIColors, trace_exception
 from backend.config import APP_VERSION, SERVER_CONFIG
 from backend.db import get_db
 from backend.db.models.config import TTIBinding as DBTTIBinding
+from backend.db.models.generation_metric import record_generation_metric
 from backend.db.models.db_task import DBTask, ScheduledTask
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.discussion import SharedDiscussionLink as DBSharedDiscussionLink
@@ -2125,6 +2126,19 @@ def build_llm_generation_router(router: APIRouter):
                         lib_events = ai_msg.metadata.get('events', [])
                         combined_events = all_events + lib_events
                         ai_msg.set_metadata_item('events', combined_events, discussion_obj)
+
+                        # Record generation metric in telemetry store
+                        estimated_prompt_tokens = len(final_prompt) // 4 if final_prompt else 0
+                        record_generation_metric(
+                            db=None,
+                            user_id=owner_db_user.id if owner_db_user else current_user.id,
+                            username=owner_username or current_user.username,
+                            model_name=ai_msg.model_name or current_user.lollms_model_name or "unknown",
+                            binding_name=ai_msg.binding_name or binding_alias,
+                            prompt_tokens=estimated_prompt_tokens,
+                            completion_tokens=ai_msg.tokens or 0,
+                            source="chat"
+                        )
 
                         # Merge sources from:
                         # 1. result["sources"] (pre-hydrated RAG sources)

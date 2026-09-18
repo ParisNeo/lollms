@@ -257,6 +257,8 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    from backend.db.models.generation_metric import GenerationMetric, calculate_co2_equivalents, KWH_PER_TOKEN, CO2_G_PER_KWH
+
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
 
     task_stats_raw = db.query(
@@ -270,29 +272,119 @@ async def get_user_stats(user_id: int, db: Session = Depends(get_db)):
     ).all()
     task_stats = [UserActivityStat(date=date, count=count) for date, count in task_stats_raw]
 
-    message_stats = []
-    try:
-        user_discussions_db_path = get_user_data_root(user.username) / "discussions.db"
-        if user_discussions_db_path.exists():
-            dm = LollmsDataManager(db_path=f"sqlite:///{user_discussions_db_path.resolve()}")
-            session = dm.get_session()
-            try:
-                message_stats_raw = session.query(
-                    func.date(dm.MessageModel.created_at),
-                    func.count(dm.MessageModel.id)
-                ).filter(
-                    dm.MessageModel.sender_type == 'assistant',
-                    dm.MessageModel.created_at >= thirty_days_ago
-                ).group_by(
-                    func.date(dm.MessageModel.created_at)
-                ).all()
-                message_stats = [UserActivityStat(date=date, count=count) for date, count in message_stats_raw]
-            finally:
-                session.close()
-    except Exception as e:
-        trace_exception(e)
+    # Metrics Telemetry
+    metrics = db.query(
+        func.date(GenerationMetric.created_at).label('metric_date'),
+        func.count(GenerationMetric.id).label('gen_count'),
+        func.sum(GenerationMetric.total_tokens).label('tok_count'),
+        func.sum(GenerationMetric.prompt_tokens).label('p_tok'),
+        func.sum(GenerationMetric.completion_tokens).label('c_tok')
+    ).filter(
+        GenerationMetric.user_id == user_id,
+        GenerationMetric.created_at >= thirty_days_ago
+    ).group_by(func.date(GenerationMetric.created_at)).all()
 
-    return UserStats(tasks_per_day=task_stats, messages_per_day=message_stats)
+    daily_msgs = defaultdict(int)
+    daily_tokens = defaultdict(int)
+    total_tokens = 0
+    total_prompt = 0
+    total_comp = 0
+
+    for date_str, count, tokens, p_tok, c_tok in metrics:
+        if date_str:
+            d_str = str(date_str)
+            daily_msgs[d_str] = count or 0
+            daily_tokens[d_str] = tokens or 0
+            total_tokens += (tokens or 0)
+            total_prompt += (p_tok or 0)
+            total_comp += (c_tok or 0)
+
+    top_models_raw = db.query(
+        GenerationMetric.model_name,
+        func.sum(GenerationMetric.total_tokens).label('tok_sum'),
+        func.count(GenerationMetric.id).label('usage_count')
+    ).filter(
+        GenerationMetric.user_id == user_id
+    ).group_by(GenerationMetric.model_name).order_by(desc('tok_sum')).limit(5).all()
+
+    top_models = [
+        {"model_name": row[0] or "unknown", "total_tokens": row[1] or 0, "count": row[2] or 0}
+        for row in top_models_raw
+    ]
+
+    message_stats = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
+        for d_str, c in sorted(daily_msgs.items())
+    ]
+    tokens_per_day = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=c)
+        for d_str, c in sorted(daily_tokens.items())
+    ]
+
+    source_rows = db.query(
+        GenerationMetric.source,
+        func.count(GenerationMetric.id).label('req_count'),
+        func.sum(GenerationMetric.total_tokens).label('tot_tok')
+    ).filter(
+        GenerationMetric.user_id == user_id,
+        GenerationMetric.created_at >= thirty_days_ago
+    ).group_by(GenerationMetric.source).all()
+
+    webui_tokens = 0
+    api_tokens = 0
+    webui_reqs = 0
+    api_reqs = 0
+
+    for src, req_c, tok_c in source_rows:
+        t = tok_c or 0
+        r = req_c or 0
+        if src == "chat":
+            webui_tokens += t
+            webui_reqs += r
+        else:
+            api_tokens += t
+            api_reqs += r
+
+    total_reqs = webui_reqs + api_reqs
+    sum_tokens = webui_tokens + api_tokens if (webui_tokens + api_tokens) > 0 else total_tokens
+
+    webui_ratio = round((webui_tokens / sum_tokens * 100.0), 1) if sum_tokens > 0 else 0.0
+    api_ratio = round((api_tokens / sum_tokens * 100.0), 1) if sum_tokens > 0 else 0.0
+
+    from backend.models.admin import SourceConsumptionBreakdown
+
+    source_breakdown = SourceConsumptionBreakdown(
+        webui_tokens=webui_tokens,
+        api_tokens=api_tokens,
+        total_tokens=sum_tokens,
+        webui_requests=webui_reqs,
+        api_requests=api_reqs,
+        total_requests=total_reqs,
+        webui_ratio=webui_ratio,
+        api_ratio=api_ratio,
+        webui_energy_kwh=round(webui_tokens * KWH_PER_TOKEN, 4),
+        api_energy_kwh=round(api_tokens * KWH_PER_TOKEN, 4),
+        webui_co2_g=round(webui_tokens * KWH_PER_TOKEN * CO2_G_PER_KWH, 2),
+        api_co2_g=round(api_tokens * KWH_PER_TOKEN * CO2_G_PER_KWH, 2)
+    )
+
+    energy_kwh = sum_tokens * KWH_PER_TOKEN
+    co2_g = energy_kwh * CO2_G_PER_KWH
+    equivalents = calculate_co2_equivalents(co2_g)
+
+    return UserStats(
+        tasks_per_day=task_stats,
+        messages_per_day=message_stats,
+        tokens_per_day=tokens_per_day,
+        total_tokens=sum_tokens,
+        total_prompt_tokens=total_prompt,
+        total_completion_tokens=total_comp,
+        total_energy_kwh=round(energy_kwh, 4),
+        total_co2_g=round(co2_g, 2),
+        co2_equivalents=equivalents,
+        top_models=top_models,
+        source_breakdown=source_breakdown
+    )
 
 @user_management_router.put("/users/{user_id}", response_model=UserPublic)
 async def admin_update_user(user_id: int, update_data: AdminUserUpdate, db: Session = Depends(get_db), current_admin: UserAuthDetails = Depends(get_current_admin_user)):

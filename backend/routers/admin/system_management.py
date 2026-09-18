@@ -85,6 +85,12 @@ class KillProcessRequest(BaseModel):
 class ModelUsageStat(BaseModel):
     model_name: str
     count: int
+    total_tokens: int = 0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    energy_kwh: float = 0.0
+    co2_g: float = 0.0
+    percentage: float = 0.0
 
 class LogEntry(BaseModel):
     task_id: str
@@ -305,11 +311,44 @@ async def kill_process(payload: KillProcessRequest, current_user: UserAuthDetail
 
 @system_management_router.get("/model-usage-stats", response_model=List[ModelUsageStat])
 async def get_model_usage_stats(db: Session = Depends(get_db)):
-    results = db.query(DBUser.lollms_model_name, func.count(DBUser.id)).group_by(DBUser.lollms_model_name).all()
+    from backend.db.models.generation_metric import GenerationMetric, KWH_PER_TOKEN, CO2_G_PER_KWH
+
+    metric_rows = db.query(
+        GenerationMetric.model_name,
+        func.count(GenerationMetric.id).label('req_count'),
+        func.sum(GenerationMetric.total_tokens).label('total_tok'),
+        func.sum(GenerationMetric.prompt_tokens).label('prompt_tok'),
+        func.sum(GenerationMetric.completion_tokens).label('comp_tok')
+    ).group_by(GenerationMetric.model_name).all()
+
+    overall_tokens = sum((row[2] or 0) for row in metric_rows)
+
     stats = []
-    for model_name, count in results:
-        stats.append(ModelUsageStat(model_name=model_name or "Not Set", count=count))
-    return sorted(stats, key=lambda x: x.count, reverse=True)
+    if metric_rows:
+        for model_name, req_count, total_tok, prompt_tok, comp_tok in metric_rows:
+            tot = total_tok or 0
+            p_tok = prompt_tok or 0
+            c_tok = comp_tok or 0
+            kwh = tot * KWH_PER_TOKEN
+            co2 = kwh * CO2_G_PER_KWH
+            pct = round((tot / overall_tokens * 100.0), 1) if overall_tokens > 0 else 0.0
+
+            stats.append(ModelUsageStat(
+                model_name=model_name or "unknown",
+                count=req_count or 0,
+                total_tokens=tot,
+                prompt_tokens=p_tok,
+                completion_tokens=c_tok,
+                energy_kwh=round(kwh, 4),
+                co2_g=round(co2, 2),
+                percentage=pct
+            ))
+    else:
+        user_rows = db.query(DBUser.lollms_model_name, func.count(DBUser.id)).group_by(DBUser.lollms_model_name).all()
+        for model_name, count in user_rows:
+            stats.append(ModelUsageStat(model_name=model_name or "Default", count=count))
+
+    return sorted(stats, key=lambda x: x.total_tokens if x.total_tokens > 0 else x.count, reverse=True)
 
 @system_management_router.get("/server-info", response_model=ServerInfo)
 async def get_server_info(request: Request, db: Session = Depends(get_db)):
@@ -371,36 +410,92 @@ async def purge_temp_files(current_admin: UserAuthDetails = Depends(get_current_
 
 @system_management_router.get("/global-generation-stats", response_model=GlobalGenerationStats)
 def get_global_generation_stats(db: Session = Depends(get_db)):
-    all_users = db.query(DBUser).all()
+    from backend.db.models.generation_metric import GenerationMetric, calculate_co2_equivalents, KWH_PER_TOKEN, CO2_G_PER_KWH
+
     thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
-    
+
+    # 1. Query real telemetry records partitioned by date and source
+    metrics_query = db.query(
+        func.date(GenerationMetric.created_at).label('metric_date'),
+        GenerationMetric.source,
+        func.count(GenerationMetric.id).label('gen_count'),
+        func.sum(GenerationMetric.total_tokens).label('tok_count'),
+        func.sum(GenerationMetric.prompt_tokens).label('p_tok'),
+        func.sum(GenerationMetric.completion_tokens).label('c_tok')
+    ).filter(
+        GenerationMetric.created_at >= thirty_days_ago
+    ).group_by(func.date(GenerationMetric.created_at), GenerationMetric.source).all()
+
+    all_dates = set()
     daily_totals = defaultdict(int)
+    daily_webui_gens = defaultdict(int)
+    daily_api_gens = defaultdict(int)
 
-    for user in all_users:
-        discussions_db_path = get_user_data_root(user.username) / "discussions.db"
-        if discussions_db_path.exists():
-            try:
-                dm = LollmsDataManager(db_path=f"sqlite:///{discussions_db_path.resolve()}")
-                with dm.get_session() as session:
-                    results = session.query(
-                        func.date(dm.MessageModel.created_at),
-                        func.count(dm.MessageModel.id)
-                    ).filter(
-                        dm.MessageModel.sender_type == 'assistant',
-                        dm.MessageModel.created_at >= thirty_days_ago
-                    ).group_by(func.date(dm.MessageModel.created_at)).all()
+    tokens_per_day_dict = defaultdict(int)
+    webui_tokens_per_day_dict = defaultdict(int)
+    api_tokens_per_day_dict = defaultdict(int)
 
-                    for date_str, count in results:
-                        daily_totals[date_str] += count
-            except Exception as e:
-                trace_exception(e)
-                print(f"Warning: Could not process discussions DB for user {user.username}: {e}")
+    total_tokens = 0
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    webui_tokens_total = 0
+    api_tokens_total = 0
+    webui_reqs_total = 0
+    api_reqs_total = 0
+
+    for date_str, src, count, tokens, p_tok, c_tok in metrics_query:
+        if date_str:
+            d_str = str(date_str)
+            all_dates.add(d_str)
+            cnt = count or 0
+            tok = tokens or 0
+            p = p_tok or 0
+            c = c_tok or 0
+
+            daily_totals[d_str] += cnt
+            tokens_per_day_dict[d_str] += tok
+            total_tokens += tok
+            total_prompt_tokens += p
+            total_completion_tokens += c
+
+            if src == "chat":
+                daily_webui_gens[d_str] += cnt
+                webui_tokens_per_day_dict[d_str] += tok
+                webui_tokens_total += tok
+                webui_reqs_total += cnt
+            else:
+                daily_api_gens[d_str] += cnt
+                api_tokens_per_day_dict[d_str] += tok
+                api_tokens_total += tok
+                api_reqs_total += cnt
+
+    # Ensure zero values exist for aligned dates across all datasets
+    sorted_date_strings = sorted(list(all_dates))
 
     generations_per_day_list = [
-        UserActivityStat(date=datetime.strptime(date_str, '%Y-%m-%d').date(), count=count)
-        for date_str, count in daily_totals.items()
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=daily_totals[d_str])
+        for d_str in sorted_date_strings
     ]
-    generations_per_day_list.sort(key=lambda x: x.date)
+    tokens_per_day_list = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=tokens_per_day_dict[d_str])
+        for d_str in sorted_date_strings
+    ]
+    webui_tokens_per_day_list = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=webui_tokens_per_day_dict[d_str])
+        for d_str in sorted_date_strings
+    ]
+    api_tokens_per_day_list = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=api_tokens_per_day_dict[d_str])
+        for d_str in sorted_date_strings
+    ]
+    webui_generations_per_day_list = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=daily_webui_gens[d_str])
+        for d_str in sorted_date_strings
+    ]
+    api_generations_per_day_list = [
+        UserActivityStat(date=datetime.strptime(d_str, '%Y-%m-%d').date(), count=daily_api_gens[d_str])
+        for d_str in sorted_date_strings
+    ]
 
     weekday_data = defaultdict(list)
     for stat in generations_per_day_list:
@@ -418,11 +513,55 @@ def get_global_generation_stats(db: Session = Depends(get_db)):
         else:
             mean_per_weekday[day_name] = 0.0
             variance_per_weekday[day_name] = 0.0
-            
+
+    sum_tokens = webui_tokens_total + api_tokens_total if (webui_tokens_total + api_tokens_total) > 0 else total_tokens
+    total_reqs = webui_reqs_total + api_reqs_total
+
+    webui_ratio = round((webui_tokens_total / sum_tokens * 100.0), 1) if sum_tokens > 0 else 0.0
+    api_ratio = round((api_tokens_total / sum_tokens * 100.0), 1) if sum_tokens > 0 else 0.0
+
+    webui_energy = webui_tokens_total * KWH_PER_TOKEN
+    api_energy = api_tokens_total * KWH_PER_TOKEN
+    webui_co2 = webui_energy * CO2_G_PER_KWH
+    api_co2 = api_energy * CO2_G_PER_KWH
+
+    from backend.models.admin import SourceConsumptionBreakdown
+
+    source_breakdown = SourceConsumptionBreakdown(
+        webui_tokens=webui_tokens_total,
+        api_tokens=api_tokens_total,
+        total_tokens=sum_tokens,
+        webui_requests=webui_reqs_total,
+        api_requests=api_reqs_total,
+        total_requests=total_reqs,
+        webui_ratio=webui_ratio,
+        api_ratio=api_ratio,
+        webui_energy_kwh=round(webui_energy, 4),
+        api_energy_kwh=round(api_energy, 4),
+        webui_co2_g=round(webui_co2, 2),
+        api_co2_g=round(api_co2, 2)
+    )
+
+    total_energy_kwh = sum_tokens * KWH_PER_TOKEN
+    total_co2_g = total_energy_kwh * CO2_G_PER_KWH
+    co2_equivalents = calculate_co2_equivalents(total_co2_g)
+
     return GlobalGenerationStats(
         generations_per_day=generations_per_day_list,
+        tokens_per_day=tokens_per_day_list,
+        webui_tokens_per_day=webui_tokens_per_day_list,
+        api_tokens_per_day=api_tokens_per_day_list,
+        webui_generations_per_day=webui_generations_per_day_list,
+        api_generations_per_day=api_generations_per_day_list,
         mean_per_weekday=mean_per_weekday,
-        variance_per_weekday=variance_per_weekday
+        variance_per_weekday=variance_per_weekday,
+        total_tokens=sum_tokens,
+        total_prompt_tokens=total_prompt_tokens,
+        total_completion_tokens=total_completion_tokens,
+        total_energy_kwh=round(total_energy_kwh, 4),
+        total_co2_g=round(total_co2_g, 2),
+        co2_equivalents=co2_equivalents,
+        source_breakdown=source_breakdown
     )
 
 @system_management_router.post("/backup/create", response_model=TaskInfo, status_code=202)

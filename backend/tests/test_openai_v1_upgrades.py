@@ -108,6 +108,23 @@ def test_auto_create_profiles_endpoint():
     res_data = response.json()
     assert "total_profiles" in res_data
 
+def test_user_personal_stats_endpoint():
+    client = TestClient(app)
+    response = client.get("/api/users/me/stats")
+    assert response.status_code == 200
+    data = response.json()
+    assert "total_tokens" in data
+    assert "total_energy_kwh" in data
+    assert "total_co2_g" in data
+    assert "co2_equivalents" in data
+    assert "source_breakdown" in data
+    assert "webui_tokens" in data["source_breakdown"]
+    assert "api_tokens" in data["source_breakdown"]
+    assert "webui_ratio" in data["source_breakdown"]
+    assert "api_ratio" in data["source_breakdown"]
+    assert "webui_tokens_per_day" in data
+    assert "api_tokens_per_day" in data
+
 def test_chat_completions_structured_output_json_schema():
     client = TestClient(app)
 

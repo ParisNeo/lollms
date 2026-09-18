@@ -63,28 +63,38 @@ def get_user_discussion(
     
     # Priority-based Context Size Resolution via Universal Profile Architecture
     max_context_size = None
-    try:
-        if hasattr(lc, 'get_ctx_size'):
-            ctx = lc.get_ctx_size()
-            if ctx and int(ctx) > 1:
-                max_context_size = int(ctx)
-    except Exception:
-        pass
 
+    # 1. Check active profiles on client
+    profiles = getattr(lc, 'llm_model_profiles', {})
+    if isinstance(profiles, dict):
+        for p in profiles.values():
+            if isinstance(p, dict) and p.get('is_default'):
+                p_ctx = p.get('forced_context_size') or p.get('ctx_size')
+                if p_ctx and int(p_ctx) > 1:
+                    max_context_size = int(p_ctx)
+                    break
+        if not max_context_size and profiles:
+            first_p = next(iter(profiles.values()), {})
+            if isinstance(first_p, dict):
+                p_ctx = first_p.get('forced_context_size') or first_p.get('ctx_size')
+                if p_ctx and int(p_ctx) > 1:
+                    max_context_size = int(p_ctx)
+
+    # 2. Check binding config
     if not max_context_size or max_context_size <= 1:
         cfg_ctx = getattr(lc, 'llm_binding_config', {}).get('ctx_size')
         if cfg_ctx and int(cfg_ctx) > 1:
             max_context_size = int(cfg_ctx)
 
+    # 3. Check engine live probe
     if not max_context_size or max_context_size <= 1:
-        profiles = getattr(lc, 'llm_model_profiles', {})
-        if isinstance(profiles, dict):
-            for p in profiles.values():
-                if isinstance(p, dict) and p.get('is_default'):
-                    p_ctx = p.get('forced_context_size') or p.get('ctx_size')
-                    if p_ctx and int(p_ctx) > 1:
-                        max_context_size = int(p_ctx)
-                        break
+        try:
+            if hasattr(lc, 'get_ctx_size'):
+                ctx = lc.get_ctx_size()
+                if ctx and int(ctx) > 1:
+                    max_context_size = int(ctx)
+        except Exception:
+            pass
 
     if not max_context_size or max_context_size <= 1:
         max_context_size = 4096
