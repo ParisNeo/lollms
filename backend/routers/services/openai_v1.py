@@ -35,7 +35,11 @@ from backend.db.models.config import (
 from backend.db.models.voice import UserVoice as DBUserVoice
 from backend.db.models.personality import Personality as DBPersonality
 from backend.security import verify_api_key
-from backend.session import user_sessions, build_lollms_client_from_params, get_user_data_root, find_model_by_alias, resolve_model_name, invalidate_model_cache
+from backend.session import (
+    user_sessions, build_lollms_client_from_params, get_user_data_root, 
+    find_model_by_alias, resolve_model_name, invalidate_model_cache,
+    _build_universal_profiles_for_modality
+)
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
 from ascii_colors import ASCIIColors, trace_exception
@@ -803,70 +807,93 @@ async def list_models(
 
     # 1. Try DB Cache first (unless forced)
     if not force_refresh:
-        # Wrap DB query or cache lookup to keep event loop free
         loop = asyncio.get_running_loop()
         cached = await loop.run_in_executor(executor, lambda: get_system_cache(db, "cache_available_models"))
-        if cached:
-            ASCIIColors.success("Returning cached model list.")
-            return {"object": "list", "data": cached}
+        if cached and isinstance(cached, list):
+            formatted_cached = []
+            for item in cached:
+                if isinstance(item, dict) and item.get("id"):
+                    formatted_cached.append({
+                        "id": item["id"],
+                        "name": item.get("name") or item["id"],
+                        "object": "model",
+                        "created": item.get("created") or int(time.time()),
+                        "owned_by": item.get("owned_by") or (item["id"].split("/")[0] if "/" in item["id"] else "lollms")
+                    })
+            if formatted_cached:
+                ASCIIColors.success("Returning cached model list.")
+                return {"object": "list", "data": formatted_cached}
 
     loop = asyncio.get_running_loop()
 
     def _fetch_models():
         """
-        Queries available models from active bindings.
-        Enforces 'load_llm=False' to fetch available metadata names instantly
-        without compiling or mounting heavy model weights into GPU/VRAM.
+        Queries available LLM profiles from active bindings and database.
+        Returns a list of OpenAI-compatible model objects.
         """
         all_models = []
+        created_time = int(time.time())
+
+        # 1. Build authoritative Universal LLM Profiles from active bindings
+        try:
+            _, model_profiles, _ = _build_universal_profiles_for_modality(
+                db=db,
+                binding_model_cls=DBLLMBinding,
+                active_binding_alias=None,
+                active_model_name=None,
+                user_overrides={}
+            )
+        except Exception as e:
+            ASCIIColors.warning(f"Error building universal profiles: {e}")
+            model_profiles = {}
+
+        # 2. Add all model profiles to all_models
+        for prof_id, prof_info in model_profiles.items():
+            title = prof_info.get("title") or prof_info.get("name") or prof_id
+            binding_alias = prof_info.get("binding_profile_name", "lollms")
+
+            all_models.append({
+                "id": prof_id,
+                "name": title,
+                "object": "model",
+                "created": created_time,
+                "owned_by": binding_alias
+            })
+
+            # If title is distinct from prof_id, also expose title alias as a model ID
+            # so clients requesting either "binding/model" or "Profile Title" succeed
+            if title and title != prof_id and not any(m["id"] == title for m in all_models):
+                all_models.append({
+                    "id": title,
+                    "name": title,
+                    "object": "model",
+                    "created": created_time,
+                    "owned_by": binding_alias
+                })
+
+        # 3. Also check for raw models from active bindings that might not have an explicit profile yet
         active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-        model_display_mode = settings.get("model_display_mode", "mixed")
-
         for binding in active_bindings:
-            try:
-                # CRITICAL: We pass load_llm=False here. 
-                # This queries model paths on disk or lightweight remote API lists without triggering heavy load allocations.
-                lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=False)
-                models = lc.list_models()
+            if binding.name != 'smart_router' and binding.alias != 'smart_router':
+                try:
+                    from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
+                    raw_models = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config)
+                    if isinstance(raw_models, list):
+                        for item in raw_models:
+                            m_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
+                            if m_id:
+                                full_raw_id = f"{binding.alias}/{m_id}"
+                                if not any(m["id"] == full_raw_id for m in all_models):
+                                    all_models.append({
+                                        "id": full_raw_id,
+                                        "name": full_raw_id,
+                                        "object": "model",
+                                        "created": created_time,
+                                        "owned_by": binding.alias
+                                    })
+                except Exception:
+                    pass
 
-                model_aliases = binding.model_aliases or {}
-                if isinstance(model_aliases, str):
-                    try:
-                        model_aliases = json.loads(model_aliases)
-                    except Exception:
-                        model_aliases = {}
-
-                if isinstance(models, list):
-                    for item in models:
-                        model_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
-                        if not model_id:
-                            continue
-
-                        alias_data = model_aliases.get(model_id)
-                        internal_id = f"{binding.alias}/{model_id}"
-                        id_to_send = internal_id
-                        name_to_send = internal_id
-
-                        if model_display_mode == 'aliased':
-                            if not alias_data: continue
-                            if alias_data.get('title'):
-                                id_to_send = alias_data.get('title')
-                                name_to_send = alias_data.get('title')
-                        elif model_display_mode == 'mixed':
-                            if alias_data and alias_data.get('title'):
-                                id_to_send = alias_data.get('title')
-                                name_to_send = f"{alias_data.get('title')} ({model_id})"
-
-                        all_models.append({
-                            "id": id_to_send,
-                            "name": name_to_send,
-                            "object": "model",
-                            "created": int(time.time()),
-                            "owned_by": "lollms"
-                        })
-            except Exception as e:
-                print(f"Could not fetch models from binding '{binding.alias}' for user '{user.username}': {e}")
-                continue
         return all_models
 
     all_models = await loop.run_in_executor(executor, _fetch_models)

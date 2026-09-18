@@ -227,9 +227,13 @@ watch(() => route.query.skillId, (newId) => {
                             <IconArrowDownTray class="w-3.5 h-3.5" />
                             <span class="hidden md:inline">Import</span>
                         </button>
-                        <button v-if="selectedSkillId" @click="handleExport('xml')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export XML">
+                        <button v-if="selectedSkillId" @click="handleExport('xml')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export as XML (.xml)">
                             <IconArrowUpTray class="w-3.5 h-3.5 text-blue-500" />
                             <span class="hidden md:inline">Export XML</span>
+                        </button>
+                        <button v-if="selectedSkillId" @click="handleExport('md')" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Export as Claude/LoLLMs Markdown (.md)">
+                            <IconArrowUpTray class="w-3.5 h-3.5 text-teal-500" />
+                            <span class="hidden md:inline">Export MD</span>
                         </button>
                         <button v-if="selectedSkillId" @click="injectSkillToDiscussion" class="btn btn-secondary btn-sm flex items-center gap-1.5" title="Bind to active chat">
                             <IconSparkles class="w-3.5 h-3.5 text-teal-500" />

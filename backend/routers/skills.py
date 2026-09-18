@@ -113,6 +113,7 @@ def create_skill(
     data = skill.model_dump()
     data.pop("is_system", None)
     data.pop("author", None)
+    data.pop("version", None)
     data.pop("owner_user_id", None)
 
     new_skill = DBSkill(
@@ -187,11 +188,17 @@ class ExportFormat(BaseModel):
 
 @skills_router.post("/{skill_id}/export")
 def export_skill(skill_id: str, payload: ExportFormat, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):
-    skill = db.query(DBSkill).filter(DBSkill.id == skill_id, DBSkill.owner_user_id == current_user.id).first()
+    skill = db.query(DBSkill).filter(
+        DBSkill.id == skill_id,
+        or_(DBSkill.owner_user_id == current_user.id, DBSkill.owner_user_id.is_(None))
+    ).first()
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    
-    if payload.format == 'xml':
+
+    safe_name = re.sub(r'[^\w\-_\. ]', '_', skill.name)
+    req_format = (payload.format or '').lower().strip()
+
+    if req_format == 'xml':
         root = ET.Element("skill", id=skill.id)
         ET.SubElement(root, "name").text = skill.name
         if skill.description:
@@ -200,34 +207,42 @@ def export_skill(skill_id: str, payload: ExportFormat, current_user: UserAuthDet
             ET.SubElement(root, "category").text = skill.category
         if skill.language:
             ET.SubElement(root, "language").text = skill.language
+        if skill.author:
+            ET.SubElement(root, "author").text = skill.author
+        if skill.version:
+            ET.SubElement(root, "version").text = str(skill.version)
         ET.SubElement(root, "timestamp").text = str(int(skill.updated_at.timestamp() * 1000)) if skill.updated_at else "0"
-        
+
         content_el = ET.SubElement(root, "content")
         content_el.text = f"<![CDATA[\n{skill.content}\n]]>"
-        
+
         xml_str = ET.tostring(root, encoding="utf-8").decode("utf-8")
         xml_str = xml_str.replace("&lt;![CDATA[", "<![CDATA[").replace("]]&gt;", "]]>")
-        
-        safe_name = re.sub(r'[^\w\-_\. ]', '_', skill.name)
+
         return Response(content=xml_str, media_type="application/xml", headers={"Content-Disposition": f'attachment; filename="skill_{safe_name}.xml"'})
-    
-    elif payload.format == 'claude':
-        frontmatter = {
-            "name": skill.name,
-            "version": "1.0.0",
-        }
-        if skill.description:
-            frontmatter["description"] = skill.description
-        if skill.category:
-            frontmatter["category"] = skill.category
-        
-        yaml_str = yaml.dump(frontmatter, sort_keys=False)
-        claude_str = f"---\n{yaml_str}---\n\n{skill.content}"
-        
-        safe_name = re.sub(r'[^\w\-_\. ]', '_', skill.name)
-        return Response(content=claude_str, media_type="text/markdown", headers={"Content-Disposition": f'attachment; filename="skill_{safe_name}.md"'})
+
+    elif req_format in ['claude', 'md', 'markdown']:
+        clean_content = (skill.content or '').strip()
+
+        # If content already starts with YAML frontmatter, export directly to avoid duplication
+        if clean_content.startswith("---"):
+            claude_str = clean_content
+        else:
+            frontmatter = {
+                "name": skill.name,
+                "version": str(skill.version or "1.0.0"),
+                "author": skill.author or "Community",
+                "description": skill.description or f"Skill: {skill.name}",
+            }
+            if skill.category:
+                frontmatter["category"] = skill.category
+
+            yaml_str = yaml.dump(frontmatter, sort_keys=False)
+            claude_str = f"---\n{yaml_str}---\n\n{clean_content}"
+
+        return Response(content=claude_str, media_type="text/markdown; charset=utf-8", headers={"Content-Disposition": f'attachment; filename="skill_{safe_name}.md"'})
     else:
-        raise HTTPException(status_code=400, detail="Unsupported format")
+        raise HTTPException(status_code=400, detail="Unsupported format. Supported formats are 'xml', 'md', and 'claude'.")
 
 @skills_router.post("/{skill_id}/share", status_code=status.HTTP_200_OK)
 async def share_skill(

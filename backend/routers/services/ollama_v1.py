@@ -18,7 +18,10 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.api_key import OpenAIAPIKey as DBAPIKey
 from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.security import verify_api_key
-from backend.session import user_sessions, build_lollms_client_from_params
+from backend.session import (
+    user_sessions, build_lollms_client_from_params,
+    _build_universal_profiles_for_modality
+)
 from backend.settings import settings
 from backend.utils import track_service_usage, check_rate_limit
 from lollms_client import MSG_TYPE
@@ -83,21 +86,42 @@ async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session
 
     def _list():
         all_models = []
-        active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-        display_mode = settings.get("model_display_mode", "mixed")
-        for binding in active_bindings:
-            try:
-                lc = build_lollms_client_from_params(user.username, binding_alias=binding.alias, load_llm=True)
-                models = lc.list_models()
-                aliases = json.loads(binding.model_aliases) if isinstance(binding.model_aliases, str) else (binding.model_aliases or {})
-                for m in models:
-                    m_id = m if isinstance(m, str) else (m.get("id") or m.get("model_name"))
-                    alias = aliases.get(m_id, {}).get("title")
-                    final_id = alias if (display_mode != 'original' and alias) else f"{binding.alias}/{m_id}"
-                    if display_mode == 'aliased' and not alias: continue
-                    all_models.append({"id": final_id, "name": final_id, "object": "model", "created": int(time.time()), "owned_by": "lollms"})
-            except: continue
-        return {"object": "list", "data": all_models}
+        created_time = int(time.time())
+
+        # Build authoritative Universal LLM Profiles from active bindings
+        try:
+            _, model_profiles, _ = _build_universal_profiles_for_modality(
+                db=db,
+                binding_model_cls=DBLLMBinding,
+                active_binding_alias=None,
+                active_model_name=None,
+                user_overrides={}
+            )
+        except Exception as e:
+            trace_exception(e)
+            model_profiles = {}
+
+        for prof_id, prof_info in model_profiles.items():
+            title = prof_info.get("title") or prof_info.get("name") or prof_id
+            binding_alias = prof_info.get("binding_profile_name", "lollms")
+            all_models.append({
+                "id": prof_id,
+                "name": title,
+                "object": "model",
+                "created": created_time,
+                "owned_by": binding_alias
+            })
+            if title and title != prof_id and not any(m["id"] == title for m in all_models):
+                all_models.append({
+                    "id": title,
+                    "name": title,
+                    "object": "model",
+                    "created": created_time,
+                    "owned_by": binding_alias
+                })
+
+        unique_models = {m["id"]: m for m in all_models}
+        return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
 
     return await loop.run_in_executor(executor, _list)
 

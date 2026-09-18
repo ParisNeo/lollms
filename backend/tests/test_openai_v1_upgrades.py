@@ -83,6 +83,24 @@ def setup_test_db():
     app.dependency_overrides.pop(get_db, None)
     app.dependency_overrides.pop(get_user_from_api_key, None)
 
+def test_list_models_returns_universal_profiles():
+    client = TestClient(app)
+    response = client.get("/v1/models")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["object"] == "list"
+    assert isinstance(data["data"], list)
+    assert len(data["data"]) > 0
+
+    model_ids = [m["id"] for m in data["data"]]
+    assert "test_llm/mock_model" in model_ids
+    assert "Mock Model 8B" in model_ids
+
+    for item in data["data"]:
+        assert item["object"] == "model"
+        assert "created" in item
+        assert "owned_by" in item
+
 def test_chat_completions_structured_output_json_schema():
     client = TestClient(app)
 

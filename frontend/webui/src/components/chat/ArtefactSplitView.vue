@@ -432,12 +432,12 @@ async function handleSave(forceType = null) {
     if (isLiveUpdating.value) return;
     isSaving.value = true;
     try {
+        const targetType = forceType || artefactGroup.value?.versions[0]?.artefact_type || 'document';
         await discussionsStore.updateArtefact({
             discussionId: discussionsStore.currentDiscussionId,
             artefactTitle: title.value,
             newContent: dbContent.value,
-            // Ensure we use the correct parameter for the store action
-            artefactType: forceType || undefined,
+            artefactType: targetType,
             updateInPlace: false
         });
 

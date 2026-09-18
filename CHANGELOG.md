@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-18 08:50]
+
+- fix(api): update service configurations for openai and ollama modules—fix API endpoints to support new prompts
+
 ## [2026-09-16 11:49]
 
 - feat(assets): remove obsolete front-end user interfaces (e.g., about-view assets)
