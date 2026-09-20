@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, defineAsyncComponent } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useAdminStore } from '../../../stores/admin';
+import { useDataStore } from '../../../stores/data';
 import { useUiStore } from '../../../stores/ui';
 import { useTasksStore } from '../../../stores/tasks';
 import { parsedMarkdown as parseMarkdown } from '../../../services/markdownParser';
@@ -13,12 +14,17 @@ import IconAnimateSpin from '../../../assets/icons/IconAnimateSpin.vue';
 import IconPlayCircle from '../../../assets/icons/IconPlayCircle.vue';
 import IconSparkles from '../../../assets/icons/IconSparkles.vue';
 import IconCpuChip from '../../../assets/icons/IconCpuChip.vue';
+import IconCheckCircle from '../../../assets/icons/IconCheckCircle.vue';
+import IconCopy from '../../../assets/icons/IconCopy.vue';
+import IconPlus from '../../../assets/icons/IconPlus.vue';
+import IconArrowDownTray from '../../../assets/icons/IconArrowDownTray.vue';
 import JsonRenderer from '../../ui/JsonRenderer.vue';
 
 const BindingModelsManager = defineAsyncComponent(() => import('./BindingModelsManager.vue'));
 const BindingZoo = defineAsyncComponent(() => import('./BindingZoo.vue'));
 
 const adminStore = useAdminStore();
+const dataStore = useDataStore();
 const uiStore = useUiStore();
 const tasksStore = useTasksStore();
 
@@ -41,6 +47,79 @@ const connectionRawModels = ref([]);
 const isLoadingConnectionModels = ref(false);
 const isAutoCreatingProfiles = ref(false);
 const connectionModelSearch = ref('');
+const selectedStyleFilter = ref('All');
+const copiedModel = ref(null);
+
+function detectModelStyle(rawName) {
+    const name = (rawName || '').toLowerCase();
+    if (name.includes('inpaint')) {
+        return { label: 'Inpainting', icon: '🖌️', badgeClass: 'bg-purple-100 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 border-purple-200 dark:border-purple-800' };
+    }
+    if (name.includes('anime') || name.includes('anything') || name.includes('counterfeit') || name.includes('abyss') || name.includes('sushi') || name.includes('waifu') || name.includes('manga') || name.includes('lora')) {
+        return { label: 'Anime / 2D', icon: '🎨', badgeClass: 'bg-pink-100 text-pink-700 dark:bg-pink-950/60 dark:text-pink-300 border-pink-200 dark:border-pink-800' };
+    }
+    if (name.includes('real') || name.includes('photo') || name.includes('epic') || name.includes('chillout') || name.includes('absolute') || name.includes('portrait')) {
+        return { label: 'Photoreal', icon: '📸', badgeClass: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800' };
+    }
+    if (name.includes('cartoon') || name.includes('disney') || name.includes('pixar') || name.includes('3d') || name.includes('render') || name.includes('cute')) {
+        return { label: '3D / Cartoon', icon: '🎭', badgeClass: 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border-amber-200 dark:border-amber-800' };
+    }
+    if (name.includes('xl') || name.includes('ccxl') || name.includes('sdxl')) {
+        return { label: 'SDXL', icon: '⚡', badgeClass: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800' };
+    }
+    return { label: 'Diffusion', icon: '✨', badgeClass: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800' };
+}
+
+function formatCleanTitle(rawName) {
+    if (!rawName) return 'Checkpoint';
+    let clean = String(rawName);
+    clean = clean.replace(/\.(safetensors|ckpt|pt|bin)$/i, '');
+    clean = clean.replace(/_[a-zA-Z0-9]{4,10}$/, '');
+    clean = clean.replace(/[_:-]+/g, ' ').trim();
+    return clean.replace(/\b\w/g, l => l.toUpperCase());
+}
+
+const aliasedModelNames = computed(() => {
+    let aliases = editingBinding.value?.model_aliases || {};
+    if (typeof aliases === 'string') {
+        try { aliases = json.loads(aliases); } catch { aliases = {}; }
+    }
+    const names = new Set(Object.keys(aliases));
+    for (const val of Object.values(aliases)) {
+        const v = typeof val === 'object' && val !== null ? (val.alias || val) : {};
+        if (v.model_name) names.add(v.model_name);
+    }
+    return names;
+});
+
+function isModelAliased(modelItem) {
+    const name = modelItem.original_model_name || modelItem.name || modelItem;
+    return aliasedModelNames.value.has(name);
+}
+
+function copyModelName(name) {
+    navigator.clipboard.writeText(name);
+    copiedModel.value = name;
+    uiStore.addNotification(`Copied checkpoint: ${name}`, 'success', 2000);
+    setTimeout(() => {
+        if (copiedModel.value === name) copiedModel.value = null;
+    }, 2000);
+}
+
+function switchToProfilesWithModel(modelName) {
+    hideForm();
+    primaryViewTab.value = 'profiles';
+}
+
+const styleCategoryCounts = computed(() => {
+    const counts = { All: connectionRawModels.value.length };
+    for (const m of connectionRawModels.value) {
+        const raw = m.original_model_name || m.name || m;
+        const style = detectModelStyle(raw).label;
+        counts[style] = (counts[style] || 0) + 1;
+    }
+    return counts;
+});
 
 async function handleAutoCreateProfilesForCurrent() {
     if (!editingBinding.value) return;
@@ -60,9 +139,16 @@ async function handleAutoCreateProfilesForCurrent() {
 }
 
 const filteredConnectionModels = computed(() => {
-    if (!connectionModelSearch.value) return connectionRawModels.value;
-    const q = connectionModelSearch.value.toLowerCase();
-    return connectionRawModels.value.filter(m => (m.original_model_name || m.name || m).toLowerCase().includes(q));
+    let list = connectionRawModels.value;
+    if (selectedStyleFilter.value !== 'All') {
+        list = list.filter(m => {
+            const raw = m.original_model_name || m.name || m;
+            return detectModelStyle(raw).label === selectedStyleFilter.value;
+        });
+    }
+    if (!connectionModelSearch.value.trim()) return list;
+    const q = connectionModelSearch.value.toLowerCase().trim();
+    return list.filter(m => (m.original_model_name || m.name || m).toLowerCase().includes(q));
 });
 
 async function fetchConnectionModels(bindingId) {
@@ -562,41 +648,192 @@ async function executeCommand(cmd, bindingId, params) {
 
             <!-- Detected Models Tab (Viewing the models list for this physical TTI connection) -->
             <div v-else-if="activeTab === 'raw_models'" class="space-y-4">
-                <div class="flex items-center justify-between gap-3 bg-gray-50 dark:bg-gray-900/50 p-4 rounded-xl border dark:border-gray-700">
-                    <div>
-                        <h4 class="font-bold text-sm text-gray-900 dark:text-white">Detected TTI Models on '{{ editingBinding.alias }}'</h4>
-                        <p class="text-xs text-gray-500">Raw diffusion models discovered on this connection.</p>
+                <!-- Header Control Banner -->
+                <div class="flex items-center justify-between gap-4 bg-gradient-to-r from-pink-50/70 via-purple-50/50 to-blue-50/50 dark:from-pink-950/20 dark:via-purple-950/20 dark:to-blue-950/20 p-4 rounded-2xl border border-pink-200/70 dark:border-pink-900/40 shadow-xs flex-wrap">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-600 text-white flex items-center justify-center shadow-md shadow-pink-500/20 shrink-0">
+                            <IconPhoto class="w-5 h-5" />
+                        </div>
+                        <div>
+                            <h4 class="font-black text-sm text-gray-900 dark:text-white flex items-center gap-2">
+                                <span>Detected Diffusion Checkpoints</span>
+                                <span class="px-2 py-0.5 rounded-full bg-pink-100 text-pink-700 dark:bg-pink-900/40 dark:text-pink-300 text-[10px] font-mono font-bold">
+                                    {{ connectionRawModels.length }} models
+                                </span>
+                            </h4>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                Checkpoint weights discovered on connection '{{ editingBinding.alias }}'.
+                            </p>
+                        </div>
                     </div>
                     <div class="flex items-center gap-2">
-                        <button @click="handleAutoCreateProfilesForCurrent" :disabled="isAutoCreatingProfiles" class="btn btn-primary btn-xs flex items-center gap-1.5 shadow-sm">
+                        <button @click="handleAutoCreateProfilesForCurrent" :disabled="isAutoCreatingProfiles || isLoadingConnectionModels" class="btn btn-primary btn-xs flex items-center gap-1.5 shadow-sm bg-gradient-to-r from-pink-600 to-purple-600 hover:from-pink-700 hover:to-purple-700 border-none text-white font-bold cursor-pointer">
                             <IconAnimateSpin v-if="isAutoCreatingProfiles" class="w-3.5 h-3.5 animate-spin" />
-                            <IconSparkles v-else class="w-3.5 h-3.5" />
-                            <span>Auto-Create Profiles for All Models</span>
+                            <IconSparkles v-else class="w-3.5 h-3.5 text-amber-300" />
+                            <span>Auto-Create Profiles for All</span>
                         </button>
-                        <button @click="fetchConnectionModels(editingBinding.id)" :disabled="isLoadingConnectionModels" class="btn btn-secondary btn-xs flex items-center gap-1">
-                            <IconArrowDownTray class="w-3.5 h-3.5" :class="{'animate-spin text-blue-500': isLoadingConnectionModels}" />
-                            <span>Probe Models</span>
+                        <button @click="fetchConnectionModels(editingBinding.id)" :disabled="isLoadingConnectionModels" class="btn btn-secondary btn-xs flex items-center gap-1.5 cursor-pointer">
+                            <IconArrowDownTray class="w-3.5 h-3.5 text-blue-500" :class="{'animate-spin': isLoadingConnectionModels}" />
+                            <span>Probe Again</span>
                         </button>
                     </div>
                 </div>
 
-                <div class="relative">
-                    <input type="text" v-model="connectionModelSearch" placeholder="Filter detected models..." class="input-field text-xs w-full" />
-                </div>
+                <!-- Search & Style Category Filters -->
+                <div class="space-y-2.5">
+                    <div class="relative">
+                        <input 
+                            type="text" 
+                            v-model="connectionModelSearch" 
+                            placeholder="Search diffusion models, checkpoints, safetensors..." 
+                            class="input-field text-xs w-full pl-9 py-2 rounded-xl" 
+                        />
+                        <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-gray-400">
+                            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                        </div>
+                    </div>
 
-                <div v-if="isLoadingConnectionModels" class="text-center py-12 text-xs text-gray-400">
-                    Probing TTI models...
-                </div>
-                <div v-else-if="filteredConnectionModels.length === 0" class="text-center py-12 text-xs text-gray-400 border-2 border-dashed rounded-xl">
-                    No models detected on this TTI connection.
-                </div>
-                <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1">
-                    <div v-for="m in filteredConnectionModels" :key="m.original_model_name || m.name || m" class="p-3 bg-gray-50 dark:bg-gray-800/80 rounded-xl border dark:border-gray-700 flex items-center justify-between gap-2">
-                        <p class="text-xs font-mono font-bold text-gray-800 dark:text-gray-200 truncate">{{ m.original_model_name || m.name || m }}</p>
+                    <!-- Category Pills -->
+                    <div v-if="connectionRawModels.length > 0 && !isLoadingConnectionModels" class="flex items-center gap-1.5 flex-wrap text-xs select-none">
+                        <button 
+                            v-for="(count, cat) in styleCategoryCounts" 
+                            :key="cat"
+                            @click="selectedStyleFilter = cat"
+                            class="px-2.5 py-1 rounded-xl font-bold text-[11px] transition-all cursor-pointer flex items-center gap-1 border"
+                            :class="selectedStyleFilter === cat ? 'bg-pink-600 text-white border-pink-600 shadow-xs' : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'"
+                        >
+                            <span>{{ cat }}</span>
+                            <span class="text-[9px] opacity-75 font-mono">({{ count }})</span>
+                        </button>
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-2 pt-2">
+                <!-- 1. ACTIVE PROBING ANIMATION (Diffusion Studio Scanner) -->
+                <div v-if="isLoadingConnectionModels" class="py-12 px-6 rounded-2xl bg-white/50 dark:bg-gray-850/50 border border-pink-100 dark:border-pink-900/30 text-center space-y-6">
+                    <div class="relative w-20 h-20 mx-auto flex items-center justify-center">
+                        <div class="absolute inset-0 rounded-3xl bg-pink-500/20 animate-ping"></div>
+                        <div class="absolute -inset-2 rounded-3xl bg-gradient-to-tr from-pink-500/20 via-purple-500/20 to-indigo-500/20 blur-md animate-pulse"></div>
+                        <div class="relative w-16 h-16 rounded-2xl bg-gradient-to-tr from-pink-500 to-purple-600 flex items-center justify-center text-white shadow-xl shadow-pink-500/30">
+                            <IconPhoto class="w-8 h-8 animate-pulse" />
+                        </div>
+                    </div>
+
+                    <div class="space-y-1.5 max-w-sm mx-auto">
+                        <h4 class="text-sm font-black text-gray-900 dark:text-white uppercase tracking-wider flex items-center justify-center gap-2">
+                            <IconAnimateSpin class="w-4 h-4 text-pink-500 animate-spin" />
+                            <span>Probing TTI Diffusion Checkpoints</span>
+                        </h4>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+                            Connecting to {{ editingBinding.alias }} to query local checkpoint files, safetensors, and remote diffusion vaults...
+                        </p>
+                    </div>
+
+                    <!-- Shimmering Skeleton Preview Cards Grid -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2 opacity-60">
+                        <div v-for="i in 6" :key="i" class="p-4 bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 space-y-2.5 animate-pulse">
+                            <div class="flex items-center justify-between">
+                                <div class="h-3 w-20 bg-gray-200 dark:bg-gray-700 rounded-md"></div>
+                                <div class="h-3 w-12 bg-gray-200 dark:bg-gray-700 rounded-md"></div>
+                            </div>
+                            <div class="h-4 w-3/4 bg-gray-200 dark:bg-gray-700 rounded-md"></div>
+                            <div class="h-2.5 w-full bg-gray-150 dark:bg-gray-750 rounded-md"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 2. EMPTY STATE -->
+                <div v-else-if="filteredConnectionModels.length === 0" class="text-center py-16 px-6 bg-white dark:bg-gray-800/60 border-2 border-dashed border-gray-200 dark:border-gray-700 rounded-2xl space-y-3">
+                    <div class="w-14 h-14 rounded-2xl bg-gray-100 dark:bg-gray-700 text-gray-400 flex items-center justify-center mx-auto">
+                        <IconPhoto class="w-7 h-7" />
+                    </div>
+                    <div class="space-y-1">
+                        <p class="text-sm font-bold text-gray-700 dark:text-gray-300">
+                            {{ connectionModelSearch ? 'No models match your filter' : 'No diffusion models discovered' }}
+                        </p>
+                        <p class="text-xs text-gray-400 max-w-sm mx-auto">
+                            Ensure the remote provider is running and API credentials or weights directories are correctly configured in Settings.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- 3. ENHANCED TTI MODEL CHECKPOINT CARDS -->
+                <div v-else class="space-y-2">
+                    <div class="flex items-center justify-between px-1 text-[11px] font-mono text-gray-400">
+                        <span>Showing {{ filteredConnectionModels.length }} of {{ connectionRawModels.length }} checkpoints</span>
+                        <span>Click + Profile to configure</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5 max-h-[55vh] overflow-y-auto custom-scrollbar pr-1 pb-2">
+                        <div 
+                            v-for="m in filteredConnectionModels" 
+                            :key="m.original_model_name || m.name || m" 
+                            class="p-4 bg-white dark:bg-gray-850 rounded-2xl border transition-all duration-200 hover:shadow-md hover:border-pink-400/80 dark:hover:border-pink-600/80 flex flex-col justify-between gap-3 group relative overflow-hidden"
+                            :class="isModelAliased(m) ? 'border-pink-300/80 dark:border-pink-900/50 shadow-2xs' : 'border-gray-200/80 dark:border-gray-700/80 shadow-xs'"
+                        >
+                            <div class="space-y-2">
+                                <!-- Card Header: Style Badge + Format Tag -->
+                                <div class="flex items-center justify-between gap-2">
+                                    <span 
+                                        class="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border flex items-center gap-1 shrink-0"
+                                        :class="detectModelStyle(m.original_model_name || m.name || m).badgeClass"
+                                    >
+                                        <span>{{ detectModelStyle(m.original_model_name || m.name || m).icon }}</span>
+                                        <span>{{ detectModelStyle(m.original_model_name || m.name || m).label }}</span>
+                                    </span>
+
+                                    <!-- Format pill -->
+                                    <span class="text-[9px] font-mono uppercase px-1.5 py-0.2 rounded bg-gray-100 dark:bg-gray-800 text-gray-400 font-bold">
+                                        {{ String(m.original_model_name || m.name || m).endsWith('.ckpt') ? 'CKPT' : 'SAFETENSORS' }}
+                                    </span>
+                                </div>
+
+                                <!-- Human-Readable Formatted Checkpoint Name -->
+                                <div>
+                                    <h5 class="text-xs font-black text-gray-900 dark:text-white leading-snug group-hover:text-pink-600 dark:group-hover:text-pink-400 transition-colors">
+                                        {{ formatCleanTitle(m.original_model_name || m.name || m) }}
+                                    </h5>
+                                </div>
+
+                                <!-- Raw Filename Pill with Copy Trigger -->
+                                <div 
+                                    @click="copyModelName(m.original_model_name || m.name || m)" 
+                                    class="p-2 rounded-xl bg-gray-50 dark:bg-gray-900/70 border dark:border-gray-800 flex items-center justify-between gap-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                                    title="Click to copy exact checkpoint filename"
+                                >
+                                    <p class="text-[10px] font-mono text-gray-500 dark:text-gray-400 truncate select-all">
+                                        {{ m.original_model_name || m.name || m }}
+                                    </p>
+                                    <div class="shrink-0 text-gray-400 hover:text-pink-500">
+                                        <IconCheckCircle v-if="copiedModel === (m.original_model_name || m.name || m)" class="w-3.5 h-3.5 text-emerald-500" />
+                                        <IconCopy v-else class="w-3.5 h-3.5" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Card Footer: Status & Action -->
+                            <div class="pt-2 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between gap-2">
+                                <span v-if="isModelAliased(m)" class="flex items-center gap-1 text-[10px] font-black uppercase text-emerald-600 dark:text-emerald-400 font-mono">
+                                    <IconCheckCircle class="w-3.5 h-3.5" />
+                                    <span>Profile Ready</span>
+                                </span>
+                                <span v-else class="text-[10px] font-mono text-gray-400">
+                                    Raw Checkpoint
+                                </span>
+
+                                <button 
+                                    @click="switchToProfilesWithModel(m.original_model_name || m.name || m)" 
+                                    class="btn btn-secondary btn-xs py-1 px-2.5 flex items-center gap-1 text-purple-600 dark:text-purple-400 hover:bg-purple-50 dark:hover:bg-purple-950/40 font-bold transition-all cursor-pointer"
+                                    title="Open Universal Profiles to configure this model"
+                                >
+                                    <IconSparkles class="w-3 h-3 text-purple-500" />
+                                    <span>+ Profile</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-2 border-t dark:border-gray-700/80">
                     <button type="button" @click="hideForm" class="btn btn-secondary text-xs">Close</button>
                 </div>
             </div>

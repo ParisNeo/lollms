@@ -589,9 +589,44 @@ async function handlePushToLibrary(type) {
     }
 }
 
+// AS-IS Native Binary File Detection
+const isAsIsFile = computed(() => {
+    const c = (dbContent.value || '').trim();
+    return c.startsWith('# As-Is File:') || c.includes('**Mode**: AS-IS') || artefactGroup.value?.versions[0]?.artefact_type === 'file';
+});
+
+const asIsMetadata = computed(() => {
+    if (!isAsIsFile.value) return null;
+    const c = dbContent.value || '';
+    const fnMatch = c.match(/\*\*Filename\*\*:\s*`?([^`\n]+)`?/i);
+    const fmtMatch = c.match(/\*\*Format\*\*:\s*([^\n]+)/i);
+    const sizeMatch = c.match(/\*\*Size\*\*:\s*([^\n]+)/i);
+    const locMatch = c.match(/\*\*Location\*\*:\s*`?([^`\n]+)`?/i);
+    return {
+        filename: fnMatch ? fnMatch[1].trim() : title.value,
+        format: fmtMatch ? fmtMatch[1].trim() : (title.value?.split('.').pop() || 'FILE').toUpperCase(),
+        size: sizeMatch ? sizeMatch[1].trim() : null,
+        location: locMatch ? locMatch[1].trim() : title.value
+    };
+});
+
 function download() {
+    if (!title.value) return;
+
+    // For AS-IS files or binary documents, download the raw physical binary bytes from the server!
+    if (isAsIsFile.value || artefactGroup.value?.versions[0]?.artefact_type === 'file') {
+        const downloadUrl = `/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(title.value)}/download`;
+        const a = document.createElement('a');
+        a.href = downloadUrl;
+        a.download = asIsMetadata.value?.filename || title.value;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        uiStore.addNotification(`Downloading native file: ${asIsMetadata.value?.filename || title.value}`, 'info');
+        return;
+    }
+
     if (!dbContent.value) return;
-    
     const blob = new Blob([dbContent.value], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -708,8 +743,8 @@ function download() {
                 <IconPlayCircle v-else class="w-4 h-4" />
             </button>
 
-            <button @click="download" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" title="Download Source">
-                <IconArrowDownTray class="w-4 h-4" />
+            <button @click="download" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" :title="isAsIsFile ? 'Download Native Binary File' : 'Download Source'">
+                <IconArrowDownTray class="w-4 h-4" :class="{'text-blue-500 font-bold': isAsIsFile}" />
             </button>
 
             <div class="h-6 w-px bg-gray-200 dark:bg-gray-700 mx-1"></div>
@@ -801,10 +836,47 @@ function download() {
                 <button @click="loadVersion(selectedVersion)" class="mt-4 btn btn-secondary btn-sm">Retry</button>
             </div>
 
-            <!-- Conditional Rendering: Interactive Data Grid or CodeMirror Editor -->
+            <!-- Conditional Rendering: Native AS-IS File Card, Interactive Data Grid, or CodeMirror Editor -->
             <template v-else>
+                <!-- AS-IS Native Binary File Card with Direct Download -->
+                <div v-if="isAsIsFile" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
+                    <div class="max-w-md w-full p-8 bg-white dark:bg-gray-850 rounded-3xl border border-gray-200/80 dark:border-gray-700 shadow-xl space-y-5 animate-in fade-in">
+                        <div class="w-20 h-20 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
+                            <IconFileText class="w-10 h-10" />
+                        </div>
+
+                        <div class="space-y-1">
+                            <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300 font-mono">
+                                {{ asIsMetadata?.format || 'NATIVE' }} FILE
+                            </span>
+                            <h3 class="text-base font-black text-gray-900 dark:text-white break-all">
+                                {{ asIsMetadata?.filename || title }}
+                            </h3>
+                            <p v-if="asIsMetadata?.size" class="text-xs font-mono text-gray-500 dark:text-gray-400">
+                                {{ asIsMetadata.size }}
+                            </p>
+                        </div>
+
+                        <div class="p-3 bg-gray-50 dark:bg-gray-900 rounded-xl text-left text-[11px] text-gray-600 dark:text-gray-400 space-y-1 border dark:border-gray-800">
+                            <p class="font-semibold text-gray-800 dark:text-gray-200">Preserved in workspace:</p>
+                            <p class="font-mono text-[10px] text-gray-500 break-all">{{ asIsMetadata?.location || title }}</p>
+                            <p class="text-[10px] italic text-gray-400 pt-1">The AI interacts directly with this native document using document tools without cluttering your context window.</p>
+                        </div>
+
+                        <!-- Direct Download Native File Action Button -->
+                        <button 
+                            type="button" 
+                            @click="download" 
+                            class="w-full btn btn-primary py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 text-xs font-bold uppercase tracking-wider cursor-pointer active:scale-98 transition-all"
+                        >
+                            <IconArrowDownTray class="w-4 h-4" />
+                            <span>Download Native File</span>
+                        </button>
+                    </div>
+                </div>
+
                 <InteractiveDataGrid 
-                    v-if="isDataArtifact"
+                    v-else-if="isDataArtifact"
                     :discussionId="discussionsStore.currentDiscussionId"
                     :title="title"
                     :version="selectedVersion"

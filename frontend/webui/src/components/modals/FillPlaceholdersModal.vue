@@ -3,7 +3,6 @@ import { ref, watch, computed } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import placeholderParser from '../../services/placeholderParser';
 import GenericModal from './GenericModal.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
 const uiStore = useUiStore();
@@ -63,34 +62,40 @@ function handleClose() {
 <template>
   <GenericModal
     modalName="fillPlaceholders"
-    title="Fill Prompt Placeholders"
-    maxWidthClass="max-w-2xl"
+    title="Configure Prompt Parameters"
+    maxWidthClass="max-w-3xl"
     @close="handleClose"
   >
     <template #body>
-      <div v-if="placeholders.length > 0" class="space-y-5 p-1">
-        <div class="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-xl border border-blue-200 dark:border-blue-800/60 text-xs text-blue-900 dark:text-blue-200">
-          <IconSparkles class="w-4 h-4 text-blue-500 shrink-0" />
-          <span>Complete the parameters below to configure your prompt values.</span>
+      <div v-if="placeholders.length > 0" class="space-y-4 p-1">
+        <div class="flex items-center gap-2.5 p-3.5 bg-blue-50/80 dark:bg-blue-950/40 rounded-2xl border border-blue-200/80 dark:border-blue-800/60 text-xs text-blue-900 dark:text-blue-200 shadow-2xs">
+          <IconSparkles class="w-4 h-4 text-blue-500 shrink-0 animate-pulse" />
+          <span>Fill in the prompt placeholders below to generate your customized prompt.</span>
         </div>
 
         <form @submit.prevent="handleSubmit" class="space-y-4">
-          <div v-for="placeholder in placeholders" :key="placeholder.name" class="space-y-1.5 p-3.5 bg-gray-50 dark:bg-gray-900/50 rounded-xl border border-gray-150 dark:border-gray-800">
-            <div class="flex justify-between items-baseline">
-              <label :for="`placeholder-${placeholder.name}`" class="block text-xs font-black uppercase tracking-wide text-gray-700 dark:text-gray-300">
+          <div 
+            v-for="placeholder in placeholders" 
+            :key="placeholder.name" 
+            class="space-y-2 p-4 bg-white dark:bg-gray-850 rounded-2xl border border-gray-200/80 dark:border-gray-700/80 shadow-xs transition-colors focus-within:border-blue-500/80 focus-within:ring-2 focus-within:ring-blue-500/10"
+          >
+            <div class="flex justify-between items-center">
+              <label :for="`placeholder-${placeholder.name}`" class="block text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-200">
                 {{ placeholder.title }}
               </label>
-              <span class="font-mono text-[10px] text-gray-400">@&lt;{{ placeholder.name }}&gt;@</span>
+              <span class="font-mono text-[10px] px-2 py-0.5 rounded-md bg-gray-100 dark:bg-gray-800 text-gray-400 font-bold">
+                @&lt;{{ placeholder.name }}&gt;@
+              </span>
             </div>
-            
-            <p v-if="placeholder.help" class="text-[11px] text-gray-500 dark:text-gray-400 italic mb-1">{{ placeholder.help }}</p>
+
+            <p v-if="placeholder.help" class="text-xs text-gray-500 dark:text-gray-400 italic">{{ placeholder.help }}</p>
 
             <!-- Dropdown Select -->
             <select
               v-if="placeholder.options && placeholder.options.length > 0"
               :id="`placeholder-${placeholder.name}`"
               v-model="formValues[placeholder.name]"
-              class="input-field text-xs w-full"
+              class="input-field text-xs w-full py-2"
             >
               <option v-for="option in placeholder.options" :key="option" :value="option">
                 {{ option }}
@@ -98,43 +103,47 @@ function handleClose() {
             </select>
 
             <!-- Checkbox for Boolean -->
-            <div v-else-if="placeholder.type === 'bool'" class="mt-2 flex items-center gap-2">
+            <div v-else-if="placeholder.type === 'bool'" class="py-1 flex items-center gap-2.5">
               <input
                 :id="`placeholder-${placeholder.name}`"
                 type="checkbox"
                 v-model="formValues[placeholder.name]"
-                class="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                class="h-4 w-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 cursor-pointer"
               />
-              <label :for="`placeholder-${placeholder.name}`" class="text-xs font-semibold text-gray-800 dark:text-gray-200 cursor-pointer">
-                Enable option
+              <label :for="`placeholder-${placeholder.name}`" class="text-xs font-bold text-gray-700 dark:text-gray-300 cursor-pointer">
+                Enabled
               </label>
             </div>
 
-            <!-- CodeMirror Editor for 'text' type -->
-            <div v-else-if="placeholder.type === 'text'" class="border dark:border-gray-700 rounded-xl overflow-hidden h-40">
-              <CodeMirrorEditor
+            <!-- Spacious, Clean Textarea for 'text' / multiline type -->
+            <div v-else-if="placeholder.type === 'text'" class="space-y-1">
+              <textarea
                 :id="`placeholder-${placeholder.name}`"
                 v-model="formValues[placeholder.name]"
-                class="h-full"
+                rows="5"
+                class="input-field w-full text-xs font-sans leading-relaxed resize-y p-3"
                 placeholder="Enter multiline text or paste content..."
-              />
+              ></textarea>
+              <div class="flex justify-end text-[10px] font-mono text-gray-400">
+                {{ (formValues[placeholder.name] || '').length }} characters
+              </div>
             </div>
 
-            <!-- Input for other types (str, int, float) -->
+            <!-- Single Line Input for other types (str, int, float) -->
             <input
               v-else
               :type="placeholder.type === 'int' || placeholder.type === 'float' ? 'number' : 'text'"
               :step="placeholder.type === 'float' ? 'any' : (placeholder.type === 'int' ? '1' : undefined)"
               :id="`placeholder-${placeholder.name}`"
               v-model="formValues[placeholder.name]"
-              class="input-field text-xs w-full"
+              class="input-field text-xs w-full py-2"
               :placeholder="`Enter ${placeholder.title.toLowerCase()}...`"
             />
           </div>
         </form>
       </div>
 
-      <div v-else class="text-center text-xs text-gray-500 py-6">
+      <div v-else class="text-center text-xs text-gray-400 py-8">
         No placeholders were found in this prompt.
       </div>
     </template>

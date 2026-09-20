@@ -32,20 +32,42 @@ const isResizing = ref(false);
 
 const isDataZoneExpanded = computed(() => uiStore.isDataZoneExpanded);
 const activeTab = computed({
-    get: () => uiStore.dataZoneTab,
-    set: (val) => uiStore.dataZoneTab = val
+    get: () => {
+        const tab = uiStore.dataZoneTab;
+        return tab === 'context' ? 'discussion' : tab;
+    },
+    set: (val) => {
+        uiStore.dataZoneTab = val;
+    }
 });
 
-const collapsed = ref({
-    discussion: false, 
-    personality: true,
-    memory: true
+// Title and Subtitle dynamically resolving per active tab
+const headerTitle = computed(() => {
+    switch (activeTab.value) {
+        case 'files': return 'Workspace Files';
+        case 'workspace': return 'Active Workspace';
+        case 'discussion': return 'Discussion Instructions';
+        case 'personality': return 'AI Logic & Persona';
+        case 'memory': return 'Long-Term Facts';
+        default: return 'Context Explorer';
+    }
+});
+
+const headerSubtitle = computed(() => {
+    switch (activeTab.value) {
+        case 'files': return 'Repository & Artefacts';
+        case 'workspace': return 'Project Editor';
+        case 'discussion': return 'Session Directives';
+        case 'personality': return 'Persona Directives';
+        case 'memory': return 'Cognitive Memory Bank';
+        default: return 'Intelligence Context';
+    }
 });
 
 // Automatically switch to Workspace tab when a file is selected
 watch(() => uiStore.activeSplitArtefactTitle, (newTitle) => {
     if (newTitle) {
-        activeTab.value = 'workspace';
+        uiStore.dataZoneTab = 'workspace';
     }
 }, { immediate: true });
 
@@ -83,43 +105,74 @@ onMounted(() => {
              class="absolute top-0 bottom-0 -left-1.5 w-3 cursor-col-resize z-20 hover:bg-blue-500/30 transition-colors" 
              v-if="!isDataZoneExpanded"></div>
 
-        <!-- Vertical Navigation Rail -->
-        <div class="w-14 shrink-0 border-r dark:border-gray-800 bg-gray-50/50 dark:bg-black flex flex-col items-center py-4 gap-4">
-            <button @click="activeTab = 'context'" 
-                    class="p-2.5 rounded-xl transition-all relative group"
-                    :class="activeTab === 'context' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'">
-                <IconDataZone class="w-6 h-6" />
-                <span class="absolute left-16 px-2 py-1 bg-gray-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">Context Zones</span>
-            </button>
-
+        <!-- Vertical Navigation Rail (5 Distinct First-Class Tabs, Zero Accordions) -->
+        <div class="w-14 shrink-0 border-r dark:border-gray-800 bg-gray-50/70 dark:bg-black flex flex-col items-center py-4 gap-3 select-none">
+            <!-- 1. Workspace Files -->
             <button @click="activeTab = 'files'" 
-                    class="p-2.5 rounded-xl transition-all relative group"
-                    :class="activeTab === 'files' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'">
-                <IconFolder class="w-6 h-6" />
-                <span class="absolute left-16 px-2 py-1 bg-gray-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">Artefacts List</span>
+                    class="p-2.5 rounded-2xl transition-all relative group cursor-pointer"
+                    :class="activeTab === 'files' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/30 scale-105' : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60'">
+                <IconFolder class="w-5 h-5" />
+                <span class="absolute left-16 px-2.5 py-1 bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                    Workspace Files
+                </span>
             </button>
 
+            <!-- 2. Active Workspace Editor -->
             <button @click="activeTab = 'workspace'" 
-                    class="p-2.5 rounded-xl transition-all relative group"
-                    :class="activeTab === 'workspace' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'">
-                    <IconPencil class="w-6 h-6" />
-                    <div v-if="discussionsStore.activeUpdatingArtefacts && discussionsStore.activeUpdatingArtefacts.size > 0" class="absolute -top-1 -right-1 flex h-3 w-3">
-                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
-                    </div>
-                    <span class="absolute left-16 px-2 py-1 bg-gray-800 text-white text-[10px] rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">Active Workspace</span>
+                    class="p-2.5 rounded-2xl transition-all relative group cursor-pointer"
+                    :class="activeTab === 'workspace' ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/30 scale-105' : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60'">
+                <IconPencil class="w-5 h-5" />
+                <div v-if="discussionsStore.activeUpdatingArtefacts && discussionsStore.activeUpdatingArtefacts.size > 0" class="absolute -top-1 -right-1 flex h-3 w-3">
+                    <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span class="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span>
+                </div>
+                <span class="absolute left-16 px-2.5 py-1 bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                    Active Workspace
+                </span>
+            </button>
+
+            <div class="h-px w-8 bg-gray-200 dark:border-gray-800 my-1"></div>
+
+            <!-- 3. Discussion Instructions (Directives) -->
+            <button @click="activeTab = 'discussion'" 
+                    class="p-2.5 rounded-2xl transition-all relative group cursor-pointer"
+                    :class="activeTab === 'discussion' ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30 scale-105' : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60'">
+                <IconDataZone class="w-5 h-5" />
+                <span class="absolute left-16 px-2.5 py-1 bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                    Discussion Directives
+                </span>
+            </button>
+
+            <!-- 4. AI Persona & Logic -->
+            <button @click="activeTab = 'personality'" 
+                    class="p-2.5 rounded-2xl transition-all relative group cursor-pointer"
+                    :class="activeTab === 'personality' ? 'bg-purple-600 text-white shadow-lg shadow-purple-500/30 scale-105' : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60'">
+                <IconSparkles class="w-5 h-5" />
+                <span class="absolute left-16 px-2.5 py-1 bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                    AI Logic & Persona
+                </span>
+            </button>
+
+            <!-- 5. Long-Term Facts (Memory) -->
+            <button @click="activeTab = 'memory'" 
+                    class="p-2.5 rounded-2xl transition-all relative group cursor-pointer"
+                    :class="activeTab === 'memory' ? 'bg-teal-600 text-white shadow-lg shadow-teal-500/30 scale-105' : 'text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800/60'">
+                <IconThinking class="w-5 h-5" />
+                <span class="absolute left-16 px-2.5 py-1 bg-gray-900 text-white text-[10px] font-bold uppercase tracking-wider rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+                    Long-Term Facts
+                </span>
             </button>
         </div>
 
         <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
             <!-- Unified Header -->
             <div class="shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center px-4 h-14 shadow-sm">
-                <div class="flex flex-col">
-                    <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">
-                        {{ activeTab === 'context' ? 'Intelligence Context' : activeTab === 'files' ? 'Knowledge Management' : 'Active Project' }}
+                <div class="flex flex-col min-w-0">
+                    <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 truncate">
+                        {{ headerSubtitle }}
                     </span>
-                    <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100">
-                         {{ activeTab === 'context' ? 'Context Explorer' : activeTab === 'files' ? 'Artefacts List' : 'Workspace' }}
+                    <h3 class="text-sm font-bold text-gray-800 dark:text-gray-100 truncate">
+                        {{ headerTitle }}
                     </h3>
                 </div>
                 <div class="flex items-center gap-1">
@@ -133,67 +186,37 @@ onMounted(() => {
                 </div>
             </div>
 
-            <!-- Dynamic Body Content -->
+            <!-- Full-Height Body Content per Tab (Zero Accordions) -->
             <div class="flex-1 overflow-hidden relative">
 
-                <!-- TAB 1: CONTEXT ZONES -->
-                <div v-if="activeTab === 'context'" class="h-full overflow-y-auto custom-scrollbar flex flex-col bg-gray-50/30 dark:bg-gray-900/30">
-                    <div class="flex flex-col border-b border-gray-200 dark:border-gray-800">
-                        <button @click="collapsed.discussion = !collapsed.discussion" 
-                                class="w-full flex items-center justify-between p-4 hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors group">
-                            <div class="flex items-center gap-3">
-                                <div class="p-1.5 rounded-md bg-blue-100 dark:bg-blue-900/30 text-blue-600">
-                                    <IconDataZone class="w-4 h-4" />
-                                </div>
-                                <span class="text-sm font-bold text-gray-700 dark:text-gray-200">Discussion Instructions</span>
-                            </div>
-                            <IconChevronDown class="w-4 h-4 text-gray-400 transition-transform duration-300" :class="{'rotate-180': !collapsed.discussion}" />
-                        </button>
-                        <div v-show="!collapsed.discussion" class="h-80 p-2 pt-0"><DiscussionZone /></div>
-                    </div>
-
-                    <div class="flex flex-col border-b border-gray-200 dark:border-gray-800">
-                        <button @click="collapsed.personality = !collapsed.personality" 
-                                class="w-full flex items-center justify-between p-4 hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors group">
-                            <div class="flex items-center gap-3">
-                                <div class="p-1.5 rounded-md bg-purple-100 dark:bg-purple-900/30 text-purple-600">
-                                    <IconSparkles class="w-4 h-4" />
-                                </div>
-                                <span class="text-sm font-bold text-gray-700 dark:text-gray-200">AI Logic & Persona</span>
-                            </div>
-                            <IconChevronDown class="w-4 h-4 text-gray-400 transition-transform duration-300" :class="{'rotate-180': !collapsed.personality}" />
-                        </button>
-                        <div v-show="!collapsed.personality" class="h-64 p-2 pt-0"><PersonalityZone /></div>
-                    </div>
-
-                    <div class="flex flex-col grow min-h-0">
-                        <button @click="collapsed.memory = !collapsed.memory" 
-                                class="w-full flex items-center justify-between p-4 hover:bg-gray-100 dark:hover:bg-gray-800/50 transition-colors group">
-                            <div class="flex items-center gap-3">
-                                <div class="p-1.5 rounded-md bg-green-100 dark:bg-green-900/30 text-green-600">
-                                    <IconThinking class="w-4 h-4" />
-                                </div>
-                                <span class="text-sm font-bold text-gray-700 dark:text-gray-200">Long-Term Facts</span>
-                            </div>
-                            <IconChevronDown class="w-4 h-4 text-gray-400 transition-transform duration-300" :class="{'rotate-180': !collapsed.memory}" />
-                        </button>
-                        <div v-show="!collapsed.memory" class="grow p-2 pt-0"><MemoryZone /></div>
-                    </div>
-                </div>
-
-                <!-- TAB 2: ARTEFACTS LIST -->
-                <div v-else-if="activeTab === 'files'" class="h-full overflow-hidden bg-white dark:bg-gray-900">
+                <!-- TAB 1: WORKSPACE FILES LIST -->
+                <div v-if="activeTab === 'files'" class="h-full overflow-hidden bg-white dark:bg-gray-900">
                     <ArtefactZone />
                 </div>
 
-                <!-- TAB 3: WORKSPACE EDITOR -->
+                <!-- TAB 2: ACTIVE WORKSPACE EDITOR -->
                 <div v-else-if="activeTab === 'workspace'" class="h-full overflow-hidden bg-white dark:bg-gray-950">
                     <div v-if="!uiStore.activeSplitArtefactTitle" class="h-full flex flex-col items-center justify-center p-12 text-center opacity-40">
                          <IconPencil class="w-16 h-16 mb-4 text-gray-400" />
                          <h4 class="text-lg font-bold uppercase tracking-widest text-gray-500">Editor Offline</h4>
-                         <p class="text-xs mt-2">Select a file from the "Files" tab to open the active workspace.</p>
+                         <p class="text-xs mt-2">Select a document from the "Workspace Files" tab to open the workspace editor.</p>
                     </div>
                     <ArtefactSplitView v-else />
+                </div>
+
+                <!-- TAB 3: DISCUSSION INSTRUCTIONS (Full Height) -->
+                <div v-else-if="activeTab === 'discussion'" class="h-full overflow-y-auto custom-scrollbar p-3 bg-gray-50/30 dark:bg-gray-900/30">
+                    <DiscussionZone />
+                </div>
+
+                <!-- TAB 4: AI LOGIC & PERSONA (Full Height) -->
+                <div v-else-if="activeTab === 'personality'" class="h-full overflow-y-auto custom-scrollbar p-3 bg-gray-50/30 dark:bg-gray-900/30">
+                    <PersonalityZone />
+                </div>
+
+                <!-- TAB 5: LONG-TERM FACTS / MEMORY (Full Height) -->
+                <div v-else-if="activeTab === 'memory'" class="h-full overflow-y-auto custom-scrollbar p-3 bg-gray-50/30 dark:bg-gray-900/30">
+                    <MemoryZone />
                 </div>
 
             </div>

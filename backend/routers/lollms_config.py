@@ -58,74 +58,23 @@ async def get_lollms_tti_models(
     db: Session = Depends(get_db)
 ):
     """
-    Lists all available Text-to-Image models from all active TTI bindings.
+    Returns only verified active Universal TTI Image Profiles where the connection server is online
+    and the underlying diffusion model is present.
     """
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    profiles_dict = await get_all_universal_profiles(modality="tti", db=db)
+    model_profiles = profiles_dict.get("profiles", {})
+
     all_models = []
-    active_tti_bindings = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).all()
-    model_display_mode = settings.get("tti_model_display_mode", "mixed")
-
-    for binding in active_tti_bindings:
-        try:
-            models_from_binding = list_tti_binding_models(tti_binding_name=binding.name, tti_binding_config=binding.config)
-
-            raw_model_names = []
-            if isinstance(models_from_binding, list):
-                for item in models_from_binding:
-                    model_id = item if isinstance(item, str) else item.get("model_name")
-                    if model_id: raw_model_names.append(model_id)
-
-            model_aliases = binding.model_aliases or {}
-            if isinstance(model_aliases, str):
-                try:
-                    model_aliases = json.loads(model_aliases)
-                except Exception:
-                    model_aliases = {}
-
-            # Use new get_binding_desc from lollms_client
-            try:
-                binding_desc = get_binding_desc(binding.name, "tti")
-                if "error" in binding_desc:
-                    binding_desc = None
-            except Exception:
-                binding_desc = None
-
-            for model_name in raw_model_names:
-                alias_data = model_aliases.get(model_name)
-
-                if model_display_mode == 'aliased' and not alias_data:
-                    continue
-
-                display_name = model_name
-
-                if alias_data:
-                    if model_display_mode == 'aliased':
-                        display_name = alias_data.get('title', model_name)
-                    elif model_display_mode == 'mixed':
-                        title = alias_data.get('title', model_name)
-                        display_name = f"{title} ({model_name})"
-                else:
-                    if model_display_mode == 'aliased':
-                        continue
-
-                binding_params = {}
-                if binding_desc:
-                    binding_params['class_parameters'] = binding_desc.get('input_parameters', [])
-                    binding_params['generation_parameters'] = binding_desc.get('generate_image_parameters', [])
-                    binding_params['edit_parameters'] = binding_desc.get('edit_image_parameters', [])
-
-                model_info = {
-                    "id": f"{binding.alias}/{model_name}",
-                    "name": display_name,
-                    "alias": alias_data,
-                    "binding_params": binding_params,
-                }
-
-                all_models.append(model_info)
-
-        except Exception as e:
-            print(f"WARNING: Could not fetch TTI models from binding '{binding.alias}': {e}")
-            trace_exception(e)
+    for prof_id, prof_info in model_profiles.items():
+        if prof_info.get("is_available") is False:
             continue
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "alias": prof_info
+        })
 
     return sorted(all_models, key=lambda x: x['name'])
 
@@ -176,132 +125,40 @@ async def set_user_llm_params(params: UserLLMParams, current_user: UserAuthDetai
 async def get_tts_models(
     db: Session = Depends(get_db)
 ):
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    profiles_dict = await get_all_universal_profiles(modality="tts", db=db)
+    model_profiles = profiles_dict.get("profiles", {})
+
     all_models = []
-    active_bindings = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).all()
-    model_display_mode = settings.get("tts_model_display_mode", "mixed")
-
-    for binding in active_bindings:
-        model_aliases = binding.model_aliases or {}
-        if isinstance(model_aliases, str):
-            try:
-                model_aliases = json.loads(model_aliases)
-            except Exception:
-                model_aliases = {}
-        try:
-            models = list_tts_binding_models(tts_binding_name=binding.name, tts_binding_config=binding.config)
-
-            # Use new get_binding_desc from lollms_client
-            try:
-                binding_desc = get_binding_desc(binding.name, "tts")
-                if "error" in binding_desc:
-                    binding_desc = None
-            except Exception:
-                binding_desc = None
-
-            if isinstance(models, list):
-                for item in models:
-                    model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
-                    if model_id:
-                        alias_data = model_aliases.get(model_id)
-
-                        if model_display_mode == 'aliased' and not alias_data:
-                            continue
-
-                        display_name = model_id
-                        if alias_data:
-                            if model_display_mode == 'aliased':
-                                display_name = alias_data.get('title', model_id)
-                            elif model_display_mode == 'mixed':
-                                title = alias_data.get('title', model_id)
-                                display_name = f"{title} ({model_id})"
-                        else:
-                            if model_display_mode == 'aliased':
-                                continue
-
-                        binding_params = {}
-                        if binding_desc:
-                            binding_params['class_parameters'] = binding_desc.get('input_parameters', [])
-                            binding_params['generation_parameters'] = binding_desc.get('synthesize_audio_parameters', [])
-
-                        model_info = {
-                            "id": f"{binding.alias}/{model_id}",
-                            "name": display_name,
-                            "alias": alias_data,
-                            "binding_params": binding_params,
-                        }
-
-                        all_models.append(model_info)
-        except Exception as e:
-            print(f"WARNING: Could not fetch TTS models from binding '{binding.alias}': {e}")
-            trace_exception(e)
+    for prof_id, prof_info in model_profiles.items():
+        if prof_info.get("is_available") is False:
             continue
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "alias": prof_info
+        })
 
-    unique_models = {m["id"]: m for m in all_models}
-    return sorted(list(unique_models.values()), key=lambda x: x['name'])
+    return sorted(all_models, key=lambda x: x['name'])
 
 @lollms_config_router.get("/stt-models", response_model=List[ModelInfo])
 async def get_stt_models(
     db: Session = Depends(get_db)
 ):
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    profiles_dict = await get_all_universal_profiles(modality="stt", db=db)
+    model_profiles = profiles_dict.get("profiles", {})
+
     all_models = []
-    active_bindings = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).all()
-    model_display_mode = settings.get("stt_model_display_mode", "mixed")
-
-    for binding in active_bindings:
-        model_aliases = binding.model_aliases or {}
-        if isinstance(model_aliases, str):
-            try:
-                model_aliases = json.loads(model_aliases)
-            except Exception:
-                model_aliases = {}
-        try:
-            models = list_stt_binding_models(stt_binding_name=binding.name, stt_binding_config=binding.config)
-
-            # Use new get_binding_desc from lollms_client
-            try:
-                binding_desc = get_binding_desc(binding.name, "stt")
-                if "error" in binding_desc:
-                    binding_desc = None
-            except Exception:
-                binding_desc = None
-
-            if isinstance(models, list):
-                for item in models:
-                    model_id = item if isinstance(item, str) else (item.get("id") or item.get("model_name"))
-                    if model_id:
-                        alias_data = model_aliases.get(model_id)
-
-                        if model_display_mode == 'aliased' and not alias_data:
-                            continue
-
-                        display_name = model_id
-                        if alias_data:
-                            if model_display_mode == 'aliased':
-                                display_name = alias_data.get('title', model_id)
-                            elif model_display_mode == 'mixed':
-                                title = alias_data.get('title', model_id)
-                                display_name = f"{title} ({model_id})"
-                        else:
-                            if model_display_mode == 'aliased':
-                                continue
-
-                        binding_params = {}
-                        if binding_desc:
-                            binding_params['class_parameters'] = binding_desc.get('input_parameters', [])
-                            binding_params['generation_parameters'] = binding_desc.get('transcribe_audio_parameters', [])
-
-                        model_info = {
-                            "id": f"{binding.alias}/{model_id}",
-                            "name": display_name,
-                            "alias": alias_data,
-                            "binding_params": binding_params,
-                        }
-
-                        all_models.append(model_info)
-        except Exception as e:
-            print(f"WARNING: Could not fetch STT models from binding '{binding.alias}': {e}")
-            trace_exception(e)
+    for prof_id, prof_info in model_profiles.items():
+        if prof_info.get("is_available") is False:
             continue
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "alias": prof_info
+        })
 
-    unique_models = {m["id"]: m for m in all_models}
-    return sorted(list(unique_models.values()), key=lambda x: x['name'])
+    return sorted(all_models, key=lambda x: x['name'])

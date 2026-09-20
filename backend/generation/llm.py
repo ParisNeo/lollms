@@ -1167,6 +1167,9 @@ def build_llm_generation_router(router: APIRouter):
         parent_message_id: Optional[str] = Form(None), 
         is_resend: bool = Form(False),
         enable_books: Optional[bool] = Form(None),
+        temperature: Optional[float] = Form(None),
+        max_nb_rounds: Optional[int] = Form(None),
+        reasoning_effort: Optional[str] = Form(None),
         current_user: UserAuthDetails = Depends(get_current_active_user),
         db: Session = Depends(get_db)
     ) -> StreamingResponse:
@@ -1801,7 +1804,7 @@ def build_llm_generation_router(router: APIRouter):
             )
         else:
             active_personality = LollmsPersonality(
-                name="LoLLMS",
+                name="Lollms",
                 author="ParisNeo",
                 category="Generic",
                 description="",
@@ -1811,6 +1814,39 @@ def build_llm_generation_router(router: APIRouter):
                 data_sources=multi_rag_data_sources if multi_rag_data_sources else None
             )
             
+        # Resolve reasoning effort
+        resolved_effort = None
+        if reasoning_effort is not None and reasoning_effort.strip():
+            clean_effort = reasoning_effort.strip().lower()
+            if clean_effort in ['low', 'medium', 'high', 'max']:
+                resolved_effort = clean_effort
+            elif clean_effort in ['none', 'off', 'disabled']:
+                resolved_effort = None
+            else:
+                resolved_effort = clean_effort
+        elif owner_db_user.reasoning_effort:
+            resolved_effort = owner_db_user.reasoning_effort
+        elif owner_db_user.reasoning_activation:
+            resolved_effort = "low"
+
+        # Resolve temperature
+        effective_temp = None
+        if temperature is not None:
+            try:
+                effective_temp = float(temperature)
+            except (ValueError, TypeError):
+                effective_temp = None
+
+        # Resolve max rounds
+        effective_max_rounds = None
+        if max_nb_rounds is not None:
+            try:
+                val = int(max_nb_rounds)
+                if val > 0:
+                    effective_max_rounds = val
+            except (ValueError, TypeError):
+                effective_max_rounds = None
+
         main_loop = asyncio.get_running_loop()
         stream_queue: asyncio.Queue[Optional[str]] = asyncio.Queue()
         stop_event = threading.Event()
@@ -1916,6 +1952,10 @@ def build_llm_generation_router(router: APIRouter):
 
                     payload = payload_map.get(mtype_val)
                     if payload:
+                        # For text chunks, always guarantee type is 'chunk' and content is chunk string without alteration
+                        if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value or mtype_val == MSG_TYPE.MSG_TYPE_CONTENT.value:
+                            payload = {"type": "chunk", "content": chunk}
+
                         # Auto-persist generated skills to permanent skills DB table
                         if mtype_val == 43: # skill_done
                             try:
@@ -1956,16 +1996,10 @@ def build_llm_generation_router(router: APIRouter):
                             except Exception as auto_sk_err:
                                 print(f"Warning: Auto-saving skill to DB: {auto_sk_err}")
 
-                        # Ensure content is set for chunks, even if we have params
+                        # Ensure content is set for chunks, strictly preserving chunk type for text stream
                         if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value or mtype_val == MSG_TYPE.MSG_TYPE_CONTENT.value:
+                            payload["type"] = "chunk"
                             payload["content"] = chunk
-
-                        # Unified Processing Protocol Integration
-                        if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
-                            payload["type"] = params["type"]
-                            payload["processing_type"] = params.get("processing_type")
-                            payload["title"] = params.get("title")
-                            payload["status"] = params.get("status")
 
                         # Inject discussion context for secondary streams to trigger frontend refreshes
                         if mtype_val >= 38 or (params and "processing_type" in params): 
@@ -2069,6 +2103,10 @@ def build_llm_generation_router(router: APIRouter):
                     except Exception as vision_ex:
                         print(f"Warning: Failed to parse vision support profile, defaulting to True: {vision_ex}")
 
+                    chat_extra_kwargs = {}
+                    if effective_temp is not None:
+                        chat_extra_kwargs["temperature"] = effective_temp
+
                     result = {}
                     try:
                         result = discussion_obj.chat(
@@ -2077,9 +2115,9 @@ def build_llm_generation_router(router: APIRouter):
                             branch_tip_id=effective_parent_id,
                             images=images_for_message,
                             streaming_callback=llm_callback, 
-                            think=owner_db_user.reasoning_activation,
-                            reasoning_effort=owner_db_user.reasoning_effort,
+                            reasoning_effort=resolved_effort,
                             reasoning_summary=owner_db_user.reasoning_summary,
+                            max_nb_rounds=effective_max_rounds,
                             add_user_message=False,
                             tools=agentic_tools,
                             enable_image_generation=owner_db_user.image_generation_enabled,
@@ -2107,7 +2145,8 @@ def build_llm_generation_router(router: APIRouter):
                             enable_specialized_events_stream=True,
                             forward_artefact_chunks=True,
                             suppress_images=not model_supports_vision,
-                            event_mode=EventMode.PROCESSING_TAG_MODE
+                            event_mode=EventMode.PROCESSING_TAG_MODE,
+                            **chat_extra_kwargs
                         )
                     finally:
                         discussion_obj.commit()

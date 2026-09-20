@@ -126,6 +126,15 @@ export function useDiscussionGeneration(state, stores, getActions) {
         if (payload.is_resend) formData.append('is_resend', 'true');
         formData.append('web_search_enabled', payload.webSearchEnabled ? 'true' : 'false');
         if (parentId) formData.append('parent_message_id', parentId);
+        if (payload.temperature !== undefined && payload.temperature !== null) {
+            formData.append('temperature', payload.temperature);
+        }
+        if (payload.max_nb_rounds !== undefined && payload.max_nb_rounds !== null) {
+            formData.append('max_nb_rounds', payload.max_nb_rounds);
+        }
+        if (payload.reasoning_effort !== undefined && payload.reasoning_effort !== null && payload.reasoning_effort !== '') {
+            formData.append('reasoning_effort', payload.reasoning_effort);
+        }
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
 
@@ -223,6 +232,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     if (data.data && data.data.ai_message) {
                         const finalAi = data.data.ai_message;
                         messageToUpdate.id = finalAi.id;
+                        if (finalAi.content) {
+                            messageToUpdate.content = finalAi.content;
+                        }
                         messageToUpdate.tokens = finalAi.tokens || finalAi.token_count || 0;
                         messageToUpdate.metadata = finalAi.metadata || {};
                         if (finalAi.sources && finalAi.sources.length > 0) {

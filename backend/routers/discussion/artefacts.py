@@ -1159,6 +1159,71 @@ def build_artefacts_router(router: APIRouter):
             headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
         )
 
+    @router.get("/{discussion_id}/artefacts/{artefact_title:path}/download")
+    async def download_artefact_file(
+        discussion_id: str,
+        artefact_title: str,
+        version: Optional[int] = Query(None),
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Downloads the raw physical binary or text file for an artefact.
+        For as-is files (.pptx, .docx, .pdf, .xlsx, .zip, etc.), serves the exact physical bytes from workspace_data.
+        """
+        decoded_title = unquote(artefact_title)
+        try:
+            if "%" in decoded_title:
+                decoded_title = unquote(decoded_title)
+        except Exception:
+            pass
+
+        discussion, owner_username, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db)
+
+        # 1. Search for physical file on disk in workspace_data_path
+        ws_data_dir = None
+        if hasattr(discussion, "workspace_data_path") and discussion.workspace_data_path:
+            ws_data_dir = Path(discussion.workspace_data_path).resolve()
+
+        candidate_paths = []
+        if ws_data_dir and ws_data_dir.exists():
+            candidate_paths.append((ws_data_dir / decoded_title).resolve())
+            for f in ws_data_dir.iterdir():
+                if f.is_file() and (f.name == decoded_title or f.stem == decoded_title or f.name.lower() == decoded_title.lower()):
+                    candidate_paths.append(f.resolve())
+
+        # Check versioned physical file in versions/
+        if hasattr(discussion, "versions_path") and discussion.versions_path:
+            v_dir = Path(discussion.versions_path).resolve()
+            if v_dir.exists() and version:
+                for f in v_dir.glob(f"{decoded_title}_v{version}.*"):
+                    if not f.name.endswith(".lam"):
+                        candidate_paths.append(f.resolve())
+
+        # Path traversal guard & serve physical file
+        for cand in candidate_paths:
+            if cand.exists() and cand.is_file():
+                if ws_data_dir and cand.is_relative_to(ws_data_dir.parent):
+                    return FileResponse(
+                        str(cand),
+                        filename=cand.name,
+                        media_type="application/octet-stream"
+                    )
+
+        # 2. Fallback to database content if pure text/code artefact
+        artefact = discussion.get_artefact(title=decoded_title, version=version)
+        if not artefact:
+            raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found.")
+
+        content = artefact.get('content', '')
+        safe_filename = decoded_title if '.' in decoded_title else f"{decoded_title}.txt"
+
+        return Response(
+            content=content.encode('utf-8'),
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": f'attachment; filename="{safe_filename}"'}
+        )
+
     @router.get("/{discussion_id}/artefact", response_model=ArtefactInfo)
     async def get_discussion_artefact_info(
         discussion_id: str,

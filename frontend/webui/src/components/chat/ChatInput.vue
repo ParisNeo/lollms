@@ -65,6 +65,7 @@ import IconBookOpen from '../../assets/icons/IconBookOpen.vue';
 import IconPlayCircle from '../../assets/icons/IconPlayCircle.vue';
 import IconGitBranch from '../../assets/icons/ui/IconGitBranch.vue';
 import IconCog from '../../assets/icons/IconCog.vue';
+import IconAdjustmentsHorizontal from '../../assets/icons/IconAdjustmentsHorizontal.vue';
 
 const discussionsStore = useDiscussionsStore();
 const dataStore = useDataStore();
@@ -111,6 +112,410 @@ const textareaRef = ref(null);
 const isWebSearchActive = ref(false); 
 const stagedImages = ref([]); 
 const user = computed(() => authStore.user);
+
+// --- Generation Parameter Controls (Temperature, Rounds, Reasoning Effort) ---
+const isTuningOpen = ref(false);
+const tuningMenuRef = ref(null);
+
+const isCustomTemp = ref(localStorage.getItem('lollms_input_custom_temp') === 'true');
+const customTemp = ref(parseFloat(localStorage.getItem('lollms_input_temp_val') || '0.7'));
+
+const isCustomRounds = ref(localStorage.getItem('lollms_input_custom_rounds') === 'true');
+const customRounds = ref(parseInt(localStorage.getItem('lollms_input_rounds_val') || '20', 10));
+
+const isReasoningEffortActive = ref(
+    localStorage.getItem('lollms_input_reasoning_active') !== null
+        ? localStorage.getItem('lollms_input_reasoning_active') === 'true'
+        : Boolean(user.value?.reasoning_activation || user.value?.reasoning_effort)
+);
+const reasoningEffort = ref(
+    localStorage.getItem('lollms_input_reasoning_effort') || 
+    (user.value?.reasoning_effort ? user.value.reasoning_effort.toLowerCase() : 'low')
+);
+
+watch(isCustomTemp, (val) => {
+    localStorage.setItem('lollms_input_custom_temp', val ? 'true' : 'false');
+});
+watch(customTemp, (val) => {
+    localStorage.setItem('lollms_input_temp_val', String(val));
+});
+watch(isCustomRounds, (val) => {
+    localStorage.setItem('lollms_input_custom_rounds', val ? 'true' : 'false');
+});
+watch(customRounds, (val) => {
+    localStorage.setItem('lollms_input_rounds_val', String(val));
+});
+watch(isReasoningEffortActive, (val) => {
+    localStorage.setItem('lollms_input_reasoning_active', val ? 'true' : 'false');
+});
+watch(reasoningEffort, (val) => {
+    localStorage.setItem('lollms_input_reasoning_effort', val);
+});
+
+watch(user, (u) => {
+    if (u && localStorage.getItem('lollms_input_reasoning_active') === null) {
+        isReasoningEffortActive.value = Boolean(u.reasoning_activation || u.reasoning_effort);
+        if (u.reasoning_effort) reasoningEffort.value = u.reasoning_effort.toLowerCase();
+    }
+});
+
+const isTuningActive = computed(() => {
+    return isCustomTemp.value || isCustomRounds.value || isReasoningEffortActive.value;
+});
+
+function resetTuningDefaults() {
+    isCustomTemp.value = false;
+    customTemp.value = 0.7;
+    isCustomRounds.value = false;
+    customRounds.value = 20;
+    isReasoningEffortActive.value = false;
+    reasoningEffort.value = 'low';
+}
+
+function setReasoningEffort(effort) {
+    reasoningEffort.value = effort;
+    isReasoningEffortActive.value = true;
+}
+
+// --- Reworked Workspace & Knowledge Hub Menu State ---
+const isWorkspaceMenuOpen = ref(false);
+const workspaceMenuRef = ref(null);
+const activeWorkspaceTab = ref('attach'); // 'attach', 'notes', 'skills', 'prompts', 'context'
+const noteSearchTerm = ref('');
+const skillSearchTerm = ref('');
+
+function openWorkspaceMenu(tab = 'attach') {
+    activeWorkspaceTab.value = tab;
+    isWorkspaceMenuOpen.value = true;
+    isTuningOpen.value = false;
+    // Guaranteed fresh fetch of notes and skills whenever menu opens
+    notesStore.fetchNotes();
+    skillsStore.fetchSkills();
+}
+
+const filteredNotes = computed(() => {
+    const list = notesStore.notes || [];
+    if (!noteSearchTerm.value.trim()) return list;
+    const q = noteSearchTerm.value.toLowerCase().trim();
+    return list.filter(n => (n.title || '').toLowerCase().includes(q) || (n.content || '').toLowerCase().includes(q));
+});
+
+const filteredSkills = computed(() => {
+    const list = skillsStore.skills || [];
+    if (!skillSearchTerm.value.trim()) return list;
+    const q = skillSearchTerm.value.toLowerCase().trim();
+    return list.filter(s => (s.name || '').toLowerCase().includes(q) || (s.description || '').toLowerCase().includes(q) || (s.category || '').toLowerCase().includes(q));
+});
+
+function isNoteActiveInContext(note) {
+    if (!note || !activeDiscussionArtefacts.value) return false;
+    return activeDiscussionArtefacts.value.some(a => 
+        a.title === note.title && a.artefact_type === 'note' && a.is_loaded
+    );
+}
+
+function isSkillActiveInContext(skill) {
+    if (!skill) return false;
+    const inArtefacts = (activeDiscussionArtefacts.value || []).some(a => 
+        (a.title === skill.name || a.title === `${skill.name}.md`) && a.artefact_type === 'skill' && a.is_loaded
+    );
+    const inAttached = (discussionsStore.attachedSkills || []).some(s => s.id === skill.id || s.name === skill.name);
+    return inArtefacts || inAttached;
+}
+
+async function handleToggleNoteInDiscussion(note) {
+    if (!activeDiscussion.value) {
+        await discussionsStore.createNewDiscussion();
+    }
+    const existing = (activeDiscussionArtefacts.value || []).find(a => 
+        a.title === note.title && a.artefact_type === 'note'
+    );
+    if (existing) {
+        if (existing.is_loaded) {
+            await discussionsStore.unloadArtefactFromContext({
+                discussionId: activeDiscussion.value.id,
+                artefactTitle: existing.title,
+                version: existing.version
+            });
+            uiStore.addNotification(`Note '${note.title}' excluded from prompt context.`, 'info');
+        } else {
+            await discussionsStore.loadArtefactToContext({
+                discussionId: activeDiscussion.value.id,
+                artefactTitle: existing.title,
+                version: existing.version
+            });
+            uiStore.addNotification(`Note '${note.title}' loaded into prompt context.`, 'success');
+        }
+    } else {
+        await discussionsStore.addNoteAsArtefact(note);
+    }
+}
+
+async function handleToggleSkillInDiscussion(skill) {
+    if (!activeDiscussion.value) {
+        await discussionsStore.createNewDiscussion();
+    }
+    const existingArt = (activeDiscussionArtefacts.value || []).find(a => 
+        (a.title === skill.name || a.title === `${skill.name}.md`) && a.artefact_type === 'skill'
+    );
+    if (existingArt) {
+        if (existingArt.is_loaded) {
+            await discussionsStore.unloadArtefactFromContext({
+                discussionId: activeDiscussion.value.id,
+                artefactTitle: existingArt.title,
+                version: existingArt.version
+            });
+            uiStore.addNotification(`Skill '${skill.name}' unloaded from context.`, 'info');
+        } else {
+            await discussionsStore.loadArtefactToContext({
+                discussionId: activeDiscussion.value.id,
+                artefactTitle: existingArt.title,
+                version: existingArt.version
+            });
+            uiStore.addNotification(`Skill '${skill.name}' loaded into context.`, 'success');
+        }
+    } else {
+        await discussionsStore.addSkillAsArtefact(skill);
+    }
+}
+
+// --- AMUSING AI VIBE & RPG LOADOUT COCKPIT ---
+const isLoadoutModalOpen = ref(false);
+
+const activeBuffs = computed(() => {
+    const buffs = [];
+
+    // 1. Reasoning Effort
+    if (isReasoningEffortActive.value) {
+        const effort = reasoningEffort.value || 'low';
+        const descriptions = {
+            low: "Snack Break Thinker: Doing a quick sanity check before answering.",
+            medium: "Pondering the Orb: Substantial deep analytical chain of thought.",
+            high: "Galaxy Brain Mode: Maximum cognitive tokens expended.",
+            max: "Cosmic Translucence: Consulting parallel universe nodes."
+        };
+        buffs.push({
+            id: 'reasoning',
+            icon: '🧠',
+            name: `Reasoning (${effort.toUpperCase()})`,
+            type: 'cognitive',
+            badge: 'Mental Boost',
+            description: descriptions[effort] || "Reasoning effort active.",
+            actionText: 'Deactivate',
+            action: () => { isReasoningEffortActive.value = false; }
+        });
+    }
+
+    // 2. Temperature
+    if (isCustomTemp.value) {
+        const temp = customTemp.value;
+        let flavor = "Balanced Coffee (0.7)";
+        if (temp < 0.35) flavor = "Ice Cold Logic 🧊 (Zero hallucinations, 100% strict)";
+        else if (temp > 1.0) flavor = "Disco Inferno 🌋 (Maximum spicy creativity)";
+        buffs.push({
+            id: 'temperature',
+            icon: '🌡️',
+            name: `Spiciness: ${temp.toFixed(2)}`,
+            type: 'vibe',
+            badge: 'Heat Override',
+            description: flavor,
+            actionText: 'Reset',
+            action: () => { isCustomTemp.value = false; }
+        });
+    }
+
+    // 3. Rounds
+    if (isCustomRounds.value) {
+        buffs.push({
+            id: 'rounds',
+            icon: '⏱️',
+            name: `Stamina: ${customRounds.value} Rounds`,
+            type: 'limit',
+            badge: 'Loop Limit',
+            description: customRounds.value > 25 ? "Marathon runner: Will loop until perfected." : "Sprint runner: Bounded reasoning steps.",
+            actionText: 'Reset',
+            action: () => { isCustomRounds.value = false; }
+        });
+    }
+
+    // 4. Web Search
+    if (isWebSearchActive.value) {
+        buffs.push({
+            id: 'web',
+            icon: '🛰️',
+            name: `Orbital Recon (${currentProviderName.value})`,
+            type: 'recon',
+            badge: 'Live Satellite',
+            description: `Live web scouting and claim verification armed via ${currentProviderList.value}.`,
+            actionText: 'Disable',
+            action: () => toggleWebSearch()
+        });
+    }
+
+    // 5. Long-Term Memory
+    if (user.value?.memory_enabled) {
+        buffs.push({
+            id: 'memory',
+            icon: '🐘',
+            name: 'Elephant Memory',
+            type: 'memory',
+            badge: 'Deep Recall',
+            description: 'Cognitive memory active: pulls past facts and automatically forms new associations.',
+            actionText: 'Settings',
+            action: () => toggleUserPref('memory_enabled')
+        });
+    }
+
+    // 6. RAG DataStores
+    if (ragStoreSelection.value && ragStoreSelection.value.length > 0) {
+        buffs.push({
+            id: 'rag',
+            icon: '🧽',
+            name: `Knowledge Sponge (${ragStoreSelection.value.length} DB${ragStoreSelection.value.length > 1 ? 's' : ''})`,
+            type: 'rag',
+            badge: 'Vectorized Memory',
+            description: `Grounding answers in: ${activeRagStoresInfo.value.map(s => s.name).join(', ')}.`,
+            actionText: 'Manage',
+            action: () => openWorkspaceMenu('context')
+        });
+    }
+
+    // 7. MCP Tools
+    if (mcpToolSelection.value && mcpToolSelection.value.length > 0) {
+        buffs.push({
+            id: 'mcp',
+            icon: '🛠️',
+            name: `Swiss Army Arm (${mcpToolSelection.value.length} tools)`,
+            type: 'tools',
+            badge: 'Cybernetic Tools',
+            description: 'Can trigger external function execution via Model Context Protocol.',
+            actionText: 'Manage',
+            action: () => openWorkspaceMenu('context')
+        });
+    }
+
+    // 8. Loaded Notes
+    const loadedNotesList = (activeDiscussionArtefacts.value || []).filter(a => a.artefact_type === 'note' && a.is_loaded);
+    if (loadedNotesList.length > 0) {
+        buffs.push({
+            id: 'notes',
+            icon: '📝',
+            name: `Cheat Sheet (${loadedNotesList.length} note${loadedNotesList.length > 1 ? 's' : ''})`,
+            type: 'notes',
+            badge: 'Direct Reference',
+            description: `Loaded: ${loadedNotesList.map(n => n.title).join(', ')}.`,
+            actionText: 'View',
+            action: () => openWorkspaceMenu('notes')
+        });
+    }
+
+    // 9. Loaded Skills
+    const loadedSkillsList = (activeDiscussionArtefacts.value || []).filter(a => a.artefact_type === 'skill' && a.is_loaded);
+    const attachedSkillsList = discussionsStore.attachedSkills || [];
+    const totalSkillsCount = loadedSkillsList.length + attachedSkillsList.length;
+    if (totalSkillsCount > 0) {
+        const skillTitles = [...loadedSkillsList.map(s => s.title), ...attachedSkillsList.map(s => s.name)];
+        buffs.push({
+            id: 'skills',
+            icon: '✨',
+            name: `Superpower Capsule (${totalSkillsCount} skill${totalSkillsCount > 1 ? 's' : ''})`,
+            type: 'skills',
+            badge: '+10 Architecture',
+            description: `Trained behaviors: ${skillTitles.join(', ')}.`,
+            actionText: 'View',
+            action: () => openWorkspaceMenu('skills')
+        });
+    }
+
+    // 10. Workspace Documents
+    const loadedDocsList = (activeDiscussionArtefacts.value || []).filter(a => ['document', 'file', 'code'].includes(a.artefact_type) && a.is_loaded);
+    if (loadedDocsList.length > 0) {
+        buffs.push({
+            id: 'docs',
+            icon: '📜',
+            name: `Scroll Stash (${loadedDocsList.length} doc${loadedDocsList.length > 1 ? 's' : ''})`,
+            type: 'docs',
+            badge: 'Active Context',
+            description: `Reading: ${loadedDocsList.map(d => d.title).join(', ')}.`,
+            actionText: 'View',
+            action: () => openWorkspaceMenu('attach')
+        });
+    }
+
+    // 11. Herd Mode
+    if (user.value?.herd_mode_enabled) {
+        buffs.push({
+            id: 'herd',
+            icon: '🐺',
+            name: `Wolfpack Consensus (${user.value.herd_rounds || 2} rounds)`,
+            type: 'herd',
+            badge: 'Multi-Agent',
+            description: 'Multiple autonomous AI agents debate and critique before answering.',
+            actionText: 'Disable',
+            action: () => toggleUserPref('herd_mode_enabled')
+        });
+    }
+
+    return buffs;
+});
+
+const activeBuffsCount = computed(() => activeBuffs.value.length);
+
+const aiCharacterClass = computed(() => {
+    const isBigBrain = isReasoningEffortActive.value && ['high', 'max'].includes(reasoningEffort.value);
+    const isSpicy = isCustomTemp.value && customTemp.value >= 1.0;
+    const isCold = isCustomTemp.value && customTemp.value <= 0.35;
+    const isWeb = isWebSearchActive.value;
+    const isHerd = user.value?.herd_mode_enabled;
+    const hasManyDocs = (activeDiscussionArtefacts.value || []).filter(a => a.is_loaded).length >= 3;
+    const hasSkills = (activeDiscussionArtefacts.value || []).some(a => a.artefact_type === 'skill' && a.is_loaded) || (discussionsStore.attachedSkills || []).length > 0;
+
+    if (isHerd) return "Wolfpack Overlord";
+    if (isBigBrain && isWeb && (ragStoreSelection.value || []).length > 0) return "Archmage of the Digital Spire";
+    if (isBigBrain && hasSkills) return "Senior Polymath Wizard";
+    if (isSpicy) return "Caffeinated Chaos Goblin";
+    if (isCold && isBigBrain) return "Vulcan Ice Calculator";
+    if (hasManyDocs) return "Grand Scroll Archivist";
+    if (isWeb) return "Cybernetic Recon Scout";
+    if (isBigBrain) return "Zen Master Philosopher";
+    if (hasSkills) return "Augmented Cyber-Specialist";
+    return "Eager Digital Familiar";
+});
+
+const aiVibeEmoji = computed(() => {
+    const cls = aiCharacterClass.value;
+    if (cls.includes("Archmage")) return "🧙‍♂️";
+    if (cls.includes("Wolfpack")) return "🐺";
+    if (cls.includes("Chaos Goblin")) return "👺";
+    if (cls.includes("Vulcan")) return "🧊";
+    if (cls.includes("Archivist")) return "📜";
+    if (cls.includes("Scout")) return "🛰️";
+    if (cls.includes("Philosopher")) return "🧘";
+    if (cls.includes("Wizard")) return "🔮";
+    if (cls.includes("Cyber")) return "🤖";
+    return "✨";
+});
+
+const aiVibeQuote = computed(() => {
+    const cls = aiCharacterClass.value;
+    if (cls.includes("Archmage")) return "I see through the fabric of the web and synthesize truth from the void.";
+    if (cls.includes("Wolfpack")) return "My agents have debated your request and forged a battle-tested response.";
+    if (cls.includes("Chaos Goblin")) return "Hold onto your keyboard, we're taking the scenic, unhinged route!";
+    if (cls.includes("Vulcan")) return "Emotion is irrelevant. Logical probability of optimal solution: 99.8%.";
+    if (cls.includes("Archivist")) return "I have unrolled your ancient scrolls and committed every line to memory.";
+    if (cls.includes("Scout")) return "Radar spinning. Pinging satellite constellations for real-time intel.";
+    if (cls.includes("Philosopher")) return "I think, therefore I ponder, therefore I generate.";
+    return "Ready to assist! Tell me what we are conquering today.";
+});
+
+function closeMenusIfOutside(e) {
+    if (isTuningOpen.value && tuningMenuRef.value && !tuningMenuRef.value.contains(e.target)) {
+        isTuningOpen.value = false;
+    }
+    if (isWorkspaceMenuOpen.value && workspaceMenuRef.value && !workspaceMenuRef.value.contains(e.target)) {
+        isWorkspaceMenuOpen.value = false;
+    }
+}
 
 const detectedPlaceholders = computed(() => {
     if (!messageText.value || typeof messageText.value !== 'string') return [];
@@ -539,16 +944,40 @@ const activeFeatures = computed(() => {
             systemPrompt: 'User: "..." Do you need to search? -> [Search Action] -> ## Web Search Context:\n### Title\nContent...'
         });
     }
-    if (user.value?.reasoning_activation) {
+    if (isReasoningEffortActive.value) {
         features.push({ 
             id: 'thinking', 
             icon: IconThinking, 
-            label: 'Thinking', 
+            label: `Reasoning (${reasoningEffort.value || 'low'})`, 
             colorClass: 'text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/20 border-indigo-200 dark:border-indigo-800', 
-            title: 'Thinking Mode Enabled.',
-            modalTitle: 'Thinking Mode',
-            modalDescription: `Enables Chain-of-Thought reasoning. Effort: ${user.value.reasoning_effort || 'medium'}.`,
-            systemPrompt: 'System may inject <think> instructions or utilize the model\'s native reasoning tokens.'
+            title: `Reasoning Effort: ${reasoningEffort.value || 'low'}.`,
+            modalTitle: 'Thinking / Reasoning Effort',
+            modalDescription: `Enables Chain-of-Thought reasoning. Effort: ${reasoningEffort.value || 'low'}.`,
+            systemPrompt: `Reasoning effort set to '${reasoningEffort.value || 'low'}'.`
+        });
+    }
+    if (isCustomTemp.value) {
+        features.push({ 
+            id: 'temperature', 
+            icon: IconAdjustmentsHorizontal, 
+            label: `Temp: ${customTemp.value}`, 
+            colorClass: 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800', 
+            title: `Custom Temperature: ${customTemp.value}`,
+            modalTitle: 'Custom Temperature',
+            modalDescription: `Sampling temperature overridden to ${customTemp.value}.`,
+            systemPrompt: `Sampling temperature set to ${customTemp.value}.`
+        });
+    }
+    if (isCustomRounds.value) {
+        features.push({ 
+            id: 'rounds', 
+            icon: IconClock, 
+            label: `Rounds: ${customRounds.value}`, 
+            colorClass: 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800', 
+            title: `Max Reasoning Rounds: ${customRounds.value}`,
+            modalTitle: 'Max Reasoning Rounds',
+            modalDescription: `Agentic reasoning loop budget limited to ${customRounds.value} rounds.`,
+            systemPrompt: `max_nb_rounds set to ${customRounds.value}.`
         });
     }
     if (user.value?.image_annotation_enabled) {
@@ -1017,7 +1446,23 @@ async function handleSendMessage() {
     messageText.value = '';
     inputTokenCount.value = 0;
     stagedImages.value = []; 
-    try { await discussionsStore.sendMessage({ prompt: text, image_server_paths: [], localImageUrls: localPreviews, image_files: imagesToUpload, webSearchEnabled: isWebSearchActive.value }); } catch(err) { console.error("SendMessage failed:", err); uiStore.addNotification('Failed to send message.', 'error'); messageText.value = text; imagesToUpload.forEach((file, i) => { stagedImages.value.push({ file, previewUrl: localPreviews[i] }); }); }
+    try { 
+        await discussionsStore.sendMessage({ 
+            prompt: text, 
+            image_server_paths: [], 
+            localImageUrls: localPreviews, 
+            image_files: imagesToUpload, 
+            webSearchEnabled: isWebSearchActive.value,
+            temperature: isCustomTemp.value ? Number(customTemp.value) : null,
+            max_nb_rounds: isCustomRounds.value ? parseInt(customRounds.value, 10) : null,
+            reasoning_effort: isReasoningEffortActive.value ? (reasoningEffort.value || 'low') : 'none'
+        }); 
+    } catch(err) { 
+        console.error("SendMessage failed:", err); 
+        uiStore.addNotification('Failed to send message.', 'error'); 
+        messageText.value = text; 
+        imagesToUpload.forEach((file, i) => { stagedImages.value.push({ file, previewUrl: localPreviews[i] }); }); 
+    }
 }
 
 function handleKeyDown(event) { 
@@ -1055,8 +1500,22 @@ watch(messageText, (newText) => {
     } 
 });
 
-onMounted(() => { promptsStore.fetchPrompts(); if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores(); if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools(); on('files-dropped-in-chat', handleFilesInput); on('files-pasted-in-chat', handleFilesInput); });
-onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-pasted-in-chat', handleFilesInput); stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl)); });
+onMounted(() => { 
+    promptsStore.fetchPrompts(); 
+    notesStore.fetchNotes();
+    skillsStore.fetchSkills();
+    if (dataStore.availableRagStores.length === 0) dataStore.fetchDataStores(); 
+    if (dataStore.availableMcpToolsForSelector.length === 0) dataStore.fetchMcpTools(); 
+    on('files-dropped-in-chat', handleFilesInput); 
+    on('files-pasted-in-chat', handleFilesInput); 
+    document.addEventListener('mousedown', closeMenusIfOutside);
+});
+onUnmounted(() => { 
+    off('files-dropped-in-chat', handleFilesInput); 
+    off('files-pasted-in-chat', handleFilesInput); 
+    stagedImages.value.forEach(img => URL.revokeObjectURL(img.previewUrl)); 
+    document.removeEventListener('mousedown', closeMenusIfOutside);
+});
 </script>
 
 <template>
@@ -1125,38 +1584,18 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
                 </template>
                 <div v-else class="grow"></div> 
 
-                <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 shrink-0" v-if="showContextBar && activeFeatures.length > 0"></div>
+                <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 shrink-0"></div>
 
-                <!-- Vertical Badge Menu -->
-                <div class="relative group/badge-menu shrink-0" v-if="activeFeatures.length > 0">
-                    <!-- Menu Trigger Button -->
-                    <button class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-[10px] font-black uppercase tracking-widest text-gray-500 hover:text-blue-500 transition-all active:scale-95">
-                        <IconSquares2x2 class="w-3.5 h-3.5" />
-                        <span>{{ activeFeatures.length }} Active</span>
-                    </button>
-
-                    <!-- Floating Vertical Menu (Viewport Aware) -->
-                    <div class="absolute bottom-full left-0 mb-2 w-56 opacity-0 translate-y-2 pointer-events-none group-hover/badge-menu:opacity-100 group-hover/badge-menu:translate-y-0 group-hover/badge-menu:pointer-events-auto transition-all duration-300 z-50">
-                        <!-- Max height set to 70% of viewport to prevent top overflow, with custom scrollbar -->
-                        <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-y-auto custom-scrollbar p-2 space-y-1 max-h-[70vh]">
-                            <div class="sticky top-0 bg-white dark:bg-gray-900 z-10 px-3 py-2 text-[9px] font-black text-gray-400 uppercase tracking-[0.2em] border-b dark:border-gray-800 mb-1">Intelligence Stack</div>
-
-                            <button v-for="feat in activeFeatures" :key="feat.id" 
-                                 @click="showFeatureInfo(feat)"
-                                 class="w-full flex items-center gap-3 p-2 rounded-xl transition-all text-left hover:bg-gray-50 dark:hover:bg-gray-800 group/feat-item">
-                                <div :class="['w-9 h-9 rounded-lg border shadow-sm transition-transform group-hover/feat-item:scale-110 shrink-0 flex items-center justify-center overflow-hidden', feat.colorClass]">
-                                    <component :is="feat.icon" class="w-5 h-5 fill-current shrink-0" />
-                                </div>
-                                <div class="flex flex-col min-w-0">
-                                    <span class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{{ feat.label }}</span>
-                                    <span class="text-[9px] text-gray-400 uppercase tracking-tighter">Click for info</span>
-                                </div>
-                            </button>
-                        </div>
-                        <!-- Tooltip Arrow -->
-                        <div class="absolute left-6 top-full -mt-1 w-3 h-3 bg-white dark:bg-gray-900 border-r border-b border-gray-200 dark:border-gray-700 transform rotate-45"></div>
-                    </div>
-                </div>
+                <!-- ── [AMUSING] AI VIBE & RPG LOADOUT COCKPIT TRIGGER ── -->
+                <button 
+                    @click="isLoadoutModalOpen = true"
+                    class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider shadow-2xs hover:scale-105 transition-all cursor-pointer select-none shrink-0"
+                    title="Click for AI Vibe Check & Character Loadout"
+                >
+                    <span class="text-xs">{{ aiVibeEmoji }}</span>
+                    <span class="truncate max-w-[120px] sm:max-w-[170px]">{{ aiCharacterClass }}</span>
+                    <span class="px-1 py-0.2 rounded bg-purple-200/80 dark:bg-purple-800 text-[9px] font-mono">{{ activeBuffsCount }} buffs</span>
+                </button>
             </div>
         </div>
 
@@ -1314,310 +1753,428 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
             </div>
 
             <!-- Input Controls -->
-            <div class="flex items-end gap-2 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm relative overflow-hidden">
-                
-                <div class="pb-1 pl-1">
-                    <DropdownMenu icon="plus" collection="" title="Add" buttonClass="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative">
-                         <div v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0" class="absolute -top-0.5 -right-0.5 w-3 h-3 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></div>
-                        <DropdownSubmenu title="Add Document" icon="file-text" collection="ui">
-                            <div class="p-1 min-w-[260px]">
-                                <button @click="triggerFileUpload('as_is')" class="menu-item"><IconFolder class="w-4 h-4 mr-3 text-emerald-500" /> <span>Native File (as-is)</span></button>
-                                <button @click="triggerFileUpload('text')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-gray-500" /> <span>Text</span></button>
-                                <button @click="triggerFileUpload('text_embedded_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-600" /> <span>Text + Embedded Images</span></button>
-                                <button @click="triggerFileUpload('text_images')" class="menu-item"><IconFileText class="w-4 h-4 mr-3 text-blue-500" /> <span>Text + Pages as Images</span></button>
-                                <button @click="triggerFileUpload('ocr')" class="menu-item"><IconEye class="w-4 h-4 mr-3 text-indigo-500" /> <span>OCR</span></button>
-                                <button @click="triggerFileUpload('images_only')" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Images</span></button>
-                            </div>
-                        </DropdownSubmenu>
-                        <DropdownSubmenu title="Add Data" icon="database" collection="ui">
-                            <div class="p-1 min-w-[320px]">
-                                <button @click="triggerFileUpload('data')" class="menu-item">
-                                    <IconDatabase class="w-4 h-4 mr-3 text-green-500" />
-                                    <span>Data Interface (Spreadsheet / SQLite DB Tables)</span>
-                                </button>
-                                <button @click="triggerFileUpload('data_bundle')" class="menu-item">
-                                    <IconFolder class="w-4 h-4 mr-3 text-yellow-500" />
-                                    <span>Folder Bundle (Consolidates all data files in folder)</span>
-                                </button>
-                            </div>
-                        </DropdownSubmenu>
-                        <button @click="triggerImageUpload" class="menu-item"><IconPhoto class="w-4 h-4 mr-3 text-purple-500" /> <span>Upload Image</span></button>
-                        <button @click="handleCreateManualArtefact" class="menu-item"><IconFilePlus class="w-4 h-4 mr-3 text-green-500" /> <span>Create Document</span></button>
-                        <button @click="handleImportFromInternet" class="menu-item"><IconWeb class="w-4 h-4 mr-3 text-cyan-500" /> <span>Import from Internet</span></button>
-                        
-                        <div class="menu-divider"></div>
-                        
-                        <!-- Context Options Submenu -->
-                        <DropdownSubmenu title="Context Options" icon="cog" collection="ui">
-                             <div class="p-1 min-w-[200px]">
-                                <!-- Group: Knowledge -->
-                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-1">Knowledge</div>
-                                
-                                <!-- Web Search Toggle -->
-                                <button @click.stop="toggleWebSearch" class="menu-item flex justify-between items-center group/item" 
-                                        :title="`Active Engines: ${currentProviderList}`">
-                                    <span class="flex items-center gap-2">
-                                        <IconGlobeAlt class="w-4 h-4 text-blue-500" />
-                                        <span>Web Search ({{ currentProviderName }})</span>
-                                    </span>
-                                    <IconCheckCircle v-if="isWebSearchActive" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                
-                                <!-- Memory Master Toggle -->
-                                <button @click.stop="toggleUserPref('memory_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconThinking class="w-4 h-4 text-teal-500" />
-                                        <span>Memory</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.memory_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+            <div class="flex items-end gap-2 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm relative">
 
-                                <!-- Skills Library Toggle -->
-                                <button @click.stop="toggleUserPref('skills_library_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconDatabase class="w-4 h-4 text-emerald-500" />
-                                        <span>Skills Auto-Search</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.skills_library_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                <div class="pb-1 pl-1 flex items-center gap-1.5 shrink-0">
+                    <!-- ── REWORKED TABBED WORKSPACE & KNOWLEDGE HUB MENU ── -->
+                    <div class="relative" ref="workspaceMenuRef">
+                        <button 
+                            type="button" 
+                            @click="isWorkspaceMenuOpen = !isWorkspaceMenuOpen" 
+                            class="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative active:scale-95 cursor-pointer"
+                            :class="{
+                                'text-blue-600 dark:text-blue-400 border-blue-400 dark:border-blue-600 bg-blue-50/60 dark:bg-blue-900/30': isWorkspaceMenuOpen,
+                                'text-gray-500': !isWorkspaceMenuOpen
+                            }"
+                            title="Workspace Hub & Knowledge Injection"
+                        >
+                            <IconPlus class="w-4 h-4" />
+                            <span v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0 || loadedContextItems.length > 0" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></span>
+                        </button>
 
-                                <!-- Street View Toggle (Only if Google API Key is present) -->
-                                <button v-if="user?.google_api_key" @click.stop="toggleUserPref('street_view_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconMap class="w-4 h-4 text-amber-500" />
-                                        <span>Street View</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.street_view_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-
-                                <!-- Scheduler Toggle -->
-                                <button @click.stop="toggleUserPref('scheduler_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconClock class="w-4 h-4 text-indigo-500" />
-                                        <span>Scheduler</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.scheduler_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                
-                                <!-- Google Workspace Tools (Only shown if Client Secret is configured) -->
-                                <template v-if="user?.google_client_secret_json">
-                                    <div class="my-1 border-t border-gray-100 dark:border-gray-700"></div>
-                                    <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">Google Workspace</div>
-                                    
-                                    <!-- Drive -->
-                                    <button @click.stop="toggleUserPref('google_drive_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                        <span class="flex items-center gap-2">
-                                            <IconGoogleDrive class="w-4 h-4 text-green-600" />
-                                            <span>Drive</span>
-                                        </span>
-                                        <IconCheckCircle v-if="user?.google_drive_enabled" class="w-4 h-4 text-green-500" />
-                                        <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                        <!-- Tabbed Popover Menu -->
+                        <Transition
+                            enter-active-class="transition ease-out duration-150"
+                            enter-from-class="opacity-0 translate-y-2 scale-95"
+                            enter-to-class="opacity-100 translate-y-0 scale-100"
+                            leave-active-class="transition ease-in duration-100"
+                            leave-from-class="opacity-100 translate-y-0 scale-100"
+                            leave-to-class="opacity-0 translate-y-2 scale-95"
+                        >
+                            <div 
+                                v-if="isWorkspaceMenuOpen" 
+                                class="absolute bottom-full left-0 mb-3 w-88 sm:w-[420px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-50 text-gray-800 dark:text-gray-100 flex flex-col max-h-[82vh]"
+                            >
+                                <!-- Tab Switcher Header -->
+                                <div class="px-2 pt-2 pb-1 border-b dark:border-gray-800 bg-gray-50/80 dark:bg-gray-950/60 flex items-center gap-1 overflow-x-auto custom-scrollbar shrink-0 select-none">
+                                    <button 
+                                        type="button" 
+                                        @click="openWorkspaceMenu('attach')"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                        :class="activeWorkspaceTab === 'attach' ? 'bg-white dark:bg-gray-800 text-blue-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                    >
+                                        <span>📎 Ingest</span>
                                     </button>
-                                    <!-- Calendar -->
-                                    <button @click.stop="toggleUserPref('google_calendar_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                        <span class="flex items-center gap-2">
-                                            <IconCalendar class="w-4 h-4 text-blue-600" />
-                                            <span>Calendar</span>
-                                        </span>
-                                        <IconCheckCircle v-if="user?.google_calendar_enabled" class="w-4 h-4 text-green-500" />
-                                        <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                    <button 
+                                        type="button" 
+                                        @click="openWorkspaceMenu('notes')"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                        :class="activeWorkspaceTab === 'notes' ? 'bg-white dark:bg-gray-800 text-amber-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                    >
+                                        <span>📝 Notes</span>
+                                        <span class="text-[9px] px-1 py-0.2 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-mono">{{ notes.length }}</span>
                                     </button>
-                                    <!-- Gmail -->
-                                    <button @click.stop="toggleUserPref('google_gmail_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                        <span class="flex items-center gap-2">
-                                            <IconGoogle class="w-4 h-4 text-red-600" />
-                                            <span>Gmail</span>
-                                        </span>
-                                        <IconCheckCircle v-if="user?.google_gmail_enabled" class="w-4 h-4 text-green-500" />
-                                        <IconCircle v-else class="w-4 h-4 text-gray-400" />
+                                    <button 
+                                        type="button" 
+                                        @click="openWorkspaceMenu('skills')"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                        :class="activeWorkspaceTab === 'skills' ? 'bg-white dark:bg-gray-800 text-teal-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                    >
+                                        <span>✨ Skills</span>
+                                        <span class="text-[9px] px-1 py-0.2 rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 font-mono">{{ skills.length }}</span>
                                     </button>
-                                </template>
-                                
-                                <!-- Group: Reasoning -->
-                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Reasoning</div>
-                                
-                                <!-- Herd Mode Toggle -->
-                                <button 
-                                    @click.stop="toggleUserPref('herd_mode_enabled')" 
-                                    data-keep-open="true"
-                                    class="menu-item flex justify-between items-center group/item"
-                                    :disabled="!canEnableHerd"
-                                    :class="{'opacity-50 cursor-not-allowed': !canEnableHerd}"
-                                    :title="!canEnableHerd ? 'Configure Herd participants in Settings' : 'Toggle Herd Mode'"
-                                >
-                                    <span class="flex items-center gap-2">
-                                        <IconUserGroup class="w-4 h-4 text-amber-500" />
-                                        <span>Herd Mode</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.herd_mode_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-                                
-                                <!-- Thinking Mode Toggle -->
-                                <button @click.stop="toggleUserPref('reasoning_activation')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconThinking class="w-4 h-4 text-purple-500" />
-                                        <span>Thinking</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.reasoning_activation" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                                    <button 
+                                        type="button" 
+                                        @click="openWorkspaceMenu('prompts')"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                        :class="activeWorkspaceTab === 'prompts' ? 'bg-white dark:bg-gray-800 text-purple-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                    >
+                                        <span>🎟️ Prompts</span>
+                                    </button>
+                                    <button 
+                                        type="button" 
+                                        @click="openWorkspaceMenu('context')"
+                                        class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
+                                        :class="activeWorkspaceTab === 'context' ? 'bg-white dark:bg-gray-800 text-green-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                    >
+                                        <span>⚙️ Context</span>
+                                    </button>
+                                </div>
 
-                                <!-- Group: Generation -->
-                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Creative Generation</div>
+                                <!-- Tab 1: Attach & Ingest -->
+                                <div v-if="activeWorkspaceTab === 'attach'" class="p-3 space-y-3 overflow-y-auto custom-scrollbar">
+                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1">Document & Media Ingestion</div>
+                                    <div class="grid grid-cols-2 gap-2">
+                                        <button @click="triggerFileUpload('as_is')" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                            <IconFolder class="w-4 h-4 text-emerald-500 shrink-0" />
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Native File</p><p class="text-[9px] text-gray-400">Preserve as-is</p></div>
+                                        </button>
+                                        <button @click="triggerFileUpload('text_images')" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                            <IconFileText class="w-4 h-4 text-blue-500 shrink-0" />
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Text + Pages</p><p class="text-[9px] text-gray-400">PDF / DOCX layout</p></div>
+                                        </button>
+                                        <button @click="triggerFileUpload('data')" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-green-50 dark:hover:bg-green-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                            <IconDatabase class="w-4 h-4 text-green-500 shrink-0" />
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Data Tables</p><p class="text-[9px] text-gray-400">CSV / DB tables</p></div>
+                                        </button>
+                                        <button @click="triggerImageUpload" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-purple-50 dark:hover:bg-purple-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                            <IconPhoto class="w-4 h-4 text-purple-500 shrink-0" />
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Images</p><p class="text-[9px] text-gray-400">Attach for vision</p></div>
+                                        </button>
+                                        <button @click="handleCreateManualArtefact" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-orange-50 dark:hover:bg-orange-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                            <IconPencil class="w-4 h-4 text-orange-500 shrink-0" />
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Create Blank</p><p class="text-[9px] text-gray-400">Write in workspace</p></div>
+                                        </button>
+                                        <button @click="handleImportFromInternet" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-cyan-50 dark:hover:bg-cyan-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                            <IconWeb class="w-4 h-4 text-cyan-500 shrink-0" />
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Scrape URL</p><p class="text-[9px] text-gray-400">Fetch web article</p></div>
+                                        </button>
+                                    </div>
+                                </div>
 
-                                <!-- Image Generation Toggle -->
-                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('image_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconPhoto class="w-4 h-4 text-pink-500" />
-                                        <span>Image Gen</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.image_generation_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                                <!-- Tab 2: Notes Hub -->
+                                <div v-else-if="activeWorkspaceTab === 'notes'" class="p-3 space-y-3 flex flex-col grow min-h-0">
+                                    <div class="flex items-center justify-between gap-2 shrink-0">
+                                        <input 
+                                            v-model="noteSearchTerm" 
+                                            type="text" 
+                                            placeholder="Filter notes..." 
+                                            class="input-field !py-1 text-xs grow"
+                                        />
+                                        <router-link to="/notes-studio" @click="isWorkspaceMenuOpen = false" class="btn btn-secondary btn-xs shrink-0 flex items-center gap-1" title="Open Notes Studio">
+                                            <IconPencil class="w-3 h-3" />
+                                            <span>Studio</span>
+                                        </router-link>
+                                    </div>
 
-                                <!-- Slide Maker Toggle -->
-                                <button v-if="isTtiConfigured" @click.stop="toggleUserPref('slide_maker_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconPresentationChartBar class="w-4 h-4 text-orange-500" />
-                                        <span>Slide Maker</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.slide_maker_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                                    <div class="overflow-y-auto custom-scrollbar space-y-1 grow max-h-72">
+                                        <div v-if="filteredNotes.length === 0" class="text-center py-8 text-xs text-gray-400 italic">
+                                            {{ noteSearchTerm ? 'No matching notes found.' : 'No notes saved yet. Create your first note in Notes Studio!' }}
+                                        </div>
+                                        <div 
+                                            v-for="note in filteredNotes" 
+                                            :key="note.id"
+                                            @click="handleToggleNoteInDiscussion(note)"
+                                            class="p-2.5 rounded-xl border transition-all flex items-center justify-between gap-3 cursor-pointer group"
+                                            :class="isNoteActiveInContext(note) ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 shadow-xs' : 'border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/60'"
+                                        >
+                                            <div class="flex items-center gap-2.5 min-w-0">
+                                                <div class="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 flex items-center justify-center shrink-0">
+                                                    <IconPencil class="w-3.5 h-3.5" />
+                                                </div>
+                                                <div class="min-w-0">
+                                                    <p class="text-xs font-bold truncate text-gray-800 dark:text-gray-100">{{ note.title || 'Untitled Note' }}</p>
+                                                    <p class="text-[9px] text-gray-400 truncate">{{ (note.content || '').substring(0, 50) }}...</p>
+                                                </div>
+                                            </div>
+                                            <div class="shrink-0 flex items-center gap-1">
+                                                <span v-if="isNoteActiveInContext(note)" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-amber-500 text-white shadow-2xs">Loaded</span>
+                                                <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase bg-gray-100 dark:bg-gray-700 text-gray-500 group-hover:text-amber-600">+ Add</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
 
-                                <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest mt-2">Building & Learning</div>
+                                <!-- Tab 3: Skills Hub -->
+                                <div v-else-if="activeWorkspaceTab === 'skills'" class="p-3 space-y-3 flex flex-col grow min-h-0">
+                                    <div class="flex items-center justify-between gap-2 shrink-0">
+                                        <input 
+                                            v-model="skillSearchTerm" 
+                                            type="text" 
+                                            placeholder="Filter skills..." 
+                                            class="input-field !py-1 text-xs grow"
+                                        />
+                                        <router-link to="/skills-studio" @click="isWorkspaceMenuOpen = false" class="btn btn-secondary btn-xs shrink-0 flex items-center gap-1" title="Open Skills Studio">
+                                            <IconSparkles class="w-3 h-3" />
+                                            <span>Studio</span>
+                                        </router-link>
+                                    </div>
 
-                                <!-- Widget Building Toggle -->
-                                <button @click.stop="toggleUserPref('inline_widgets_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconCpuChip class="w-4 h-4 text-indigo-500" />
-                                        <span>Widget Building</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.inline_widgets_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                                    <div class="overflow-y-auto custom-scrollbar space-y-1 grow max-h-72">
+                                        <div v-if="filteredSkills.length === 0" class="text-center py-8 text-xs text-gray-400 italic">
+                                            {{ skillSearchTerm ? 'No matching skills found.' : 'No skills in library. Create one in Skills Studio or install from Zoo!' }}
+                                        </div>
+                                        <div 
+                                            v-for="skill in filteredSkills" 
+                                            :key="skill.id"
+                                            @click="handleToggleSkillInDiscussion(skill)"
+                                            class="p-2.5 rounded-xl border transition-all flex items-center justify-between gap-3 cursor-pointer group"
+                                            :class="isSkillActiveInContext(skill) ? 'bg-teal-50/80 dark:bg-teal-950/40 border-teal-300 dark:border-teal-800 shadow-xs' : 'border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/60'"
+                                        >
+                                            <div class="flex items-center gap-2.5 min-w-0">
+                                                <div class="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-900/40 text-teal-600 flex items-center justify-center shrink-0">
+                                                    <IconSparkles class="w-3.5 h-3.5" />
+                                                </div>
+                                                <div class="min-w-0">
+                                                    <div class="flex items-center gap-1.5">
+                                                        <p class="text-xs font-bold truncate text-gray-800 dark:text-gray-100">{{ skill.name }}</p>
+                                                        <span class="px-1 py-0.2 rounded text-[8px] font-bold uppercase font-mono" :class="skill.is_system ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' : 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'">
+                                                            {{ skill.is_system ? 'System' : 'Personal' }}
+                                                        </span>
+                                                    </div>
+                                                    <p class="text-[9px] text-gray-400 truncate">{{ skill.description || skill.category || 'AI capability capsule' }}</p>
+                                                </div>
+                                            </div>
+                                            <div class="shrink-0 flex items-center gap-1">
+                                                <span v-if="isSkillActiveInContext(skill)" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-teal-500 text-white shadow-2xs">Equipped</span>
+                                                <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase bg-gray-100 dark:bg-gray-700 text-gray-500 group-hover:text-teal-600">+ Equip</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
 
-                                <!-- Note Building Toggle -->
-                                <button @click.stop="toggleUserPref('note_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconFileText class="w-4 h-4 text-amber-500" />
-                                        <span>Note Building</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.note_generation_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                                <!-- Tab 4: Prompts -->
+                                <div v-else-if="activeWorkspaceTab === 'prompts'" class="p-3 space-y-3 overflow-y-auto custom-scrollbar max-h-72">
+                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1">Prompt Templates</div>
+                                    <div class="space-y-1">
+                                        <div v-for="p in lollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content); isWorkspaceMenuOpen = false;" class="p-2 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-950/30 cursor-pointer border border-transparent hover:border-purple-200 text-xs">
+                                            <p class="font-bold text-gray-800 dark:text-gray-200">{{ p.name }}</p>
+                                            <p class="text-[9px] text-gray-400 truncate">{{ p.description }}</p>
+                                        </div>
+                                    </div>
+                                </div>
 
-                                <!-- Book Building Toggle -->
-                                <button @click.stop="toggleUserPref('book_generation_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconBookOpen class="w-4 h-4 text-rose-500" />
-                                        <span>Book Building</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.book_generation_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
+                                <!-- Tab 5: Context & RAG -->
+                                <div v-else-if="activeWorkspaceTab === 'context'" class="p-3 space-y-3 overflow-y-auto custom-scrollbar max-h-72">
+                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1">Active RAG Knowledge Stores</div>
+                                    <div class="space-y-1">
+                                        <button @click.stop="handleOpenCreateDatastoreModal" class="w-full text-left p-2 rounded-xl text-green-600 font-bold text-xs hover:bg-green-50 dark:hover:bg-green-950/20 border border-dashed border-green-300">
+                                            + Create New DataStore
+                                        </button>
+                                        <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="w-full text-left p-2 rounded-xl flex items-center justify-between text-xs border" :class="ragStoreSelection.includes(store.id) ? 'bg-green-50 dark:bg-green-950/30 border-green-300 font-bold text-green-700' : 'border-gray-100 dark:border-gray-800'">
+                                            <span class="truncate pr-2">{{ store.name }}</span>
+                                            <IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 shrink-0" />
+                                        </button>
+                                    </div>
 
-                                <!-- Artefacts Toggle -->
-                                <button @click.stop="toggleUserPref('artefacts_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconFileText class="w-4 h-4 text-blue-500" />
-                                        <span>Artefacts</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.artefacts_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-
-                                <!-- Skill Building Toggle -->
-                                <button @click.stop="toggleUserPref('skills_building_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconPencil class="w-4 h-4 text-sky-500" />
-                                        <span>Skill Building</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.skills_building_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-
-                                <!-- Form Building Toggle -->
-                                <button @click.stop="toggleUserPref('form_building_enabled')" class="menu-item flex justify-between items-center group/item" data-keep-open="true">
-                                    <span class="flex items-center gap-2">
-                                        <IconPlus class="w-4 h-4 text-blue-500" />
-                                        <span>Form Building</span>
-                                    </span>
-                                    <IconCheckCircle v-if="user?.form_building_enabled" class="w-4 h-4 text-green-500" />
-                                    <IconCircle v-else class="w-4 h-4 text-gray-400" />
-                                </button>
-
-                                <!-- Settings Link -->
-                                <div class="my-1 border-t border-gray-100 dark:border-gray-700 mt-2"></div>
-                                <button @click="navigateToContextSettings" class="menu-item flex justify-between items-center group/item">
-                                    <span class="flex items-center gap-2">
-                                        <IconSettings class="w-4 h-4 text-gray-500" />
-                                        <span>Configure...</span>
-                                    </span>
-                                </button>
-
-                             </div>
-                        </DropdownSubmenu>
-                        
-                        <!-- RAG, Tools, Prompts Submenus -->
-                        <DropdownSubmenu title="RAG Context" icon="database">
-                             <div class="p-1 max-h-64 overflow-y-auto min-w-[220px]">
-                                <button @click.stop="handleOpenCreateDatastoreModal" class="menu-item text-green-600 dark:text-green-400 font-bold flex items-center gap-2 border-b dark:border-gray-700/60 pb-1 mb-1">
-                                    <IconPlus class="w-4 h-4" />
-                                    <span>+ New DataStore & Link</span>
-                                </button>
-                                <div v-if="availableRagStores.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No stores available.</div>
-                                <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="menu-item flex justify-between items-center group/item"><span class="truncate pr-4" :class="{'font-bold text-green-600': ragStoreSelection.includes(store.id)}">{{ store.name }}</span><IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 shrink-0" /></button>
-                             </div>
-                        </DropdownSubmenu>
-                        <DropdownSubmenu title="MCP Tools" icon="server">
-                            <div class="p-1 max-h-72 overflow-y-auto min-w-[220px]">
-                                <div v-if="availableMcpToolsForSelector.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No tools available.</div>
-                                <div v-for="group in availableMcpToolsForSelector" :key="group.label" class="mb-2">
-                                    <div class="px-3 py-1 text-[10px] font-black text-gray-400 uppercase tracking-widest">{{ group.label }}</div>
-                                    <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="menu-item flex justify-between items-center pl-5"><span class="truncate pr-4 text-xs" :class="{'font-bold text-purple-600': mcpToolSelection.includes(tool.id)}">{{ tool.name }}</span><IconCheckCircle v-if="mcpToolSelection.includes(tool.id)" class="w-4 h-4 text-purple-500 shrink-0" /></button>
+                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1 pt-2 border-t dark:border-gray-800">MCP Cybernetic Tools</div>
+                                    <div class="space-y-1">
+                                        <div v-for="group in availableMcpToolsForSelector" :key="group.label" class="space-y-1">
+                                            <span class="text-[9px] font-bold text-gray-400 uppercase px-1">{{ group.label }}</span>
+                                            <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="w-full text-left p-2 rounded-xl flex items-center justify-between text-xs border" :class="mcpToolSelection.includes(tool.id) ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 font-bold text-purple-700' : 'border-gray-100 dark:border-gray-800'">
+                                                <span class="truncate pr-2">{{ tool.name }}</span>
+                                                <IconCheckCircle v-if="mcpToolSelection.includes(tool.id)" class="w-4 h-4 text-purple-500 shrink-0" />
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </DropdownSubmenu>
-                        <DropdownSubmenu title="Prompts" icon="ticket">
-                             <div class="p-1 max-h-72 overflow-y-auto min-w-[200px]">
-                                <DropdownSubmenu title="Standard" icon="lollms" class="w-full"><button v-for="p in lollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-xs">{{ p.name }}</button></DropdownSubmenu>
-                                <DropdownSubmenu title="Personal" icon="user" class="w-full">
-                                    <div class="px-2 py-1 sticky top-0 bg-white dark:bg-gray-800 z-10"><input v-model="userPromptSearchTerm" @click.stop placeholder="Search..." class="input-field-sm w-full"></div>
-                                    <div v-for="(prompts, cat) in filteredUserPromptsByCategory" :key="cat">
-                                        <div class="px-3 py-1 text-[9px] font-bold text-gray-400 uppercase">{{ cat }}</div>
-                                        <button v-for="p in prompts" :key="p.id" @click="handlePromptSelection(p.content)" class="menu-item text-xs pl-5">{{ p.name }}</button>
+                        </Transition>
+                    </div>
+
+                    <!-- Generation Controls (Temperature, Rounds, Reasoning Effort) Popover -->
+                    <div class="relative" ref="tuningMenuRef">
+                        <button 
+                            type="button" 
+                            @click="isTuningOpen = !isTuningOpen"
+                            class="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative active:scale-95 cursor-pointer"
+                            :class="{
+                                'text-purple-600 dark:text-purple-400 border-purple-400 dark:border-purple-600 bg-purple-50/60 dark:bg-purple-900/30': isTuningActive,
+                                'text-gray-500': !isTuningActive
+                            }"
+                            title="Generation Parameters (Temperature, Rounds, Reasoning Effort)"
+                        >
+                            <IconAdjustmentsHorizontal class="w-4 h-4" />
+                            <span v-if="isTuningActive" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-purple-500 rounded-full border-2 border-white dark:border-gray-800 animate-pulse"></span>
+                        </button>
+
+                        <!-- Floating Tuning Popover Panel -->
+                        <Transition
+                            enter-active-class="transition ease-out duration-150"
+                            enter-from-class="opacity-0 translate-y-2 scale-95"
+                            enter-to-class="opacity-100 translate-y-0 scale-100"
+                            leave-active-class="transition ease-in duration-100"
+                            leave-from-class="opacity-100 translate-y-0 scale-100"
+                            leave-to-class="opacity-0 translate-y-2 scale-95"
+                        >
+                            <div 
+                                v-if="isTuningOpen"
+                                class="absolute bottom-full left-0 mb-3 w-80 sm:w-88 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl p-4 space-y-4 z-50 text-gray-800 dark:text-gray-100"
+                            >
+                                <!-- Popover Header -->
+                                <div class="flex items-center justify-between border-b dark:border-gray-800 pb-2.5">
+                                    <div class="flex items-center gap-2">
+                                        <IconAdjustmentsHorizontal class="w-4 h-4 text-purple-500" />
+                                        <span class="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-100">Generation Controls</span>
                                     </div>
-                                </DropdownSubmenu>
-                             </div>
-                        </DropdownSubmenu>
+                                    <button 
+                                        type="button" 
+                                        @click="resetTuningDefaults" 
+                                        class="text-[10px] font-bold text-gray-400 hover:text-red-500 hover:underline transition-colors cursor-pointer"
+                                        title="Reset parameters to model and server defaults"
+                                    >
+                                        Reset Defaults
+                                    </button>
+                                </div>
 
-                        <DropdownSubmenu title="My Notes" icon="pencil">
-                             <div class="p-1 max-h-72 overflow-y-auto min-w-[220px]">
-                                <div v-if="notes.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No notes found.</div>
-                                <button v-for="note in notes" :key="note.id" @click.stop="discussionsStore.addNoteAsArtefact(note)" class="menu-item flex justify-between items-center group/item">
-                                    <span class="truncate pr-4 text-xs">{{ note.title }}</span>
-                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === note.title && i.type === 'note')" class="w-4 h-4 text-green-500 shrink-0" />
-                                </button>
-                             </div>
-                        </DropdownSubmenu>
+                                <!-- 1. Reasoning Effort (Thinking) -->
+                                <div class="space-y-2">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-1.5">
+                                            <IconThinking class="w-4 h-4 text-indigo-500" />
+                                            <span class="text-xs font-bold">Reasoning Effort</span>
+                                        </div>
+                                        <button 
+                                            type="button" 
+                                            @click="isReasoningEffortActive = !isReasoningEffortActive" 
+                                            :class="[isReasoningEffortActive ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
+                                            :title="isReasoningEffortActive ? 'Deactivate thinking' : 'Activate thinking (defaults to low)'"
+                                        >
+                                            <span :class="[isReasoningEffortActive ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200']"></span>
+                                        </button>
+                                    </div>
 
-                        <DropdownSubmenu title="My Skills" icon="sparkles">
-                             <div class="p-1 max-h-72 overflow-y-auto min-w-[220px]">
-                                <div v-if="skills.length === 0" class="px-4 py-3 text-xs text-gray-500 italic">No skills found.</div>
-                                <button v-for="skill in skills" :key="skill.id" @click.stop="discussionsStore.addSkillAsArtefact(skill)" class="menu-item flex justify-between items-center group/item">
-                                    <span class="truncate pr-4 text-xs">{{ skill.name }}</span>
-                                    <IconCheckCircle v-if="loadedContextItems.some(i => i.title === skill.name && i.type === 'skill')" class="w-4 h-4 text-green-500 shrink-0" />
-                                </button>
-                             </div>
-                        </DropdownSubmenu>
-                    </DropdownMenu>
+                                    <!-- Effort Selector (Pills) -->
+                                    <div v-if="isReasoningEffortActive" class="grid grid-cols-4 gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs animate-in fade-in">
+                                        <button 
+                                            v-for="effort in ['low', 'medium', 'high', 'max']" 
+                                            :key="effort"
+                                            type="button"
+                                            @click="setReasoningEffort(effort)"
+                                            class="py-1 px-1.5 rounded-lg font-bold text-[10px] uppercase transition-all capitalize cursor-pointer text-center"
+                                            :class="reasoningEffort === effort ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-xs' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'"
+                                        >
+                                            {{ effort }}
+                                        </button>
+                                    </div>
+                                    <p class="text-[10px] text-gray-400">
+                                        {{ isReasoningEffortActive ? `Model will reason with ${reasoningEffort.toUpperCase()} effort.` : 'Thinking deactivated (model responds directly).' }}
+                                    </p>
+                                </div>
+
+                                <!-- 2. Temperature -->
+                                <div class="space-y-2 border-t dark:border-gray-800 pt-3">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="text-xs font-bold">Temperature</span>
+                                            <span class="text-[10px] font-mono text-gray-400">
+                                                {{ isCustomTemp ? customTemp.toFixed(2) : '(Default)' }}
+                                            </span>
+                                        </div>
+                                        <button 
+                                            type="button" 
+                                            @click="isCustomTemp = !isCustomTemp" 
+                                            :class="[isCustomTemp ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
+                                            :title="isCustomTemp ? 'Deactivate custom temperature (use model default)' : 'Activate custom temperature'"
+                                        >
+                                            <span :class="[isCustomTemp ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200']"></span>
+                                        </button>
+                                    </div>
+
+                                    <div v-if="isCustomTemp" class="space-y-2 animate-in fade-in">
+                                        <div class="flex items-center gap-3">
+                                            <input 
+                                                type="range" 
+                                                v-model.number="customTemp" 
+                                                min="0.0" 
+                                                max="2.0" 
+                                                step="0.05" 
+                                                class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                                            />
+                                            <input 
+                                                type="number" 
+                                                v-model.number="customTemp" 
+                                                min="0.0" 
+                                                max="2.0" 
+                                                step="0.05" 
+                                                class="input-field !py-0.5 !px-1.5 text-xs w-16 text-center font-mono font-bold"
+                                            />
+                                        </div>
+                                        <div class="flex items-center justify-between text-[10px] text-gray-400">
+                                            <button type="button" @click="customTemp = 0.2" class="hover:text-purple-500 cursor-pointer">Precise (0.2)</button>
+                                            <button type="button" @click="customTemp = 0.7" class="hover:text-purple-500 cursor-pointer">Balanced (0.7)</button>
+                                            <button type="button" @click="customTemp = 1.2" class="hover:text-purple-500 cursor-pointer">Creative (1.2)</button>
+                                        </div>
+                                    </div>
+                                    <p v-else class="text-[10px] text-gray-400">
+                                        Deactivated. Model will use its native default temperature.
+                                    </p>
+                                </div>
+
+                                <!-- 3. Number of Rounds -->
+                                <div class="space-y-2 border-t dark:border-gray-800 pt-3">
+                                    <div class="flex items-center justify-between">
+                                        <div class="flex items-center gap-1.5">
+                                            <IconClock class="w-4 h-4 text-blue-500" />
+                                            <span class="text-xs font-bold">Max Reasoning Rounds</span>
+                                            <span class="text-[10px] font-mono text-gray-400">
+                                                {{ isCustomRounds ? customRounds : '(Default)' }}
+                                            </span>
+                                        </div>
+                                        <button 
+                                            type="button" 
+                                            @click="isCustomRounds = !isCustomRounds" 
+                                            :class="[isCustomRounds ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
+                                            :title="isCustomRounds ? 'Deactivate custom rounds limit (use discussion default)' : 'Activate custom rounds limit'"
+                                        >
+                                            <span :class="[isCustomRounds ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200']"></span>
+                                        </button>
+                                    </div>
+
+                                    <div v-if="isCustomRounds" class="space-y-2 animate-in fade-in">
+                                        <div class="flex items-center gap-3">
+                                            <input 
+                                                type="range" 
+                                                v-model.number="customRounds" 
+                                                min="1" 
+                                                max="50" 
+                                                step="1" 
+                                                class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                            />
+                                            <input 
+                                                type="number" 
+                                                v-model.number="customRounds" 
+                                                min="1" 
+                                                max="50" 
+                                                step="1" 
+                                                class="input-field !py-0.5 !px-1.5 text-xs w-16 text-center font-mono font-bold"
+                                            />
+                                        </div>
+                                        <div class="flex items-center justify-between text-[10px] text-gray-400">
+                                            <button type="button" @click="customRounds = 5" class="hover:text-blue-500 cursor-pointer">Quick (5)</button>
+                                            <button type="button" @click="customRounds = 10" class="hover:text-blue-500 cursor-pointer">Standard (10)</button>
+                                            <button type="button" @click="customRounds = 20" class="hover:text-blue-500 cursor-pointer">Default (20)</button>
+                                            <button type="button" @click="customRounds = 35" class="hover:text-blue-500 cursor-pointer">Deep (35)</button>
+                                        </div>
+                                    </div>
+                                    <p v-else class="text-[10px] text-gray-400">
+                                        Deactivated. Discussion default (20 rounds) will apply.
+                                    </p>
+                                </div>
+                            </div>
+                        </Transition>
+                    </div>
+
                     <input type="file" ref="fileInput" @change="handleFileUpload" multiple class="hidden">
                     <input type="file" ref="imageInput" @change="handleImageUpload" multiple accept="image/*" class="hidden">
                 </div>
@@ -1665,6 +2222,143 @@ onUnmounted(() => { off('files-dropped-in-chat', handleFilesInput); off('files-p
             </div>
         </div>
     </div>
+
+    <!-- ── [AMUSING] AI CHARACTER SHEET & ACTIVE LOADOUT MODAL ── -->
+    <Teleport to="body">
+        <div 
+            v-if="isLoadoutModalOpen" 
+            @click.self="isLoadoutModalOpen = false" 
+            class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+        >
+            <div class="bg-white dark:bg-gray-900 w-full max-w-xl rounded-3xl shadow-2xl border border-purple-200/60 dark:border-purple-800/50 overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200">
+
+                <!-- Character Header -->
+                <div class="p-6 bg-gradient-to-br from-purple-600 via-indigo-600 to-blue-600 text-white relative overflow-hidden shrink-0">
+                    <div class="absolute -right-8 -bottom-8 text-8xl opacity-15 pointer-events-none select-none">
+                        {{ aiVibeEmoji }}
+                    </div>
+
+                    <div class="flex items-center justify-between relative z-10 mb-3">
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs font-black uppercase tracking-[0.2em] bg-white/20 px-2.5 py-0.5 rounded-full backdrop-blur-sm">
+                                AI Character Sheet
+                            </span>
+                        </div>
+                        <button @click="isLoadoutModalOpen = false" class="p-1.5 hover:bg-white/20 rounded-full transition-colors cursor-pointer text-white">
+                            <IconXMark class="w-5 h-5" />
+                        </button>
+                    </div>
+
+                    <div class="flex items-center gap-4 relative z-10">
+                        <div class="w-16 h-16 rounded-2xl bg-white/20 backdrop-blur-md border border-white/30 flex items-center justify-center text-4xl shadow-inner shrink-0">
+                            {{ aiVibeEmoji }}
+                        </div>
+                        <div class="min-w-0">
+                            <h3 class="text-xl sm:text-2xl font-black tracking-tight leading-tight">{{ aiCharacterClass }}</h3>
+                            <p class="text-xs text-purple-100 italic mt-0.5 line-clamp-2">"{{ aiVibeQuote }}"</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Attributes & Meters Grid -->
+                <div class="p-6 overflow-y-auto custom-scrollbar space-y-6 grow">
+                    <div class="space-y-2">
+                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Cognitive Attributes</span>
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <!-- Reasoning Gauge -->
+                            <div class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-800 space-y-1">
+                                <span class="text-[9px] font-bold text-gray-400 uppercase">🧠 Brain Power</span>
+                                <p class="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase font-mono">
+                                    {{ isReasoningEffortActive ? reasoningEffort : 'Instant Instinct' }}
+                                </p>
+                                <p class="text-[9px] text-gray-400 leading-tight">
+                                    {{ isReasoningEffortActive ? 'Chain-of-thought enabled.' : 'Fast direct response.' }}
+                                </p>
+                            </div>
+
+                            <!-- Heat Gauge -->
+                            <div class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-800 space-y-1">
+                                <span class="text-[9px] font-bold text-gray-400 uppercase">🌡️ Spiciness</span>
+                                <p class="text-xs font-black text-amber-600 dark:text-amber-400 uppercase font-mono">
+                                    {{ isCustomTemp ? customTemp.toFixed(2) : 'Default' }}
+                                </p>
+                                <p class="text-[9px] text-gray-400 leading-tight">
+                                    {{ isCustomTemp ? (customTemp > 1 ? 'High creativity.' : 'Precise logic.') : 'Model calibrated.' }}
+                                </p>
+                            </div>
+
+                            <!-- Stamina Gauge -->
+                            <div class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-800 space-y-1">
+                                <span class="text-[9px] font-bold text-gray-400 uppercase">⏱️ Stamina</span>
+                                <p class="text-xs font-black text-blue-600 dark:text-blue-400 uppercase font-mono">
+                                    {{ isCustomRounds ? `${customRounds} Rounds` : '20 Rounds' }}
+                                </p>
+                                <p class="text-[9px] text-gray-400 leading-tight">Agentic loop budget.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Active Buffs & Equipped Inventory -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Equipped Buffs & Knowledge ({{ activeBuffs.length }})</span>
+                            <span class="text-[9px] text-gray-400 font-mono">Live conversation context</span>
+                        </div>
+
+                        <div v-if="activeBuffs.length === 0" class="p-6 text-center text-xs text-gray-400 italic bg-gray-50 dark:bg-gray-800/40 rounded-2xl border border-dashed dark:border-gray-800">
+                            No active buffs or knowledge equipped. The AI is running in clean vanilla mode!
+                        </div>
+
+                        <div v-else class="space-y-2">
+                            <div 
+                                v-for="buff in activeBuffs" 
+                                :key="buff.id"
+                                class="p-3.5 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/40 flex items-center justify-between gap-3 group"
+                            >
+                                <div class="flex items-start gap-3 min-w-0">
+                                    <div class="w-8 h-8 rounded-xl bg-white dark:bg-gray-700 shadow-xs flex items-center justify-center text-lg shrink-0 border border-gray-200 dark:border-gray-600">
+                                        {{ buff.icon }}
+                                    </div>
+                                    <div class="min-w-0">
+                                        <div class="flex items-center gap-2">
+                                            <h4 class="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{{ buff.name }}</h4>
+                                            <span class="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-widest bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300">{{ buff.badge }}</span>
+                                        </div>
+                                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{{ buff.description }}</p>
+                                    </div>
+                                </div>
+
+                                <button 
+                                    type="button"
+                                    @click="buff.action();" 
+                                    class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all shrink-0 cursor-pointer bg-gray-200/80 dark:bg-gray-700 hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-600 text-gray-600 dark:text-gray-300"
+                                >
+                                    {{ buff.actionText || 'Eject' }}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer with quick actions -->
+                <div class="p-4 border-t dark:border-gray-800 bg-gray-50/70 dark:bg-gray-950/70 flex items-center justify-between gap-3 shrink-0">
+                    <div class="flex items-center gap-2">
+                        <button @click="isLoadoutModalOpen = false; openWorkspaceMenu('notes');" class="btn btn-secondary btn-xs flex items-center gap-1">
+                            <span>📝 Equip Note</span>
+                        </button>
+                        <button @click="isLoadoutModalOpen = false; openWorkspaceMenu('skills');" class="btn btn-secondary btn-xs flex items-center gap-1">
+                            <span>✨ Equip Skill</span>
+                        </button>
+                    </div>
+
+                    <button @click="isLoadoutModalOpen = false" class="btn btn-primary btn-sm px-6">
+                        Awesome!
+                    </button>
+                </div>
+
+            </div>
+        </div>
+    </Teleport>
 </template>
 
 <style scoped>

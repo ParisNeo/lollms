@@ -31,6 +31,7 @@ const dataStore = useDataStore();
 const tasksStore = useTasksStore();
 const { 
     bindings, ttiBindings, ttsBindings, sttBindings,
+    ttvBindings, ttmBindings, ragBindings,
     globalSettings, availableBindingTypes, availableTtiBindingTypes, 
     availableTtsBindingTypes
 } = storeToRefs(adminStore);
@@ -40,10 +41,13 @@ const isCrossBindingMode = computed(() => !props.binding);
 
 const activeBindingList = computed(() => {
     switch (props.bindingType) {
-        case 'tti': return ttiBindings.value.filter(b => b.is_active);
-        case 'tts': return ttsBindings.value.filter(b => b.is_active);
-        case 'stt': return sttBindings.value.filter(b => b.is_active);
-        default: return bindings.value.filter(b => b.is_active);
+        case 'tti': return (ttiBindings.value || []).filter(b => b.is_active);
+        case 'tts': return (ttsBindings.value || []).filter(b => b.is_active);
+        case 'stt': return (sttBindings.value || []).filter(b => b.is_active);
+        case 'ttv': return (ttvBindings.value || []).filter(b => b.is_active);
+        case 'ttm': return (ttmBindings.value || []).filter(b => b.is_active);
+        case 'rag': return (ragBindings.value || []).filter(b => b.is_active);
+        default: return (bindings.value || []).filter(b => b.is_active);
     }
 });
 
@@ -341,9 +345,13 @@ function selectModelByName(modelName) {
 }
 
 const globalDefaultModel = computed(() => {
-    const settingKey = props.bindingType === 'tti' 
-        ? 'default_tti_binding_model'
-        : (props.bindingType === 'rag' ? 'default_safe_store_vectorizer' : 'default_lollms_model_name');
+    let settingKey = 'default_lollms_model_name';
+    if (props.bindingType === 'tti') settingKey = 'default_tti_binding_model';
+    else if (props.bindingType === 'tts') settingKey = 'default_tts_binding_model';
+    else if (props.bindingType === 'stt') settingKey = 'default_stt_binding_model';
+    else if (props.bindingType === 'ttv') settingKey = 'default_ttv_binding_model';
+    else if (props.bindingType === 'ttm') settingKey = 'default_ttm_binding_model';
+    else if (props.bindingType === 'rag') settingKey = 'default_safe_store_vectorizer';
     const setting = globalSettings.value.find(s => s.key === settingKey);
     return setting ? setting.value : null;
 });
@@ -674,6 +682,18 @@ async function setAsGlobalDefault() {
         } else if (props.bindingType === 'tti') {
             await adminStore.updateGlobalSettings({ 'default_tti_binding_model': fullModelName });
             uiStore.addNotification('Global default TTI model profile updated.', 'success');
+        } else if (props.bindingType === 'tts') {
+            await adminStore.updateGlobalSettings({ 'default_tts_binding_model': fullModelName });
+            uiStore.addNotification('Global default TTS model profile updated.', 'success');
+        } else if (props.bindingType === 'stt') {
+            await adminStore.updateGlobalSettings({ 'default_stt_binding_model': fullModelName });
+            uiStore.addNotification('Global default STT model profile updated.', 'success');
+        } else if (props.bindingType === 'ttv') {
+            await adminStore.updateGlobalSettings({ 'default_ttv_binding_model': fullModelName });
+            uiStore.addNotification('Global default TTV model profile updated.', 'success');
+        } else if (props.bindingType === 'ttm') {
+            await adminStore.updateGlobalSettings({ 'default_ttm_binding_model': fullModelName });
+            uiStore.addNotification('Global default TTM model profile updated.', 'success');
         } else if (props.bindingType === 'llm') {
             await adminStore.updateGlobalSettings({ 'default_lollms_model_name': fullModelName });
             uiStore.addNotification('Global default model profile updated.', 'success');
@@ -722,25 +742,69 @@ function handleFileChange(event) {
     event.target.value = '';
 }
 
-onMounted(async () => {
-    if (isCrossBindingMode.value) {
-        if (activeBindingList.value.length > 0 && !targetBindingId.value) {
-            targetBindingId.value = activeBindingList.value[0].id;
+async function loadModalityData() {
+    isLoading.value = true;
+    try {
+        switch (props.bindingType) {
+            case 'tti': await adminStore.fetchTtiBindings(true); break;
+            case 'tts': await adminStore.fetchTtsBindings(true); break;
+            case 'stt': await adminStore.fetchSttBindings(true); break;
+            case 'ttv': await adminStore.fetchTtvBindings(true); break;
+            case 'ttm': await adminStore.fetchTtmBindings(true); break;
+            case 'rag': await adminStore.fetchRagBindings(true); break;
+            default: await adminStore.fetchBindings(true); break;
         }
+
+        if (isCrossBindingMode.value) {
+            if (activeBindingList.value.length > 0) {
+                const validBinding = activeBindingList.value.find(b => b.id === targetBindingId.value);
+                if (!validBinding) {
+                    targetBindingId.value = activeBindingList.value[0].id;
+                }
+            } else {
+                targetBindingId.value = null;
+            }
+        }
+
+        await Promise.allSettled([
+            fetchModels(),
+            fetchUniversalProfiles()
+        ]);
+
+        if (configuredAliases.value.length > 0) {
+            if (!selectedModel.value || !configuredAliases.value.some(a => a.original_model_name === selectedModel.value.original_model_name)) {
+                selectModel(configuredAliases.value[0]);
+            }
+        } else if (models.value.length > 0) {
+            selectModel(models.value[0]);
+        } else {
+            selectedModel.value = null;
+            form.value = getInitialFormState();
+        }
+    } finally {
+        isLoading.value = false;
     }
-    await Promise.allSettled([
-        fetchModels(),
-        fetchUniversalProfiles()
-    ]);
-    if (!selectedModel.value && configuredAliases.value.length > 0) {
-        selectModel(configuredAliases.value[0]);
-    }
+}
+
+onMounted(async () => {
+    await loadModalityData();
+});
+
+watch(() => props.bindingType, async () => {
+    selectedModel.value = null;
+    form.value = getInitialFormState();
+    targetBindingId.value = null;
+    selectedBindingFilter.value = 'ALL';
+    await loadModalityData();
 });
 
 watch(activeBindingList, (list) => {
-    if (list && list.length > 0 && !targetBindingId.value) {
-        targetBindingId.value = list[0].id;
-        fetchModels();
+    if (list && list.length > 0) {
+        const validBinding = list.find(b => b.id === targetBindingId.value);
+        if (!validBinding) {
+            targetBindingId.value = list[0].id;
+            fetchModels();
+        }
     }
 }, { immediate: true });
 

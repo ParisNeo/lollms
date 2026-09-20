@@ -80,6 +80,55 @@ def _format_model_alias_dict(alias_data: Any) -> Optional[Dict[str, Any]]:
         return alias_data.get('alias', alias_data) if 'alias' in alias_data else alias_data
     return {"title": str(alias_data)}
 
+def _filter_models_by_modality(models: List[str], modality: str) -> List[str]:
+    """Filters raw provider model listings to strictly isolate models relevant to the specified modality."""
+    if not models:
+        return []
+
+    mod = (modality or "llm").lower()
+
+    if mod == "tti":
+        image_keywords = {
+            'image', 'dall-e', 'flux', 'stable-diffusion', 'sdxl', 'sd-', 'sd_', 'diffusion',
+            'imagen', 'dreamshaper', 'deliberate', 'photoreal', 'safetensors', 'ckpt',
+            'recraft', 'ideogram', 'playground', 'aurora', 'aura-flow', 'pixart', 'kolors',
+            'kandinsky', 'bria', 'proteus', 'midjourney', 'inpaint', 'paint', 'canvas', 'illustrious'
+        }
+        matched = [m for m in models if any(k in m.lower() for k in image_keywords)]
+        return matched if matched else models
+
+    elif mod == "ttv":
+        video_keywords = {'video', 'svd', 'cogvideox', 'luma', 'kling', 'runway', 'gen-2', 'gen-3', 'hunyuan-video', 'animate', 'animatediff', 'pika', 'sora', 'mochi', 'wan'}
+        matched = [m for m in models if any(k in m.lower() for k in video_keywords)]
+        return matched if matched else models
+
+    elif mod == "ttm":
+        music_keywords = {'music', 'audio', 'audioldm', 'musicgen', 'stable-audio', 'suno', 'udio', 'bark', 'riffusion'}
+        matched = [m for m in models if any(k in m.lower() for k in music_keywords)]
+        return matched if matched else models
+
+    elif mod == "tts":
+        tts_keywords = {'tts', 'speech', 'voice', 'elevenlabs', 'kokoro', 'chatter', 'f5-tts', 'fish-speech', 'xtts', 'vits', 'piper', 'coqui', 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'}
+        matched = [m for m in models if any(k in m.lower() for k in tts_keywords)]
+        return matched if matched else models
+
+    elif mod == "stt":
+        stt_keywords = {'whisper', 'transcribe', 'stt', 'asr', 'conformer', 'sensevoice', 'moonshine'}
+        matched = [m for m in models if any(k in m.lower() for k in stt_keywords)]
+        return matched if matched else models
+
+    elif mod == "rag":
+        rag_keywords = {'embed', 'embedding', 'bge', 'e5', 'minilm', 'text-embedding', 'gte', 'nomic', 'voyage', 'cohere'}
+        matched = [m for m in models if any(k in m.lower() for k in rag_keywords)]
+        return matched if matched else models
+
+    elif mod == "llm":
+        excluded_exts = {'.safetensors', '.ckpt', '.pt'}
+        matched = [m for m in models if not any(m.lower().endswith(ext) for ext in excluded_exts)]
+        return matched if matched else models
+
+    return models
+
 def _normalize_binding_desc(name: str, desc: Dict[str, Any], binding_type: str = "llm") -> Dict[str, Any]:
     base_info = {
         "name": name,
@@ -338,52 +387,74 @@ def _generate_model_icon_task(task: Task, username: str, prompt: str):
 
 @bindings_management_router.get("/universal-profiles", response_model=Dict[str, Any])
 async def get_all_universal_profiles(
-    modality: str = Query("llm", description="Modality type: 'llm', 'tti', 'tts', 'stt'"),
+    modality: str = Query("llm", description="Modality type: 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm', 'rag'"),
     db: Session = Depends(get_db)
 ):
     """
     Returns all configured universal model profiles across all active bindings of the specified modality.
     Used by the Universal Profiles manager, Smart Router composition matrix, policy modals, and dashboard.
     """
+    mod = (modality or "llm").lower()
     profiles = {}
     binding_cls = DBLLMBinding
-    if modality == "tti":
+    if mod == "tti":
         binding_cls = DBTTIBinding
-    elif modality == "tts":
+    elif mod == "tts":
         binding_cls = DBTTSBinding
-    elif modality == "stt":
+    elif mod == "stt":
         binding_cls = DBSTTBinding
+    elif mod == "ttv":
+        binding_cls = DBTTVBinding
+    elif mod == "ttm":
+        binding_cls = DBTTMBinding
+    elif mod == "rag":
+        binding_cls = DBRAGBinding
 
     active_bindings = db.query(binding_cls).filter(binding_cls.is_active == True).all()
 
     for binding in active_bindings:
-        # Check live server connectivity and detected engine models without heavy weight allocation
         is_online = True
         raw_models = []
         try:
-            if modality == "llm":
+            if mod == "llm":
                 from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
                 raw_list = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config or {})
                 if isinstance(raw_list, list):
                     for r in raw_list:
                         mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
-                        if mid: raw_models.append(mid)
-            elif modality == "tti":
+                        if mid: raw_models.append(str(mid))
+            elif mod == "tti":
                 from lollms_client.lollms_tti_binding import list_binding_models as list_tti_binding_models
                 raw_list = list_tti_binding_models(tti_binding_name=binding.name, tti_binding_config=binding.config or {})
                 if isinstance(raw_list, list):
                     for r in raw_list:
                         mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
-                        if mid: raw_models.append(mid)
+                        if mid: raw_models.append(str(mid))
+            elif mod == "tts":
+                from lollms_client.lollms_tts_binding import list_binding_models as list_tts_binding_models
+                raw_list = list_tts_binding_models(tts_binding_name=binding.name, tts_binding_config=binding.config or {})
+                if isinstance(raw_list, list):
+                    for r in raw_list:
+                        mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                        if mid: raw_models.append(str(mid))
+            elif mod == "stt":
+                from lollms_client.lollms_stt_binding import list_binding_models as list_stt_binding_models
+                raw_list = list_stt_binding_models(stt_binding_name=binding.name, stt_binding_config=binding.config or {})
+                if isinstance(raw_list, list):
+                    for r in raw_list:
+                        mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                        if mid: raw_models.append(str(mid))
 
             if not raw_models and binding.name != 'smart_router':
                 config = _get_effective_config(binding)
-                service = _get_binding_instance(modality, binding.name, config)
+                service = _get_binding_instance(mod, binding.name, config)
                 if service and hasattr(service, 'list_models'):
                     raw_list = service.list_models() or []
                     for r in raw_list:
                         mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
-                        if mid: raw_models.append(mid)
+                        if mid: raw_models.append(str(mid))
+
+            raw_models = _filter_models_by_modality(raw_models, mod)
         except Exception:
             pass
 
@@ -482,7 +553,7 @@ async def get_all_universal_profiles(
 @bindings_management_router.post("/bindings/{binding_id}/auto-create-profiles", response_model=Dict[str, Any])
 async def auto_create_profiles_for_binding(
     binding_id: int,
-    modality: str = Query("llm"),
+    modality: str = Query("llm", description="Modality type: 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm', 'rag'"),
     db: Session = Depends(get_db),
     current_admin: UserAuthDetails = Depends(get_current_admin_user)
 ):
@@ -490,12 +561,20 @@ async def auto_create_profiles_for_binding(
     Scans all models detected on the specified physical binding connection and automatically
     generates a Universal Model Profile for each model.
     """
-    binding_cls = DBLLMBinding if modality == "llm" else DBTTIBinding
+    mod = (modality or "llm").lower()
+    binding_cls = DBLLMBinding
+    if mod == "tti": binding_cls = DBTTIBinding
+    elif mod == "tts": binding_cls = DBTTSBinding
+    elif mod == "stt": binding_cls = DBSTTBinding
+    elif mod == "ttv": binding_cls = DBTTVBinding
+    elif mod == "ttm": binding_cls = DBTTMBinding
+    elif mod == "rag": binding_cls = DBRAGBinding
+
     binding = db.query(binding_cls).filter(binding_cls.id == binding_id).first()
     if not binding:
-        raise HTTPException(status_code=404, detail="Binding connection not found.")
+        raise HTTPException(status_code=404, detail=f"{mod.upper()} Binding connection not found.")
 
-    models_list = _get_modality_models_list(binding, modality)
+    models_list = _get_modality_models_list(binding, mod)
     raw_model_names = [m.original_model_name for m in models_list]
 
     if not raw_model_names:
@@ -1081,7 +1160,7 @@ def _get_modality_models(
 
 def _get_modality_models_list(binding_record, binding_type: str) -> List[BindingModel]:
     try:
-        models_list = []
+        raw_models_extracted = []
         if binding_record.name != 'smart_router' and binding_record.alias != 'smart_router':
             config = _get_effective_config(binding_record)
             service = _get_binding_instance(binding_type, binding_record.name, config)
@@ -1090,7 +1169,9 @@ def _get_modality_models_list(binding_record, binding_type: str) -> List[Binding
                 for item in raw_models:
                     m_id = item if isinstance(item, str) else (item.get("name") or item.get("id") or item.get("model_name"))
                     if m_id:
-                        models_list.append(m_id)
+                        raw_models_extracted.append(str(m_id))
+
+        filtered_models = _filter_models_by_modality(raw_models_extracted, binding_type)
 
         model_aliases = binding_record.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -1104,6 +1185,7 @@ def _get_modality_models_list(binding_record, binding_type: str) -> List[Binding
         if (binding_record.name == 'smart_router' or binding_record.alias == 'smart_router') and not model_aliases:
             model_aliases = {"auto": {"title": "Auto Smart Router", "description": "Dynamic multi-model smart router", "routing_strategy": "balanced"}}
 
+        models_list = list(filtered_models)
         for k in model_aliases.keys():
             if k not in models_list:
                 models_list.append(k)
