@@ -1,0 +1,675 @@
+<script setup>
+import { ref, computed, watch } from 'vue';
+import { useUiStore } from '../../stores/ui';
+import { useDiscussionsStore } from '../../stores/discussions';
+import { useAuthStore } from '../../stores/auth';
+import GenericModal from './GenericModal.vue';
+import IconWeb from '../../assets/icons/ui/IconWeb.vue';
+import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
+import IconWikipedia from '../../assets/icons/IconWikipedia.vue';
+import IconYoutube from '../../assets/icons/IconYoutube.vue';
+import IconServer from '../../assets/icons/IconServer.vue';
+import apiClient from '../../services/api';
+
+const uiStore = useUiStore();
+const discussionsStore = useDiscussionsStore();
+const authStore = useAuthStore();
+
+const modalData = computed(() => uiStore.modalData('importFromInternet'));
+const discussionId = computed(() => modalData.value?.discussionId);
+const datastoreId = computed(() => modalData.value?.datastoreId);
+
+const url = ref('');
+const soUrl = ref('');
+const depth = ref(0);
+const processWithAi = ref(false);
+const isLoading = ref(false);
+const mode = ref('url');
+const youtubeUrl = ref('');
+const youtubeLanguage = ref('en');
+
+// Search and multi-selection state
+const searchResults = ref([]);
+const selectedIndices = ref(new Set());
+const isSearching = ref(false);
+const searchQuery = ref('');
+
+const hasGoogleConfig = computed(() => {
+    return !!authStore.user?.google_api_key && !!authStore.user?.google_cse_id;
+});
+
+// Arxiv state
+const arxivQuery = ref('');
+const arxivAuthor = ref('');
+const arxivYear = ref(null);
+const arxivMax = ref(5);
+const arxivModes = ref({});
+
+const commonLanguages = [
+    { value: 'en', label: 'English' },
+    { value: 'es', label: 'Spanish' },
+    { value: 'fr', label: 'French' },
+    { value: 'de', label: 'German' },
+    { value: 'it', label: 'Italian' },
+    { value: 'pt', label: 'Portuguese' },
+    { value: 'nl', label: 'Dutch' },
+    { value: 'pl', label: 'Polish' },
+    { value: 'ru', label: 'Russian' },
+    { value: 'zh', label: 'Chinese' },
+    { value: 'ja', label: 'Japanese' },
+    { value: 'ko', label: 'Korean' },
+    { value: 'ar', label: 'Arabic' },
+    { value: 'hi', label: 'Hindi' },
+    { value: 'tr', label: 'Turkish' }
+];
+
+watch(() => uiStore.modalProps.importFromInternet, (props) => {
+    if (props) {
+        if (props.mode) {
+            mode.value = props.mode;
+        }
+        url.value = '';
+        soUrl.value = '';
+        depth.value = 0;
+        processWithAi.value = false;
+        searchQuery.value = '';
+        youtubeUrl.value = '';
+        youtubeLanguage.value = 'en';
+        searchResults.value = [];
+        selectedIndices.value.clear();
+    }
+}, { immediate: true, deep: true });
+
+function isUrl(str) {
+    if (!str || typeof str !== 'string') return false;
+    const trimmed = str.trim();
+    return trimmed.startsWith('http://') || trimmed.startsWith('https://');
+}
+
+function normalizeUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    const trimmed = rawUrl.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+        return `https://${trimmed}`;
+    }
+    return trimmed;
+}
+
+async function handleSearch() {
+    isSearching.value = true;
+    searchResults.value = [];
+    selectedIndices.value.clear();
+    try {
+        if (mode.value === 'wikipedia') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/wikipedia/search`, { query: searchQuery.value });
+            searchResults.value = resp.data;
+        } else if (mode.value === 'duckduckgo' || mode.value === 'google') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/web/search`, { 
+                query: searchQuery.value,
+                provider: mode.value
+            });
+            searchResults.value = resp.data;
+        } else if (mode.value === 'github') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/github/search`, { query: searchQuery.value });
+            searchResults.value = resp.data;
+        } else if (mode.value === 'stackoverflow') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/stackoverflow/search`, { query: searchQuery.value });
+            searchResults.value = resp.data;
+        } else if (mode.value === 'arxiv') {
+            const resp = await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/arxiv/search`, { 
+                query: arxivQuery.value,
+                author: arxivAuthor.value,
+                year: arxivYear.value,
+                max_results: arxivMax.value
+            });
+            searchResults.value = resp.data;
+            resp.data.forEach(r => arxivModes.value[r.id] = 'abstract');
+        }
+    } catch (e) {
+        uiStore.addNotification("Search failed.", "error");
+    } finally {
+        isSearching.value = false;
+    }
+}
+
+function toggleSelection(idx) {
+    if (selectedIndices.value.has(idx)) selectedIndices.value.delete(idx);
+    else selectedIndices.value.add(idx);
+}
+
+async function handleSubmit() {
+    const onStagedCallback = modalData.value?.onStaged;
+
+    // 1. DataStore Staging Pipeline
+    if (onStagedCallback || datastoreId.value) {
+        isLoading.value = true;
+        const stagedFiles = [];
+
+        try {
+            if (mode.value === 'youtube') {
+                if (!youtubeUrl.value.trim()) { uiStore.addNotification('YouTube URL is required.', 'warning'); return; }
+                const cleanYt = normalizeUrl(youtubeUrl.value);
+                const res = await apiClient.post('/api/files/fetch-youtube-transcript', { video_url: cleanYt, language: youtubeLanguage.value.trim() });
+                const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                stagedFiles.push(file);
+            } else if (mode.value === 'url') {
+                if (!url.value.trim()) { uiStore.addNotification('URL is required.', 'warning'); return; }
+                const cleanWebUrl = normalizeUrl(url.value);
+                const res = await apiClient.post('/api/files/fetch-web-content', { url: cleanWebUrl, depth: depth.value });
+                const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                stagedFiles.push(file);
+            } else if (['duckduckgo', 'google'].includes(mode.value)) {
+                if (selectedIndices.value.size === 0) return;
+                const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+                for (const item of items) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-web-content', { url: item.url, depth: 0 });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {
+                        console.warn(`Failed to scrape ${item.url}:`, err);
+                    }
+                }
+            } else if (mode.value === 'wikipedia') {
+                if (selectedIndices.value.size === 0) return;
+                const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+                for (const item of items) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-wikipedia-content', { title: item.title, url: item.url });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {
+                        console.warn(`Failed to fetch Wikipedia ${item.title}:`, err);
+                    }
+                }
+            } else if (mode.value === 'arxiv') {
+                if (selectedIndices.value.size === 0) return;
+                const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+                for (const item of items) {
+                    try {
+                        const paperMode = arxivModes.value[item.id] || 'abstract';
+                        const res = await apiClient.post('/api/files/fetch-arxiv-content', { id: item.id, title: item.title, mode: paperMode });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {
+                        console.warn(`Failed to fetch Arxiv ${item.id}:`, err);
+                    }
+                }
+            } else if (mode.value === 'github') {
+                let urlsToImport = selectedIndices.value.size > 0 
+                    ? Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url) 
+                    : (isUrl(searchQuery.value) ? [normalizeUrl(searchQuery.value)] : []);
+                for (const u of urlsToImport) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-web-content', { url: u, depth: 0 });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {}
+                }
+            } else if (mode.value === 'stackoverflow') {
+                let urlsToImport = [];
+                if (soUrl.value.trim()) {
+                    urlsToImport = [normalizeUrl(soUrl.value)];
+                } else if (selectedIndices.value.size > 0) {
+                    urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
+                } else if (isUrl(searchQuery.value)) {
+                    urlsToImport = [normalizeUrl(searchQuery.value)];
+                }
+                for (const u of urlsToImport) {
+                    try {
+                        const res = await apiClient.post('/api/files/fetch-web-content', { url: u, depth: 0 });
+                        const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
+                        stagedFiles.push(file);
+                    } catch (err) {}
+                }
+            }
+
+            if (stagedFiles.length > 0) {
+                if (typeof onStagedCallback === 'function') {
+                    onStagedCallback(stagedFiles);
+                }
+                uiStore.addNotification(`${stagedFiles.length} file(s) staged successfully.`, 'success');
+                uiStore.closeModal('importFromInternet');
+            } else {
+                uiStore.addNotification('No readable content was extracted to stage.', 'warning');
+            }
+        } catch (e) {
+            uiStore.addNotification('Extraction failed.', 'error');
+        } finally {
+            isLoading.value = false;
+        }
+        return;
+    }
+
+    // 2. Discussion Ingestion Pipeline
+    if (!discussionId.value) return;
+
+    if (mode.value === 'url') {
+        if (!url.value.trim()) {
+            uiStore.addNotification('URL is required.', 'warning');
+            return;
+        }
+        isLoading.value = true;
+        try {
+            const cleanUrl = normalizeUrl(url.value);
+            await discussionsStore.importArtefactFromUrl(
+                discussionId.value, 
+                cleanUrl, 
+                depth.value, 
+                processWithAi.value
+            );
+            uiStore.closeModal('importFromInternet');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'duckduckgo' || mode.value === 'google') {
+        if (selectedIndices.value.size === 0) return;
+        isLoading.value = true;
+        try {
+            const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+            for (const item of items) {
+                await discussionsStore.importArtefactFromUrl(
+                    discussionId.value, 
+                    item.url, 
+                    0, 
+                    false
+                );
+            }
+            uiStore.addNotification(`${items.length} pages queued for import.`, "success");
+            uiStore.closeModal('importFromInternet');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'wikipedia') {
+        if (selectedIndices.value.size === 0) return;
+        isLoading.value = true;
+        try {
+            const items = Array.from(selectedIndices.value).map(idx => searchResults.value[idx]);
+            await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/wikipedia/import`, { items, auto_load: true });
+            uiStore.addNotification("Articles imported.", "success");
+            await discussionsStore.fetchArtefacts(discussionId.value);
+            uiStore.closeModal('importFromInternet');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'arxiv') {
+        if (selectedIndices.value.size === 0) return;
+        isLoading.value = true;
+        try {
+            const items = Array.from(selectedIndices.value).map(idx => {
+                const r = searchResults.value[idx];
+                return { id: r.id, title: r.title, mode: arxivModes.value[r.id] || 'abstract' };
+            });
+            await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/arxiv/import`, { items, auto_load: true });
+            uiStore.addNotification("Papers imported.", "success");
+            await discussionsStore.fetchArtefacts(discussionId.value);
+            uiStore.closeModal('importFromInternet');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'youtube') {
+        if (!youtubeUrl.value.trim()) {
+            uiStore.addNotification('Video URL is required.', 'warning');
+            return;
+        }
+        isLoading.value = true;
+        try {
+            const cleanYt = normalizeUrl(youtubeUrl.value);
+            await discussionsStore.importYoutubeTranscript(
+                discussionId.value,
+                cleanYt,
+                youtubeLanguage.value.trim()
+            );
+            uiStore.closeModal('importFromInternet');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'github') {
+        let urlsToImport = [];
+        if (selectedIndices.value.size > 0) {
+            urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
+        } else if (isUrl(searchQuery.value)) {
+            urlsToImport = [normalizeUrl(searchQuery.value)];
+        }
+
+        if (urlsToImport.length === 0) return;
+
+        isLoading.value = true;
+        try {
+            for (const u of urlsToImport) {
+                await discussionsStore.importGithubArtefact(discussionId.value, u);
+            }
+            uiStore.closeModal('importFromInternet');
+        } finally {
+            isLoading.value = false;
+        }
+    } else if (mode.value === 'stackoverflow') {
+        let urlsToImport = [];
+        if (soUrl.value.trim()) {
+            urlsToImport = [normalizeUrl(soUrl.value)];
+        } else if (selectedIndices.value.size > 0) {
+            urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
+        } else if (isUrl(searchQuery.value)) {
+            urlsToImport = [normalizeUrl(searchQuery.value)];
+        }
+
+        if (urlsToImport.length === 0) return;
+
+        isLoading.value = true;
+        try {
+            for (const u of urlsToImport) {
+                await discussionsStore.importStackOverflowArtefact(discussionId.value, u);
+            }
+            uiStore.closeModal('importFromInternet');
+        } finally {
+            isLoading.value = false;
+        }
+    }
+}
+</script>
+
+<template>
+    <GenericModal
+        modalName="importFromInternet"
+        :title="mode === 'url' ? 'Import from URL' : mode === 'wikipedia' ? 'Import Wikipedia' : mode === 'youtube' ? 'Import YouTube' : mode === 'arxiv' ? 'Import Arxiv' : mode === 'github' ? 'Import GitHub' : mode === 'stackoverflow' ? 'Import StackOverflow' : 'Import from Internet'"
+        maxWidthClass="max-w-2xl"
+    >
+        <template #body>
+            <div class="space-y-4 p-1">
+                <!-- Mode Toggle Tabs -->
+                <div class="flex flex-wrap gap-y-2 border-b border-gray-200 dark:border-gray-700 mb-4">
+                    <button 
+                        @click="mode = 'url'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'url' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconWeb class="w-4 h-4 hidden sm:block" />
+                        URL
+                    </button>
+                    <button 
+                        @click="mode = 'duckduckgo'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'duckduckgo' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconWeb class="w-4 h-4 hidden sm:block" />
+                        DDG
+                    </button>
+                    <button 
+                        v-if="hasGoogleConfig"
+                        @click="mode = 'google'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'google' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconWeb class="w-4 h-4 hidden sm:block" />
+                        Google
+                    </button>
+                    <button 
+                        @click="mode = 'wikipedia'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'wikipedia' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconWikipedia class="w-4 h-4 hidden sm:block" />
+                        Wiki
+                    </button>
+                    <button 
+                        @click="mode = 'arxiv'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'arxiv' ? 'border-orange-500 text-orange-600 dark:text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconServer class="w-4 h-4 hidden sm:block" />
+                        Arxiv
+                    </button>
+                    <button 
+                        @click="mode = 'youtube'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'youtube' ? 'border-red-500 text-red-600 dark:text-red-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconYoutube class="w-4 h-4 hidden sm:block" />
+                        YouTube
+                    </button>
+                    <button 
+                        @click="mode = 'github'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'github' ? 'border-gray-800 text-gray-900 dark:text-white border-b-gray-800 dark:border-b-gray-200' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconServer class="w-4 h-4 hidden sm:block" />
+                        GitHub
+                    </button>
+                    <button 
+                        @click="mode = 'stackoverflow'"
+                        class="flex-1 min-w-[80px] pb-2 text-sm font-medium text-center border-b-2 transition-colors flex items-center justify-center gap-1.5"
+                        :class="mode === 'stackoverflow' ? 'border-orange-500 text-orange-600 dark:text-orange-400' : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    >
+                        <IconServer class="w-4 h-4 hidden sm:block" />
+                        StackOverflow
+                    </button>
+                </div>
+
+                <!-- URL Mode Content -->
+                <div v-if="mode === 'url'" class="space-y-4">
+                    <p class="text-sm text-gray-600 dark:text-gray-300">
+                        Extract content from a website and save it as an artefact in your workspace.
+                    </p>
+
+                    <div>
+                        <label for="scrape-url" class="label">Target Web URL</label>
+                        <div class="relative mt-1">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <IconWeb class="h-4 w-4 text-gray-400" />
+                            </div>
+                            <input
+                                id="scrape-url"
+                                v-model="url"
+                                type="url"
+                                class="input-field pl-10"
+                                placeholder="https://example.com/article"
+                                @keyup.enter="handleSubmit"
+                            />
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                            <label for="scrape-depth" class="label">Scraping Depth</label>
+                            <input
+                                id="scrape-depth"
+                                v-model.number="depth"
+                                type="number"
+                                min="0"
+                                max="5"
+                                class="input-field mt-1"
+                            />
+                            <p class="text-[10px] text-gray-500 mt-1">0: Target page only.</p>
+                        </div>
+
+                        <div class="flex flex-col justify-end pb-1">
+                            <label class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" v-model="processWithAi" class="sr-only peer">
+                                <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                                <span class="ml-3 text-sm font-medium text-gray-700 dark:text-gray-300">AI Summarization</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Unified Search Mode Content (Wikipedia, DDG, Google, GitHub, SO) -->
+                <div v-if="['wikipedia', 'duckduckgo', 'google', 'github', 'stackoverflow'].includes(mode)" class="space-y-4">
+                    <div class="flex gap-2">
+                        <div class="relative grow">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <IconWikipedia v-if="mode === 'wikipedia'" class="h-4 w-4 text-gray-400" />
+                                <IconServer v-else-if="['github', 'stackoverflow'].includes(mode)" class="h-4 w-4 text-gray-400" />
+                                <IconWeb v-else class="h-4 w-4 text-gray-400" />
+                            </div>
+                            <input
+                                v-model="searchQuery"
+                                type="text"
+                                class="input-field pl-10"
+                                :placeholder="mode === 'wikipedia' ? 'Article title or URL' : (['github', 'stackoverflow'].includes(mode) ? 'Search query or URL...' : 'Search query...')"
+                                @keyup.enter="handleSearch"
+                            />
+                        </div>
+                        <button @click="handleSearch" class="btn btn-secondary" :disabled="isSearching || !searchQuery.trim()">
+                            <IconAnimateSpin v-if="isSearching" class="w-4 h-4 animate-spin" />
+                            <span v-else>Search</span>
+                        </button>
+                    </div>
+
+                    <!-- Search Results -->
+                    <div v-if="searchResults.length > 0" class="max-h-60 overflow-y-auto space-y-2 border rounded p-2 bg-gray-50 dark:bg-gray-900/50">
+                        <div v-for="(res, idx) in searchResults" :key="idx" 
+                             @click="toggleSelection(idx)"
+                             class="p-2 border rounded cursor-pointer transition-colors"
+                             :class="selectedIndices.has(idx) ? 'bg-blue-50 border-blue-500 dark:bg-blue-900/30' : 'bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-750'">
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" :checked="selectedIndices.has(idx)" class="rounded text-blue-600">
+                                <span class="font-bold text-sm">{{ res.title }}</span>
+                            </div>
+                            <a :href="res.url" target="_blank" @click.stop class="text-[10px] text-blue-500 hover:underline mt-1 block truncate">{{ res.url }}</a>
+                            <p class="text-[10px] text-gray-500 line-clamp-2 mt-1">{{ res.snippet }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Arxiv Mode Content -->
+                <div v-if="mode === 'arxiv'" class="space-y-4">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="col-span-2">
+                            <label class="text-[10px] font-bold uppercase text-gray-400">Search Query</label>
+                            <input v-model="arxivQuery" type="text" class="input-field" placeholder="Topic keywords...">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-gray-400">Author</label>
+                            <input v-model="arxivAuthor" type="text" class="input-field" placeholder="Einstein">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-gray-400">Year</label>
+                            <input v-model.number="arxivYear" type="number" class="input-field" placeholder="2024">
+                        </div>
+                    </div>
+                    <div class="flex justify-between items-center">
+                         <div class="flex items-center gap-2">
+                             <label class="text-xs">Count:</label>
+                             <input v-model.number="arxivMax" type="number" class="input-field !w-16" min="1" max="50">
+                         </div>
+                         <button @click="handleSearch" class="btn btn-primary" :disabled="isSearching || (!arxivQuery && !arxivAuthor)">
+                            <IconAnimateSpin v-if="isSearching" class="w-4 h-4 animate-spin mr-2" />
+                            Search Arxiv
+                        </button>
+                    </div>
+
+                    <!-- Arxiv Results -->
+                    <div v-if="searchResults.length > 0" class="max-h-60 overflow-y-auto space-y-2 border rounded p-2 bg-gray-50 dark:bg-gray-900/50">
+                        <div v-for="(res, idx) in searchResults" :key="idx" 
+                             class="p-2 border rounded bg-white dark:bg-gray-800"
+                             :class="selectedIndices.has(idx) ? 'border-orange-500' : 'dark:border-gray-700'">
+                            <div class="flex items-start gap-2">
+                                <input type="checkbox" :checked="selectedIndices.has(idx)" @change="toggleSelection(idx)" class="mt-1 rounded text-orange-600">
+                                <div class="grow min-w-0">
+                                    <div class="font-bold text-xs truncate" :title="res.title">{{ res.title }}</div>
+                                    <div class="text-[9px] text-gray-500">{{ res.authors.join(', ') }} ({{ res.year }})</div>
+                                    
+                                    <!-- Mode Toggle -->
+                                    <div class="mt-2 flex gap-1 bg-gray-100 dark:bg-gray-900 p-0.5 rounded-lg w-fit">
+                                        <button @click="arxivModes[res.id] = 'abstract'" 
+                                                class="px-2 py-0.5 text-[9px] font-bold rounded transition-all"
+                                                :class="arxivModes[res.id] === 'abstract' ? 'bg-white dark:bg-gray-700 shadow-sm text-orange-600' : 'text-gray-400'">
+                                            Abstract
+                                        </button>
+                                        <button @click="arxivModes[res.id] = 'full'" 
+                                                class="px-2 py-0.5 text-[9px] font-bold rounded transition-all"
+                                                :class="arxivModes[res.id] === 'full' ? 'bg-white dark:bg-gray-700 shadow-sm text-orange-600' : 'text-gray-400'">
+                                            Full Text
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- YouTube Mode Content -->
+                <div v-if="mode === 'youtube'" class="space-y-4">
+                    <p class="text-sm text-gray-600 dark:text-gray-300">
+                        Extract transcript from a YouTube video into your workspace.
+                    </p>
+                    
+                    <div>
+                        <label for="youtube-url" class="label">Video URL</label>
+                        <div class="relative mt-1">
+                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                <IconYoutube class="h-4 w-4 text-red-500" />
+                            </div>
+                            <input
+                                id="youtube-url"
+                                v-model="youtubeUrl"
+                                type="url"
+                                class="input-field pl-10"
+                                placeholder="https://www.youtube.com/watch?v=..."
+                                @keyup.enter="handleSubmit"
+                            />
+                        </div>
+                    </div>
+
+                    <!-- Language Selection -->
+                    <div>
+                        <label for="youtube-lang" class="label">Transcript Language</label>
+                        <select
+                            id="youtube-lang"
+                            v-model="youtubeLanguage"
+                            class="input-field mt-1"
+                        >
+                            <option v-for="lang in commonLanguages" :key="lang.value" :value="lang.value">
+                                {{ lang.label }} ({{ lang.value }})
+                            </option>
+                        </select>
+                        <p class="text-[10px] text-gray-500 mt-1">
+                            The system will find original captions or translate them if necessary.
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Direct StackOverflow Mode URL Alternative -->
+                <div v-if="mode === 'stackoverflow'" class="space-y-4 border-t dark:border-gray-700 pt-3">
+                    <p class="text-sm text-gray-600 dark:text-gray-300">
+                        Or import a question and its top answers directly by URL:
+                    </p>
+                    <div>
+                        <label for="so-url" class="label">StackOverflow Question URL</label>
+                        <div class="relative mt-1">
+                            <input
+                                id="so-url"
+                                v-model="soUrl"
+                                type="url"
+                                class="input-field w-full"
+                                placeholder="https://stackoverflow.com/questions/12345/..."
+                                @keyup.enter="handleSubmit"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </template>
+        <template #footer>
+            <div class="flex justify-end gap-3">
+                <button @click="uiStore.closeModal('importFromInternet')" type="button" class="btn btn-secondary">Cancel</button>
+                
+                <span v-if="['wikipedia', 'duckduckgo', 'google', 'arxiv', 'github', 'stackoverflow'].includes(mode) && selectedIndices.size > 0" class="text-xs text-gray-500 self-center">
+                    {{ selectedIndices.size }} selected
+                </span>
+
+                <button @click="handleSubmit" type="button" class="btn btn-primary" 
+                    :disabled="isLoading || 
+                              (mode === 'url' && !url.trim()) || 
+                              (['wikipedia', 'duckduckgo', 'google', 'arxiv'].includes(mode) && selectedIndices.size === 0) ||
+                              (mode === 'youtube' && !youtubeUrl.trim()) ||
+                              (mode === 'github' && selectedIndices.size === 0 && !isUrl(searchQuery)) ||
+                              (mode === 'stackoverflow' && selectedIndices.size === 0 && !isUrl(searchQuery) && !isUrl(soUrl))">
+                    <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
+                    {{ isLoading ? 'Fetching...' : (datastoreId || modalData?.onStaged ? 'Stage for Review' : 'Import') }}
+                </button>
+            </div>
+        </template>
+    </GenericModal>
+</template>

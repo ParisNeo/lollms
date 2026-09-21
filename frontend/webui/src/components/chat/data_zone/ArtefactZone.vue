@@ -294,9 +294,9 @@ async function handleBundleImport(event) {
     }
 }
 
-function handleImportFromUrl() {
+function handleImportFromInternet() {
     if (idToUse.value) {
-        uiStore.openModal('scrapeUrl', { discussionId: idToUse.value, mode: 'url' });
+        uiStore.openModal('importFromInternet', { discussionId: idToUse.value, mode: 'url' });
     }
 }
 
@@ -433,7 +433,7 @@ async function handleBatchCreateDiscussion() {
                  <button @click="toggleSelectionMode" class="p-1.5 rounded-lg transition-all" :class="selectionMode ? 'bg-blue-500 text-white shadow-sm' : 'text-gray-400 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50'" title="Batch Operations (Select Multiple)">
                      <IconGather class="w-4.5 h-4.5" />
                  </button>
-                 <button @click="handleImportFromUrl" class="p-1.5 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all" title="Import from URL"><IconWeb class="w-4.5 h-4.5 text-blue-500" /></button>
+                 <button @click="handleImportFromInternet" class="p-1.5 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all" title="Import from Internet"><IconWeb class="w-4.5 h-4.5 text-blue-500" /></button>
                  <button @click="handleRefreshArtefacts" class="p-1.5 hover:text-blue-500 hover:bg-gray-200 dark:hover:bg-gray-700/50 rounded-lg transition-all" title="Refresh List"><IconRefresh class="w-4.5 h-4.5" :class="{'animate-spin': isLoadingArtefacts}" /></button>
             </div>
         </div>

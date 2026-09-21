@@ -8,7 +8,7 @@ import IconWeb from '../../assets/icons/ui/IconWeb.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconWikipedia from '../../assets/icons/IconWikipedia.vue';
 import IconYoutube from '../../assets/icons/IconYoutube.vue';
-import IconServer from '../../assets/icons/IconServer.vue'; // Using for Arxiv
+import IconServer from '../../assets/icons/IconServer.vue';
 import apiClient from '../../services/api';
 
 const uiStore = useUiStore();
@@ -20,18 +20,18 @@ const discussionId = computed(() => modalData.value?.discussionId);
 const datastoreId = computed(() => modalData.value?.datastoreId);
 
 const url = ref('');
+const soUrl = ref('');
 const depth = ref(0);
 const processWithAi = ref(false);
 const isLoading = ref(false);
 const mode = ref('url');
 const youtubeUrl = ref('');
 const youtubeLanguage = ref('en');
+
 // Unified Search state (Wikipedia, DDG, Google, GitHub, SO)
 const searchResults = ref([]);
 const selectedIndices = ref(new Set());
 const isSearching = ref(false);
-
-// Unified Search state (Wikipedia, DDG, Google)
 const searchQuery = ref('');
 
 const hasGoogleConfig = computed(() => {
@@ -43,9 +43,9 @@ const arxivQuery = ref('');
 const arxivAuthor = ref('');
 const arxivYear = ref(null);
 const arxivMax = ref(5);
-const arxivModes = ref({}); // Map of ID -> "abstract" or "full"
+const arxivModes = ref({});
 
-const commonLanguages =[
+const commonLanguages = [
     { value: 'en', label: 'English' },
     { value: 'es', label: 'Spanish' },
     { value: 'fr', label: 'French' },
@@ -63,13 +63,13 @@ const commonLanguages =[
     { value: 'tr', label: 'Turkish' }
 ];
 
-// Deep watcher on modalProps ensures mode switches instantly to 'youtube', 'arxiv', etc.
 watch(() => uiStore.modalProps.scrapeUrl, (props) => {
     if (props) {
         if (props.mode) {
             mode.value = props.mode;
         }
         url.value = '';
+        soUrl.value = '';
         depth.value = 0;
         processWithAi.value = false;
         searchQuery.value = '';
@@ -79,6 +79,21 @@ watch(() => uiStore.modalProps.scrapeUrl, (props) => {
         selectedIndices.value.clear();
     }
 }, { immediate: true, deep: true });
+
+function isUrl(str) {
+    if (!str || typeof str !== 'string') return false;
+    const trimmed = str.trim();
+    return trimmed.startsWith('http://') || trimmed.startsWith('https://');
+}
+
+function normalizeUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return '';
+    const trimmed = rawUrl.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+        return `https://${trimmed}`;
+    }
+    return trimmed;
+}
 
 async function handleSearch() {
     isSearching.value = true;
@@ -108,7 +123,6 @@ async function handleSearch() {
                 max_results: arxivMax.value
             });
             searchResults.value = resp.data;
-            // Initialize modes
             resp.data.forEach(r => arxivModes.value[r.id] = 'abstract');
         }
     } catch (e) {
@@ -123,14 +137,10 @@ function toggleSelection(idx) {
     else selectedIndices.value.add(idx);
 }
 
-function isUrl(str) {
-    return str.startsWith('http://') || str.startsWith('https://');
-}
-
 async function handleSubmit() {
     const onStagedCallback = modalData.value?.onStaged;
 
-    // 1. STAGING PIPELINE (When called from DataStoresView or onStaged handler)
+    // 1. STAGING PIPELINE (DataStore Staging)
     if (onStagedCallback || datastoreId.value) {
         isLoading.value = true;
         const stagedFiles = [];
@@ -138,12 +148,14 @@ async function handleSubmit() {
         try {
             if (mode.value === 'youtube') {
                 if (!youtubeUrl.value.trim()) { uiStore.addNotification('YouTube URL is required.', 'warning'); return; }
-                const res = await apiClient.post('/api/files/fetch-youtube-transcript', { video_url: youtubeUrl.value.trim(), language: youtubeLanguage.value.trim() });
+                const cleanYt = normalizeUrl(youtubeUrl.value);
+                const res = await apiClient.post('/api/files/fetch-youtube-transcript', { video_url: cleanYt, language: youtubeLanguage.value.trim() });
                 const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
                 stagedFiles.push(file);
             } else if (mode.value === 'url') {
                 if (!url.value.trim()) { uiStore.addNotification('URL is required.', 'warning'); return; }
-                const res = await apiClient.post('/api/files/fetch-web-content', { url: url.value.trim(), depth: depth.value });
+                const cleanWebUrl = normalizeUrl(url.value);
+                const res = await apiClient.post('/api/files/fetch-web-content', { url: cleanWebUrl, depth: depth.value });
                 const file = new File([res.data.content], res.data.filename, { type: 'text/markdown' });
                 stagedFiles.push(file);
             } else if (['duckduckgo', 'google'].includes(mode.value)) {
@@ -184,7 +196,9 @@ async function handleSubmit() {
                     }
                 }
             } else if (mode.value === 'github') {
-                let urlsToImport = selectedIndices.value.size > 0 ? Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url) : (isUrl(searchQuery.value) ? [searchQuery.value.trim()] : []);
+                let urlsToImport = selectedIndices.value.size > 0 
+                    ? Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url) 
+                    : (isUrl(searchQuery.value) ? [normalizeUrl(searchQuery.value)] : []);
                 for (const u of urlsToImport) {
                     try {
                         const res = await apiClient.post('/api/files/fetch-web-content', { url: u, depth: 0 });
@@ -193,7 +207,14 @@ async function handleSubmit() {
                     } catch (err) {}
                 }
             } else if (mode.value === 'stackoverflow') {
-                let urlsToImport = selectedIndices.value.size > 0 ? Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url) : (isUrl(searchQuery.value) ? [searchQuery.value.trim()] : []);
+                let urlsToImport = [];
+                if (soUrl.value.trim()) {
+                    urlsToImport = [normalizeUrl(soUrl.value)];
+                } else if (selectedIndices.value.size > 0) {
+                    urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
+                } else if (isUrl(searchQuery.value)) {
+                    urlsToImport = [normalizeUrl(searchQuery.value)];
+                }
                 for (const u of urlsToImport) {
                     try {
                         const res = await apiClient.post('/api/files/fetch-web-content', { url: u, depth: 0 });
@@ -230,9 +251,10 @@ async function handleSubmit() {
         }
         isLoading.value = true;
         try {
+            const cleanUrl = normalizeUrl(url.value);
             await discussionsStore.importArtefactFromUrl(
                 discussionId.value, 
-                url.value.trim(), 
+                cleanUrl, 
                 depth.value, 
                 processWithAi.value
             );
@@ -276,7 +298,7 @@ async function handleSubmit() {
         try {
             const items = Array.from(selectedIndices.value).map(idx => {
                 const r = searchResults.value[idx];
-                return { id: r.id, title: r.title, mode: arxivModes.value[r.id] };
+                return { id: r.id, title: r.title, mode: arxivModes.value[r.id] || 'abstract' };
             });
             await apiClient.post(`/api/discussions/${discussionId.value}/artefacts/arxiv/import`, { items, auto_load: true });
             uiStore.addNotification("Papers imported.", "success");
@@ -292,9 +314,10 @@ async function handleSubmit() {
         }
         isLoading.value = true;
         try {
+            const cleanYt = normalizeUrl(youtubeUrl.value);
             await discussionsStore.importYoutubeTranscript(
                 discussionId.value,
-                youtubeUrl.value.trim(),
+                cleanYt,
                 youtubeLanguage.value.trim()
             );
             uiStore.closeModal('scrapeUrl');
@@ -302,38 +325,40 @@ async function handleSubmit() {
             isLoading.value = false;
         }
     } else if (mode.value === 'github') {
-        let urlsToImport =[];
+        let urlsToImport = [];
         if (selectedIndices.value.size > 0) {
             urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
         } else if (isUrl(searchQuery.value)) {
-            urlsToImport = [searchQuery.value.trim()];
+            urlsToImport = [normalizeUrl(searchQuery.value)];
         }
 
         if (urlsToImport.length === 0) return;
 
         isLoading.value = true;
         try {
-            for (const url of urlsToImport) {
-                await discussionsStore.importGithubArtefact(discussionId.value, url);
+            for (const u of urlsToImport) {
+                await discussionsStore.importGithubArtefact(discussionId.value, u);
             }
             uiStore.closeModal('scrapeUrl');
         } finally {
             isLoading.value = false;
         }
     } else if (mode.value === 'stackoverflow') {
-        let urlsToImport =[];
-        if (selectedIndices.value.size > 0) {
+        let urlsToImport = [];
+        if (soUrl.value.trim()) {
+            urlsToImport = [normalizeUrl(soUrl.value)];
+        } else if (selectedIndices.value.size > 0) {
             urlsToImport = Array.from(selectedIndices.value).map(idx => searchResults.value[idx].url);
         } else if (isUrl(searchQuery.value)) {
-            urlsToImport =[searchQuery.value.trim()];
+            urlsToImport = [normalizeUrl(searchQuery.value)];
         }
 
         if (urlsToImport.length === 0) return;
 
         isLoading.value = true;
         try {
-            for (const url of urlsToImport) {
-                await discussionsStore.importStackOverflowArtefact(discussionId.value, url);
+            for (const u of urlsToImport) {
+                await discussionsStore.importStackOverflowArtefact(discussionId.value, u);
             }
             uiStore.closeModal('scrapeUrl');
         } finally {
@@ -484,7 +509,7 @@ async function handleSubmit() {
                                 @keyup.enter="handleSearch"
                             />
                         </div>
-                        <button @click="handleSearch" class="btn btn-secondary" :disabled="isSearching || !searchQuery">
+                        <button @click="handleSearch" class="btn btn-secondary" :disabled="isSearching || !searchQuery.trim()">
                             <IconAnimateSpin v-if="isSearching" class="w-4 h-4 animate-spin" />
                             <span v-else>Search</span>
                         </button>
@@ -604,10 +629,10 @@ async function handleSubmit() {
                     </div>
                 </div>
 
-                <!-- StackOverflow Mode Content -->
-                <div v-if="mode === 'stackoverflow'" class="space-y-4">
+                <!-- Direct StackOverflow Mode URL Alternative -->
+                <div v-if="mode === 'stackoverflow'" class="space-y-4 border-t dark:border-gray-700 pt-3">
                     <p class="text-sm text-gray-600 dark:text-gray-300">
-                        Import a question and its top answers directly.
+                        Or import a question and its top answers directly by URL:
                     </p>
                     <div>
                         <label for="so-url" class="label">StackOverflow Question URL</label>
@@ -630,7 +655,6 @@ async function handleSubmit() {
             <div class="flex justify-end gap-3">
                 <button @click="uiStore.closeModal('scrapeUrl')" type="button" class="btn btn-secondary">Cancel</button>
                 
-                <!-- Conditionally show Select Count -->
                 <span v-if="['wikipedia', 'duckduckgo', 'google', 'arxiv', 'github', 'stackoverflow'].includes(mode) && selectedIndices.size > 0" class="text-xs text-gray-500 self-center">
                     {{ selectedIndices.size }} selected
                 </span>
@@ -640,7 +664,8 @@ async function handleSubmit() {
                               (mode === 'url' && !url.trim()) || 
                               (['wikipedia', 'duckduckgo', 'google', 'arxiv'].includes(mode) && selectedIndices.size === 0) ||
                               (mode === 'youtube' && !youtubeUrl.trim()) ||
-                              (['github', 'stackoverflow'].includes(mode) && selectedIndices.size === 0 && !isUrl(searchQuery))">
+                              (mode === 'github' && selectedIndices.size === 0 && !isUrl(searchQuery)) ||
+                              (mode === 'stackoverflow' && selectedIndices.size === 0 && !isUrl(searchQuery) && !isUrl(soUrl))">
                     <IconAnimateSpin v-if="isLoading" class="w-4 h-4 mr-2 animate-spin" />
                     {{ isLoading ? 'Fetching...' : (datastoreId || modalData?.onStaged ? 'Stage for Review' : 'Import') }}
                 </button>

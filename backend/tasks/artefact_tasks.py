@@ -150,6 +150,8 @@ def _import_artefact_task(
 def _clean_url_to_title(url: str) -> str:
     """Generates a clean, deterministic title from a URL without ugly slashes or duplicate schemas."""
     from urllib.parse import urlparse
+    if not url.startswith(('http://', 'https://')):
+        url = f"https://{url}"
     parsed = urlparse(url)
     netloc = parsed.netloc.replace('www.', '')
     path_clean = parsed.path.strip('/').replace('/', '_')
@@ -169,32 +171,123 @@ def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str
     task.log(f"Importing from URL: {url} (Depth: {depth})...")
     task.set_progress(10)
 
+    # Normalize protocol
+    clean_url = url.strip()
+    if not clean_url.startswith(('http://', 'https://')):
+        clean_url = f"https://{clean_url}"
+
+    # SSRF protection
+    from backend.security import validate_url, safe_requests_get
+    try:
+        validate_url(clean_url)
+    except ValueError as ve:
+        task.log(f"Security error: {ve}", "ERROR")
+        raise ve
+
     try:
         discussion = get_user_discussion(username, discussion_id)
         if not discussion:
             raise ValueError(f"Discussion '{discussion_id}' not found.")
 
-        task.set_progress(30)
-        task.log(f"Scraping content from '{url}'...")
+        task.set_progress(25)
+        task.log(f"Scraping content from '{clean_url}'...")
 
-        clean_title = _clean_url_to_title(url)
+        clean_title = _clean_url_to_title(clean_url)
 
-        # Native lollms_client method handles scraping and artefact creation
-        try:
-            result = discussion.import_url(
-                url=url,
-                depth=depth,
-                process_with_ai=process_with_ai,
+        imported = False
+        if hasattr(discussion, 'import_url'):
+            try:
+                task.log("Attempting native discussion.import_url...")
+                discussion.import_url(
+                    url=clean_url,
+                    depth=depth,
+                    process_with_ai=process_with_ai,
+                    title=clean_title,
+                    auto_load=True
+                )
+                imported = True
+            except TypeError:
+                try:
+                    discussion.import_url(
+                        url=clean_url,
+                        depth=depth,
+                        process_with_ai=process_with_ai,
+                        auto_load=True
+                    )
+                    imported = True
+                except Exception as ex_type:
+                    task.log(f"Native import_url failed with fallback: {ex_type}", "WARNING")
+            except Exception as ex_import:
+                task.log(f"Native import_url failed: {ex_import}. Falling back to resilient web scraper...", "WARNING")
+
+        # Multi-strategy scraping fallback
+        if not imported:
+            scraped_content = ""
+
+            # Strategy 1: ScrapeMaster
+            if ScrapeMaster:
+                try:
+                    task.log("Attempting ScrapeMaster extraction...")
+                    scraper = ScrapeMaster(clean_url, strategy=["beautifulsoup", "selenium"], headless=True)
+                    if hasattr(scraper, "scrape_markdown"):
+                        scraped_content = scraper.scrape_markdown()
+                    elif hasattr(scraper, "scrape_all"):
+                        results = scraper.scrape_all(max_depth=depth, convert_to_markdown=True)
+                        scraped_content = results.get('markdown') or "\n\n".join(results.get('texts', []))
+                    elif hasattr(scraper, "scrape"):
+                        scraped_content = scraper.scrape(clean_url)
+                except Exception as sm_err:
+                    task.log(f"ScrapeMaster failed: {sm_err}", "WARNING")
+
+            # Strategy 2: Safe HTTP + BeautifulSoup fallback
+            if not scraped_content or len(scraped_content.strip()) < 20:
+                task.log("Attempting resilient HTTP extraction with BeautifulSoup...")
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+                }
+                from bs4 import BeautifulSoup
+                resp = safe_requests_get(clean_url, headers=headers, timeout=15, max_response_size=2097152)
+                resp.raise_for_status()
+
+                soup = BeautifulSoup(resp.content, "html.parser")
+                for tag in soup(["script", "style", "nav", "footer", "header", "noscript", "svg", "iframe"]):
+                    tag.decompose()
+
+                page_title = soup.title.string.strip() if soup.title and soup.title.string else clean_title
+                main_el = soup.find("article") or soup.find("main") or soup.find("div", {"id": "content"}) or soup.body or soup
+                scraped_text = main_el.get_text(separator="\n\n", strip=True) if main_el else ""
+
+                scraped_content = f"# {page_title}\nSource: {clean_url}\n\n{scraped_text}"
+
+            if not scraped_content or len(scraped_content.strip()) < 10:
+                raise ValueError(f"No readable content could be extracted from {clean_url}")
+
+            task.set_progress(70)
+
+            # Strategy 3: Optional AI summary / refinement
+            if process_with_ai:
+                task.log("Refining content with AI summarization...")
+                try:
+                    lc = get_user_lollms_client(username)
+                    if lc:
+                        prompt = f"Convert the following scraped web content into clean, structured Markdown. Preserve all factual details, links, and code snippets:\n\n{scraped_content[:12000]}"
+                        ai_text = lc.generate_text(prompt, max_new_tokens=2048)
+                        if ai_text and len(ai_text.strip()) > 50:
+                            scraped_content = ai_text.strip()
+                except Exception as ai_err:
+                    task.log(f"AI refinement note: {ai_err}. Preserving raw scraped content.", "INFO")
+
+            task.log(f"Adding '{clean_title}' to discussion workspace...")
+            discussion.add_artefact(
                 title=clean_title,
-                auto_load=True
+                content=scraped_content,
+                author="Web Scraper",
+                active=True,
+                artefact_type="document"
             )
-        except TypeError:
-            result = discussion.import_url(
-                url=url,
-                depth=depth,
-                process_with_ai=process_with_ai,
-                auto_load=True
-            )
+            from lollms_client.lollms_artefact import ArtefactVisibility
+            discussion.artefacts.set_visibility(clean_title, ArtefactVisibility.FULL)
 
         task.set_progress(90)
         discussion.commit()
@@ -228,10 +321,10 @@ def _import_artefact_from_url_task(task: Task, username: str, discussion_id: str
             print(f"Warning: Failed to broadcast discussion_updated from url task: {ws_err}")
 
         task.set_progress(100)
-        task.log(f"Successfully imported from '{url}'.")
+        task.log(f"Successfully imported from '{clean_url}'.")
         return {
-            "message": f"Successfully imported content from {url}", 
-            "url": url,
+            "message": f"Successfully imported content from {clean_url}", 
+            "url": clean_url,
             "artefacts": artefacts
         }
     except Exception as e:

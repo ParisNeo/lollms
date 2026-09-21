@@ -1387,7 +1387,7 @@ async function handlePaste(event) {
     for (let i = 0; i < items.length; i++) { if (items[i].type.indexOf("image") !== -1) { const blob = items[i].getAsFile(); if (blob) { const extension = (blob.type.split('/')[1] || 'png').toLowerCase().replace('jpeg', 'jpg'); imageFiles.push(new File([blob], `pasted_image_${Date.now()}.${extension}`, { type: blob.type })); } } }
     if (imageFiles.length > 0) { event.preventDefault(); await handleFilesInput(imageFiles); }
 }
-async function handleImportFromInternet() { if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; } uiStore.openModal('scrapeUrl', { discussionId: activeDiscussion.value.id, mode: 'url' }); }
+async function handleImportFromInternet() { if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; } uiStore.openModal('importFromInternet', { discussionId: activeDiscussion.value.id, mode: 'url' }); }
 async function handleCreateManualArtefact() { if (!activeDiscussion.value) { uiStore.addNotification('Please start a discussion first.', 'warning'); return; } uiStore.openModal('createArtefact', { discussionId: activeDiscussion.value.id }); }
 function handlePromptSelection(content) {
     const placeholders = placeholderParser.parse(content);
@@ -1857,7 +1857,7 @@ onUnmounted(() => {
                                         </button>
                                         <button @click="handleImportFromInternet" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-cyan-50 dark:hover:bg-cyan-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
                                             <IconWeb class="w-4 h-4 text-cyan-500 shrink-0" />
-                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Scrape URL</p><p class="text-[9px] text-gray-400">Fetch web article</p></div>
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Import from Internet</p><p class="text-[9px] text-gray-400">Web, Wiki, Arxiv, YouTube, etc.</p></div>
                                         </button>
                                     </div>
                                 </div>

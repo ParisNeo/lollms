@@ -69,7 +69,7 @@ const ImageEditorSettingsModal = defineAsyncComponent(() => import('./ImageEdito
 const NoteEditorModal = defineAsyncComponent(() => import('./NoteEditorModal.vue'));
 const NoteGroupModal = defineAsyncComponent(() => import('./NoteGroupModal.vue'));
 const SystemLogModal = defineAsyncComponent(() => import('./SystemLogModal.vue'));
-const ScrapeUrlModal = defineAsyncComponent(() => import('./ScrapeUrlModal.vue'));
+const ImportFromInternetModal = defineAsyncComponent(() => import('./ImportFromInternetModal.vue'));
 const ArtefactImportWizardModal = defineAsyncComponent(() => import('./ArtefactImportWizardModal.vue'));
 const PendingUsersModal = defineAsyncComponent(() => import('./PendingUsersModal.vue'));
 const RenameArtefactModal = defineAsyncComponent(() => import('./RenameArtefactModal.vue'));
@@ -149,7 +149,7 @@ const FlowWizardModal = defineAsyncComponent(() => import('../flow/FlowWizardMod
     <NoteEditorModal v-if="activeModal === 'noteEditor'" />
     <NoteGroupModal v-if="activeModal === 'noteGroup'" />
     <SystemLogModal v-if="activeModal === 'systemLog'" />
-    <ScrapeUrlModal v-if="activeModal === 'scrapeUrl'" />
+    <ImportFromInternetModal v-if="activeModal === 'importFromInternet'" />
     <ArtefactImportWizardModal v-if="activeModal === 'artefactImportWizard'" />
     <RenameArtefactModal v-if="activeModal === 'renameArtefact'" />
     <ArtefactVersionManagerModal v-if="activeModal === 'artefactVersionManager'" />

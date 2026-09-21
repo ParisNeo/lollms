@@ -711,7 +711,7 @@ async function handleUploadFiles() {
 
 function openServiceImportModal(serviceMode = 'url') {
     if (!currentSelectedStore.value) return;
-    uiStore.openModal('scrapeUrl', {
+    uiStore.openModal('importFromInternet', {
         datastoreId: currentSelectedStore.value.id,
         mode: serviceMode,
         onStaged: (stagedFiles) => {
@@ -1339,7 +1339,7 @@ async function handleImportStore() {
                                         </button>
                                         <button @click="openServiceImportModal('url')" class="btn btn-secondary btn-xs flex items-center justify-start gap-1.5 p-2 h-9">
                                             <IconGlobeAlt class="w-4 h-4 text-cyan-500 shrink-0" />
-                                            <span class="truncate">URL Scraper</span>
+                                            <span class="truncate">Import from Internet</span>
                                         </button>
                                     </div>
                                 </div>

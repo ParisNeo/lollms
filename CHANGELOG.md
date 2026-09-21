@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-21 11:48]
+
+- fix(backend): migrate static assets to JS format
+
 ## [2026-09-20 21:25]
 
 - `fix(backend): update LLM generation router and add missing parent message ID`
