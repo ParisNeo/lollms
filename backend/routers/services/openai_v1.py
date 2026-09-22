@@ -38,7 +38,8 @@ from backend.security import verify_api_key
 from backend.session import (
     user_sessions, build_lollms_client_from_params, get_user_data_root, 
     find_model_by_alias, resolve_model_name, invalidate_model_cache,
-    _build_universal_profiles_for_modality
+    _build_universal_profiles_for_modality, reset_client_state,
+    cancel_client_generation, evict_client_from_registry
 )
 from backend.settings import settings
 from lollms_client import LollmsPersonality, MSG_TYPE
@@ -290,21 +291,12 @@ class ResponseObject(BaseModel):
 
 def _prepare_generation(lc) -> None:
     """Call before every generation to arm a clean cancellation state."""
-    if hasattr(lc, 'llm') and lc.llm is not None and hasattr(lc.llm, 'reset_cancel'):
-        lc.llm.reset_cancel()
+    reset_client_state(lc)
 
 
 def _cancel_generation(lc) -> None:
-    """
-    Best-effort cancellation:
-      1. Call binding.cancel() — closes HTTP sessions, sets the event.
-      2. If the binding didn't override cancel() (i.e. it's purely cooperative
-         via is_cancelled()), the event alone may not be enough for a hung
-         thread.  The caller should still hard-kill the process as a last resort
-         if lc lives in a child process (see below).
-    """
-    if hasattr(lc, 'llm') and lc.llm is not None and hasattr(lc.llm, 'cancel'):
-        lc.llm.cancel()
+    """Signals cancellation to client and closes connection to free backend server slots."""
+    cancel_client_generation(lc)
 
 def generate_mistral_compatible_id() -> str:
     """Generates a 9-character alphanumeric ID required by Mistral/LiteLLM."""
@@ -806,79 +798,45 @@ async def list_models(
             }]
         }
 
-    # 1. Try DB Cache first (unless forced)
-    if not force_refresh:
-        loop = asyncio.get_running_loop()
-        cached = await loop.run_in_executor(executor, lambda: get_system_cache(db, "cache_available_models"))
-        if cached and isinstance(cached, list):
-            formatted_cached = []
-            for item in cached:
-                if isinstance(item, dict) and item.get("id"):
-                    formatted_cached.append({
-                        "id": item["id"],
-                        "name": item.get("name") or item["id"],
-                        "object": "model",
-                        "created": item.get("created") or int(time.time()),
-                        "owned_by": item.get("owned_by") or (item["id"].split("/")[0] if "/" in item["id"] else "lollms")
-                    })
-            if formatted_cached:
-                ASCIIColors.success("Returning cached model list.")
-                return {"object": "list", "data": formatted_cached}
-
-    loop = asyncio.get_running_loop()
-
-    def _fetch_models():
-        """
-        Queries available LLM profiles from active bindings.
-        Returns only working Universal Profiles where the connection server is active and the model is available.
-        """
-        all_models = []
-        created_time = int(time.time())
-
-        # Retrieve universal profiles with live connection health verification
+    # Retrieve live verified universal profiles directly (eliminates stale phantom caches)
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    try:
+        profiles_dict = await get_all_universal_profiles(modality="llm", db=db)
+        model_profiles = profiles_dict.get("profiles", {})
+    except Exception as e:
+        ASCIIColors.warning(f"Error retrieving universal profiles for /v1/models: {e}")
         try:
-            from backend.routers.admin.bindings_management import get_all_universal_profiles
-            profiles_dict = asyncio.run(get_all_universal_profiles(modality="llm", db=db))
-            model_profiles = profiles_dict.get("profiles", {})
+            _, model_profiles, _ = _build_universal_profiles_for_modality(
+                db=db,
+                binding_model_cls=DBLLMBinding,
+                active_binding_alias=None,
+                active_model_name=None,
+                user_overrides={}
+            )
         except Exception:
-            try:
-                _, model_profiles, _ = _build_universal_profiles_for_modality(
-                    db=db,
-                    binding_model_cls=DBLLMBinding,
-                    active_binding_alias=None,
-                    active_model_name=None,
-                    user_overrides={}
-                )
-            except Exception as e:
-                ASCIIColors.warning(f"Error building universal profiles: {e}")
-                model_profiles = {}
+            model_profiles = {}
 
-        for prof_id, prof_info in model_profiles.items():
-            # Exclude unavailable models or dead servers so clients only see working endpoints
-            if prof_info.get("is_available") is False:
-                continue
+    all_models = []
+    created_time = int(time.time())
 
-            title = prof_info.get("title") or prof_info.get("name") or prof_id
-            binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
+    for prof_id, prof_info in model_profiles.items():
+        # Strictly exclude unavailable or offline models
+        if prof_info.get("is_available") is False or prof_info.get("is_online") is False:
+            continue
 
-            all_models.append({
-                "id": prof_id,
-                "name": title,
-                "object": "model",
-                "created": created_time,
-                "owned_by": binding_alias
-            })
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
 
-        return all_models
-
-    all_models = await loop.run_in_executor(executor, _fetch_models)
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "object": "model",
+            "created": created_time,
+            "owned_by": binding_alias
+        })
 
     unique_models = {m["id"]: m for m in all_models}
     final_list = sorted(list(unique_models.values()), key=lambda x: x['id'])
-
-    # Update Cache only if we actually found models to prevent caching empty lists
-    if final_list:
-        await loop.run_in_executor(executor, lambda: set_system_cache(db, "cache_available_models", final_list))
 
     return {"object": "list", "data": final_list}
 
@@ -1095,9 +1053,12 @@ async def chat_completions(
                     ASCIIColors.warning(
                         f"[stream] Client '{user.username}' disconnected — cancelling."
                     )
-                    await loop.run_in_executor(None, lambda: _cancel_generation(lc))
+                    nonlocal client_aborted
+                    client_aborted = True
+                    cancel_client_generation(lc)
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
 
+                generation_error = False
                 try:
                     _prepare_generation(lc)
                     watcher_task = asyncio.ensure_future(watch_disconnect())
@@ -1144,10 +1105,17 @@ async def chat_completions(
                      # ── STREAMING PATH ────────────────────────────────────────────────────
                     in_reasoning = False
 
+                    client_aborted = False
+
                     def llm_callback(chunk_text: str, msg_type: MSG_TYPE, **kwargs) -> bool:
                         nonlocal in_reasoning
-                        if lc.llm and lc.llm.is_cancelled():
+                        if client_aborted or (lc and lc.cancel_generation):
                             return False
+                        if lc and hasattr(lc, 'llm') and lc.llm:
+                            if getattr(lc.llm, 'cancelled', False):
+                                return False
+                            if hasattr(lc.llm, 'is_cancelled') and lc.llm.is_cancelled():
+                                return False
 
                         if msg_type == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK and chunk_text:
                             main_loop.call_soon_threadsafe(
@@ -1196,6 +1164,7 @@ async def chat_completions(
 
                     # Use a dedicated thread for generation to prevent event loop starvation
                     def blocking_gen() -> None:
+                        nonlocal generation_error
                         try:
                             lc.generate_from_messages(
                                 openai_messages,
@@ -1206,7 +1175,11 @@ async def chat_completions(
                                 **generation_kwargs
                             )
                         except Exception as ex:
+                            generation_error = True
+                            err_str = str(ex).lower()
                             ASCIIColors.error(f"[blocking_gen] {ex}")
+                            if "connection" in err_str or "disconnected" in err_str or "broken pipe" in err_str:
+                                evict_client_from_registry(lc, user.username)
                             main_loop.call_soon_threadsafe(
                                 stream_queue.put_nowait,
                                 make_error_chunk(str(ex))
@@ -1268,12 +1241,20 @@ async def chat_completions(
                     yield "data: [DONE]\n\n"
 
                 except Exception as e:
+                    generation_error = True
+                    err_msg = str(e)
                     ASCIIColors.error(f"[stream_generator] Crash: {e}")
                     trace_exception(e)
-                    yield make_error_chunk(str(e))
+                    if "connection" in err_msg.lower() or "disconnected" in err_msg.lower():
+                        evict_client_from_registry(lc, user.username)
+                    yield make_error_chunk(err_msg)
                     yield "data: [DONE]\n\n"
                 finally:
-                    _cancel_generation(lc)
+                    if client_aborted or generation_error:
+                        cancel_client_generation(lc)
+                    else:
+                        reset_client_state(lc)
+
                     if watcher_task and not watcher_task.done():
                         watcher_task.cancel()
                         try:
@@ -1331,8 +1312,17 @@ async def chat_completions(
 
             result_content = await gen_task
 
+        except Exception as e:
+            if "connection" in str(e).lower() or "disconnected" in str(e).lower() or "broken pipe" in str(e).lower():
+                evict_client_from_registry(lc, user.username)
+            raise
         finally:
-            _cancel_generation(lc)   # always reset for next request
+            # Only signal cancellation if the client actually disconnected prematurely
+            if disconnect_task in done and gen_task not in done:
+                cancel_client_generation(lc)
+            else:
+                reset_client_state(lc)
+
             for t in [gen_task, disconnect_task]:
                 if not t.done():
                     t.cancel()

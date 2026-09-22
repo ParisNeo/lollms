@@ -20,7 +20,8 @@ from backend.db.models.config import LLMBinding as DBLLMBinding
 from backend.security import verify_api_key
 from backend.session import (
     user_sessions, build_lollms_client_from_params,
-    _build_universal_profiles_for_modality
+    _build_universal_profiles_for_modality, reset_client_state,
+    cancel_client_generation, evict_client_from_registry
 )
 from backend.settings import settings
 from backend.utils import track_service_usage, check_rate_limit
@@ -83,48 +84,34 @@ async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session
             }]
         }
 
-    loop = asyncio.get_running_loop()
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    try:
+        profiles_dict = await get_all_universal_profiles(modality="llm", db=db)
+        model_profiles = profiles_dict.get("profiles", {})
+    except Exception as e:
+        trace_exception(e)
+        model_profiles = {}
 
-    def _list():
-        all_models = []
-        created_time = int(time.time())
+    all_models = []
+    created_time = int(time.time())
 
-        try:
-            from backend.routers.admin.bindings_management import get_all_universal_profiles
-            profiles_dict = asyncio.run(get_all_universal_profiles(modality="llm", db=db))
-            model_profiles = profiles_dict.get("profiles", {})
-        except Exception:
-            try:
-                _, model_profiles, _ = _build_universal_profiles_for_modality(
-                    db=db,
-                    binding_model_cls=DBLLMBinding,
-                    active_binding_alias=None,
-                    active_model_name=None,
-                    user_overrides={}
-                )
-            except Exception as e:
-                trace_exception(e)
-                model_profiles = {}
+    for prof_id, prof_info in model_profiles.items():
+        if prof_info.get("is_available") is False or prof_info.get("is_online") is False:
+            continue
 
-        for prof_id, prof_info in model_profiles.items():
-            if prof_info.get("is_available") is False:
-                continue
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
 
-            title = prof_info.get("title") or prof_info.get("name") or prof_id
-            binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "object": "model",
+            "created": created_time,
+            "owned_by": binding_alias
+        })
 
-            all_models.append({
-                "id": prof_id,
-                "name": title,
-                "object": "model",
-                "created": created_time,
-                "owned_by": binding_alias
-            })
-
-        unique_models = {m["id"]: m for m in all_models}
-        return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
-
-    return await loop.run_in_executor(executor, _list)
+    unique_models = {m["id"]: m for m in all_models}
+    return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}
 
 @ollama_v1_router.post("/chat/completions")
 async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
@@ -141,6 +128,7 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
         executor, 
         lambda: build_lollms_client_from_params(user.username, binding_alias, model_name, llm_params={"temperature": request.temperature}, load_llm=True)
     )
+    reset_client_state(lc)
 
     messages = list(request.messages)
     if request.personality:
@@ -182,12 +170,22 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
                     main_loop, stream_queue = asyncio.get_running_loop(), asyncio.Queue()
                     completion_id, created_ts = f"chatcmpl-{uuid.uuid4().hex}", int(time.time())
                     def llm_cb(chunk, msg_type, **kwargs):
+                        if lc and lc.cancel_generation:
+                            return False
+                        if lc and hasattr(lc, 'llm') and lc.llm and getattr(lc.llm, 'cancelled', False):
+                            return False
                         if msg_type == MSG_TYPE.MSG_TYPE_CHUNK:
                             main_loop.call_soon_threadsafe(stream_queue.put_nowait, f"data: {ChatCompletionStreamResponse(id=completion_id, model=request.model, created=created_ts, choices=[ChatCompletionResponseStreamChoice(index=0, delta=DeltaMessage(content=chunk))]).model_dump_json()}\n\n")
                         return True
                     def bg_gen():
-                        try: lc.generate_from_messages(openai_messages, streaming_callback=llm_cb, images=images, n_predict=request.max_tokens, **generation_kwargs)
-                        finally: main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
+                        try: 
+                            lc.generate_from_messages(openai_messages, streaming_callback=llm_cb, images=images, n_predict=request.max_tokens, **generation_kwargs)
+                        except Exception as e:
+                            if "connection" in str(e).lower() or "disconnected" in str(e).lower():
+                                evict_client_from_registry(lc, user.username)
+                        finally: 
+                            reset_client_state(lc)
+                            main_loop.call_soon_threadsafe(stream_queue.put_nowait, None)
                     
                     # Replace explicit threading with run_in_executor
                     main_loop.run_in_executor(executor, bg_gen)

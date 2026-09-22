@@ -455,13 +455,17 @@ async def get_all_universal_profiles(
                         if mid: raw_models.append(str(mid))
 
             raw_models = _filter_models_by_modality(raw_models, mod)
-        except Exception:
-            pass
+        except Exception as e:
+            trace_exception(e)
+            is_online = False
+            raw_models = []
 
         aliases = binding.model_aliases or {}
         if isinstance(aliases, str):
             try: aliases = json.loads(aliases)
             except Exception: aliases = {}
+        if not isinstance(aliases, dict):
+            aliases = {}
 
         for orig_name, alias_data in aliases.items():
             if not isinstance(alias_data, dict):
@@ -469,8 +473,8 @@ async def get_all_universal_profiles(
             cfg = alias_data.get("alias", {}) if "alias" in alias_data else alias_data
             target_model = cfg.get("model_name") or orig_name
 
-            # Health check: Only mark unavailable if server returned an explicit model list and model is missing
-            if not binding.is_active:
+            # Health check: Verify binding active status, online reachability, and model presence
+            if not binding.is_active or not is_online:
                 is_available = False
             elif raw_models and target_model not in raw_models and binding.name != 'smart_router':
                 is_available = False
@@ -517,36 +521,38 @@ async def get_all_universal_profiles(
                 "is_available": is_available
             }
 
-        # Include default model as profile if not explicitly aliased
-        if binding.default_model_name and f"{binding.alias}/{binding.default_model_name}" not in profiles:
+        # Include default model as fallback profile ONLY if this binding has NO explicit profiles defined
+        has_binding_profiles = any(p["binding_alias"] == binding.alias for p in profiles.values())
+        if not has_binding_profiles and binding.default_model_name and f"{binding.alias}/{binding.default_model_name}" not in profiles:
             def_id = f"{binding.alias}/{binding.default_model_name}"
             def_available = is_online and (not raw_models or binding.default_model_name in raw_models)
-            profiles[def_id] = {
-                "id": def_id,
-                "binding_id": binding.id,
-                "binding_alias": binding.alias,
-                "binding_name": binding.name,
-                "original_model_name": binding.default_model_name,
-                "model_name": binding.default_model_name,
-                "title": binding.default_model_name,
-                "name": binding.default_model_name,
-                "description": f"Default model for {binding.alias}",
-                "icon": None,
-                "vision_enabled": False,
-                "has_vision": False,
-                "forced_context_size": None,
-                "ctx_size": None,
-                "routing_config": {
-                    "description": f"Default engine model {binding.default_model_name}",
-                    "complexity_tier": 2,
-                    "cost_per_1k_tokens": 0.0,
-                    "avg_latency_ms": 200,
-                    "priority": 1
-                },
-                "is_binding_default": True,
-                "is_online": is_online,
-                "is_available": def_available
-            }
+            if def_available:
+                profiles[def_id] = {
+                    "id": def_id,
+                    "binding_id": binding.id,
+                    "binding_alias": binding.alias,
+                    "binding_name": binding.name,
+                    "original_model_name": binding.default_model_name,
+                    "model_name": binding.default_model_name,
+                    "title": binding.default_model_name,
+                    "name": binding.default_model_name,
+                    "description": f"Default model for {binding.alias}",
+                    "icon": None,
+                    "vision_enabled": False,
+                    "has_vision": False,
+                    "forced_context_size": None,
+                    "ctx_size": None,
+                    "routing_config": {
+                        "description": f"Default engine model {binding.default_model_name}",
+                        "complexity_tier": 2,
+                        "cost_per_1k_tokens": 0.0,
+                        "avg_latency_ms": 200,
+                        "priority": 1
+                    },
+                    "is_binding_default": True,
+                    "is_online": is_online,
+                    "is_available": def_available
+                }
 
     return {"profiles": profiles, "count": len(profiles)}
 
@@ -1185,12 +1191,28 @@ def _get_modality_models_list(binding_record, binding_type: str) -> List[Binding
         if (binding_record.name == 'smart_router' or binding_record.alias == 'smart_router') and not model_aliases:
             model_aliases = {"auto": {"title": "Auto Smart Router", "description": "Dynamic multi-model smart router", "routing_strategy": "balanced"}}
 
-        models_list = list(filtered_models)
-        for k in model_aliases.keys():
-            if k not in models_list:
-                models_list.append(k)
+        if binding_record.name == 'smart_router' or binding_record.alias == 'smart_router':
+            models_list = list(model_aliases.keys())
+        elif filtered_models:
+            # Physical models must come strictly from the engine, not from old phantom aliases
+            models_list = list(filtered_models)
+        else:
+            # Fallback if engine could not be probed
+            models_list = []
 
-        return [BindingModel(original_model_name=model_name, alias=model_aliases.get(model_name)) for model_name in sorted(models_list)]
+        result = []
+        for model_name in sorted(models_list):
+            alias_data = model_aliases.get(model_name)
+            if not alias_data:
+                # Check if any profile uses this model as target
+                for k, v in model_aliases.items():
+                    v_dict = v.get("alias", v) if isinstance(v, dict) else {}
+                    if v_dict.get("model_name") == model_name:
+                        alias_data = v
+                        break
+            result.append(BindingModel(original_model_name=model_name, alias=alias_data))
+
+        return result
     except Exception as e:
         trace_exception(e)
         return []

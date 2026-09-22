@@ -1653,9 +1653,12 @@ def _migrate_model_aliases_to_universal_profiles(connection):
                     # 4. Normalize VLM companion model profile
                     vlm_prof = cfg.get("vlm_model_profile", None)
 
+                    # Fix: Preserve the real underlying model_name rather than overwriting it with the alias key
+                    target_model_name = cfg.get("model_name") or orig_name
+
                     upgraded_entry = {
                         "binding_profile_name": b_alias,
-                        "model_name": orig_name,
+                        "model_name": target_model_name,
                         "title": cfg.get("title") or cfg.get("name") or orig_name,
                         "name": cfg.get("name") or cfg.get("title") or orig_name,
                         "description": cfg.get("description", ""),
@@ -1697,17 +1700,25 @@ def _migrate_model_aliases_to_universal_profiles(connection):
             print(f"WARNING: Profile migration error on table {tbl}: {e}")
             connection.rollback()
 
-    # Self-heal orphaned user models
+    # Purge any stale cache entries from previous boots
+    try:
+        connection.execute(text("DELETE FROM global_configs WHERE key = 'cache_available_models'"))
+        connection.commit()
+    except Exception:
+        pass
+
+    # Self-heal orphaned user models using active LLM bindings specifically
     try:
         if active_llm_profiles:
             def_llm_rec = connection.execute(text("SELECT alias, default_model_name FROM llm_bindings WHERE is_active = 1 ORDER BY id ASC LIMIT 1")).fetchone()
             if def_llm_rec and def_llm_rec[0] and def_llm_rec[1]:
                 fallback_full_model = f"{def_llm_rec[0]}/{def_llm_rec[1]}"
+                active_llm_binding_aliases = {row[0] for row in connection.execute(text("SELECT alias FROM llm_bindings WHERE is_active = 1")).fetchall()}
                 users = connection.execute(text("SELECT id, username, lollms_model_name FROM users")).fetchall()
                 healed_count = 0
                 for u in users:
                     u_id, u_name, u_model = u[0], u[1], u[2]
-                    if not u_model or (u_model not in active_llm_profiles and "/" in u_model and u_model.split("/")[0] not in [r[1] for r in records if tbl == "llm_bindings"]):
+                    if not u_model or (u_model not in active_llm_profiles and "/" in u_model and u_model.split("/")[0] not in active_llm_binding_aliases):
                         connection.execute(
                             text("UPDATE users SET lollms_model_name = :fallback WHERE id = :id"),
                             {"fallback": fallback_full_model, "id": u_id}

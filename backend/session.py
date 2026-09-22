@@ -58,6 +58,85 @@ TOKEN_CACHE_TTL = 10 # seconds
 _global_client_registry: Dict[str, LollmsClient] = {}
 _registry_lock = threading.Lock()
 
+def reset_client_state(lc: Optional[LollmsClient]) -> None:
+    """
+    Arms a clean, uncancelled generation state on a LollmsClient and its underlying binding.
+    Must be called before any generation and after successful completion.
+    """
+    if lc is None:
+        return
+    try:
+        lc.cancel_generation = False
+        if hasattr(lc, 'llm') and lc.llm is not None:
+            llm = lc.llm
+            if hasattr(llm, 'reset_cancel') and callable(llm.reset_cancel):
+                try:
+                    llm.reset_cancel()
+                except Exception:
+                    pass
+            if hasattr(llm, '_cancel_event') and llm._cancel_event is not None:
+                try:
+                    llm._cancel_event.clear()
+                except Exception:
+                    pass
+            if hasattr(llm, 'cancelled'):
+                try:
+                    llm.cancelled = False
+                except Exception:
+                    pass
+    except Exception as e:
+        ASCIIColors.warning(f"Error resetting client generation state: {e}")
+
+def cancel_client_generation(lc: Optional[LollmsClient]) -> None:
+    """
+    Signals cooperative and socket-level cancellation to LollmsClient and its underlying binding.
+    Closes active response streams to immediately free inference slots on the generation server.
+    """
+    if lc is None:
+        return
+    try:
+        lc.cancel_generation = True
+        if hasattr(lc, 'llm') and lc.llm is not None:
+            llm = lc.llm
+            if hasattr(llm, 'cancel') and callable(llm.cancel):
+                try:
+                    llm.cancel()
+                except Exception as e:
+                    ASCIIColors.warning(f"Error calling llm.cancel(): {e}")
+            if hasattr(llm, '_cancel_event') and llm._cancel_event is not None:
+                try:
+                    llm._cancel_event.set()
+                except Exception:
+                    pass
+            if hasattr(llm, 'cancelled'):
+                try:
+                    llm.cancelled = True
+                except Exception:
+                    pass
+            if hasattr(llm, 'current_response') and llm.current_response is not None:
+                try:
+                    llm.current_response.close()
+                except Exception:
+                    pass
+    except Exception as e:
+        ASCIIColors.warning(f"Error cancelling client generation: {e}")
+
+def evict_client_from_registry(client: Optional[LollmsClient] = None, username: Optional[str] = None) -> None:
+    """
+    Evicts a poisoned or disconnected LollmsClient instance from the global cache,
+    forcing the next request to construct a fresh connection pool to the generation server.
+    """
+    with _registry_lock:
+        if client is not None:
+            keys_to_remove = [k for k, v in _global_client_registry.items() if v is client]
+            for k in keys_to_remove:
+                del _global_client_registry[k]
+        else:
+            _global_client_registry.clear()
+
+    if username and username in user_sessions:
+        user_sessions[username].pop("lollms_clients_cache", None)
+
 # Locks to prevent race conditions during concurrent requests
 _session_init_lock = threading.Lock()
 _client_build_locks: Dict[str, threading.Lock] = {}
@@ -591,32 +670,7 @@ def _build_universal_profiles_for_modality(
 
             model_profiles[prof_name] = profile_entry
 
-        default_model = binding.default_model_name
-        if default_model and f"{binding.alias}/{default_model}" not in model_profiles:
-            prof_name = f"{binding.alias}/{default_model}"
-            is_model_default = is_binding_default and (default_model == active_model_name or active_model_name is None)
-            if is_model_default:
-                default_model_profile_name = prof_name
-
-            model_profiles[prof_name] = {
-                "binding_profile_name": binding.alias,
-                "model_name": default_model,
-                "title": default_model,
-                "description": f"Default model for {binding.alias}",
-                "vision_enabled": False,
-                "has_vision": False,
-                "forced_context_size": forced_ctx_size,
-                "ctx_size": forced_ctx_size,
-                "routing_config": {
-                    "description": f"Default model {default_model}",
-                    "complexity_tier": 2,
-                    "cost_per_1k_tokens": 0.0,
-                    "avg_latency_ms": 200,
-                    "priority": 1
-                },
-                "is_default": is_model_default,
-                **user_overrides
-            }
+        # Include default model as fallback profile ONLY
 
     # Second pass: Dynamically assemble Smart Router groups using member profiles
     for binding in all_bindings:

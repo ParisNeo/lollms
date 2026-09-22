@@ -72,7 +72,10 @@ from backend.session import (get_current_active_user,
                              get_user_discussion_assets_path,
                              get_user_lollms_client,
                              get_user_temp_uploads_path, user_sessions,
-                             build_lollms_client_from_params)
+                             build_lollms_client_from_params,
+                             reset_client_state,
+                             cancel_client_generation,
+                             evict_client_from_registry)
 from backend.task_manager import task_manager, Task
 from backend.ws_manager import manager
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
@@ -1189,8 +1192,7 @@ def build_llm_generation_router(router: APIRouter):
             binding_alias, _ = user_model_full.split('/', 1)
 
         lc = get_user_lollms_client(owner_username, binding_alias)
-        if lc:
-            lc.cancel_generation = False
+        reset_client_state(lc)
         discussion_obj.lollms_client = lc
 
         # Ensure max_context_size is updated with the active model profile
@@ -1897,7 +1899,10 @@ def build_llm_generation_router(router: APIRouter):
 
                 def llm_callback(chunk: Any, msg_type: Any, params: Optional[Dict] = None, **kwargs) -> bool:
                     nonlocal first_chunk_time
-                    if stop_event.is_set(): return False
+                    if stop_event.is_set() or (lc and lc.cancel_generation): return False
+                    if lc and hasattr(lc, 'llm') and lc.llm:
+                        if getattr(lc.llm, 'cancelled', False) or (hasattr(lc.llm, 'is_cancelled') and lc.llm.is_cancelled()):
+                            return False
 
                     mtype_val = msg_type.value if hasattr(msg_type, 'value') else msg_type
                     
@@ -2288,7 +2293,19 @@ def build_llm_generation_router(router: APIRouter):
                     if "tag_start_idx" in error_str:
                         error_str = "A streaming buffer sync issue occurred while parsing tool tags. The partial turn was preserved."
                     main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": error_str}) + "\n")
+                except Exception as e:
+                    trace_exception(e)
+                    error_str = str(e)
+                    if "connection" in error_str.lower() or "disconnected" in error_str.lower() or "broken pipe" in error_str.lower():
+                        evict_client_from_registry(lc, current_user.username)
+                    if "tag_start_idx" in error_str:
+                        error_str = "A streaming buffer sync issue occurred while parsing tool tags. The partial turn was preserved."
+                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "error", "content": error_str}) + "\n")
                 finally:
+                    if stop_event.is_set():
+                        cancel_client_generation(lc)
+                    else:
+                        reset_client_state(lc)
                     user_sessions.get(current_user.username, {}).get("active_generation_control", {}).pop(discussion_id, None)
                     manager.send_personal_message_sync({
                         "type": "generation_status",
@@ -2323,9 +2340,8 @@ def build_llm_generation_router(router: APIRouter):
 
         try:
             lc = get_user_lollms_client(username)
-            if lc:
-                lc.cancel_generation = True
+            cancel_client_generation(lc)
         except Exception as e:
-            print(f"Warning: Failed to set cancel_generation on lollms_client: {e}")
+            print(f"Warning: Failed to cancel generation on lollms_client: {e}")
 
         return {"message": "Stop signal sent."}
