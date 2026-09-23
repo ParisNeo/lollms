@@ -314,6 +314,7 @@ def build_discussions_router():
             if msg.parent_id and msg.parent_id in children_map and len(children_map[msg.parent_id]) > 1:
                 msg_branches = children_map[msg.parent_id]
 
+            msg_thoughts = getattr(msg, 'thoughts', None) or msg_metadata.get('thoughts') or msg_metadata.get('reasoning_content')
             messages_output.append(
                 MessageOutput(
                     id=msg.id, sender=msg.sender, sender_type=msg.sender_type, content=msg.content,
@@ -325,7 +326,8 @@ def build_discussions_router():
                     created_at=msg.created_at, 
                     branch_id=branch_tip_to_load, 
                     branches=msg_branches,
-                    metadata=msg_metadata
+                    metadata=msg_metadata,
+                    thoughts=msg_thoughts
                 )
             )
 

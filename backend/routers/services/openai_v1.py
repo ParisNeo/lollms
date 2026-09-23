@@ -777,6 +777,7 @@ def parse_tool_calls_from_text(content: Any) -> Tuple[Optional[str], Optional[Li
 
 @openai_v1_router.get("/models")
 async def list_models(
+    mode: Optional[str] = Query(None, description="Listing mode: 'profiles_only' (default) or 'all_models'"),
     force_refresh: bool = Query(False, description="Force refresh of the model cache"),
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
@@ -798,46 +799,88 @@ async def list_models(
             }]
         }
 
-    # Retrieve live verified universal profiles directly (eliminates stale phantom caches)
+    # Resolution of listing mode: query parameter overrides setting; checks modality setting first
+    listing_mode = (mode or settings.get("llm_models_advertisement_mode") or settings.get("openai_models_mode", "profiles_only")).lower().strip()
+
     from backend.routers.admin.bindings_management import get_all_universal_profiles
     try:
         profiles_dict = await get_all_universal_profiles(modality="llm", db=db)
         model_profiles = profiles_dict.get("profiles", {})
     except Exception as e:
         ASCIIColors.warning(f"Error retrieving universal profiles for /v1/models: {e}")
-        try:
-            _, model_profiles, _ = _build_universal_profiles_for_modality(
-                db=db,
-                binding_model_cls=DBLLMBinding,
-                active_binding_alias=None,
-                active_model_name=None,
-                user_overrides={}
-            )
-        except Exception:
-            model_profiles = {}
+        model_profiles = {}
 
     all_models = []
     created_time = int(time.time())
 
-    for prof_id, prof_info in model_profiles.items():
-        # Strictly exclude unavailable or offline models
-        if prof_info.get("is_available") is False or prof_info.get("is_online") is False:
-            continue
+    if listing_mode in ["all_models", "binding_model", "all"]:
+        # Mode B: Forward all available models across active bindings in binding/model format
+        active_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+        seen_ids = set()
 
-        title = prof_info.get("title") or prof_info.get("name") or prof_id
-        binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
+        for prof_id, prof_info in model_profiles.items():
+            if prof_info.get("is_available") is False or prof_info.get("is_online") is False:
+                continue
+            binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
+            title = prof_info.get("title") or prof_info.get("name") or prof_id
 
-        all_models.append({
-            "id": prof_id,
-            "name": title,
-            "object": "model",
-            "created": created_time,
-            "owned_by": binding_alias
-        })
+            if prof_id not in seen_ids:
+                seen_ids.add(prof_id)
+                all_models.append({
+                    "id": prof_id,
+                    "name": title,
+                    "object": "model",
+                    "created": created_time,
+                    "owned_by": binding_alias
+                })
 
-    unique_models = {m["id"]: m for m in all_models}
-    final_list = sorted(list(unique_models.values()), key=lambda x: x['id'])
+        for binding in active_bindings:
+            if binding.name == 'smart_router' or binding.alias == 'smart_router':
+                continue
+            try:
+                from lollms_client.lollms_llm_binding import list_binding_models as list_llm_binding_models
+                raw_list = list_llm_binding_models(llm_binding_name=binding.name, llm_binding_config=binding.config or {})
+                if isinstance(raw_list, list):
+                    for r in raw_list:
+                        m_name = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                        if m_name:
+                            full_id = f"{binding.alias}/{m_name}"
+                            if full_id not in seen_ids:
+                                seen_ids.add(full_id)
+                                all_models.append({
+                                    "id": full_id,
+                                    "name": m_name,
+                                    "object": "model",
+                                    "created": created_time,
+                                    "owned_by": binding.alias
+                                })
+            except Exception:
+                pass
+    else:
+        # Mode A (DEFAULT): Profiles Only with actual profile names as ID
+        seen_ids = set()
+        for prof_id, prof_info in model_profiles.items():
+            if prof_info.get("is_available") is False or prof_info.get("is_online") is False:
+                continue
 
+            profile_name = prof_info.get("name") or prof_info.get("title") or prof_info.get("original_model_name") or prof_id.split("/")[-1]
+            binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
+
+            target_id = profile_name
+            if target_id in seen_ids:
+                target_id = f"{binding_alias}/{profile_name}"
+
+            if target_id not in seen_ids:
+                seen_ids.add(target_id)
+                all_models.append({
+                    "id": target_id,
+                    "name": profile_name,
+                    "object": "model",
+                    "created": created_time,
+                    "owned_by": binding_alias
+                })
+
+    final_list = sorted(all_models, key=lambda x: x['id'])
     return {"object": "list", "data": final_list}
 
 
@@ -887,16 +930,11 @@ async def chat_completions(
     db: Session = Depends(get_db)
 ):
     loop = asyncio.get_running_loop()
-    try:
-        # Offload potentially blocking database model resolution
-        binding_alias, model_name = await loop.run_in_executor(
-            executor,
-            lambda: resolve_model_name(db, request.model)
-        )
-    except HTTPException as e:
-        if e.status_code == 400:
-            await loop.run_in_executor(executor, lambda: invalidate_model_cache(db))
-        raise e
+    # Offload potentially blocking database model resolution (without triggering broadcast storms)
+    binding_alias, model_name = await loop.run_in_executor(
+        executor,
+        lambda: resolve_model_name(db, request.model)
+    )
 
     # Client building can be slow, might involve model loading.
     try:

@@ -89,6 +89,8 @@ export function processSingleMessage(msg) {
         }
     }
 
+    const thoughts = msg.thoughts || metadata.thoughts || metadata.reasoning_content || null;
+
     // Ensure all image references are sanitized against double headers
     const rawRefs = msg.image_references || [];
     const normalizedImageRefs = (Array.isArray(rawRefs) ? rawRefs : []).map(ref => {
@@ -105,6 +107,7 @@ export function processSingleMessage(msg) {
     return {
         ...msg,
         content: cleanContent,
+        thoughts: thoughts,
         binding_name,
         model_name,
         sender_type: senderType,

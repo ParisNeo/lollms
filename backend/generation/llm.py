@@ -2211,11 +2211,15 @@ def build_llm_generation_router(router: APIRouter):
                     def msg_to_out(m): 
                         if not m: return None
                         meta = m.metadata or {}
+                        thoughts_val = getattr(m, 'thoughts', None) or meta.get('thoughts') or meta.get('reasoning_content')
+                        if thoughts_val and 'thoughts' not in meta:
+                            meta['thoughts'] = thoughts_val
                         return {
                             "id": m.id, 
                             "sender": m.sender, 
                             "content": m.content, 
                             "metadata": meta, 
+                            "thoughts": thoughts_val,
                             "sources": meta.get('sources', []),
                             "events": meta.get('events', []),
                             "sender_type": m.sender_type, 

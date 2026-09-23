@@ -235,6 +235,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         if (finalAi.content) {
                             messageToUpdate.content = finalAi.content;
                         }
+                        if (finalAi.thoughts) {
+                            messageToUpdate.thoughts = finalAi.thoughts;
+                        }
                         messageToUpdate.tokens = finalAi.tokens || finalAi.token_count || 0;
                         messageToUpdate.metadata = finalAi.metadata || {};
                         if (finalAi.sources && finalAi.sources.length > 0) {

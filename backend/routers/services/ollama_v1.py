@@ -8,7 +8,7 @@ import uuid
 from typing import List, Optional, Dict, Any, Union
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse
@@ -68,7 +68,11 @@ async def get_user_from_api_key(authorization: Optional[HTTPAuthorizationCredent
     return user
 
 @ollama_v1_router.get("/models")
-async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session = Depends(get_db)):
+async def list_models(
+    mode: Optional[str] = Query(None, description="Listing mode: 'profiles_only' (default) or 'all_models'"),
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
     # --- FORCE MODEL MODE FOR LISTING ---
     force_model_mode = settings.get("force_model_mode", "disabled")
     forced_model = settings.get("force_model_name")
@@ -84,6 +88,8 @@ async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session
             }]
         }
 
+    listing_mode = (mode or settings.get("llm_models_advertisement_mode", "profiles_only")).lower().strip()
+
     from backend.routers.admin.bindings_management import get_all_universal_profiles
     try:
         profiles_dict = await get_all_universal_profiles(modality="llm", db=db)
@@ -94,21 +100,28 @@ async def list_models(user: DBUser = Depends(get_user_from_api_key), db: Session
 
     all_models = []
     created_time = int(time.time())
+    seen_ids = set()
 
     for prof_id, prof_info in model_profiles.items():
         if prof_info.get("is_available") is False or prof_info.get("is_online") is False:
             continue
 
-        title = prof_info.get("title") or prof_info.get("name") or prof_id
         binding_alias = prof_info.get("binding_alias") or prof_info.get("binding_profile_name", "lollms")
+        profile_name = prof_info.get("name") or prof_info.get("title") or prof_info.get("original_model_name") or prof_id.split("/")[-1]
 
-        all_models.append({
-            "id": prof_id,
-            "name": title,
-            "object": "model",
-            "created": created_time,
-            "owned_by": binding_alias
-        })
+        target_id = prof_id if listing_mode in ["all_models", "binding_model"] else profile_name
+        if target_id in seen_ids:
+            target_id = f"{binding_alias}/{profile_name}"
+
+        if target_id not in seen_ids:
+            seen_ids.add(target_id)
+            all_models.append({
+                "id": target_id,
+                "name": profile_name,
+                "object": "model",
+                "created": created_time,
+                "owned_by": binding_alias
+            })
 
     unique_models = {m["id"]: m for m in all_models}
     return {"object": "list", "data": sorted(list(unique_models.values()), key=lambda x: x['id'])}

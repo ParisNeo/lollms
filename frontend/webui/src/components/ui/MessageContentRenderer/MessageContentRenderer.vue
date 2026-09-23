@@ -43,6 +43,7 @@ import apiClient from '../../../services/api';
 
 const props = defineProps({
   content: { type: String, default: '' },
+  thoughts: { type: String, default: '' },
   sources: { type: Array, default: () => [] },
   forms: { type: Array, default: () => [] },
   events: { type: Array, default: () => [] },
@@ -606,9 +607,10 @@ const getEventIcon = (eventType) => {
 };
 
 const messageParts = computed(() => {
-    if (!props.content) return [];
-    
-    let content = props.content;
+    const rawExplicitThoughts = (props.thoughts || props.metadata?.thoughts || props.metadata?.reasoning_content || '').trim();
+    if (!props.content && !rawExplicitThoughts) return [];
+
+    let content = props.content || '';
     
     if (props.isStreaming) {
         const unsafeTags = ['svg', 'html', 'style', 'div', 'table'];
@@ -682,6 +684,16 @@ const messageParts = computed(() => {
     }
 
     const parts = [];
+
+    // Prepend explicit thoughts (from streaming or metadata) if thoughts are not already embedded in content as <think>
+    if (rawExplicitThoughts && !content.includes('<think>')) {
+        parts.push({
+            type: 'think',
+            content: rawExplicitThoughts,
+            isClosed: !props.isStreaming,
+            id: `think-explicit-${props.messageId || 'live'}`
+        });
+    }
 
     segments.forEach(segment => {
         if (segment.type === 'think') {

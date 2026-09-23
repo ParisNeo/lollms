@@ -68,6 +68,16 @@ const statusSettingMap = {
     lollms: 'lollms_services_enabled'
 };
 
+const advertisementModalities = [
+    { key: 'llm_models_advertisement_mode', label: 'LLM (Language & Reasoning)', icon: '🧠', desc: 'Text completions, Chat APIs, and Copilot endpoints' },
+    { key: 'tti_models_advertisement_mode', label: 'TTI (Text-to-Image)', icon: '🎨', desc: 'Image generation and canvas inpainting' },
+    { key: 'tts_models_advertisement_mode', label: 'TTS (Text-to-Speech)', icon: '🔊', desc: 'Spoken audio and voice cloning synthesis' },
+    { key: 'stt_models_advertisement_mode', label: 'STT (Speech-to-Text)', icon: '🎙️', desc: 'Transcription and audio processing' },
+    { key: 'ttv_models_advertisement_mode', label: 'TTV (Text-to-Video)', icon: '🎬', desc: 'Video generation pipeline' },
+    { key: 'ttm_models_advertisement_mode', label: 'TTM (Text-to-Music)', icon: '🎵', desc: 'Music and audio sound effects' },
+    { key: 'rag_models_advertisement_mode', label: 'RAG (Embeddings & Vectorizers)', icon: '📚', desc: 'Knowledge bases and vector indexing' }
+];
+
 async function handleResetUsage() {
     const confirmed = await uiStore.showConfirmation({
         title: 'Reset Usage Stats?',
@@ -201,6 +211,92 @@ async function handleResetUsage() {
                                 </button>
                             </div>
                             <p class="text-[10px] text-gray-500 leading-tight">If disabled, anonymous requests will be handled by the primary administrator account.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── PER-MODALITY MODEL ADVERTISEMENT POLICY ── -->
+                <div class="pt-8 border-t dark:border-gray-700 space-y-4">
+                    <div>
+                        <h4 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <span>📡</span>
+                            <span>Model Advertisement & Exposure Policy</span>
+                        </h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Configure how available models are advertised and discovered by OpenAI, Ollama, and external API clients for each modality.
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div v-for="modality in advertisementModalities" :key="modality.key"
+                             class="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900/50 border dark:border-gray-700/80 space-y-3 flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="font-bold text-xs text-gray-900 dark:text-white flex items-center gap-1.5">
+                                        <span>{{ modality.icon }}</span>
+                                        <span>{{ modality.label }}</span>
+                                    </span>
+                                    <span class="text-[9px] font-mono uppercase px-2 py-0.5 rounded-full font-bold"
+                                          :class="(form[modality.key] || 'profiles_only') === 'profiles_only' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'">
+                                        {{ (form[modality.key] || 'profiles_only') === 'profiles_only' ? 'Profiles Only' : 'All Models' }}
+                                    </span>
+                                </div>
+                                <p class="text-[10px] text-gray-500 mt-1">{{ modality.desc }}</p>
+                            </div>
+
+                            <div>
+                                <label :for="modality.key" class="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1">Exposure Format</label>
+                                <select :id="modality.key"
+                                        v-model="form[modality.key]"
+                                        @change="hasChanges = true"
+                                        class="input-field text-xs w-full py-1.5 font-medium">
+                                    <option value="profiles_only">Profiles Only (Default) — Uses actual profile names as ID</option>
+                                    <option value="all_models">Forward All Models — Forwards raw models in binding/model format</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── PER-MODALITY MODEL ADVERTISEMENT POLICY ── -->
+                <div class="pt-8 border-t dark:border-gray-700 space-y-4">
+                    <div>
+                        <h4 class="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <span>📡</span>
+                            <span>Model Advertisement & Exposure Policy</span>
+                        </h4>
+                        <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                            Configure how available models are advertised and discovered by OpenAI, Ollama, and external API clients for each modality.
+                        </p>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div v-for="modality in advertisementModalities" :key="modality.key"
+                             class="p-4 rounded-2xl bg-gray-50 dark:bg-gray-900/50 border dark:border-gray-700/80 space-y-3 flex flex-col justify-between">
+                            <div>
+                                <div class="flex items-center justify-between gap-2">
+                                    <span class="font-bold text-xs text-gray-900 dark:text-white flex items-center gap-1.5">
+                                        <span>{{ modality.icon }}</span>
+                                        <span>{{ modality.label }}</span>
+                                    </span>
+                                    <span class="text-[9px] font-mono uppercase px-2 py-0.5 rounded-full font-bold"
+                                          :class="(form[modality.key] || 'profiles_only') === 'profiles_only' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'">
+                                        {{ (form[modality.key] || 'profiles_only') === 'profiles_only' ? 'Profiles Only' : 'All Models' }}
+                                    </span>
+                                </div>
+                                <p class="text-[10px] text-gray-500 mt-1">{{ modality.desc }}</p>
+                            </div>
+
+                            <div>
+                                <label :for="modality.key" class="block text-[10px] font-black uppercase tracking-wider text-gray-400 mb-1">Exposure Format</label>
+                                <select :id="modality.key"
+                                        v-model="form[modality.key]"
+                                        @change="hasChanges = true"
+                                        class="input-field text-xs w-full py-1.5 font-medium">
+                                    <option value="profiles_only">Profiles Only (Default) — Uses actual profile names as ID</option>
+                                    <option value="all_models">Forward All Models — Forwards raw models in binding/model format</option>
+                                </select>
+                            </div>
                         </div>
                     </div>
                 </div>

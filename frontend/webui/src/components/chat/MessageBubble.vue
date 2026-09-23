@@ -796,6 +796,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                         <!-- Text Content -->
                         <MessageContentRenderer
                             :content="message.content"
+                            :thoughts="message.thoughts || message.metadata?.thoughts || message.metadata?.reasoning_content"
                             :sources="message.sources"
                             :forms="message.forms"
                             :events="message.events"

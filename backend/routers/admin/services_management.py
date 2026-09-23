@@ -36,10 +36,17 @@ async def get_services_dashboard(db: Session = Depends(get_db)):
 
     # 2. Gather settings
     service_keys = [
-        "openai_api_service_enabled", "openai_api_require_key",
+        "openai_api_service_enabled", "openai_api_require_key", "openai_models_mode",
         "ollama_service_enabled", "ollama_require_key",
         "lollms_services_enabled", "lollms_services_require_key",
-        "rate_limit_enabled", "rate_limit_max_requests", "rate_limit_window_seconds"
+        "rate_limit_enabled", "rate_limit_max_requests", "rate_limit_window_seconds",
+        "llm_models_advertisement_mode",
+        "tti_models_advertisement_mode",
+        "tts_models_advertisement_mode",
+        "stt_models_advertisement_mode",
+        "ttv_models_advertisement_mode",
+        "ttm_models_advertisement_mode",
+        "rag_models_advertisement_mode"
     ]
     
     settings_response = {k: settings.get(k) for k in service_keys}

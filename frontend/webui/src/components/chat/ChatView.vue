@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted, onUnmounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { storeToRefs } from 'pinia';
@@ -15,30 +15,82 @@ const discussionsStore = useDiscussionsStore();
 const { isLoadingMessages, currentModelVisionSupport } = storeToRefs(discussionsStore);
 const isDataZoneVisible = computed(() => uiStore.isDataZoneVisible);
 const { emit } = useEventBus();
+
 const isDraggingOver = ref(false);
+let dragCounter = 0;
+let dragHeartbeatTimer = null;
+
+function resetDragState() {
+    dragCounter = 0;
+    isDraggingOver.value = false;
+    if (dragHeartbeatTimer) {
+        clearTimeout(dragHeartbeatTimer);
+        dragHeartbeatTimer = null;
+    }
+}
+
+function handleDragEnter(event) {
+    event.preventDefault();
+    if (event.dataTransfer?.types?.includes('Files')) {
+        dragCounter++;
+        isDraggingOver.value = true;
+        refreshHeartbeat();
+    }
+}
 
 function handleDragOver(event) {
     event.preventDefault();
     if (event.dataTransfer?.types?.includes('Files')) {
-        isDraggingOver.value = true;
+        if (!isDraggingOver.value) {
+            isDraggingOver.value = true;
+        }
+        refreshHeartbeat();
     }
 }
 
 function handleDragLeave(event) {
-    if (!event.currentTarget?.contains(event.relatedTarget)) {
-        isDraggingOver.value = false;
+    event.preventDefault();
+    dragCounter = Math.max(0, dragCounter - 1);
+    if (dragCounter === 0) {
+        resetDragState();
     }
+}
+
+function refreshHeartbeat() {
+    if (dragHeartbeatTimer) clearTimeout(dragHeartbeatTimer);
+    dragHeartbeatTimer = setTimeout(() => {
+        resetDragState();
+    }, 1500);
 }
 
 function handleDrop(event) {
     event.preventDefault();
-    isDraggingOver.value = false;
-
     const files = Array.from(event.dataTransfer?.files || []);
+    resetDragState();
+
     if (files.length > 0) {
         emit('files-dropped-in-chat', files);
     }
 }
+
+function handleGlobalKeydown(e) {
+    if (e.key === 'Escape' && isDraggingOver.value) {
+        resetDragState();
+    }
+}
+
+onMounted(() => {
+    window.addEventListener('dragend', resetDragState);
+    window.addEventListener('drop', resetDragState);
+    window.addEventListener('keydown', handleGlobalKeydown);
+});
+
+onUnmounted(() => {
+    window.removeEventListener('dragend', resetDragState);
+    window.removeEventListener('drop', resetDragState);
+    window.removeEventListener('keydown', handleGlobalKeydown);
+    if (dragHeartbeatTimer) clearTimeout(dragHeartbeatTimer);
+});
 
 async function handlePaste(event) {
     if (!currentModelVisionSupport.value) return;
@@ -67,16 +119,23 @@ async function handlePaste(event) {
 <template>
     <div 
         class="h-full flex flex-row overflow-hidden relative"
+        @dragenter="handleDragEnter"
         @dragover.prevent="handleDragOver"
         @dragleave="handleDragLeave"
         @drop.stop="handleDrop"
         @paste="handlePaste"
     >
-        <!-- Editorial Drop Zone -->
-        <div v-if="isDraggingOver" class="absolute inset-0 bg-white/60 dark:bg-gray-900/60 backdrop-blur-md border-2 border-dashed border-blue-500/50 rounded-2xl z-30 flex items-center justify-center m-6 pointer-events-none transition-all duration-500">
-            <div class="text-center">
-                <span class="modal-tag">Workspace</span>
-                <p class="text-3xl font-serif text-gray-900 dark:text-white">Release to attach files</p>
+        <!-- Editorial Drop Zone with Click-to-Dismiss Safety -->
+        <div 
+            v-if="isDraggingOver" 
+            @click="resetDragState"
+            class="absolute inset-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-md border-2 border-dashed border-blue-500/50 rounded-2xl z-30 flex items-center justify-center m-6 cursor-pointer select-none transition-all duration-300"
+            title="Click anywhere to dismiss"
+        >
+            <div class="text-center pointer-events-none">
+                <span class="modal-tag">Workspace Ingestion</span>
+                <p class="text-2xl font-serif text-gray-900 dark:text-white">Release to attach files</p>
+                <p class="text-[10px] text-gray-400 mt-2">or click anywhere to cancel</p>
             </div>
         </div>
 

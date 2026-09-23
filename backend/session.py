@@ -1210,6 +1210,7 @@ def get_user_notebook_assets_path(username: str, notebook_id: str) -> Path:
 
 def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], Optional[str]]:
     all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
+    clean_search = alias_title.strip().lower()
     for binding in all_bindings:
         model_aliases = binding.model_aliases or {}
         if isinstance(model_aliases, str):
@@ -1220,9 +1221,18 @@ def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], O
 
         for original_name, alias_data in model_aliases.items():
             if alias_data:
-                title = alias_data.get('title') or (alias_data.get('alias', {}).get('title') if isinstance(alias_data, dict) else None)
-                target = alias_data.get('model_name') or (alias_data.get('alias', {}).get('model_name') if isinstance(alias_data, dict) else None)
-                if title == alias_title or original_name == alias_title:
+                cfg = alias_data.get('alias', {}) if isinstance(alias_data, dict) and 'alias' in alias_data else (alias_data if isinstance(alias_data, dict) else {})
+                title = cfg.get('title') or cfg.get('name') or (str(alias_data) if not isinstance(alias_data, dict) else None)
+                name = cfg.get('name') or cfg.get('title')
+                target = cfg.get('model_name') or original_name
+                if (
+                    alias_title == title or 
+                    alias_title == original_name or 
+                    alias_title == name or
+                    clean_search == (title or '').lower() or
+                    clean_search == (original_name or '').lower() or
+                    clean_search == (name or '').lower()
+                ):
                     return binding.alias, target or original_name
     return None, None
 
@@ -1243,6 +1253,7 @@ def resolve_model_name(db: Session, requested_model: str, fallback_to_default: b
                 return default_binding.alias, default_binding.default_model_name
         raise HTTPException(status_code=400, detail="Model name is empty.")
 
+    # 1. Check if model is passed in 'binding/model' format
     if '/' in requested_model:
         parts = requested_model.split('/', 1)
         binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
@@ -1254,23 +1265,34 @@ def resolve_model_name(db: Session, requested_model: str, fallback_to_default: b
                 except Exception:
                     model_aliases = {}
 
+            req_lower = parts[1].strip().lower()
             for original_name, alias_data in model_aliases.items():
                 if alias_data:
-                    title = alias_data.get('title') or (alias_data.get('alias', {}).get('title') if isinstance(alias_data, dict) else None)
-                    target = alias_data.get('model_name') or (alias_data.get('alias', {}).get('model_name') if isinstance(alias_data, dict) else None)
-                    if title == parts[1] or original_name == parts[1]:
+                    cfg = alias_data.get('alias', {}) if isinstance(alias_data, dict) and 'alias' in alias_data else (alias_data if isinstance(alias_data, dict) else {})
+                    title = cfg.get('title') or cfg.get('name')
+                    name = cfg.get('name') or cfg.get('title')
+                    target = cfg.get('model_name') or original_name
+                    if (
+                        parts[1] == title or 
+                        parts[1] == original_name or 
+                        parts[1] == name or
+                        req_lower == (title or '').lower() or 
+                        req_lower == (original_name or '').lower() or
+                        req_lower == (name or '').lower()
+                    ):
                         return parts[0], target or original_name
             return parts[0], parts[1]
 
+    # 2. Check if model is passed as profile name/title without slash
     binding_alias, model_name = find_model_by_alias(db, requested_model)
     if binding_alias:
         return binding_alias, model_name
 
+    # 3. Fallback to default model if configured
     if fallback_to_default:
         default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
         if default_binding:
             ASCIIColors.warning(f"Model '{requested_model}' not found. Falling back to default: {default_binding.alias}/{default_binding.default_model_name}")
             return default_binding.alias, default_binding.default_model_name
 
-    invalidate_model_cache(db)
-    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use 'binding/model_name' format or a valid profile alias.")
+    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use a valid profile name or 'binding/model' format.")

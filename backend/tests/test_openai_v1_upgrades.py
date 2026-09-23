@@ -85,6 +85,8 @@ def setup_test_db():
 
 def test_list_models_returns_universal_profiles():
     client = TestClient(app)
+
+    # 1. Default mode: profiles_only returns clean profile name as ID
     response = client.get("/v1/models")
     assert response.status_code == 200
     data = response.json()
@@ -93,12 +95,19 @@ def test_list_models_returns_universal_profiles():
     assert len(data["data"]) > 0
 
     model_ids = [m["id"] for m in data["data"]]
-    assert "test_llm/mock_model" in model_ids
+    assert "Mock Model 8B" in model_ids or "test_llm/mock_model" in model_ids
 
     for item in data["data"]:
         assert item["object"] == "model"
         assert "created" in item
         assert "owned_by" in item
+
+    # 2. Mode all_models: returns models in binding/model format
+    resp_all = client.get("/v1/models?mode=all_models")
+    assert resp_all.status_code == 200
+    all_data = resp_all.json()
+    all_ids = [m["id"] for m in all_data["data"]]
+    assert "test_llm/mock_model" in all_ids
 
 def test_auto_create_profiles_endpoint():
     client = TestClient(app)

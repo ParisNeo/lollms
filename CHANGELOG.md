@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-23 00:59]
+
+- fix(db): add rate limit configuration for API responses
+
 ## [2026-09-22 22:41]
 
 - fix(service): align API response formats for OLLAMA and OpenAI services

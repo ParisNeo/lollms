@@ -278,7 +278,8 @@ def _extract_raw_models_for_binding(b_type: str, binding_record: Any) -> List[An
 def _get_models_for_binding_type(
     db: Session,
     b_type: str,
-    binding_alias: Optional[str] = None
+    binding_alias: Optional[str] = None,
+    ad_mode: str = "profiles_only"
 ) -> List[BindingModelInfo]:
     target_cls = BINDING_TYPE_MAP[b_type]
     query = db.query(target_cls).filter(target_cls.is_active == True)
@@ -307,50 +308,80 @@ def _get_models_for_binding_type(
         if not isinstance(aliases, dict):
             aliases = {}
 
-        # 1. Process models reported by the underlying binding engine
-        for model_name in raw_names:
-            alias_data = aliases.get(model_name)
-            clean_alias = _clean_alias(alias_data)
-            display_name = (clean_alias.get("title") or clean_alias.get("name") or model_name) if clean_alias else model_name
-            full_id = f"{binding.alias}/{model_name}"
+        if ad_mode in ["all_models", "binding_model", "all"]:
+            # Forward all available physical models formatted as binding/model
+            for model_name in raw_names:
+                alias_data = aliases.get(model_name)
+                clean_alias = _clean_alias(alias_data)
+                display_name = (clean_alias.get("title") or clean_alias.get("name") or model_name) if clean_alias else model_name
+                full_id = f"{binding.alias}/{model_name}"
 
-            if full_id not in seen_ids:
-                seen_ids.add(full_id)
-                models_out.append(BindingModelInfo(
-                    id=full_id,
-                    name=display_name,
-                    binding=binding.alias,
-                    model_name=model_name,
-                    alias=clean_alias
-                ))
+                if full_id not in seen_ids:
+                    seen_ids.add(full_id)
+                    models_out.append(BindingModelInfo(
+                        id=full_id,
+                        name=display_name,
+                        binding=binding.alias,
+                        model_name=model_name,
+                        alias=clean_alias
+                    ))
 
-        # 2. Process models declared in aliases (e.g. configured profiles, router groups)
-        for orig_name, alias_data in aliases.items():
-            full_id = f"{binding.alias}/{orig_name}"
-            if full_id not in seen_ids:
+            # Also include configured profiles as binding/profile
+            for orig_name, alias_data in aliases.items():
+                full_id = f"{binding.alias}/{orig_name}"
+                if full_id not in seen_ids:
+                    clean_alias = _clean_alias(alias_data)
+                    display_name = (clean_alias.get("title") or clean_alias.get("name") or orig_name) if clean_alias else orig_name
+                    target = clean_alias.get("model_name") or orig_name
+                    if not raw_names or target in raw_names or binding.name == 'smart_router':
+                        seen_ids.add(full_id)
+                        models_out.append(BindingModelInfo(
+                            id=full_id,
+                            name=display_name,
+                            binding=binding.alias,
+                            model_name=target,
+                            alias=clean_alias
+                        ))
+        else:
+            # Mode: profiles_only (Default) — uses actual profile name as ID
+            for orig_name, alias_data in aliases.items():
                 clean_alias = _clean_alias(alias_data)
                 display_name = (clean_alias.get("title") or clean_alias.get("name") or orig_name) if clean_alias else orig_name
-                seen_ids.add(full_id)
-                models_out.append(BindingModelInfo(
-                    id=full_id,
-                    name=display_name,
-                    binding=binding.alias,
-                    model_name=orig_name,
-                    alias=clean_alias
-                ))
+                target = clean_alias.get("model_name") or orig_name
 
-        # 3. Fallback to default_model_name if available and not yet indexed
-        if binding.default_model_name:
-            full_id = f"{binding.alias}/{binding.default_model_name}"
-            if full_id not in seen_ids:
-                seen_ids.add(full_id)
-                models_out.append(BindingModelInfo(
-                    id=full_id,
-                    name=binding.default_model_name,
-                    binding=binding.alias,
-                    model_name=binding.default_model_name,
-                    alias=None
-                ))
+                # Health check: Only advertise if verified present or smart_router
+                if raw_names and target not in raw_names and binding.name != 'smart_router':
+                    continue
+
+                target_id = display_name
+                if target_id in seen_ids:
+                    target_id = f"{binding.alias}/{display_name}"
+
+                if target_id not in seen_ids:
+                    seen_ids.add(target_id)
+                    models_out.append(BindingModelInfo(
+                        id=target_id,
+                        name=display_name,
+                        binding=binding.alias,
+                        model_name=target,
+                        alias=clean_alias
+                    ))
+
+            # If no profiles exist at all for this binding, provide default model or verified raw models
+            if not aliases and raw_names:
+                for model_name in raw_names:
+                    target_id = model_name
+                    if target_id in seen_ids:
+                        target_id = f"{binding.alias}/{model_name}"
+                    if target_id not in seen_ids:
+                        seen_ids.add(target_id)
+                        models_out.append(BindingModelInfo(
+                            id=target_id,
+                            name=model_name,
+                            binding=binding.alias,
+                            model_name=model_name,
+                            alias=None
+                        ))
 
     return sorted(models_out, key=lambda x: x.name)
 
@@ -809,20 +840,13 @@ async def list_voices(
 async def list_models_for_binding_type(
     binding_type: str,
     binding_alias: Optional[str] = Query(None, description="Optional filter by specific binding alias"),
+    mode: Optional[str] = Query(None, description="Advertisement mode: 'profiles_only' (default) or 'all_models'"),
     user: DBUser = Depends(get_user_for_lollms_service),
     db: Session = Depends(get_db)
 ):
     """
-    Lists all available models for a specific binding modality.
+    Lists all available models for a specific binding modality adhering to the configured advertisement mode.
     Supported types: 'llm', 'tti', 'tts', 'stt', 'ttv', 'ttm', 'rag'.
-    Example endpoints:
-      - /lollms/v1/llm/models
-      - /lollms/v1/tti/models
-      - /lollms/v1/tts/models
-      - /lollms/v1/stt/models
-      - /lollms/v1/ttv/models
-      - /lollms/v1/ttm/models
-      - /lollms/v1/rag/models
     """
     normalized_type = binding_type.lower().strip()
     normalized_type = BINDING_ALIAS_NORMALIZER.get(normalized_type, normalized_type)
@@ -833,10 +857,13 @@ async def list_models_for_binding_type(
             detail=f"Unsupported binding type '{binding_type}'. Supported types: {', '.join(BINDING_TYPE_MAP.keys())}"
         )
 
+    setting_key = f"{normalized_type}_models_advertisement_mode"
+    ad_mode = (mode or settings.get(setting_key, "profiles_only")).lower().strip()
+
     loop = asyncio.get_running_loop()
     model_items = await loop.run_in_executor(
         executor,
-        lambda: _get_models_for_binding_type(db, normalized_type, binding_alias)
+        lambda: _get_models_for_binding_type(db, normalized_type, binding_alias, ad_mode=ad_mode)
     )
 
     return BindingModelListResponse(
@@ -850,10 +877,11 @@ async def list_models_for_binding_type(
 async def list_all_service_models(
     binding_type: str = Query("llm", description="Binding modality type (llm, tti, tts, stt, ttv, ttm, rag)"),
     binding_alias: Optional[str] = Query(None, description="Optional filter by specific binding alias"),
+    mode: Optional[str] = Query(None, description="Advertisement mode: 'profiles_only' (default) or 'all_models'"),
     user: DBUser = Depends(get_user_for_lollms_service),
     db: Session = Depends(get_db)
 ):
     """
     Convenience endpoint listing models for the specified binding type (defaults to 'llm').
     """
-    return await list_models_for_binding_type(binding_type, binding_alias, user, db)
+    return await list_models_for_binding_type(binding_type, binding_alias, mode, user, db)
