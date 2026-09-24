@@ -586,18 +586,21 @@ def get_user_lollms_client(
     username: str,
     binding_alias_override: Optional[str] = None,
     model_name_override: Optional[str] = None,
-    load_mcp: bool = True
+    load_mcp: bool = True,
+    llm_params: Optional[Dict[str, Any]] = None
 ) -> LollmsClient:
     client = build_lollms_client_from_params(
         username=username,
         binding_alias=binding_alias_override,
         model_name=model_name_override,
+        llm_params=llm_params,
         load_mcp=load_mcp
     )
 
     if username in user_sessions:
         clients_cache = user_sessions[username].setdefault("lollms_clients_cache", {})
-        cache_key = f"{binding_alias_override or 'default'}_{model_name_override or 'default'}"
+        params_suffix = f"_{hash(json.dumps(llm_params, sort_keys=True, default=str))}" if llm_params else ""
+        cache_key = f"{binding_alias_override or 'default'}_{model_name_override or 'default'}{params_suffix}"
         if not load_mcp:
             cache_key += "_no_mcp"
         clients_cache[cache_key] = client
@@ -718,8 +721,7 @@ def _build_universal_profiles_for_modality(
 
             if profile_entry["allow_parameters_override"] and user_overrides:
                 for k, v in user_overrides.items():
-                    if v is not None:
-                        profile_entry[k] = v
+                    profile_entry[k] = v
 
             # Index under both full ID and short key for seamless lollms_client lookup
             model_profiles[prof_name] = profile_entry
@@ -1055,6 +1057,15 @@ def build_lollms_client_from_params(
                             lc.llm.forced_context_size = active_ctx
                         if hasattr(lc.llm, 'ctx_size'):
                             lc.llm.ctx_size = active_ctx
+                        if "reasoning_activation" in primary_config:
+                            setattr(lc.llm, 'reasoning_activation', primary_config["reasoning_activation"])
+                        if "reasoning_effort" in primary_config:
+                            setattr(lc.llm, 'reasoning_effort', primary_config["reasoning_effort"])
+
+                    if "reasoning_activation" in primary_config:
+                        setattr(lc, 'reasoning_activation', primary_config["reasoning_activation"])
+                    if "reasoning_effort" in primary_config:
+                        setattr(lc, 'reasoning_effort', primary_config["reasoning_effort"])
 
                     _global_client_registry[registry_key] = lc
                     return lc

@@ -32,7 +32,8 @@ from backend.routers.services.openai_v1 import (
     ChatCompletionRequest, UsageInfo, DeltaMessage, 
     ChatCompletionResponseStreamChoice, ChatCompletionStreamResponse,
     preprocess_openai_messages, resolve_model_name, handle_tools_injection,
-    parse_tool_calls_from_text, ChatCompletionResponse, ChatCompletionResponseChoice, ChatMessage
+    parse_tool_calls_from_text, ChatCompletionResponse, ChatCompletionResponseChoice, ChatMessage,
+    extract_reasoning_parameters
 )
 
 ollama_v1_router = APIRouter(prefix="/ollama/v1")
@@ -136,10 +137,21 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
         lambda: resolve_model_name(db, request.model)
     )
 
+    client_effort, client_thinking, extra_thinking_kwargs = extract_reasoning_parameters(request)
+
+    llm_runtime_params = {
+        "temperature": request.temperature,
+        "max_output_tokens": request.max_tokens or request.max_completion_tokens
+    }
+    if client_thinking is not None:
+        llm_runtime_params["reasoning_activation"] = client_thinking
+    if client_effort is not None or client_thinking is False:
+        llm_runtime_params["reasoning_effort"] = client_effort
+
     # Wrap client build
     lc = await loop.run_in_executor(
         executor, 
-        lambda: build_lollms_client_from_params(user.username, binding_alias, model_name, llm_params={"temperature": request.temperature}, load_llm=True)
+        lambda: build_lollms_client_from_params(user.username, binding_alias, model_name, llm_params=llm_runtime_params, load_llm=True)
     )
     reset_client_state(lc)
 
@@ -158,7 +170,13 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
     if request.tools: openai_messages = handle_tools_injection(openai_messages, request.tools)
 
     generation_kwargs = {}
-    if request.reasoning_effort: generation_kwargs["reasoning_effort"] = request.reasoning_effort
+    if client_thinking is not None:
+        generation_kwargs["reasoning_activation"] = client_thinking
+        generation_kwargs["thinking"] = client_thinking
+        generation_kwargs["think"] = client_thinking
+    if client_effort is not None or client_thinking is False:
+        generation_kwargs["reasoning_effort"] = client_effort
+    generation_kwargs.update(extra_thinking_kwargs)
 
     if request.stream:
         async def stream_generator():

@@ -19,7 +19,7 @@ from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 import os
 import tempfile
 from backend.db import get_db
@@ -84,6 +84,7 @@ class ChatMessage(BaseModel):
     refusal: Optional[str] = None
 
 class ChatCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     model: str
     messages: List[ChatMessage]
     personality: Optional[str] = None 
@@ -96,6 +97,8 @@ class ChatCompletionRequest(BaseModel):
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None
     response_format: Optional[Union[Dict[str, Any], str]] = None
     reasoning_effort: Optional[str] = None
+    thinking: Optional[Union[bool, Dict[str, Any], str]] = None
+    reasoning: Optional[Dict[str, Any]] = None
     stop: Optional[Union[str, List[str]]] = None
     presence_penalty: Optional[float] = None
     frequency_penalty: Optional[float] = None
@@ -257,6 +260,7 @@ class AudioTranscriptionResponse(BaseModel):
 
 # --- NEW: Models for OpenAI Responses API ---
 class ResponseCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
     model: str
     input: Union[str, List[Any]]
     instructions: Optional[str] = None
@@ -265,6 +269,8 @@ class ResponseCreateRequest(BaseModel):
     max_output_tokens: Optional[int] = None
     stream: Optional[bool] = False
     reasoning: Optional[Dict[str, Any]] = None
+    reasoning_effort: Optional[str] = None
+    thinking: Optional[Union[bool, Dict[str, Any], str]] = None
 
 class ResponseOutputContent(BaseModel):
     type: str = "text"
@@ -532,6 +538,106 @@ def handle_response_format_injection(messages: List[Dict], response_format: Any)
 
     messages.insert(0, {"role": "system", "content": format_prompt.strip()})
     return messages
+
+def extract_reasoning_parameters(request_obj: Any) -> Tuple[Optional[str], Optional[bool], Dict[str, Any]]:
+    """
+    Extracts reasoning effort and thinking activation from any API request object or dict.
+    Supports OpenAI (reasoning_effort), Anthropic (thinking: {type, budget_tokens}),
+    DeepSeek/vLLM (chat_template_kwargs, reasoning, think), and Ollama (options: {thinking}).
+    Returns (reasoning_effort, reasoning_activation, extra_thinking_kwargs).
+    """
+    extra = getattr(request_obj, '__pydantic_extra__', {}) or {}
+    if not isinstance(extra, dict):
+        extra = {}
+
+    def _get(key, default=None):
+        val = getattr(request_obj, key, None)
+        if val is not None:
+            return val
+        return extra.get(key, default)
+
+    effort = _get("reasoning_effort")
+    thinking_val = _get("thinking")
+    reasoning_val = _get("reasoning")
+    think_val = _get("think")
+    options_val = _get("options")
+    chat_kwargs = _get("chat_template_kwargs")
+
+    # Options fallback (Ollama style)
+    if isinstance(options_val, dict):
+        if effort is None:
+            effort = options_val.get("reasoning_effort") or options_val.get("effort")
+        if thinking_val is None:
+            thinking_val = options_val.get("thinking") if "thinking" in options_val else options_val.get("think")
+
+    # Chat template kwargs (vLLM / HuggingFace style)
+    if isinstance(chat_kwargs, dict):
+        if thinking_val is None:
+            thinking_val = chat_kwargs.get("thinking")
+
+    # Reasoning dict (OpenAI Responses / custom style)
+    if isinstance(reasoning_val, dict):
+        if effort is None:
+            effort = reasoning_val.get("effort") or reasoning_val.get("reasoning_effort")
+        if thinking_val is None and "enabled" in reasoning_val:
+            thinking_val = reasoning_val.get("enabled")
+
+    # Direct think flag
+    if thinking_val is None and think_val is not None:
+        thinking_val = think_val
+
+    resolved_effort = None
+    if effort is not None:
+        c_eff = str(effort).strip().lower()
+        if c_eff in ["none", "off", "disabled", "false", "0"]:
+            resolved_effort = None
+            if thinking_val is None:
+                thinking_val = False
+        elif c_eff in ["low", "medium", "high", "max"]:
+            resolved_effort = c_eff
+            if thinking_val is None:
+                thinking_val = True
+        else:
+            resolved_effort = c_eff
+            if thinking_val is None:
+                thinking_val = True
+
+    resolved_activation = None
+    extra_thinking_kwargs = {}
+
+    if isinstance(thinking_val, dict):
+        t_type = str(thinking_val.get("type", "")).lower()
+        if t_type == "enabled":
+            resolved_activation = True
+            if not resolved_effort:
+                resolved_effort = thinking_val.get("effort") or "low"
+        elif t_type == "disabled":
+            resolved_activation = False
+            resolved_effort = None
+
+        if "budget_tokens" in thinking_val:
+            extra_thinking_kwargs["budget_tokens"] = thinking_val["budget_tokens"]
+            extra_thinking_kwargs["thinking_budget"] = thinking_val["budget_tokens"]
+    elif isinstance(thinking_val, bool):
+        resolved_activation = thinking_val
+        if thinking_val and not resolved_effort:
+            resolved_effort = "low"
+        elif not thinking_val:
+            resolved_effort = None
+    elif isinstance(thinking_val, str):
+        c_t = thinking_val.strip().lower()
+        if c_t in ["true", "1", "enabled", "on", "yes"]:
+            resolved_activation = True
+            if not resolved_effort:
+                resolved_effort = "low"
+        elif c_t in ["false", "0", "disabled", "off", "no"]:
+            resolved_activation = False
+            resolved_effort = None
+
+    if resolved_effort is not None and resolved_activation is None:
+        resolved_activation = True
+
+    return resolved_effort, resolved_activation, extra_thinking_kwargs
 
 def parse_reasoning_and_content(text: Any) -> Tuple[str, Optional[str]]:
     """
@@ -936,6 +1042,20 @@ async def chat_completions(
         lambda: resolve_model_name(db, request.model)
     )
 
+    # Extract reasoning effort and thinking parameters from client request
+    client_effort, client_thinking, extra_thinking_kwargs = extract_reasoning_parameters(request)
+
+    effective_max_tokens = request.max_completion_tokens if request.max_completion_tokens is not None else request.max_tokens
+
+    llm_runtime_params = {
+        "temperature": request.temperature,
+        "max_output_tokens": effective_max_tokens
+    }
+    if client_thinking is not None:
+        llm_runtime_params["reasoning_activation"] = client_thinking
+    if client_effort is not None or client_thinking is False:
+        llm_runtime_params["reasoning_effort"] = client_effort
+
     # Client building can be slow, might involve model loading.
     try:
         lc = await loop.run_in_executor(
@@ -944,10 +1064,7 @@ async def chat_completions(
                 username=user.username,
                 binding_alias=binding_alias,
                 model_name=model_name,
-                llm_params={
-                    "temperature": request.temperature,
-                    "max_output_tokens": request.max_tokens
-                },
+                llm_params=llm_runtime_params,
                 load_llm=True
             )
         )
@@ -976,11 +1093,15 @@ async def chat_completions(
     if request.response_format:
         openai_messages = handle_response_format_injection(openai_messages, request.response_format)
 
-    effective_max_tokens = request.max_completion_tokens if request.max_completion_tokens is not None else request.max_tokens
-
     generation_kwargs = {}
-    if request.reasoning_effort:
-        generation_kwargs["reasoning_effort"] = request.reasoning_effort
+    if client_thinking is not None:
+        generation_kwargs["reasoning_activation"] = client_thinking
+        generation_kwargs["thinking"] = client_thinking
+        generation_kwargs["think"] = client_thinking
+    if client_effort is not None or client_thinking is False:
+        generation_kwargs["reasoning_effort"] = client_effort
+    generation_kwargs.update(extra_thinking_kwargs)
+
     if request.top_p is not None:
         generation_kwargs["top_p"] = request.top_p
     if request.stop is not None:
@@ -1040,7 +1161,7 @@ async def chat_completions(
 [bold]Model name:[/bold] {model_name}
 [bold]Stream:[/bold] {request.stream}{stream_style}
 [bold]Temperature:[/bold] {request.temperature}
-[bold]Thinking:[/bold] {'active' if request.reasoning_effort else 'inactive'}
+[bold]Thinking:[/bold] {'active (' + str(client_effort or 'low') + ')' if client_thinking else 'inactive'}
 [bold]Received images:[/bold] {len(images)}
 [bold]Max Tokens:[/bold] {request.max_tokens}
 [bold]Number of Messages:[/bold] {len(request.messages)}
@@ -2139,11 +2260,36 @@ async def create_response_openai(
     if request.tools:
         messages = handle_tools_injection(messages, request.tools)
 
+    resp_effort, resp_thinking, resp_extra_thinking = extract_reasoning_parameters(request)
+
+    llm_runtime_params = {
+        "temperature": request.temperature,
+        "max_output_tokens": request.max_output_tokens
+    }
+    if resp_thinking is not None:
+        llm_runtime_params["reasoning_activation"] = resp_thinking
+    if resp_effort is not None or resp_thinking is False:
+        llm_runtime_params["reasoning_effort"] = resp_effort
+
+    lc = await loop.run_in_executor(
+        executor,
+        lambda: build_lollms_client_from_params(
+            username=user.username,
+            binding_alias=binding_alias,
+            model_name=model_name,
+            llm_params=llm_runtime_params,
+            load_llm=True
+        )
+    )
+
     generation_kwargs = {}
-    if request.reasoning and isinstance(request.reasoning, dict):
-        effort = request.reasoning.get("effort")
-        if effort:
-            generation_kwargs["reasoning_effort"] = effort
+    if resp_thinking is not None:
+        generation_kwargs["reasoning_activation"] = resp_thinking
+        generation_kwargs["thinking"] = resp_thinking
+        generation_kwargs["think"] = resp_thinking
+    if resp_effort is not None or resp_thinking is False:
+        generation_kwargs["reasoning_effort"] = resp_effort
+    generation_kwargs.update(resp_extra_thinking)
 
     _prepare_generation(lc)
     try:
