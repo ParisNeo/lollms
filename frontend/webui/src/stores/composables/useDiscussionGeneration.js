@@ -179,6 +179,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 case 'thought':
                     if (!messageToUpdate.thoughts) messageToUpdate.thoughts = "";
                     messageToUpdate.thoughts += data.content;
+                    messageToUpdate.thoughts = messageToUpdate.thoughts
+                        .replace(/^[\s\r\n]*<(?:think|thought)\b[^>]*>[\s\r\n]*/i, '')
+                        .replace(/[\s\r\n]*<\/(?:think|thought)>[\s\r\n]*$/i, '');
                     break;
 
                 case 'memory_update':
@@ -247,7 +250,10 @@ export function useDiscussionGeneration(state, stores, getActions) {
                             messageToUpdate.content = finalAi.content;
                         }
                         if (finalAi.thoughts) {
-                            messageToUpdate.thoughts = finalAi.thoughts;
+                            messageToUpdate.thoughts = String(finalAi.thoughts)
+                                .replace(/^[\s\r\n]*<(?:think|thought)\b[^>]*>[\s\r\n]*/i, '')
+                                .replace(/[\s\r\n]*<\/(?:think|thought)>[\s\r\n]*$/i, '')
+                                .trim();
                         }
                         messageToUpdate.tokens = finalAi.tokens || finalAi.token_count || 0;
                         messageToUpdate.metadata = finalAi.metadata || {};

@@ -1160,11 +1160,15 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     line-height: 1.7;
 }
 
+
+
+
 .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-200 dark:bg-gray-800 rounded-full; }
 .btn-icon-sm { @apply p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center; }
 .think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
 details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
+details[open] > .think-summary .think-arrow { transform: rotate(90deg); }
 .think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
 .think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
 .think-summary::-webkit-details-marker { display: none; }

@@ -1947,6 +1947,7 @@ def build_llm_generation_router(router: APIRouter):
                 )
 
             def blocking_call():
+                nonlocal collected_forms, collected_sources, all_events
                 start_time = time.time()
                 first_chunk_time = None
 
@@ -1999,11 +2000,16 @@ def build_llm_generation_router(router: APIRouter):
                     if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(params)) + "\n")
 
+                    thought_chunk = chunk
+                    if mtype_val == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK.value and isinstance(thought_chunk, str):
+                        thought_chunk = re.sub(r'^[\s\r\n]*<(?:think|thought)\b[^>]*>[\s\r\n]*', '', thought_chunk, flags=re.IGNORECASE)
+                        thought_chunk = re.sub(r'[\s\r\n]*</(?:think|thought)>[\s\r\n]*$', '', thought_chunk, flags=re.IGNORECASE)
+
                     payload_map = {
                         MSG_TYPE.MSG_TYPE_NEW_MESSAGE.value: {"type": "new_message_id", "content": chunk},
                         MSG_TYPE.MSG_TYPE_CHUNK.value: {"type": "chunk", "content": chunk},
                         MSG_TYPE.MSG_TYPE_CONTENT.value: {"type": "chunk", "content": chunk}, 
-                        MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK.value: {"type": "thought", "content": chunk},
+                        MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK.value: {"type": "thought", "content": thought_chunk},
                         MSG_TYPE.MSG_TYPE_STEP_START.value: {"type": "step_start", "content": chunk, "id": (params or {}).get("id"), "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_STEP_END.value: {"type": "step_end", "content": chunk, "id": (params or {}).get("id"), "status": "done", "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_TOOL_CALL.value: {"type": "tool_call", "content": params if params else {"name": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
@@ -2251,7 +2257,7 @@ def build_llm_generation_router(router: APIRouter):
 
                         if all_forms_combined:
                             ai_msg.set_metadata_item('forms', all_forms_combined, discussion_obj)
-                            collected_forms = all_forms_combined
+                            collected_forms[:] = all_forms_combined
 
                         # Record generation metric in telemetry store
                         estimated_prompt_tokens = len(final_prompt) // 4 if final_prompt else 0
@@ -2294,6 +2300,9 @@ def build_llm_generation_router(router: APIRouter):
                         if not m: return None
                         meta = m.metadata or {}
                         thoughts_val = getattr(m, 'thoughts', None) or meta.get('thoughts') or meta.get('reasoning_content')
+                        if thoughts_val and isinstance(thoughts_val, str):
+                            thoughts_val = re.sub(r'^[\s\r\n]*<(?:think|thought)\b[^>]*>[\s\r\n]*', '', thoughts_val, flags=re.IGNORECASE).strip()
+                            thoughts_val = re.sub(r'[\s\r\n]*</(?:think|thought)>[\s\r\n]*$', '', thoughts_val, flags=re.IGNORECASE).strip()
                         if thoughts_val and 'thoughts' not in meta:
                             meta['thoughts'] = thoughts_val
                         return {

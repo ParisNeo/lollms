@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-24 21:24]
+
+- `fix(backend/generation): update LLM router implementation to include blocking call support`
+
 ## [2026-09-24 19:57]
 
 - fix(generation): update reasoning effort logic to handle true/false responses for thinking activation

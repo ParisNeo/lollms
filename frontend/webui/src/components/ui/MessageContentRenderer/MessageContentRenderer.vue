@@ -102,6 +102,41 @@ const formatThinkingTime = (seconds) => {
     return `${mins}m ${secs}s`;
 };
 
+function cleanThoughtContent(text) {
+    if (!text || typeof text !== 'string') return '';
+    let cleaned = text
+        .replace(/^[\s\r\n]*<(?:think|thought)\b[^>]*>[\s\r\n]*/i, '')
+        .replace(/[\s\r\n]*<\/(?:think|thought)>[\s\r\n]*$/i, '')
+        .replace(/<\/?(?:think|thought)\b[^>]*>/gi, '')
+        .trim();
+    if (cleaned.startsWith('<think') || cleaned.startsWith('<thought')) {
+        cleaned = cleaned.replace(/^<(?:think|thought)[^>]*>?/i, '').trim();
+    }
+    return cleaned;
+}
+
+function getThoughtSneakPeek(content, isStreaming = false) {
+    if (!content || typeof content !== 'string') return '';
+    const cleaned = cleanThoughtContent(content);
+    if (!cleaned) return '';
+    const lines = cleaned.split('\n')
+        .map(l => l.trim().replace(/^[-*#`>_ ]+/, ''))
+        .filter(Boolean);
+    if (lines.length === 0) return '';
+
+    let text = '';
+    if (isStreaming) {
+        if (lines.length > 1 && lines[lines.length - 1].length < 25) {
+            text = `${lines[lines.length - 2]} ${lines[lines.length - 1]}`;
+        } else {
+            text = lines[lines.length - 1];
+        }
+    } else {
+        text = lines[0];
+    }
+    return text.length > 90 ? text.substring(0, 90) + '...' : text;
+}
+
 function wrapInIsolatedShell(source, partId) {
     if (!source) return '';
 
@@ -796,8 +831,19 @@ const messageParts = computed(() => {
 
     while (idx < content.length) {
         if (!inThink) {
-            const nextOpen = content.indexOf('<think>', idx);
-            const nextClose = content.indexOf('</think>', idx);
+            const nextOpenThink = content.indexOf('<think>', idx);
+            const nextOpenThought = content.indexOf('<thought>', idx);
+            const nextOpen = (nextOpenThink !== -1 && nextOpenThought !== -1)
+                ? Math.min(nextOpenThink, nextOpenThought)
+                : (nextOpenThink !== -1 ? nextOpenThink : nextOpenThought);
+            const openTagLen = (nextOpen === nextOpenThought && nextOpenThought !== -1) ? 9 : 7;
+
+            const nextCloseThink = content.indexOf('</think>', idx);
+            const nextCloseThought = content.indexOf('</thought>', idx);
+            const nextClose = (nextCloseThink !== -1 && nextCloseThought !== -1)
+                ? Math.min(nextCloseThink, nextCloseThought)
+                : (nextCloseThink !== -1 ? nextCloseThink : nextCloseThought);
+            const closeTagLen = (nextClose === nextCloseThought && nextCloseThought !== -1) ? 10 : 8;
 
             if (nextOpen > -1 && nextClose > -1) {
                 if (nextOpen < nextClose) {
@@ -805,20 +851,20 @@ const messageParts = computed(() => {
                         segments.push({ type: 'normal', content: content.substring(idx, nextOpen) });
                     }
                     inThink = true;
-                    idx = nextOpen + 7;
+                    idx = nextOpen + openTagLen;
                 } else {
                     segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
-                    idx = nextClose + 8;
+                    idx = nextClose + closeTagLen;
                 }
             } else if (nextOpen > -1) {
                 if (nextOpen > idx) {
                     segments.push({ type: 'normal', content: content.substring(idx, nextOpen) });
                 }
-                segments.push({ type: 'think', content: content.substring(nextOpen + 7), isClosed: false });
+                segments.push({ type: 'think', content: content.substring(nextOpen + openTagLen), isClosed: false });
                 idx = content.length;
             } else if (nextClose > -1) {
                 segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
-                idx = nextClose + 8;
+                idx = nextClose + closeTagLen;
                 if (idx < content.length) {
                     segments.push({ type: 'normal', content: content.substring(idx) });
                 }
@@ -828,11 +874,17 @@ const messageParts = computed(() => {
                 idx = content.length;
             }
         } else {
-            const nextClose = content.indexOf('</think>', idx);
+            const nextCloseThink = content.indexOf('</think>', idx);
+            const nextCloseThought = content.indexOf('</thought>', idx);
+            const nextClose = (nextCloseThink !== -1 && nextCloseThought !== -1)
+                ? Math.min(nextCloseThink, nextCloseThought)
+                : (nextCloseThink !== -1 ? nextCloseThink : nextCloseThought);
+            const closeTagLen = (nextClose === nextCloseThought && nextCloseThought !== -1) ? 10 : 8;
+
             if (nextClose > -1) {
                 segments.push({ type: 'think', content: content.substring(idx, nextClose), isClosed: true });
                 inThink = false;
-                idx = nextClose + 8;
+                idx = nextClose + closeTagLen;
             } else {
                 segments.push({ type: 'think', content: content.substring(idx), isClosed: false });
                 idx = content.length;
@@ -842,11 +894,12 @@ const messageParts = computed(() => {
 
     const parts = [];
 
-    // Prepend explicit thoughts (from streaming or metadata) if thoughts are not already embedded in content as <think>
-    if (rawExplicitThoughts && !content.includes('<think>')) {
+    // Prepend explicit thoughts (from streaming or metadata) if thoughts are not already embedded in content as <think> or <thought>
+    const cleanedExplicitThoughts = cleanThoughtContent(rawExplicitThoughts);
+    if (cleanedExplicitThoughts && !content.includes('<think>') && !content.includes('<thought>')) {
         parts.push({
             type: 'think',
-            content: rawExplicitThoughts,
+            content: cleanedExplicitThoughts,
             isClosed: !props.isStreaming,
             id: `think-explicit-${props.messageId || 'live'}`
         });
@@ -854,12 +907,15 @@ const messageParts = computed(() => {
 
     segments.forEach(segment => {
         if (segment.type === 'think') {
-            parts.push({
-                type: 'think',
-                content: segment.content.trim(),
-                isClosed: segment.isClosed,
-                id: `think-${parts.length}`
-            });
+            const cleanedSegment = cleanThoughtContent(segment.content);
+            if (cleanedSegment || !segment.isClosed) {
+                parts.push({
+                    type: 'think',
+                    content: cleanedSegment,
+                    isClosed: segment.isClosed,
+                    id: `think-${parts.length}`
+                });
+            }
         } else {
             const segContent = segment.content;
             const patterns = [
@@ -1491,32 +1547,40 @@ function onMermaidReady({ svg }, partIndex) {
               </div>
           </div>
 
-          <!-- Thinking block -->
+          <!-- Thinking block (Collapsed by default, with live sneak peek in header) -->
           <details 
             v-else-if="part.type === 'think'" 
             class="think-block my-4 select-none" 
-            :open="isDetailOpen(part.id, isStreaming && !part.isClosed)"
+            :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
           >
             <summary class="think-summary">
               <IconChevronRight class="w-3 h-3 text-blue-500 transition-transform duration-200 think-arrow shrink-0" />
               <IconAnimateSpin v-if="!part.isClosed" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
               <IconThinking v-else class="h-4 w-4 text-blue-400 shrink-0" />
-              <div class="flex items-center justify-between w-full pr-2">
-                  <div class="flex items-center gap-2">
-                      <span class="text-xs">Thinking Process</span>
-                      <span v-if="!part.isClosed" class="flex gap-1 items-center mt-1">
+              <div class="flex items-center justify-between w-full pr-2 min-w-0 gap-3">
+                  <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-xs font-semibold text-blue-800 dark:text-blue-200 shrink-0">Thinking Process</span>
+                      <span v-if="!part.isClosed" class="flex gap-1 items-center shrink-0">
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.3s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.15s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce"></span>
                       </span>
+                      <!-- Live sneak peek when collapsed -->
+                      <span 
+                          v-if="!isDetailOpen(part.id, false) && getThoughtSneakPeek(part.content, !part.isClosed || isStreaming)" 
+                          class="text-xs text-gray-500 dark:text-gray-400 italic truncate font-mono max-w-xs sm:max-w-md md:max-w-lg opacity-85"
+                          :title="getThoughtSneakPeek(part.content, !part.isClosed || isStreaming)"
+                      >
+                          — {{ getThoughtSneakPeek(part.content, !part.isClosed || isStreaming) }}
+                      </span>
                   </div>
-                  <span class="text-[10px] font-mono opacity-60 tracking-wider">
+                  <span class="text-[10px] font-mono opacity-60 tracking-wider shrink-0 whitespace-nowrap">
                       {{ part.isClosed ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking (${formatThinkingTime(thinkingTimers[part.id]?.elapsed)})` }}
                   </span>
               </div>
             </summary>
-            <div class="think-content select-text" v-html="parsedMarkdown(part.content)"></div>
+            <div class="think-content select-text" v-html="parsedMarkdown(cleanThoughtContent(part.content))"></div>
           </details>
 
           <!-- Image tool block -->
