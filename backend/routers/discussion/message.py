@@ -104,19 +104,41 @@ def build_message_router(router: APIRouter):
     ):
         """
         Submits user answers for an interactive form created by the LLM.
-        This resumes the generation loop if it was waiting.
+        Resumes the generation loop if waiting, or accepts submission for completed turns.
         """
         discussion_obj, _, _, _ = await get_discussion_and_owner_for_request(discussion_id, current_user, db, 'interact')
-        
+
+        result = None
+        resumed = False
         try:
-            # Proxies to lollms_discussion.submit_form_response
-            result = discussion_obj.submit_form_response(form_id, payload.answers)
-            return {"status": "success", "message": "Form submitted successfully", "result": result}
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            if hasattr(discussion_obj, 'submit_form_response'):
+                try:
+                    result = discussion_obj.submit_form_response(form_id, payload.answers)
+                    resumed = True
+                except (ValueError, KeyError):
+                    resumed = False
         except Exception as e:
             trace_exception(e)
-            raise HTTPException(status_code=500, detail="Internal error processing form submission.")
+
+        try:
+            from backend.ws_manager import manager
+            manager.send_personal_message_sync({
+                "type": "form_submitted",
+                "data": {
+                    "discussion_id": discussion_id,
+                    "form_id": form_id,
+                    "answers": payload.answers
+                }
+            }, current_user.id)
+        except Exception:
+            pass
+
+        return {
+            "status": "success",
+            "message": "Form submitted successfully",
+            "resumed_generation": resumed,
+            "result": result
+        }
 
     @router.put("/{discussion_id}/messages/{message_id}/grade", response_model=MessageOutput)
     async def grade_discussion_message(discussion_id: str, message_id: str, grade_update: MessageGradeUpdate, current_user: UserAuthDetails = Depends(get_current_active_user), db: Session = Depends(get_db)):

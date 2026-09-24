@@ -1915,9 +1915,25 @@ def build_llm_generation_router(router: APIRouter):
                             collected_sources.append(params)
 
                     # Capture forms into local list for persistence
-                    if (mtype_val == MSG_TYPE.MSG_TYPE_FORM_READY.value or mtype_val == 46) and params:
-                        form_entry = params.get('form', params) if isinstance(params, dict) else params
-                        collected_forms.append(form_entry)
+                    form_entry = None
+                    if mtype_val == MSG_TYPE.MSG_TYPE_FORM_READY.value or mtype_val == 46:
+                        target_data = params if (params and isinstance(params, (dict, list))) else chunk
+                        if isinstance(target_data, dict):
+                            form_entry = target_data.get('form', target_data)
+                        elif isinstance(target_data, list):
+                            form_entry = {"id": f"form_{int(time.time()*1000)}", "title": "Interactive Form", "fields": target_data}
+                        elif isinstance(target_data, str) and ('"fields"' in target_data or '<field' in target_data):
+                            try:
+                                parsed = json.loads(target_data)
+                                if isinstance(parsed, dict):
+                                    form_entry = parsed.get('form', parsed)
+                            except Exception:
+                                pass
+
+                        if form_entry and isinstance(form_entry, dict):
+                            if 'fields' not in form_entry and 'form_fields' in form_entry:
+                                form_entry['fields'] = form_entry['form_fields']
+                            collected_forms.append(form_entry)
 
                     tip = discussion_obj.get_message(discussion_obj.active_branch_id)
                     current_content_len = len(tip.content) if tip else 0
@@ -1942,7 +1958,7 @@ def build_llm_generation_router(router: APIRouter):
                         MSG_TYPE.MSG_TYPE_TOOL_OUTPUT.value: {"type": "tool_output", "content": params if params else {"output": chunk}, "id": (params or {}).get("id"), "offset": current_content_len},
                         MSG_TYPE.MSG_TYPE_SOURCES_LIST.value: {"type": "sources", "content": params if params else chunk},
                         # Secondary Content Streams: Content is the text fragment, params is metadata
-                        MSG_TYPE.MSG_TYPE_FORM_READY.value: {"type": "form_ready", "content": params, "discussion_id": discussion_id},
+                        MSG_TYPE.MSG_TYPE_FORM_READY.value: {"type": "form_ready", "content": form_entry or (params if params else chunk), "discussion_id": discussion_id},
                         38: {"type": "artefact_chunk", "content": chunk, "meta": params},
                         39: {"type": "artefact_done", "content": chunk, "meta": params},
                         40: {"type": "note_chunk", "content": chunk, "meta": params},
@@ -1951,7 +1967,7 @@ def build_llm_generation_router(router: APIRouter):
                         43: {"type": "skill_done", "content": chunk, "meta": params},
                         44: {"type": "widget_chunk", "content": chunk, "meta": params},
                         45: {"type": "widget_done", "content": chunk, "meta": params},
-                        46: {"type": "form_ready", "content": params},
+                        46: {"type": "form_ready", "content": form_entry or (params if params else chunk), "discussion_id": discussion_id},
                         47: {"type": "form_submitted", "content": params},
                         # Multi-Level Cognitive Memory Events
                         MSG_TYPE.MSG_TYPE_INFO.value: {
@@ -2177,8 +2193,24 @@ def build_llm_generation_router(router: APIRouter):
                         combined_events = all_events + lib_events
                         ai_msg.set_metadata_item('events', combined_events, discussion_obj)
 
-                        if collected_forms:
-                            ai_msg.set_metadata_item('forms', collected_forms, discussion_obj)
+                        existing_forms = ai_msg.metadata.get('forms', []) if (ai_msg and ai_msg.metadata) else []
+                        if not isinstance(existing_forms, list):
+                            existing_forms = []
+
+                        all_forms_combined = []
+                        seen_fids = set()
+                        for f in (collected_forms + existing_forms + (result.get('forms') or []) + (getattr(ai_msg, 'forms', []) or [])):
+                            if isinstance(f, dict):
+                                fid = f.get('id') or f.get('form_id') or f.get('title')
+                                if fid and fid not in seen_fids:
+                                    seen_fids.add(fid)
+                                    all_forms_combined.append(f)
+                                elif not fid:
+                                    all_forms_combined.append(f)
+
+                        if all_forms_combined:
+                            ai_msg.set_metadata_item('forms', all_forms_combined, discussion_obj)
+                            collected_forms = all_forms_combined
 
                         # Record generation metric in telemetry store
                         estimated_prompt_tokens = len(final_prompt) // 4 if final_prompt else 0

@@ -110,7 +110,7 @@ class LongContextRequest(BaseModel):
     text: str
     prompt: Optional[str] = None
     model: Optional[str] = None
-    max_generation_tokens: Optional[int] = 4096
+    max_generation_tokens: Optional[int] = 32000
 
 class RagQueryRequest(BaseModel):
     datastore_id: str
@@ -501,7 +501,7 @@ async def get_context_size(request: ContextSizeRequest, user: DBUser = Depends(g
     def _get_ctx_size():
         lc = build_lollms_client_from_params(user.username, alias, name, load_llm=True)
         context_size = lc.get_ctx_size(name)
-        return ContextSizeResponse(context_size=context_size if context_size else getattr(lc.llm, 'default_ctx_size', 4096))
+        return ContextSizeResponse(context_size=context_size if context_size else getattr(lc.llm, 'default_ctx_size', 32000))
 
     return await loop.run_in_executor(executor, _get_ctx_size)
 

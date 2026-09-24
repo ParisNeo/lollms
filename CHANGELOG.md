@@ -42,6 +42,14 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-24 12:30]
+
+- feat(backend): add discussion context router and message parser for model prompt interaction
+
+## [2026-09-24 12:28]
+
+- fix(api): update max context size to 32k in discussion and session contexts
+
 ## [2026-09-24 07:54]
 
 - ---

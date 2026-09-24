@@ -125,7 +125,7 @@ def _bootstrap_global_settings(connection):
         "force_tti_model_name": { "value": "", "type": "string", "description": "The TTI model name to force on all users. (e.g., 'diffusers/stable-diffusion-v1-5').", "category": "Global TTI Overrides" },
         "force_iti_model_mode": { "value": "disabled", "type": "string", "description": "Global Image Editing model override mode: 'disabled', 'force_once' (sets user pref), 'force_always' (overrides session).", "category": "Global ITI Overrides" },
         "force_iti_model_name": { "value": "", "type": "string", "description": "The Image Editing model name to force on all users. (e.g., 'diffusers/instruct-pix2pix').", "category": "Global ITI Overrides" },
-        "force_context_size": { "value": 4096, "type": "integer", "description": "The context size (in tokens) to force on all users.", "category": "Global LLM Overrides" },
+        "force_context_size": { "value": 32000, "type": "integer", "description": "The context size (in tokens) to force on all users.", "category": "Global LLM Overrides" },
         "openai_api_service_enabled": { "value": False, "type": "boolean", "description": "Enable the OpenAI-compatible v1 API endpoint for users.", "category": "Services" },
         "openai_api_require_key": { "value": True, "type": "boolean", "description": "Require an API key for the OpenAI-compatible v1 API endpoint. If disabled, requests without a key will be handled by the primary admin account.", "category": "Services" },
         "ollama_service_enabled": { "value": False, "type": "boolean", "description": "Enable the Ollama service endpoint for users (OpenAI compatible).", "category": "Services" },

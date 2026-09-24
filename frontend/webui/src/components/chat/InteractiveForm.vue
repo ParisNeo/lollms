@@ -24,12 +24,12 @@ const resolvedFields = computed(() => {
 
     let rawFields = null;
 
-    // 1. Direct fields array or object
-    if (props.form.fields !== undefined && props.form.fields !== null) {
+    // 1. Direct fields array or object (only if non-empty array)
+    if (props.form.fields !== undefined && props.form.fields !== null && (Array.isArray(props.form.fields) ? props.form.fields.length > 0 : true)) {
         rawFields = props.form.fields;
-    } else if (props.form.form && props.form.form.fields !== undefined && props.form.form.fields !== null) {
+    } else if (props.form.form && props.form.form.fields !== undefined && props.form.form.fields !== null && (Array.isArray(props.form.form.fields) ? props.form.form.fields.length > 0 : true)) {
         rawFields = props.form.form.fields;
-    } else if (props.form.form_fields !== undefined && props.form.form_fields !== null) {
+    } else if (props.form.form_fields !== undefined && props.form.form_fields !== null && (Array.isArray(props.form.form_fields) ? props.form.form_fields.length > 0 : true)) {
         rawFields = props.form.form_fields;
     } else if (props.form.elements !== undefined && props.form.elements !== null) {
         rawFields = props.form.elements;
@@ -41,7 +41,7 @@ const resolvedFields = computed(() => {
         rawFields = props.form.data.fields;
     } else if (props.form.content?.fields !== undefined && props.form.content?.fields !== null) {
         rawFields = props.form.content.fields;
-    } else if (Array.isArray(props.form.form)) {
+    } else if (Array.isArray(props.form.form) && props.form.form.length > 0) {
         rawFields = props.form.form;
     }
 
@@ -72,14 +72,14 @@ const resolvedFields = computed(() => {
 
     // 4. In-place XML parser fallback if raw markup is present
     if (!rawFields || (Array.isArray(rawFields) && rawFields.length === 0)) {
-        const rawXml = props.form.raw || props.form.content || props.form.raw_xml || (typeof props.form.form === 'string' ? props.form.form : '');
-        if (typeof rawXml === 'string' && (rawXml.includes('<field') || rawXml.includes('<lollms_form'))) {
+        const rawXml = props.form.raw || props.form.content || props.form.raw_xml || (typeof props.form.form === 'string' ? props.form.form : '') || (typeof props.form.description === 'string' && props.form.description.includes('<field') ? props.form.description : '');
+        if (typeof rawXml === 'string' && (rawXml.includes('<field') || rawXml.includes('<lollms_form') || rawXml.includes('<processing'))) {
             const extracted = [];
-            const fieldRegex = /<field\b([^>]*?)(?:>([\s\S]*?)<\/field>|\/>|\s*>)/gi;
+            const fieldRegex = /<field\b([^>]*?)(?:>([\s\S]*?)<\/field>|\s*\/?>)/gi;
             const matches = [...rawXml.matchAll(fieldRegex)];
             for (const m of matches) {
                 const fieldAttrsStr = m[1] || '';
-                const innerContent = m[2] || '';
+                const innerContent = (m[2] || '').trim();
                 const fAttrs = {};
                 const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
                 for (const ma of fieldAttrsStr.matchAll(attrRegex)) {
@@ -89,9 +89,16 @@ const resolvedFields = computed(() => {
                     const options = [...innerContent.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)].map(om => om[1].trim());
                     if (options.length > 0) {
                         fAttrs.options = options;
+                    } else if (!fAttrs.default && !innerContent.includes('<')) {
+                        fAttrs.default = innerContent;
                     }
                 }
-                if (fAttrs.name || fAttrs.label) {
+                if (!fAttrs.options && (fAttrs.choices || fAttrs.options_list || fAttrs.values)) {
+                    fAttrs.options = fAttrs.choices || fAttrs.options_list || fAttrs.values;
+                }
+                if (fAttrs.name || fAttrs.label || fAttrs.id) {
+                    if (!fAttrs.name && fAttrs.id) fAttrs.name = fAttrs.id;
+                    if (!fAttrs.name && fAttrs.label) fAttrs.name = fAttrs.label.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
                     extracted.push(fAttrs);
                 }
             }
@@ -195,27 +202,38 @@ watch(() => props.form?.submitted, (newVal) => {
 });
 
 async function submitForm() {
-    if (resolvedFields.value.length === 0) return;
     isSubmitting.value = true;
     try {
         const formId = props.form.id || props.form.form_id || props.form.form?.id || props.form.form?.form_id || formTitle.value;
-        await apiClient.post(`/api/discussions/${props.discussionId}/forms/${encodeURIComponent(formId)}/submit`, {
-            answers: { ...answers }
-        });
+
+        // 1. Submit answers to backend resume endpoint (if generation was waiting)
+        try {
+            await apiClient.post(`/api/discussions/${props.discussionId}/forms/${encodeURIComponent(formId)}/submit`, {
+                answers: { ...answers }
+            });
+        } catch (apiErr) {
+            console.warn("Backend form submission notice:", apiErr);
+        }
+
         isDone.value = true;
         uiStore.addNotification("Response submitted successfully.", "success");
 
-        const formattedAnswers = Object.entries(answers)
-            .map(([k, v]) => `- **${k}**: ${v}`)
-            .join('\n');
-
+        // 2. Build structured message prompt to send to chat
         const titleText = formTitle.value;
+        const answerEntries = Object.entries(answers);
+        const formattedAnswers = answerEntries.length > 0
+            ? answerEntries.map(([k, v]) => `- **${k}**: ${v}`).join('\n')
+            : "No field values filled.";
 
-        discussionsStore.sendMessage({
-            prompt: `[FORM_SUBMISSION: ${titleText}]\nUser provided the following data:\n${formattedAnswers}\n\nPlease analyze this data and continue your task.`
+        const promptMessage = `[FORM_SUBMISSION: ${titleText}]\nUser provided the following data:\n${formattedAnswers}\n\nPlease analyze this data and continue your task.`;
+
+        // 3. Send message so the AI processes the form submission in chat
+        await discussionsStore.sendMessage({
+            prompt: promptMessage
         });
 
     } catch (e) {
+        console.error("Failed to submit form data:", e);
         uiStore.addNotification("Failed to submit form data.", "error");
     } finally {
         isSubmitting.value = false;

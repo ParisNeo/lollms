@@ -89,27 +89,27 @@ def build_context_router(router: APIRouter):
                 except Exception:
                     pass
 
-            discussion.max_context_size = resolved_ctx or 4096
+            discussion.max_context_size = resolved_ctx or 32000
             status = discussion.get_context_status()
 
             # Guard against status returning max_tokens <= 1
             if isinstance(status, dict):
                 if not status.get("max_tokens") or status.get("max_tokens") <= 1:
-                    status["max_tokens"] = discussion.max_context_size or 4096
+                    status["max_tokens"] = discussion.max_context_size or 32000
                     cur = status.get("current_tokens", 0)
                     status["percent"] = (cur / status["max_tokens"]) * 100 if status["max_tokens"] > 0 else 0
             elif hasattr(status, "max_tokens"):
                 if not status.max_tokens or status.max_tokens <= 1:
-                    status.max_tokens = discussion.max_context_size or 4096
+                    status.max_tokens = discussion.max_context_size or 32000
                     status.percent = (status.current_tokens / status.max_tokens) * 100 if status.max_tokens > 0 else 0
 
             return status
 
         except Exception as e:
             trace_exception(e)
-            resolved_max = getattr(discussion, 'max_context_size', 4096)
+            resolved_max = getattr(discussion, 'max_context_size', 32000)
             if not resolved_max or resolved_max <= 1:
-                resolved_max = 4096
+                resolved_max = 32000
             return ContextStatusResponse(current_tokens=0, max_tokens=resolved_max, zones={})
 
     @router.get("/{discussion_id}/generation_status")

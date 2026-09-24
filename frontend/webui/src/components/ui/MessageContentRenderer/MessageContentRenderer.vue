@@ -365,12 +365,14 @@ const parseSpecialBlock = (rawBlock, match = null) => {
                 const formIdMatch = attrsStr.match(/id=["']([^"']*)["']/i);
                 const formId = formIdMatch ? formIdMatch[1] : null;
 
-                // 1. Check if rawInner contains direct field definitions
-                if (rawInner.includes('<field') || rawInner.includes('<lollms_form')) {
+                // 1. Check if rawInner or rawBlock contains direct field definitions
+                if (rawInner.includes('<field') || rawBlock.includes('<field')) {
                     const innerMatch = rawInner.match(/<lollms_form\b([^>]*)>([\s\S]*?)(?:<\/lollms_form>|$)/i);
                     const formAttrs = innerMatch ? innerMatch[1] : attrsStr;
-                    const formBody = innerMatch ? innerMatch[2] : rawInner;
+                    const formBody = innerMatch ? innerMatch[2] : (rawInner.includes('<field') ? rawInner : rawBlock);
                     const parsedForm = _parse_form_xml(formAttrs, formBody);
+                    parsedForm.raw = rawBlock;
+                    parsedForm.content = rawInner || rawBlock;
                     return {
                         type: 'form_ready',
                         form: parsedForm,
@@ -381,7 +383,7 @@ const parseSpecialBlock = (rawBlock, match = null) => {
 
                 // 2. Lookup in props.forms, props.events, metadata
                 const allEvents = [...(props.events || []), ...(props.metadata?.events || [])];
-                let formData = (props.forms || []).find(f => (formId && f.id === formId) || (title && (f.title === title || f.id === title)));
+                let formData = (props.forms || []).find(f => (formId && (f.id === formId || f.form_id === formId)) || (title && (f.title === title || f.id === title || f.form_id === title)));
 
                 if (!formData && allEvents.length > 0) {
                     const formEvent = allEvents.find(e => 
@@ -398,7 +400,7 @@ const parseSpecialBlock = (rawBlock, match = null) => {
                 }
 
                 if (!formData && props.metadata?.forms) {
-                    formData = props.metadata.forms.find(f => (formId && f.id === formId) || (title && (f.title === title || f.id === title)));
+                    formData = props.metadata.forms.find(f => (formId && (f.id === formId || f.form_id === formId)) || (title && (f.title === title || f.id === title || f.form_id === title)));
                 }
 
                 if (!formData && allEvents.length > 0) {
@@ -415,12 +417,13 @@ const parseSpecialBlock = (rawBlock, match = null) => {
                 if (formData) {
                     const submissionEvent = allEvents.find(e => 
                         (e.type === 'form_submitted' || e.type === 47) && e.content && 
-                        (e.content.form_id === formData.id || e.content.id === formData.id)
+                        (e.content.form_id === formData.id || e.content.id === formData.id || e.content.form_id === formData.form_id)
                     );
                     if (submissionEvent) {
                         formData.submitted = true;
                         formData.answers = submissionEvent.content.answers;
                     }
+                    formData.raw = rawBlock;
                     return {
                         type: 'form_ready',
                         form: formData,
@@ -429,17 +432,15 @@ const parseSpecialBlock = (rawBlock, match = null) => {
                     };
                 }
 
-                // Fallback: Return form container so InteractiveForm displays properly
+                // 3. Fallback: Parse from attrsStr and rawBlock/content
+                const fallbackParsed = _parse_form_xml(attrsStr, rawBlock);
+                fallbackParsed.raw = rawBlock;
+                fallbackParsed.content = rawInner || rawBlock;
+                fallbackParsed.isLoading = !isClosed;
                 return {
                     type: 'form_ready',
-                    form: {
-                        id: formId || 'form_' + Date.now(),
-                        title: title || 'Interactive Form',
-                        description: isClosed ? 'Form created' : 'Preparing interactive form...',
-                        fields: [],
-                        isLoading: !isClosed
-                    },
-                    id: formId || title,
+                    form: fallbackParsed,
+                    id: fallbackParsed.id,
                     raw: rawBlock
                 };
             }
@@ -699,40 +700,53 @@ const parseSpecialBlock = (rawBlock, match = null) => {
 function _parse_form_xml(attrs_str, body) {
     const attrs = {};
     if (typeof attrs_str === 'string') {
-        const attrMatch = attrs_str.matchAll(/(\w+)\s*=\s*["']([^"']+)["']/g);
+        const attrMatch = attrs_str.matchAll(/(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g);
         for (const match of attrMatch) {
-            attrs[match[1]] = match[2];
+            attrs[match[1]] = match[2] !== undefined ? match[2] : match[3];
         }
     }
 
     const fields = [];
     if (typeof body === 'string') {
-        const fieldRegex = /<field\s+([^>]*?)(?:\/?>|>([\s\S]*?)<\/field>)/gi;
+        const fieldRegex = /<field\b([^>]*?)(?:>([\s\S]*?)<\/field>|\s*\/?>)/gi;
         const matches = [...body.matchAll(fieldRegex)];
         for (const m of matches) {
-            const fieldAttrsStr = m[1];
-            const innerContent = m[2];
+            const fieldAttrsStr = m[1] || '';
+            const innerContent = (m[2] || '').trim();
             const fAttrs = {};
             if (typeof fieldAttrsStr === 'string') {
-                const fAttrMatch = fieldAttrsStr.matchAll(/(\w+)\s*=\s*["']([^"']*)["']/g);
+                const fAttrMatch = fieldAttrsStr.matchAll(/(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g);
                 for (const ma of fAttrMatch) {
-                    fAttrs[ma[1]] = ma[2];
+                    fAttrs[ma[1]] = ma[2] !== undefined ? ma[2] : ma[3];
                 }
             }
-            if (typeof innerContent === 'string') {
+            if (innerContent) {
                 const options = [...innerContent.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)].map(om => om[1].trim());
                 if (options.length > 0) {
                     fAttrs.options = options;
+                } else if (!fAttrs.default && !innerContent.includes('<')) {
+                    fAttrs.default = innerContent;
                 }
             }
-            fields.push(fAttrs);
+            if (!fAttrs.options && (fAttrs.choices || fAttrs.options_list || fAttrs.values)) {
+                fAttrs.options = fAttrs.choices || fAttrs.options_list || fAttrs.values;
+            }
+            if (fAttrs.name || fAttrs.label || fAttrs.id) {
+                if (!fAttrs.name && fAttrs.id) fAttrs.name = fAttrs.id;
+                if (!fAttrs.name && fAttrs.label) fAttrs.name = fAttrs.label.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+                fields.push(fAttrs);
+            }
         }
     }
 
+    const formId = attrs.id || (attrs.title ? attrs.title.toLowerCase().replace(/[^a-z0-9_]+/g, '_') : 'form');
+
     return { 
-        id: (attrs.title || 'form') + Date.now(), 
-        title: attrs.title || 'Form', 
+        id: formId, 
+        form_id: formId,
+        title: attrs.title || 'Interactive Form', 
         description: attrs.description || '', 
+        submit_label: attrs.submit_label || attrs.submit || 'Send Response',
         fields 
     };
 }

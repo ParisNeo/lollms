@@ -1895,7 +1895,7 @@ async def get_model_context_size(
             )
         )
         ctx_size = await loop.run_in_executor(executor, lambda: lc.get_ctx_size(model_name))
-        return ContextSizeResponse(context_size=ctx_size or getattr(lc.llm, 'default_ctx_size', 4096))
+        return ContextSizeResponse(context_size=ctx_size or getattr(lc.llm, 'default_ctx_size', 32000))
     except HTTPException as e:
         raise e
     except Exception as e:
