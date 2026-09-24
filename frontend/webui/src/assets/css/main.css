@@ -140,6 +140,12 @@
 /* Increased max-width to utilize more screen real estate on large monitors */
 .message-content-container { @apply max-w-7xl xl:max-w-[90%] mx-auto px-3 sm:px-4 lg:px-6 py-4 flex items-start space-x-3; }
 
+.message-content-wrapper {
+    position: relative;
+    isolation: isolate;
+    contain: paint;
+}
+
 .user-bubble { @apply self-end rounded-br-md bg-blue-50 text-blue-900 dark:bg-blue-800 dark:text-blue-100; width: 100%; }
 .ai-bubble { 
     @apply self-start rounded-bl-md bg-white text-gray-800 border border-gray-100 
@@ -564,6 +570,8 @@ details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blu
 .think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
 .think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
 .think-summary::-webkit-details-marker { display: none; }
+.think-block summary::-webkit-details-marker { display: none; }
+.think-block[open] .think-arrow { transform: rotate(90deg); }
 .think-content { @apply p-3; }
 
 

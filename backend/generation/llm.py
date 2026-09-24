@@ -1863,6 +1863,7 @@ def build_llm_generation_router(router: APIRouter):
         async def stream_generator() -> AsyncGenerator[str, None]:
             all_events = []
             collected_sources = []
+            collected_forms = []
             watcher_task = None
 
             async def watch_disconnect() -> None:
@@ -1912,6 +1913,11 @@ def build_llm_generation_router(router: APIRouter):
                             collected_sources.extend(params)
                         else:
                             collected_sources.append(params)
+
+                    # Capture forms into local list for persistence
+                    if (mtype_val == MSG_TYPE.MSG_TYPE_FORM_READY.value or mtype_val == 46) and params:
+                        form_entry = params.get('form', params) if isinstance(params, dict) else params
+                        collected_forms.append(form_entry)
 
                     tip = discussion_obj.get_message(discussion_obj.active_branch_id)
                     current_content_len = len(tip.content) if tip else 0
@@ -2171,6 +2177,9 @@ def build_llm_generation_router(router: APIRouter):
                         combined_events = all_events + lib_events
                         ai_msg.set_metadata_item('events', combined_events, discussion_obj)
 
+                        if collected_forms:
+                            ai_msg.set_metadata_item('forms', collected_forms, discussion_obj)
+
                         # Record generation metric in telemetry store
                         estimated_prompt_tokens = len(final_prompt) // 4 if final_prompt else 0
                         record_generation_metric(
@@ -2222,6 +2231,7 @@ def build_llm_generation_router(router: APIRouter):
                             "thoughts": thoughts_val,
                             "sources": meta.get('sources', []),
                             "events": meta.get('events', []),
+                            "forms": meta.get('forms') or getattr(m, 'forms', []),
                             "sender_type": m.sender_type, 
                             "image_references": [
                                 i if (isinstance(i, str) and (i.startswith('data:image/') or i.startswith('http://') or i.startswith('https://') or i.startswith('/api/')))

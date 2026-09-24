@@ -321,8 +321,8 @@ export const useDataStore = defineStore('data', () => {
         }
     }
 
-    async function fetchDataLakeData(storeId, method = 'pca') {
-        const response = await apiClient.get(`/api/store/${storeId}/data-lake`, { params: { method } });
+    async function fetchDataLakeData(storeId, method = 'umap', dimensions = 2) {
+        const response = await apiClient.get(`/api/store/${storeId}/data-lake`, { params: { method, dimensions } });
         return response.data;
     }
 

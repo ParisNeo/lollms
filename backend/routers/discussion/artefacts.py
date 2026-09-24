@@ -21,7 +21,7 @@ from backend.db import get_db
 from backend.models import DiscussionInfo, UserAuthDetails, ArtefactInfo, ArtefactCreateManual, ArtefactUpdate, ExportContextRequest, LoadArtefactRequest, TaskInfo, UnloadArtefactRequest, UrlImportRequest, ArtefactAndDataZoneUpdateResponse
 from backend.models.personality import PersonalitySendRequest
 from backend.models.discussion import ArtefactUploadResponse
-from backend.session import get_current_active_user, get_user_lollms_client
+from backend.session import get_current_active_user, get_user_lollms_client, is_sentence_transformer_vectorizer
 from backend.discussion import get_user_discussion
 from backend.routers.discussion.helpers import get_discussion_and_owner_for_request
 from backend.task_manager import task_manager
@@ -1754,12 +1754,17 @@ def build_artefacts_router(router: APIRouter):
         if db.query(DBDataStore).filter_by(owner_user_id=user_db_record.id, name=payload.name).first():
             raise HTTPException(status_code=400, detail=f"DataStore '{payload.name}' already exists.")
 
+        eff_vec_name = payload.vectorizer_name or settings.get("default_safe_store_vectorizer", "default_st")
+        eff_vec_config = (payload.vectorizer_config or {}).copy()
+        if is_sentence_transformer_vectorizer(eff_vec_name, eff_vec_config):
+            eff_vec_config["use_shared_server"] = True
+
         new_ds = DBDataStore(
             owner_user_id=user_db_record.id,
             name=payload.name,
             description=payload.description,
-            vectorizer_name=payload.vectorizer_name or settings.get("default_safe_store_vectorizer", "default_st"),
-            vectorizer_config=payload.vectorizer_config or {},
+            vectorizer_name=eff_vec_name,
+            vectorizer_config=eff_vec_config,
             chunk_size=payload.chunk_size if payload.chunk_size is not None else settings.get("default_chunk_size", 2048),
             chunk_overlap=payload.chunk_overlap if payload.chunk_overlap is not None else settings.get("default_chunk_overlap", 256),
             chunking_strategy=payload.chunking_strategy or "recursive",

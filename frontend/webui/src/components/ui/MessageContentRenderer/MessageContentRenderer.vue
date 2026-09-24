@@ -75,6 +75,20 @@ const editingPromptIdx = ref(-1);
 const editedPromptText = ref('');
 
 const thinkingTimers = ref({});
+const openDetailsMap = ref({});
+
+function isDetailOpen(id, defaultOpen = false) {
+    if (!id) return defaultOpen;
+    if (openDetailsMap.value[id] !== undefined) {
+        return openDetailsMap.value[id];
+    }
+    return defaultOpen;
+}
+
+function handleToggleDetail(id, event) {
+    if (!id || !event?.target) return;
+    openDetailsMap.value[id] = event.target.open;
+}
 
 const embeddedViews = computed(() => {
     return props.metadata?.embedded_views || [];
@@ -90,30 +104,11 @@ const formatThinkingTime = (seconds) => {
 
 function wrapInIsolatedShell(source, partId) {
     if (!source) return '';
-    
+
     const isDarkMode = uiStore.currentTheme === 'dark';
-    
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        body { 
-            margin: 0; 
-            padding: 16px; 
-            font-family: system-ui, -apple-system, sans-serif; 
-            overflow: hidden;
-            background: ${isDarkMode ? 'transparent' : '#ffffff'};
-            color: ${isDarkMode ? '#f3f4f6' : '#111827'};
-        }
-        * { box-sizing: border-box; }
-    </style>
-</head>
-<body>
-    <div id="lollms-widget-root">${source}</div>
-    
+    const trimmed = source.trim();
+
+    const resizeScript = `
     <script>
         const sendHeight = () => {
             const height = document.documentElement.scrollHeight;
@@ -123,11 +118,9 @@ function wrapInIsolatedShell(source, partId) {
                 partId: '${partId}'
             }, '*');
         };
-        
         const observer = new ResizeObserver(sendHeight);
         observer.observe(document.body);
-        window.onload = sendHeight;
-        
+        window.addEventListener('load', sendHeight);
         document.addEventListener('click', (e) => {
             const link = e.target.closest('a');
             if (link && link.href && !link.href.startsWith('javascript:')) {
@@ -135,9 +128,87 @@ function wrapInIsolatedShell(source, partId) {
                 window.open(link.href, '_blank');
             }
         });
-    <\/script>
+    <\/script>`;
+
+    // If source is already a complete HTML document, inject resize script and contained boundary
+    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.toLowerCase().includes('<html')) {
+        const injectedStyles = `<style>
+            html, body {
+                margin: 0;
+                padding: 12px;
+                position: relative;
+                overflow-x: hidden;
+            }
+        </style>`;
+
+        if (source.includes('</head>')) {
+            source = source.replace('</head>', `${injectedStyles}</head>`);
+        }
+        if (source.includes('</body>')) {
+            return source.replace('</body>', `${resizeScript}</body>`);
+        }
+        return `${source}${resizeScript}`;
+    }
+
+    return `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        html, body { 
+            margin: 0; 
+            padding: 16px; 
+            font-family: system-ui, -apple-system, sans-serif; 
+            overflow-x: hidden;
+            position: relative;
+            background: ${isDarkMode ? '#030712' : '#ffffff'};
+            color: ${isDarkMode ? '#f3f4f6' : '#111827'};
+        }
+        * { box-sizing: border-box; }
+    </style>
+</head>
+<body>
+    <div id="lollms-widget-root">${source}</div>
+    ${resizeScript}
 </body>
 </html>`;
+}
+
+function isHtmlDocument(token) {
+    if (!token) return false;
+    const title = (token.title || '').toLowerCase();
+    const content = (token.content || '').toLowerCase();
+    return title.endsWith('.html') || 
+           title.endsWith('.htm') || 
+           title.endsWith('.svg') ||
+           content.includes('<!doctype') || 
+           content.includes('<html') ||
+           content.includes('<body') ||
+           content.includes('<canvas');
+}
+
+function getDocLanguage(title) {
+    if (!title) return 'plaintext';
+    const ext = title.split('.').pop().toLowerCase();
+    const map = {
+        'py': 'python',
+        'js': 'javascript',
+        'ts': 'typescript',
+        'json': 'json',
+        'css': 'css',
+        'html': 'html',
+        'cpp': 'cpp',
+        'c': 'c',
+        'cs': 'csharp',
+        'java': 'java',
+        'sh': 'bash',
+        'xml': 'xml',
+        'sql': 'sql',
+        'md': 'markdown'
+    };
+    return map[ext] || 'plaintext';
 }
 
 function handleWidgetMessage(event) {
@@ -289,6 +360,90 @@ const parseSpecialBlock = (rawBlock, match = null) => {
             const title = titleMatch ? titleMatch[1] : (pType ? pType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Processing');
             const isClosed = rawBlock.includes('</processing>');
 
+            // If this processing block represents a form, resolve and return the interactive form
+            if (pType === 'lollms_form' || pType === 'form' || pType === 'interactive_form') {
+                const formIdMatch = attrsStr.match(/id=["']([^"']*)["']/i);
+                const formId = formIdMatch ? formIdMatch[1] : null;
+
+                // 1. Check if rawInner contains direct field definitions
+                if (rawInner.includes('<field') || rawInner.includes('<lollms_form')) {
+                    const innerMatch = rawInner.match(/<lollms_form\b([^>]*)>([\s\S]*?)(?:<\/lollms_form>|$)/i);
+                    const formAttrs = innerMatch ? innerMatch[1] : attrsStr;
+                    const formBody = innerMatch ? innerMatch[2] : rawInner;
+                    const parsedForm = _parse_form_xml(formAttrs, formBody);
+                    return {
+                        type: 'form_ready',
+                        form: parsedForm,
+                        id: parsedForm.id,
+                        raw: rawBlock
+                    };
+                }
+
+                // 2. Lookup in props.forms, props.events, metadata
+                const allEvents = [...(props.events || []), ...(props.metadata?.events || [])];
+                let formData = (props.forms || []).find(f => (formId && f.id === formId) || (title && (f.title === title || f.id === title)));
+
+                if (!formData && allEvents.length > 0) {
+                    const formEvent = allEvents.find(e => 
+                        (e.type === 'form_ready' || e.type === 46 || e.type === 'form') &&
+                        e.content &&
+                        (
+                            (formId && (e.content.id === formId || e.content.form_id === formId || (e.content.form && (e.content.form.id === formId || e.content.form.form_id === formId)))) ||
+                            (title && (e.content.title === title || (e.content.form && e.content.form.title === title)))
+                        )
+                    );
+                    if (formEvent) {
+                        formData = JSON.parse(JSON.stringify(formEvent.content.form || formEvent.content));
+                    }
+                }
+
+                if (!formData && props.metadata?.forms) {
+                    formData = props.metadata.forms.find(f => (formId && f.id === formId) || (title && (f.title === title || f.id === title)));
+                }
+
+                if (!formData && allEvents.length > 0) {
+                    const anyFormEvent = [...allEvents].reverse().find(e => (e.type === 'form_ready' || e.type === 46) && e.content);
+                    if (anyFormEvent) {
+                        formData = JSON.parse(JSON.stringify(anyFormEvent.content.form || anyFormEvent.content));
+                    }
+                }
+
+                if (!formData && props.forms && props.forms.length > 0) {
+                    formData = props.forms[props.forms.length - 1];
+                }
+
+                if (formData) {
+                    const submissionEvent = allEvents.find(e => 
+                        (e.type === 'form_submitted' || e.type === 47) && e.content && 
+                        (e.content.form_id === formData.id || e.content.id === formData.id)
+                    );
+                    if (submissionEvent) {
+                        formData.submitted = true;
+                        formData.answers = submissionEvent.content.answers;
+                    }
+                    return {
+                        type: 'form_ready',
+                        form: formData,
+                        id: formData.id || formId || title,
+                        raw: rawBlock
+                    };
+                }
+
+                // Fallback: Return form container so InteractiveForm displays properly
+                return {
+                    type: 'form_ready',
+                    form: {
+                        id: formId || 'form_' + Date.now(),
+                        title: title || 'Interactive Form',
+                        description: isClosed ? 'Form created' : 'Preparing interactive form...',
+                        fields: [],
+                        isLoading: !isClosed
+                    },
+                    id: formId || title,
+                    raw: rawBlock
+                };
+            }
+
             return { 
                 type: 'processing', 
                 pType, 
@@ -301,20 +456,59 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         }
     }
 
-    if (!match) {
-        const regex = /(<think>[\s\S]*?(?:<\/think>|$))|(<annotate>[\s\S]*?(?:<\/annotate>|$))|(<generate_image[^>]*>[\s\S]*?(?:<\/generate_image>|$))|(<edit_image[^>]*>[\s\S]*?(?:<\/edit_image>|$))|(<generate_slides[^>]*>[\s\S]*?(?:<\/generate_slides>|$))|(<street_view>[\s\S]*?(?:<\/street_view>|$))|(<schedule_task[^>]*>[\s\S]*?(?:<\/schedule_task>|$))|(<note[^>]*>[\s\S]*?(?:<\/note>|$))|(<skill[^>]*>[\s\S]*?(?:<\/skill>|$))|(<lollms_widget\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_inline[^>]*>[\s\S]*?(?:<\/lollms_inline>|$))|(<lollms_building[^>]*\/>)|(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)|(<lollms_working[^>]*\/>)|(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)|(<processing\b([^>]*)>([\s\S]*?)(?:<\/processing>|$))|(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)|(<owl>[\s\S]*?(?:<\/owl>|$))/;
-        match = regex.exec(rawBlock);
+    // 2. Direct match for raw <lollms_form> tags
+    if (rawBlock.includes('<lollms_form')) {
+        const formMatch = rawBlock.match(/<lollms_form\b([^>]*)>([\s\S]*?)(?:<\/lollms_form>|$)/i);
+        if (formMatch) {
+            const parsedForm = _parse_form_xml(formMatch[1] || '', formMatch[2] || '');
+            return {
+                type: 'form_ready',
+                form: parsedForm,
+                id: parsedForm.id,
+                raw: rawBlock
+            };
+        }
     }
 
-    if (!match) return { type: 'content', content: rawBlock };
+    // 3. Direct match for <lollms_form_anchor>
+    if (rawBlock.includes('<lollms_form_anchor')) {
+        const anchorMatch = rawBlock.match(/<lollms_form_anchor\s+id=["']([^"']+)["']/i);
+        const id = anchorMatch ? anchorMatch[1] : null;
+        let formData = props.forms?.find(f => f.id === id);
+        const allEvents = [...(props.events || []), ...(props.metadata?.events || [])];
+        if (!formData && allEvents.length > 0) {
+            const formEvent = allEvents.find(e => 
+                (e.type === 'form_ready' || e.type === 46 || e.type === 'form') && 
+                e.content && 
+                (e.content.form_id === id || e.content.id === id || (e.content.form && e.content.form.id === id))
+            );
+            if (formEvent) {
+                formData = JSON.parse(JSON.stringify(formEvent.content.form || formEvent.content));
+            }
+        }
+        if (formData) {
+            const submissionEvent = allEvents.find(e => 
+                (e.type === 'form_submitted' || e.type === 47) && e.content && 
+                (e.content.form_id === id || e.content.id === id)
+            );
+            if (submissionEvent) {
+                formData.submitted = true;
+                formData.answers = submissionEvent.content.answers;
+            }
+        }
+        return { type: 'form_ready', form: formData, id, raw: rawBlock };
+    }
 
-    if (match[1]) {
-        const content = match[1].replace(/<think>|<\/think>/g, '').trim();
-        const isClosed = match[1].trim().endsWith('</think>');
+    // 4. Think blocks
+    if (rawBlock.includes('<think>')) {
+        const content = rawBlock.replace(/<think>|<\/think>/g, '').trim();
+        const isClosed = rawBlock.trim().endsWith('</think>');
         return { type: 'think', content, isClosed };
-    } 
-    else if (match[2]) {
-        let annotateContent = match[2].replace(/<annotate>|<\/annotate>/g, '').trim();
+    }
+
+    // 5. Annotate blocks
+    if (rawBlock.includes('<annotate>')) {
+        let annotateContent = rawBlock.replace(/<annotate>|<\/annotate>/g, '').trim();
         const jsonMatch = annotateContent.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
         if (jsonMatch) annotateContent = jsonMatch[0];
         try {
@@ -322,172 +516,120 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         } catch (e) {
             return { type: 'content', content: `[Invalid annotation data]` };
         }
-    } 
-    else if (match[3]) {
-        const fullTag = match[3];
-        const promptContent = fullTag.replace(/<generate_image[^>]*>|<\/generate_image>/g, '').trim();
-        return { type: 'image_tool', mode: 'generate', prompt: promptContent, raw: fullTag };
-    } 
-    else if (match[4]) {
-        const fullTag = match[4];
-        const promptContent = fullTag.replace(/<edit_image[^>]*>|<\/edit_image>/g, '').trim();
-        return { type: 'image_tool', mode: 'edit', prompt: promptContent, raw: fullTag };
-    } 
-    else if (match[5]) {
-        const fullTag = match[5];
-        const innerContent = fullTag.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
+    }
+
+    // 6. Image tools
+    if (rawBlock.includes('<generate_image')) {
+        const promptContent = rawBlock.replace(/<generate_image[^>]*>|<\/generate_image>/g, '').trim();
+        return { type: 'image_tool', mode: 'generate', prompt: promptContent, raw: rawBlock };
+    }
+
+    if (rawBlock.includes('<edit_image')) {
+        const promptContent = rawBlock.replace(/<edit_image[^>]*>|<\/edit_image>/g, '').trim();
+        return { type: 'image_tool', mode: 'edit', prompt: promptContent, raw: rawBlock };
+    }
+
+    if (rawBlock.includes('<generate_slides')) {
+        const innerContent = rawBlock.replace(/<generate_slides[^>]*>|<\/generate_slides>/g, '').trim();
         const slideRegex = /<Slide>(.*?)<\/Slide>/gis;
         const slides = [];
         let sMatch;
         while ((sMatch = slideRegex.exec(innerContent)) !== null) {
             slides.push(sMatch[1].trim());
         }
-        return { type: 'image_tool', mode: 'slides', prompt: innerContent, slides, raw: fullTag };
+        return { type: 'image_tool', mode: 'slides', prompt: innerContent, slides, raw: rawBlock };
     }
-    else if (match[6]) {
-        const fullTag = match[6];
-        const location = fullTag.replace(/<street_view>|<\/street_view>/g, '').trim();
-        return { type: 'image_tool', mode: 'street_view', prompt: location, raw: fullTag };
+
+    if (rawBlock.includes('<street_view>')) {
+        const location = rawBlock.replace(/<street_view>|<\/street_view>/g, '').trim();
+        return { type: 'image_tool', mode: 'street_view', prompt: location, raw: rawBlock };
     }
-    else if (match[7]) {
-        const fullTag = match[7];
-        const promptContent = fullTag.replace(/<schedule_task[^>]*>|<\/schedule_task>/g, '').trim();
+
+    // 7. Scheduler, notes, skills
+    if (rawBlock.includes('<schedule_task')) {
+        const promptContent = rawBlock.replace(/<schedule_task[^>]*>|<\/schedule_task>/g, '').trim();
         let name = "Task";
-        const nameMatch = fullTag.match(/name="([^"]*)"/);
+        const nameMatch = rawBlock.match(/name="([^"]*)"/);
         if (nameMatch) name = nameMatch[1];
-        return { type: 'scheduler', name, prompt: promptContent, raw: fullTag };
+        return { type: 'scheduler', name, prompt: promptContent, raw: rawBlock };
     }
-    else if (match[8]) {
-        const fullTag = match[8];
-        const noteContent = fullTag.replace(/<note[^>]*>|<\/note>/g, '').trim();
+
+    if (rawBlock.includes('<note')) {
+        const noteContent = rawBlock.replace(/<note[^>]*>|<\/note>/g, '').trim();
         let title = "AI Note";
-        const titleMatch = fullTag.match(/title="([^"]*)"/);
+        const titleMatch = rawBlock.match(/title="([^"]*)"/);
         if (titleMatch) title = titleMatch[1];
-        return { type: 'note', title, content: noteContent, raw: fullTag };
+        return { type: 'note', title, content: noteContent, raw: rawBlock };
     }
-    else if (match[9]) {
-        const fullTag = match[9];
-        const skillContent = fullTag.replace(/<skill[^>]*>|<\/skill>/g, '').trim();
+
+    if (rawBlock.includes('<skill')) {
+        const skillContent = rawBlock.replace(/<skill[^>]*>|<\/skill>/g, '').trim();
         let title = "AI Skill";
         let description = "";
         let category = "General";
         
-        const titleMatch = fullTag.match(/title="([^"]*)"/);
-        const descMatch = fullTag.match(/description="([^"]*)"/);
-        const catMatch = fullTag.match(/category="([^"]*)"/);
+        const titleMatch = rawBlock.match(/title="([^"]*)"/);
+        const descMatch = rawBlock.match(/description="([^"]*)"/);
+        const catMatch = rawBlock.match(/category="([^"]*)"/);
         
         if (titleMatch) title = titleMatch[1];
         if (descMatch) description = descMatch[1];
         if (catMatch) category = catMatch[1];
         
-        return { type: 'skill', title, description, category, content: skillContent, raw: fullTag };
+        return { type: 'skill', title, description, category, content: skillContent, raw: rawBlock };
     }
-    else if (match[10]) {
-        const raw = match[10];
-        const widgetId = match[11];
+
+    // 8. Widgets & building indicators
+    if (rawBlock.includes('<lollms_widget')) {
+        const widgetIdMatch = rawBlock.match(/id=["']([^"']+)["']/);
+        const widgetId = widgetIdMatch ? widgetIdMatch[1] : '';
         const widgetData = props.inlineWidgets?.find(w => w.id === widgetId);
         return { 
             type: 'interactive_widget', 
             widget: widgetData || { id: widgetId, title: 'Widget (Loading...)', is_loading: true }, 
-            raw 
+            raw: rawBlock 
         };
     }
-    else if (match[12]) {
-        const fullTag = match[12];
-        const matchInline = typeof fullTag === 'string' ? fullTag.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/) : null;
+
+    if (rawBlock.includes('<lollms_inline')) {
+        const matchInline = rawBlock.match(/<lollms_inline[^>]*>([\s\S]*?)(?:<\/lollms_inline>|$)/);
         const innerContent = (matchInline && matchInline[1]) ? matchInline[1].trim() : '';
-        const titleMatch = typeof fullTag === 'string' ? fullTag.match(/title=["']([^"']+)["']/i) : null;
+        const titleMatch = rawBlock.match(/title=["']([^"']+)["']/i);
         const title = titleMatch ? titleMatch[1] : 'Interactive Widget';
-        const isLoading = !fullTag.includes('</lollms_inline>');
+        const isLoading = !rawBlock.includes('</lollms_inline>');
         const widgetData = { id: title, title: title, source: innerContent, is_loading: isLoading };
-        return { type: 'interactive_widget', widget: widgetData, raw: fullTag };
+        return { type: 'interactive_widget', widget: widgetData, raw: rawBlock };
     }
-    else if (match[13] || match[16]) {
-        const raw = match[13] || match[16];
-        const msgMatch = typeof raw === 'string' ? raw.match(/message=["']([^"']+)["']/) : null;
-        const lblMatch = typeof raw === 'string' ? raw.match(/label=["']([^"']+)["']/) : null;
+
+    if (rawBlock.includes('<lollms_building') || rawBlock.includes('<lollms_working')) {
+        const msgMatch = rawBlock.match(/message=["']([^"']+)["']/);
+        const lblMatch = rawBlock.match(/label=["']([^"']+)["']/);
         const label = (msgMatch && msgMatch[1]) || (lblMatch && lblMatch[1]) || 'Processing';
-        const title = typeof raw === 'string' ? raw.match(/title=["']([^"']+)["']/)?.[1] || '' : '';
-        const sub_content = typeof raw === 'string' ? raw.match(/sub_content=["']([^"']+)["']/)?.[1] || '' : '';
-        const id = typeof raw === 'string' ? raw.match(/id=["']([^"']+)["']/)?.[1] : undefined;
+        const title = rawBlock.match(/title=["']([^"']*)["']/)?.[1] || '';
+        const sub_content = rawBlock.match(/sub_content=["']([^"']*)["']/)?.[1] || '';
+        const id = rawBlock.match(/id=["']([^"']+)["']/)?.[1];
 
         const isDone = (props.forms?.some(f => f.id === id || f.form_id === id)) || 
                        (props.inlineWidgets?.some(w => w.id === id && !w.is_loading)) ||
                        (title && activeDiscussionArtefacts.value?.some(a => a.title === title));
                        
-        return { type: 'building_indicator', label, title, sub_content, isDone, id, raw };
+        return { type: 'building_indicator', label, title, sub_content, isDone, id, raw: rawBlock };
     }
-    else if (match[14]) {
-        const raw = match[14];
-        const id = match[15];
-        let formData = props.forms?.find(f => f.id === id);
-        
-        if (!formData && props.events) {
-            const formEvent = props.events.find(e => e.type === 'form_ready' && e.content && (e.content.form_id === id || e.content.id === id || (e.content.form && e.content.form.id === id)));
-            if (formEvent) {
-                formData = JSON.parse(JSON.stringify(formEvent.content.form || formEvent.content));
-            }
-        }
-        
-        if (formData && props.events) {
-            const submissionEvent = props.events.find(e => e.type === 'form_submitted' && e.content && e.content.form_id === id);
-            if (submissionEvent) {
-                formData.submitted = true;
-                formData.answers = submissionEvent.content.answers;
-            }
-        }
-        
-        return { type: 'form_ready', form: formData, id, raw };
-    }
-    else if (match[17]) {
-        const raw = match[17];
-        const fullId = match[18];
+
+    // 9. Artefact images, OWL, tools, memory
+    if (rawBlock.includes('<artefact_image')) {
+        const idMatch = rawBlock.match(/id=["']([^"']+)["']/);
+        const fullId = idMatch ? idMatch[1] : '';
         const parts = fullId.split('::');
-        return { type: 'artefact_image', title: parts[0], index: parseInt(parts[parts.length - 1]), raw };
+        return { type: 'artefact_image', title: parts[0], index: parseInt(parts[parts.length - 1]), raw: rawBlock };
     }
-    else if (match[19]) {
-        const raw = match[19];
-        const attrsStr = match[20] || '';
-        const inner = match[21] || '';
 
-        const innerStatusMatch = inner.match(/<!--\s*status:([a-zA-Z0-9_-]+)\s*-->/i);
-        const cleanInner = inner.replace(/<!--\s*status:[a-zA-Z0-9_-]+\s*-->/gi, '').trim();
+    if (rawBlock.includes('<owl>')) {
+        const content = rawBlock.replace(/<owl>|<\/owl>/g, '').trim();
+        return { type: 'owl', content, raw: rawBlock };
+    }
 
-        const typeMatch = attrsStr.match(/type=["']([^"']*)["']/i);
-        const titleMatch = attrsStr.match(/title=["']([^"']*)["']/i);
-        const pType = typeMatch ? typeMatch[1] : 'process';
-        const title = titleMatch ? titleMatch[1] : (pType ? pType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Processing');
-        const isClosed = raw.trim().endsWith('</processing>');
-
-        return { 
-            type: 'processing', 
-            pType, 
-            title, 
-            statusContent: cleanInner, 
-            isClosed, 
-            status: innerStatusMatch ? innerStatusMatch[1] : null,
-            raw 
-        };
-    }
-    else if (match[24]) {
-        const raw = match[24];
-        const attrs = match[25];
-        const body = match[26];
-        const parsedForm = _parse_form_xml(attrs, body);
-        return { 
-            type: 'form_ready', 
-            form: parsedForm, 
-            id: parsedForm.id, 
-            raw 
-        };
-    }
-    else if (match[27]) {
-        const raw = match[27];
-        const content = raw.replace(/<owl>|<\/owl>/g, '').trim();
-        return { type: 'owl', content, raw };
-    }
-    else if (rawBlock.includes('<tool_call')) {
-        const raw = rawBlock;
+    if (rawBlock.includes('<tool_call')) {
         const innerContent = rawBlock.replace(/<tool_call[^>]*>/i, '').replace(/<\/tool_call>/i, '').trim();
         let parsedJson = null;
         try {
@@ -498,23 +640,24 @@ const parseSpecialBlock = (rawBlock, match = null) => {
                 parsedJson = JSON.parse(cleaned);
             } catch (e2) {}
         }
-        return { type: 'tool_call', name: parsedJson?.name || 'Tool Call', parameters: parsedJson?.parameters || {}, raw };
+        return { type: 'tool_call', name: parsedJson?.name || 'Tool Call', parameters: parsedJson?.parameters || {}, raw: rawBlock };
     }
-    else if (rawBlock.includes('<mem_load')) {
-        const raw = rawBlock;
+
+    if (rawBlock.includes('<mem_load')) {
         const idMatch = rawBlock.match(/id=["']([^"']+)["']/i);
         const id = idMatch ? idMatch[1] : '';
-        return { type: 'mem_load', memoryId: id, raw };
+        return { type: 'mem_load', memoryId: id, raw: rawBlock };
     }
-    else if (rawBlock.includes('<youtube') || rawBlock.includes('<youtube_video')) {
-        const raw = rawBlock;
-        const idMatch = raw.match(/id=["']([^"']+)["']/i);
-        const urlMatch = raw.match(/url=["']([^"']+)["']/i);
-        const listMatch = raw.match(/list=["']([^"']+)["']/i);
-        const titleMatch = raw.match(/title=["']([^"']+)["']/i);
-        const startMatch = raw.match(/start=["']?(\d+)["']?/i);
 
-        const innerMatch = raw.match(/<youtube(?:_video)?[^>]*>([\s\S]*?)<\/youtube(?:_video)?>/i);
+    // 10. YouTube embeds
+    if (rawBlock.includes('<youtube') || rawBlock.includes('<youtube_video')) {
+        const idMatch = rawBlock.match(/id=["']([^"']+)["']/i);
+        const urlMatch = rawBlock.match(/url=["']([^"']+)["']/i);
+        const listMatch = rawBlock.match(/list=["']([^"']+)["']/i);
+        const titleMatch = rawBlock.match(/title=["']([^"']+)["']/i);
+        const startMatch = rawBlock.match(/start=["']?(\d+)["']?/i);
+
+        const innerMatch = rawBlock.match(/<youtube(?:_video)?[^>]*>([\s\S]*?)<\/youtube(?:_video)?>/i);
         const innerText = innerMatch ? innerMatch[1].trim() : '';
 
         const candidate = (idMatch && idMatch[1]) || (urlMatch && urlMatch[1]) || (listMatch && `list=${listMatch[1]}`) || innerText;
@@ -535,19 +678,19 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         } else {
             return { type: 'content', content: rawBlock };
         }
-    } else {
-        const ytExtracted = extractYouTubeEmbedInfo(rawBlock);
-        if (ytExtracted && (rawBlock.includes('youtube.com') || rawBlock.includes('youtu.be') || rawBlock.includes('youtube-nocookie.com'))) {
-            return {
-                type: 'youtube_video',
-                embedType: ytExtracted.type,
-                videoId: ytExtracted.videoId,
-                listId: ytExtracted.listId,
-                startTime: ytExtracted.startTime || 0,
-                title: ytExtracted.type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video',
-                raw: rawBlock
-            };
-        }
+    }
+
+    const ytExtracted = extractYouTubeEmbedInfo(rawBlock);
+    if (ytExtracted && (rawBlock.includes('youtube.com') || rawBlock.includes('youtu.be') || rawBlock.includes('youtube-nocookie.com'))) {
+        return {
+            type: 'youtube_video',
+            embedType: ytExtracted.type,
+            videoId: ytExtracted.videoId,
+            listId: ytExtracted.listId,
+            startTime: ytExtracted.startTime || 0,
+            title: ytExtracted.type === 'playlist' ? 'YouTube Playlist' : 'YouTube Video',
+            raw: rawBlock
+        };
     }
 
     return { type: 'content', content: rawBlock };
@@ -1260,14 +1403,20 @@ function onMermaidReady({ svg }, partIndex) {
                         <IconTrash class="w-3.5 h-3.5" />
                       </button>
                   </summary>
-                  <div class="document-content p-4 prose prose-sm dark:prose-invert max-w-none">
-                    <iframe 
-                        v-if="token.content.includes('<html') || token.content.includes('<!DOCTYPE')"
-                        :srcdoc="token.content"
-                        class="w-full h-[500px] border-none"
-                        sandbox="allow-scripts"
-                    ></iframe>
-                    <div v-else v-html="parsedMarkdown(token.content)"></div>
+                  <div class="document-content p-4 max-w-none">
+                    <div v-if="isHtmlDocument(token)" class="w-full rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-white" style="contain: paint; isolation: isolate;">
+                        <iframe 
+                            :srcdoc="wrapInIsolatedShell(token.content, token.uid || 'doc')"
+                            class="w-full h-[500px] border-none"
+                            sandbox="allow-scripts allow-forms allow-modals"
+                        ></iframe>
+                    </div>
+                    <CodeBlock 
+                        v-else-if="getDocLanguage(token.title) !== 'plaintext' && getDocLanguage(token.title) !== 'markdown'" 
+                        :language="getDocLanguage(token.title)" 
+                        :code="token.content" 
+                    />
+                    <div v-else class="prose prose-sm dark:prose-invert max-w-none" v-html="parsedMarkdown(token.content)"></div>
                   </div>
               </details>
               
@@ -1329,25 +1478,31 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- Thinking block -->
-          <details v-else-if="part.type === 'think'" class="think-block my-4" open>
+          <details 
+            v-else-if="part.type === 'think'" 
+            class="think-block my-4 select-none" 
+            :open="isDetailOpen(part.id, isStreaming && !part.isClosed)"
+            @toggle="handleToggleDetail(part.id, $event)"
+          >
             <summary class="think-summary">
+              <IconChevronRight class="w-3 h-3 text-blue-500 transition-transform duration-200 think-arrow shrink-0" />
               <IconAnimateSpin v-if="!part.isClosed" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
-              <IconThinking v-else class="h-5 w-5 text-blue-400 shrink-0" />
+              <IconThinking v-else class="h-4 w-4 text-blue-400 shrink-0" />
               <div class="flex items-center justify-between w-full pr-2">
                   <div class="flex items-center gap-2">
-                      <span>Thinking</span>
-                      <span v-if="!part.isClosed" class="flex gap-1 items-center mt-1.5">
+                      <span class="text-xs">Thinking Process</span>
+                      <span v-if="!part.isClosed" class="flex gap-1 items-center mt-1">
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.3s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce" style="animation-delay: -0.15s"></span>
                           <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-bounce"></span>
                       </span>
                   </div>
                   <span class="text-[10px] font-mono opacity-60 tracking-wider">
-                      {{ part.isClosed ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` }}
+                      {{ part.isClosed ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking (${formatThinkingTime(thinkingTimers[part.id]?.elapsed)})` }}
                   </span>
               </div>
             </summary>
-            <div class="think-content" v-html="parsedMarkdown(part.content)"></div>
+            <div class="think-content select-text" v-html="parsedMarkdown(part.content)"></div>
           </details>
 
           <!-- Image tool block -->
@@ -1427,7 +1582,12 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- Note block -->
-          <details v-else-if="part.type === 'note'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60" open>
+          <details 
+            v-else-if="part.type === 'note'" 
+            class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60"
+            :open="isDetailOpen(part.id, false)"
+            @toggle="handleToggleDetail(part.id, $event)"
+          >
             <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
                 <span class="flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
@@ -1465,7 +1625,12 @@ function onMermaidReady({ svg }, partIndex) {
           </details>
 
           <!-- Skill block -->
-          <details v-else-if="part.type === 'skill'" class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60" open>
+          <details 
+            v-else-if="part.type === 'skill'" 
+            class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60"
+            :open="isDetailOpen(part.id, false)"
+            @toggle="handleToggleDetail(part.id, $event)"
+          >
             <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
                 <span class="flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
@@ -1564,9 +1729,13 @@ function onMermaidReady({ svg }, partIndex) {
           <template v-else-if="part.type === 'form_ready'">
                <div class="my-4 p-4 bg-white dark:bg-gray-800 rounded-xl border dark:border-gray-700 shadow-sm">
                   <InteractiveForm 
+                      v-if="part.form"
                       :form="part.form" 
                       :discussion-id="currentDiscussionId"
                   />
+                  <div v-else class="text-xs text-gray-400 italic p-2">
+                      Loading interactive form...
+                  </div>
                </div>
           </template>
 
@@ -1604,9 +1773,9 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- Interactive Widget -->
           <div v-else-if="part.type === 'interactive_widget' && part.widget" 
-               class="my-4 group/widget-container clear-both isolation-auto">
-              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-xl transition-all hover:border-blue-500/20">
-                  
+               class="my-4 group/widget-container clear-both" style="isolation: isolate; contain: paint;">
+              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-xl transition-all hover:border-blue-500/20" style="contain: paint;">
+
                   <div class="px-4 py-2.5 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
                       <div class="flex items-center gap-3 min-w-0">
                           <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600">
@@ -1622,22 +1791,22 @@ function onMermaidReady({ svg }, partIndex) {
                       <div v-if="!part.widget.is_loading" class="flex items-center gap-1">
                           <button 
                             @click="openWidgetFullscreen(part.widget)"
-                            class="p-1.5 rounded-lg hover:bg-blue-500 hover:text-white text-gray-400 transition-all"
+                            class="p-1.5 rounded-lg hover:bg-blue-500 hover:text-white text-gray-400 transition-all cursor-pointer"
                             title="Full Screen View"
                           >
                               <IconMaximize class="w-3.5 h-3.5" />
                           </button>
                           <button 
                             @click="openWidgetInNewTab(part.widget)"
-                            class="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-all"
+                            class="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-all cursor-pointer"
                             title="Open in New Tab"
                           >
                               <IconGlobeAlt class="w-3.5 h-3.5" />
                           </button>
                       </div>
                   </div>
-                  
-                  <div class="relative w-full bg-white transition-all overflow-hidden border-b dark:border-gray-800" style="min-height: 100px;">
+
+                  <div class="relative w-full bg-white transition-all overflow-hidden border-b dark:border-gray-800" style="min-height: 100px; contain: paint;">
                       <iframe 
                         v-if="getWidgetContent(part.widget)"
                         :data-part-id="part.id"
@@ -1645,7 +1814,7 @@ function onMermaidReady({ svg }, partIndex) {
                         :srcdoc="wrapInIsolatedShell(getWidgetContent(part.widget), part.id)" 
                         class="w-full border-none pointer-events-auto bg-white transition-[height] duration-300" 
                         style="height: 400px;"
-                        sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
+                        sandbox="allow-scripts allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>
                       

@@ -153,6 +153,22 @@ def ensure_bool(value, default=False):
     else:
         return default
 
+def is_sentence_transformer_vectorizer(name: Optional[str], config: Optional[Dict[str, Any]] = None) -> bool:
+    """Checks if a vectorizer name or config represents a Sentence-Transformers model."""
+    if name:
+        n = str(name).lower().strip()
+        if n in ["st", "sentence_transformer", "sentence_transformers", "sentense_transformer", "sentense_transformers"]:
+            return True
+        if n.startswith("st:") or n.startswith("st_"):
+            return True
+        if "sentence_transformer" in n or "sentense_transformer" in n:
+            return True
+    if config and isinstance(config, dict):
+        vec = config.get("vectorizer_name") or config.get("vectorizer")
+        if vec and is_sentence_transformer_vectorizer(vec):
+            return True
+    return False
+
 def get_user_by_username(db: Session, username: str) -> Optional[DBUser]:
     return db.query(DBUser).filter(DBUser.username == username).first()
 
@@ -1132,6 +1148,10 @@ def get_safe_store_instance(
             v_config = vectorizer_config.copy()
             if 'model_name' in v_config and 'model' not in v_config:
                 v_config['model'] = v_config['model_name']
+
+            # Enforce use_shared_server for sentence-transformer vectorizers
+            if is_sentence_transformer_vectorizer(datastore_record.vectorizer_name, v_config):
+                v_config["use_shared_server"] = True
 
             strategy = getattr(datastore_record, "chunking_strategy", "recursive") or "recursive"
             strategy_kwargs = getattr(datastore_record, "chunking_kwargs", {}) or {}

@@ -28,7 +28,7 @@ Authlib==1.6.12
 bleach==6.4.0
 
 # --- LoLLMs Ecosystem & Client Library ---
-lollms-client==1.19.10
+lollms-client==1.19.12
 ascii_colors==0.12.3
 pipmaster==1.1.13
 openai==2.1.0
@@ -41,7 +41,7 @@ numpy==2.2.6
 Pillow==12.3.0
 
 # --- SafeStore & Vector / Graph Engine ---
-safe_store==3.6.0
+safe_store==3.7.1
 wcwidth==0.2.14
 
 # --- Document Parsing, Ingestion & Office Formats ---

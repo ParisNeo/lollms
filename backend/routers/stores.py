@@ -71,7 +71,8 @@ from backend.session import (
     get_safe_store_instance,
     get_user_datastore_root_path,
     get_user_lollms_client,
-    user_sessions
+    user_sessions,
+    is_sentence_transformer_vectorizer
 )
 from backend.settings import settings
 from backend.ws_manager import manager
@@ -147,6 +148,7 @@ class DataLakeChunkPoint(BaseModel):
     full_text: str
     x: float
     y: float
+    z: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
     color: str
 
@@ -156,13 +158,14 @@ class DataLakeDocumentLegend(BaseModel):
     chunk_count: int
     color: str
     centroid: Dict[str, float]
+    symbol: Optional[str] = "diamond"
 
 class DataLakeResponse(BaseModel):
     points: List[DataLakeChunkPoint]
     documents: List[DataLakeDocumentLegend]
     total_chunks: int
     dimensions: int = 2
-    reduction_method: str = "PCA"
+    reduction_method: str = "UMAP"
 
 _data_lake_cache: Dict[str, Dict[str, Any]] = {}
 
@@ -170,6 +173,11 @@ DOCUMENT_PALETTE = [
     "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ef4444",
     "#06b6d4", "#ec4899", "#14b8a6", "#f97316", "#6366f1",
     "#84cc16", "#a855f7", "#0ea5e9", "#eab308", "#d946ef"
+]
+
+DOCUMENT_SYMBOLS = [
+    "star", "diamond", "triangle_up", "square", "cross", 
+    "hexagon", "triangle_down", "plus", "circle_cross", "pentagon"
 ]
 
 def _sanitize_numpy(data: Any) -> Any:
@@ -594,6 +602,9 @@ def _revectorize_datastore_task(task: Task, username: str, datastore_id: str, ne
         if not ds_rec:
             raise Exception("DataStore not found.")
 
+        if is_sentence_transformer_vectorizer(new_vec_name, new_vec_config):
+            new_vec_config["use_shared_server"] = True
+
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
         task.set_progress(30)
 
@@ -1017,7 +1028,7 @@ async def batch_delete_rag_documents_from_datastore(
 @store_files_router.get("/data-lake", response_model=DataLakeResponse)
 async def get_datastore_data_lake_projection(
     datastore_id: str,
-    method: str = "pca",
+    method: str = "umap",
     dimensions: int = 2,
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
@@ -1030,27 +1041,47 @@ async def get_datastore_data_lake_projection(
     if not datastore_record:
         raise HTTPException(status_code=404, detail="Datastore not found")
 
+    dims = int(dimensions)
+    if dims not in (2, 3):
+        dims = 2
+
+    method_clean = (method or "umap").lower().strip()
+    if method_clean not in ("umap", "pca", "tsne"):
+        method_clean = "umap"
+
     owner_username = datastore_record.owner.username
     db_path = get_datastore_db_path(owner_username, datastore_id)
     if not db_path.exists():
-        return DataLakeResponse(points=[], documents=[], total_chunks=0, reduction_method=method)
+        return DataLakeResponse(points=[], documents=[], total_chunks=0, dimensions=dims, reduction_method=method_clean.upper())
 
     mtime = db_path.stat().st_mtime
-    cache_key = f"{datastore_id}_{method.lower()}_{dimensions}d"
+    cache_key = f"{datastore_id}_{method_clean}_{dims}d"
 
     if cache_key in _data_lake_cache and _data_lake_cache[cache_key]["mtime"] == mtime:
         return _data_lake_cache[cache_key]["response"]
 
     try:
         with ss:
-            raw_view = ss.get_datalake_view(
-                method=method.lower(),
-                n_components=dimensions,
-                output_format='dict'
-            )
+            try:
+                raw_view = ss.get_datalake_view(
+                    method=method_clean,
+                    n_components=dims,
+                    output_format='dict'
+                )
+            except (ImportError, Exception) as first_err:
+                if method_clean == 'umap':
+                    ASCIIColors.warning(f"UMAP projection failed ({first_err}), falling back to PCA...")
+                    raw_view = ss.get_datalake_view(
+                        method='pca',
+                        n_components=dims,
+                        output_format='dict'
+                    )
+                    method_clean = 'pca'
+                else:
+                    raise first_err
 
         if not raw_view:
-            return DataLakeResponse(points=[], documents=[], total_chunks=0, reduction_method=method)
+            return DataLakeResponse(points=[], documents=[], total_chunks=0, dimensions=dims, reduction_method=method_clean.upper())
 
         document_chunks_count = {}
         doc_titles = {}
@@ -1072,8 +1103,11 @@ async def get_datastore_data_lake_projection(
             doc_id = str(p.get("document_id") or p.get("doc_id") or p.get("file_path") or "doc_1")
             x_val = float(p.get("x", 0.0))
             y_val = float(p.get("y", 0.0))
+            z_val = float(p.get("z", 0.0)) if (dims == 3 or "z" in p) else None
+
             if np.isnan(x_val) or np.isinf(x_val): x_val = 0.0
             if np.isnan(y_val) or np.isinf(y_val): y_val = 0.0
+            if z_val is not None and (np.isnan(z_val) or np.isinf(z_val)): z_val = 0.0
 
             text_content = str(p.get("chunk_text") or p.get("content") or p.get("text") or "")
             snippet = text_content[:180] + ("..." if len(text_content) > 180 else "")
@@ -1087,13 +1121,18 @@ async def get_datastore_data_lake_projection(
                 full_text=text_content,
                 x=round(x_val, 5),
                 y=round(y_val, 5),
+                z=round(z_val, 5) if z_val is not None else None,
                 metadata=p.get("metadata") or p.get("document_metadata") or {},
                 color=doc_color_map.get(doc_id, "#3b82f6")
             ))
-            doc_coords_accumulator.setdefault(doc_id, []).append((x_val, y_val))
+
+            if dims == 3 and z_val is not None:
+                doc_coords_accumulator.setdefault(doc_id, []).append((x_val, y_val, z_val))
+            else:
+                doc_coords_accumulator.setdefault(doc_id, []).append((x_val, y_val))
 
         doc_legends = []
-        for doc_id in unique_docs:
+        for idx, doc_id in enumerate(unique_docs):
             d_name = doc_titles.get(doc_id, "Document")
             d_coords = doc_coords_accumulator.get(doc_id, [(0.0, 0.0)])
             c_x = float(np.mean([pt[0] for pt in d_coords]))
@@ -1101,20 +1140,27 @@ async def get_datastore_data_lake_projection(
             if np.isnan(c_x) or np.isinf(c_x): c_x = 0.0
             if np.isnan(c_y) or np.isinf(c_y): c_y = 0.0
 
+            centroid_dict = {"x": round(c_x, 5), "y": round(c_y, 5)}
+            if dims == 3 and len(d_coords[0]) > 2:
+                c_z = float(np.mean([pt[2] for pt in d_coords]))
+                if np.isnan(c_z) or np.isinf(c_z): c_z = 0.0
+                centroid_dict["z"] = round(c_z, 5)
+
             doc_legends.append(DataLakeDocumentLegend(
                 id=doc_id,
                 name=d_name,
                 chunk_count=document_chunks_count.get(doc_id, 0),
                 color=doc_color_map.get(doc_id, "#3b82f6"),
-                centroid={"x": round(c_x, 5), "y": round(c_y, 5)}
+                centroid=centroid_dict,
+                symbol=DOCUMENT_SYMBOLS[idx % len(DOCUMENT_SYMBOLS)]
             ))
 
         response_obj = DataLakeResponse(
             points=points,
             documents=doc_legends,
             total_chunks=len(points),
-            dimensions=dimensions,
-            reduction_method=method.upper()
+            dimensions=dims,
+            reduction_method=method_clean.upper()
         )
         _data_lake_cache[cache_key] = {"mtime": mtime, "response": response_obj}
         return response_obj
@@ -1126,7 +1172,8 @@ async def get_datastore_data_lake_projection(
 @store_files_router.get("/data-lake/export-html", response_class=HTMLResponse)
 async def export_datastore_datalake_html(
     datastore_id: str,
-    method: str = "pca",
+    method: str = "umap",
+    dimensions: int = 2,
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
@@ -1141,6 +1188,9 @@ async def export_datastore_datalake_html(
     with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tf:
         tmp_html_path = tf.name
 
+    dims = int(dimensions) if dimensions in (2, 3) else 2
+    method_clean = (method or "umap").lower().strip()
+
     try:
         with ss:
             if hasattr(ss, "export_datalake_html"):
@@ -1148,8 +1198,8 @@ async def export_datastore_datalake_html(
                     ss.export_datalake_html(
                         output_file=tmp_html_path,
                         title=f"{datastore_record.name} · Semantic Data Lake",
-                        method=method.lower(),
-                        n_components=3
+                        method=method_clean,
+                        n_components=dims
                     )
                 except TypeError:
                     ss.export_datalake_html(tmp_html_path)
@@ -2123,6 +2173,9 @@ async def list_available_vectorizers(db: Session = Depends(get_db)):
                 if 'model' in clean_config:
                     del clean_config['model']
 
+                if is_sentence_transformer_vectorizer(binding.name, clean_config):
+                    clean_config["use_shared_server"] = True
+
                 raw_models_list = safe_store.SafeStore.list_models(
                     vectorizer_name=binding.name,
                     vectorizer_config=clean_config
@@ -2288,6 +2341,9 @@ async def create_datastore(ds_create: DataStoreCreate, current_user: UserAuthDet
 
     effective_vec_name = (forced_vec if force_rag and forced_vec else ds_create.vectorizer_name) or "default_st"
     effective_vec_config = ds_create.vectorizer_config or {}
+
+    if is_sentence_transformer_vectorizer(effective_vec_name, effective_vec_config):
+        effective_vec_config["use_shared_server"] = True
 
     new_ds_db_obj = DBDataStore(
         owner_user_id=user_db_record.id, 

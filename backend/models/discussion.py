@@ -121,6 +121,7 @@ class MessageOutput(BaseModel):
     token_count: Optional[int] = None
     sources: Optional[List[Dict]] = None
     events: Optional[List[Dict[str, Any]]] = None
+    forms: Optional[List[Dict[str, Any]]] = None
     image_references: List[str] = []
     active_images: List[bool] = Field(default_factory=list)
     user_grade: int = 0

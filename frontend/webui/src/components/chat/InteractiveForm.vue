@@ -1,5 +1,5 @@
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue';
+import { ref, reactive, onMounted, computed, watch } from 'vue';
 import apiClient from '../../services/api';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
@@ -16,19 +16,114 @@ const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
 const answers = reactive({});
 const isSubmitting = ref(false);
-const isDone = ref(!!props.form.submitted);
+const isDone = ref(!!props.form?.submitted);
 
-// Helper to parse options (handles both comma-strings and nested tag arrays)
+// Defensive Field Normalizer: Resolves fields across all library/event structures
+const resolvedFields = computed(() => {
+    if (!props.form) return [];
+
+    let rawFields = null;
+
+    // 1. Direct fields array or object
+    if (props.form.fields !== undefined && props.form.fields !== null) {
+        rawFields = props.form.fields;
+    } else if (props.form.form && props.form.form.fields !== undefined && props.form.form.fields !== null) {
+        rawFields = props.form.form.fields;
+    } else if (props.form.form_fields !== undefined && props.form.form_fields !== null) {
+        rawFields = props.form.form_fields;
+    } else if (props.form.elements !== undefined && props.form.elements !== null) {
+        rawFields = props.form.elements;
+    } else if (props.form.inputs !== undefined && props.form.inputs !== null) {
+        rawFields = props.form.inputs;
+    } else if (props.form.items !== undefined && props.form.items !== null) {
+        rawFields = props.form.items;
+    } else if (props.form.data?.fields !== undefined && props.form.data?.fields !== null) {
+        rawFields = props.form.data.fields;
+    } else if (props.form.content?.fields !== undefined && props.form.content?.fields !== null) {
+        rawFields = props.form.content.fields;
+    } else if (Array.isArray(props.form.form)) {
+        rawFields = props.form.form;
+    }
+
+    // 2. Parse if serialized as a JSON string
+    if (typeof rawFields === 'string') {
+        const trimmed = rawFields.trim();
+        if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+            try {
+                const parsed = JSON.parse(trimmed);
+                if (Array.isArray(parsed) || (typeof parsed === 'object' && parsed !== null)) {
+                    rawFields = parsed;
+                }
+            } catch (e) {
+                // Not valid JSON, continue to XML check
+            }
+        }
+    }
+
+    // 3. Convert dictionary/object to array if keyed by field name
+    if (rawFields && typeof rawFields === 'object' && !Array.isArray(rawFields)) {
+        rawFields = Object.entries(rawFields).map(([key, val]) => {
+            if (typeof val === 'object' && val !== null) {
+                return { name: val.name || key, ...val };
+            }
+            return { name: key, label: String(val), type: 'text' };
+        });
+    }
+
+    // 4. In-place XML parser fallback if raw markup is present
+    if (!rawFields || (Array.isArray(rawFields) && rawFields.length === 0)) {
+        const rawXml = props.form.raw || props.form.content || props.form.raw_xml || (typeof props.form.form === 'string' ? props.form.form : '');
+        if (typeof rawXml === 'string' && (rawXml.includes('<field') || rawXml.includes('<lollms_form'))) {
+            const extracted = [];
+            const fieldRegex = /<field\b([^>]*?)(?:>([\s\S]*?)<\/field>|\/>|\s*>)/gi;
+            const matches = [...rawXml.matchAll(fieldRegex)];
+            for (const m of matches) {
+                const fieldAttrsStr = m[1] || '';
+                const innerContent = m[2] || '';
+                const fAttrs = {};
+                const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+                for (const ma of fieldAttrsStr.matchAll(attrRegex)) {
+                    fAttrs[ma[1]] = ma[2] !== undefined ? ma[2] : ma[3];
+                }
+                if (innerContent) {
+                    const options = [...innerContent.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)].map(om => om[1].trim());
+                    if (options.length > 0) {
+                        fAttrs.options = options;
+                    }
+                }
+                if (fAttrs.name || fAttrs.label) {
+                    extracted.push(fAttrs);
+                }
+            }
+            if (extracted.length > 0) {
+                rawFields = extracted;
+            }
+        }
+    }
+
+    return Array.isArray(rawFields) ? rawFields : [];
+});
+
+const formTitle = computed(() => {
+    return props.form?.title || props.form?.form?.title || props.form?.name || 'Interactive Form';
+});
+
+const formDescription = computed(() => {
+    return props.form?.description || props.form?.form?.description || '';
+});
+
+const formSubmitLabel = computed(() => {
+    return props.form?.submit_label || props.form?.form?.submit_label || 'Send Response';
+});
+
+// Helper to parse options (handles comma-strings, arrays of strings/objects, and bracketed lists)
 const getOptions = (field) => {
-    // Audit of all possible keys used by various library versions and parsers
     let opts = field.options || field.choices || field.values || field.items || field.content || [];
 
-    // If the field object ITSELF has the options (happens if the parser is flat)
     if ((!opts || opts.length === 0) && field.value && Array.isArray(field.value)) {
         opts = field.value;
     }
 
-    // Handle bracketed python/JSON list formats (e.g. "['Red', 'Green', 'Blue']")
     if (typeof opts === 'string' && opts.trim().startsWith('[')) {
         try {
             const cleaned = opts.trim().replace(/'/g, '"');
@@ -41,20 +136,16 @@ const getOptions = (field) => {
         }
     }
 
-    // Handle Array of Objects or Strings
     if (Array.isArray(opts)) {
         return opts.map(o => {
             if (typeof o === 'object' && o !== null) {
-                // Return first available text property
                 return o.label || o.value || o.text || o.name || Object.values(o)[0];
             }
             return String(o);
         });
     }
 
-    // Handle Comma-Separated Strings (Fallback for less capable parsers)
     if (typeof opts === 'string' && opts.trim().length > 0) {
-        // If the string contains newlines, split by line, otherwise by comma
         const separator = opts.includes('\n') ? /\n/ : ',';
         return opts.split(separator).map(o => o.trim()).filter(Boolean);
     }
@@ -62,11 +153,16 @@ const getOptions = (field) => {
     return [];
 };
 
-onMounted(() => {
-    // Initialize defaults based on field types
-    props.form.fields.forEach(field => {
+const initAnswers = () => {
+    const fieldsList = resolvedFields.value;
+    if (!Array.isArray(fieldsList) || fieldsList.length === 0) return;
+
+    fieldsList.forEach(field => {
+        if (!field || !field.name) return;
+
+        if (answers[field.name] !== undefined) return;
+
         if (field.default !== undefined) {
-            // Correctly handle boolean defaults for checkboxes
             if (field.type === 'checkbox') {
                 answers[field.name] = (field.default === 'true' || field.default === true);
             } else if (field.type === 'number' || field.type === 'range') {
@@ -81,31 +177,42 @@ onMounted(() => {
         else answers[field.name] = '';
     });
 
-    if (props.form.submitted && props.form.answers) {
+    if (props.form?.submitted && props.form?.answers) {
         Object.assign(answers, props.form.answers);
     }
+};
+
+onMounted(() => {
+    initAnswers();
+});
+
+watch(resolvedFields, () => {
+    initAnswers();
+}, { deep: true });
+
+watch(() => props.form?.submitted, (newVal) => {
+    isDone.value = Boolean(newVal);
 });
 
 async function submitForm() {
+    if (resolvedFields.value.length === 0) return;
     isSubmitting.value = true;
     try {
-        const formId = props.form.id || props.form.form_id;
-        await apiClient.post(`/api/discussions/${props.discussionId}/forms/${formId}/submit`, {
+        const formId = props.form.id || props.form.form_id || props.form.form?.id || props.form.form?.form_id || formTitle.value;
+        await apiClient.post(`/api/discussions/${props.discussionId}/forms/${encodeURIComponent(formId)}/submit`, {
             answers: { ...answers }
         });
         isDone.value = true;
         uiStore.addNotification("Response submitted successfully.", "success");
 
-        // Format the confirmation message for the AI's thread
         const formattedAnswers = Object.entries(answers)
             .map(([k, v]) => `- **${k}**: ${v}`)
             .join('\n');
 
-        const formTitle = props.form.title || 'Form';
+        const titleText = formTitle.value;
 
-        // Send a silent system prompt to trigger AI continuation
         discussionsStore.sendMessage({
-            prompt: `[FORM_SUBMISSION: ${formTitle}]\nUser provided the following data:\n${formattedAnswers}\n\nPlease analyze this data and continue your task.`
+            prompt: `[FORM_SUBMISSION: ${titleText}]\nUser provided the following data:\n${formattedAnswers}\n\nPlease analyze this data and continue your task.`
         });
 
     } catch (e) {
@@ -126,8 +233,8 @@ async function submitForm() {
                     <IconPlus v-else class="w-6 h-6" />
                 </div>
                 <div>
-                    <h4 class="font-black text-lg uppercase tracking-tight text-gray-900 dark:text-white">{{ form.title }}</h4>
-                    <p v-if="form.description" class="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">{{ form.description }}</p>
+                    <h4 class="font-black text-lg uppercase tracking-tight text-gray-900 dark:text-white">{{ formTitle }}</h4>
+                    <p v-if="formDescription" class="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">{{ formDescription }}</p>
                 </div>
             </div>
             <div v-if="isDone" class="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full border border-green-500/20">
@@ -138,24 +245,29 @@ async function submitForm() {
 
         <!-- Form Fields -->
         <div class="p-8 space-y-8">
-            <div v-for="field in form.fields" :key="field.name" class="group/field transition-all">
+            <div v-if="resolvedFields.length === 0" class="text-center py-6 text-xs text-gray-400 italic">
+                <IconAnimateSpin v-if="form?.isLoading" class="w-5 h-5 mx-auto mb-2 text-blue-500 animate-spin" />
+                <span>{{ form?.isLoading ? 'Loading form fields...' : 'No fields defined for this form.' }}</span>
+            </div>
+
+            <div v-for="field in resolvedFields" :key="field.name || field.id" class="group/field transition-all">
                 <!-- TYPE: Section / Header -->
                 <div v-if="field.type === 'section'" class="pt-6 pb-2 border-b-2 border-gray-100 dark:border-gray-800">
-                    <h5 class="text-xs font-black uppercase tracking-[0.2em] text-blue-500">{{ field.label }}</h5>
+                    <h5 class="text-xs font-black uppercase tracking-[0.2em] text-blue-500">{{ field.label || field.name }}</h5>
                 </div>
 
                 <!-- INPUT FIELDS -->
                 <template v-else>
                     <div class="flex justify-between items-baseline mb-2">
                         <label class="block text-sm font-black text-gray-700 dark:text-gray-200 uppercase tracking-wide">
-                            {{ field.label }}
+                            {{ field.label || field.name }}
                             <span v-if="field.required" class="text-red-500 ml-1">*</span>
                         </label>
                         <span v-if="field.hint" class="text-[10px] font-medium text-gray-400 italic">{{ field.hint }}</span>
                     </div>
 
                     <!-- TYPE: Text -->
-                    <input v-if="field.type === 'text'" 
+                    <input v-if="field.type === 'text' || !field.type" 
                            v-model="answers[field.name]" 
                            :placeholder="field.placeholder" 
                            class="input-field focus:ring-4 focus:ring-blue-500/10" 

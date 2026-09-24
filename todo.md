@@ -69,6 +69,10 @@ new ui:
 - OK Fix user update and add a way to disconnect the user from admin panel
 - OK Add note building and reloading to the discussion (add a new code environment with save note button and add a notes list with open note and a use note in discussion options), 
 
+
+# data
+affichage chunked files
+
 ## Discussion:
 - Add the possibility to use multiple bindings at once with different configurations
 - activate optional RAG for discussion datazone

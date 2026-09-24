@@ -217,6 +217,17 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     import('../notes').then(n => n.useNotesStore().fetchNotes());
                     break;
 
+                case 'form_ready':
+                    if (data.content) {
+                        if (!messageToUpdate.forms) messageToUpdate.forms = [];
+                        const formItem = data.content.form || data.content;
+                        const formId = formItem.id || formItem.form_id;
+                        if (!messageToUpdate.forms.some(f => (f.id && f.id === formId) || (f.title && f.title === formItem.title))) {
+                            messageToUpdate.forms.push(formItem);
+                        }
+                    }
+                    break;
+
                 case 'sources':
                     messageToUpdate.sources = Array.isArray(data.content) ? data.content : [data.content];
                     if (!messageToUpdate.metadata) messageToUpdate.metadata = {};
@@ -248,11 +259,16 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         if (finalAi.events && finalAi.events.length > 0) {
                             messageToUpdate.events = finalAi.events;
                         }
+                        if (finalAi.forms && finalAi.forms.length > 0) {
+                            messageToUpdate.forms = finalAi.forms;
+                        } else if (finalAi.metadata?.forms && finalAi.metadata.forms.length > 0) {
+                            messageToUpdate.forms = finalAi.metadata.forms;
+                        }
                     }
                     break;
                     
                 default:
-                    if (['tool_call', 'tool_output', 'step_start', 'step_end', 'info', 'warning', 'error'].includes(data.type)) {
+                    if (['tool_call', 'tool_output', 'step_start', 'step_end', 'info', 'warning', 'error', 'form_ready', 'form_submitted'].includes(data.type)) {
                         if (!messageToUpdate.events) messageToUpdate.events = [];
                         messageToUpdate.events.push(data);
                         messageToUpdate.lastEvent = data;
