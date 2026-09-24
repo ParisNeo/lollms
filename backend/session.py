@@ -972,7 +972,7 @@ def build_lollms_client_from_params(
         elif forced_ctx and int(forced_ctx) > 1:
             primary_config["ctx_size"] = int(forced_ctx)
         elif not primary_config.get("ctx_size") or int(primary_config.get("ctx_size", 0)) <= 1:
-            primary_config["ctx_size"] = 4096
+            primary_config["ctx_size"] = 32000
 
         primary_config.update(final_user_params)
         primary_config["model_name"] = actual_model

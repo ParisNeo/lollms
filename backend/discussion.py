@@ -97,7 +97,7 @@ def get_user_discussion(
             pass
 
     if not max_context_size or max_context_size <= 1:
-        max_context_size = 4096
+        max_context_size = 32000
 
     discussion = dm.get_discussion(
         lollms_client=lc,
