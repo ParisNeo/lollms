@@ -1195,6 +1195,32 @@ def build_llm_generation_router(router: APIRouter):
         elif user_model_full:
             target_model = user_model_full
 
+        # Resolve reasoning effort and thinking activation upfront
+        resolved_effort = None
+        explicit_thinking = None
+        if thinking is not None and thinking.strip():
+            c_th = thinking.strip().lower()
+            if c_th in ['true', '1', 'yes', 'on', 'enabled']:
+                explicit_thinking = True
+            elif c_th in ['false', '0', 'no', 'off', 'disabled']:
+                explicit_thinking = False
+
+        if reasoning_effort is not None and reasoning_effort.strip():
+            clean_effort = reasoning_effort.strip().lower()
+            if clean_effort in ['low', 'medium', 'high', 'max']:
+                resolved_effort = clean_effort
+            elif clean_effort in ['none', 'off', 'disabled', 'false']:
+                resolved_effort = None
+                explicit_thinking = False
+            else:
+                resolved_effort = clean_effort
+        elif explicit_thinking is False:
+            resolved_effort = None
+        elif owner_db_user.reasoning_effort:
+            resolved_effort = owner_db_user.reasoning_effort
+        elif owner_db_user.reasoning_activation or explicit_thinking is True:
+            resolved_effort = "low"
+
         runtime_llm_params = {}
         if explicit_thinking is not None:
             runtime_llm_params["reasoning_activation"] = explicit_thinking
