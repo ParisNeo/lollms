@@ -314,23 +314,22 @@ def get_current_active_user(db_user: DBUser = Depends(get_current_db_user_from_t
             "reasoning_summary": db_user.reasoning_summary
         }
 
-        if user_model_full and '/' in user_model_full:
-            binding_alias, model_name = user_model_full.split('/', 1)
-            binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias).first()
-            if binding and binding.model_aliases:
-                if isinstance(binding.model_aliases, str):
-                    try:
-                        binding.model_aliases = json.loads(binding.model_aliases)
-                    except Exception as e:
-                        binding.model_aliases = {}
-                
-                alias_info = binding.model_aliases.get(model_name)
-                if alias_info and not alias_info.get('allow_parameters_override', True):
-                    llm_settings_overridden = True
-                    param_map = {"temperature": "llm_temperature", "top_k": "llm_top_k", "top_p": "llm_top_p", "repeat_penalty": "llm_repeat_penalty", "repeat_last_n": "llm_repeat_last_n", "reasoning_activation": "reasoning_activation", "reasoning_effort": "reasoning_effort", "reasoning_summary": "reasoning_summary"}
-                    for alias_key, user_key in param_map.items():
-                        if alias_key in alias_info and alias_info[alias_key] is not None:
-                            effective_llm_params[user_key] = alias_info[alias_key]
+        _, _, prof_info = get_universal_model_profile(db, user_model_full, modality="llm")
+        if prof_info and not prof_info.get('allow_parameters_override', True):
+            llm_settings_overridden = True
+            param_map = {
+                "temperature": "llm_temperature",
+                "top_k": "llm_top_k",
+                "top_p": "llm_top_p",
+                "repeat_penalty": "llm_repeat_penalty",
+                "repeat_last_n": "llm_repeat_last_n",
+                "reasoning_activation": "reasoning_activation",
+                "reasoning_effort": "reasoning_effort",
+                "reasoning_summary": "reasoning_summary"
+            }
+            for alias_key, user_key in param_map.items():
+                if alias_key in prof_info and prof_info[alias_key] is not None:
+                    effective_llm_params[user_key] = prof_info[alias_key]
 
         lc = get_user_lollms_client(username)
         ai_name_for_user = getattr(lc, "ai_name", "assistant")
@@ -583,16 +582,26 @@ def invalidate_user_mcp_cache(username: str):
 def reload_lollms_client_mcp(username: str):
     invalidate_user_mcp_cache(username)
 
-def get_user_lollms_client(username: str, binding_alias_override: Optional[str] = None, load_mcp: bool = True) -> LollmsClient:
-    client = build_lollms_client_from_params(username, binding_alias_override, load_mcp=load_mcp)
-    
+def get_user_lollms_client(
+    username: str,
+    binding_alias_override: Optional[str] = None,
+    model_name_override: Optional[str] = None,
+    load_mcp: bool = True
+) -> LollmsClient:
+    client = build_lollms_client_from_params(
+        username=username,
+        binding_alias=binding_alias_override,
+        model_name=model_name_override,
+        load_mcp=load_mcp
+    )
+
     if username in user_sessions:
         clients_cache = user_sessions[username].setdefault("lollms_clients_cache", {})
-        cache_key = binding_alias_override or "default"
+        cache_key = f"{binding_alias_override or 'default'}_{model_name_override or 'default'}"
         if not load_mcp:
             cache_key += "_no_mcp"
         clients_cache[cache_key] = client
-        
+
     return client
 
 def _build_universal_profiles_for_modality(
@@ -608,7 +617,32 @@ def _build_universal_profiles_for_modality(
     model_profiles = {}
     default_model_profile_name = None
 
-    # First pass: Build concrete binding profiles & regular model profiles
+    def _matches_active(b_alias: str, p_key: str, p_cfg: dict) -> bool:
+        if not active_model_name:
+            return False
+        m_raw = active_model_name.strip()
+        m_low = m_raw.lower()
+        if active_binding_alias and active_binding_alias != b_alias:
+            if not m_low.startswith(f"{b_alias.lower()}/"):
+                return False
+
+        p_title = (p_cfg.get('title') or '').strip().lower()
+        p_name = (p_cfg.get('name') or '').strip().lower()
+        p_target = (p_cfg.get('model_name') or '').strip().lower()
+        p_key_low = p_key.strip().lower()
+        namespaced_key = f"{b_alias}/{p_key}".lower()
+        namespaced_target = f"{b_alias}/{p_target}".lower() if p_target else ""
+
+        return (
+            m_low == p_key_low or
+            m_low == namespaced_key or
+            m_low == p_title or
+            m_low == p_name or
+            m_low == p_target or
+            m_low == namespaced_target
+        )
+
+    # First pass: Build concrete binding profiles & universal model profiles
     for binding in all_bindings:
         b_config = binding.config.copy() if binding.config else {}
         is_binding_default = (binding.alias == active_binding_alias)
@@ -623,19 +657,21 @@ def _build_universal_profiles_for_modality(
         if isinstance(aliases, str):
             try: aliases = json.loads(aliases)
             except Exception: aliases = {}
+        if not isinstance(aliases, dict):
+            aliases = {}
 
         for orig_name, alias_data in aliases.items():
             if not isinstance(alias_data, dict):
                 alias_data = {"title": str(alias_data)}
-            
+
             cfg = alias_data.get('alias', {}) if 'alias' in alias_data else alias_data
             prof_name = f"{binding.alias}/{orig_name}"
-            is_model_default = is_binding_default and (orig_name == active_model_name or cfg.get('title') == active_model_name)
+            is_model_default = _matches_active(binding.alias, orig_name, cfg)
 
             if is_model_default:
                 default_model_profile_name = prof_name
 
-            raw_ctx = forced_ctx_size or cfg.get('forced_context_size') or cfg.get('ctx_size')
+            raw_ctx = forced_ctx_size or cfg.get('forced_context_size') or cfg.get('ctx_size') or b_config.get('ctx_size')
             effective_ctx = None
             if raw_ctx is not None:
                 try:
@@ -648,6 +684,7 @@ def _build_universal_profiles_for_modality(
             target_model = cfg.get('model_name') or orig_name
 
             profile_entry = {
+                "name": orig_name,
                 "binding_profile_name": binding.alias,
                 "model_name": target_model,
                 "title": cfg.get('title') or orig_name,
@@ -684,9 +721,10 @@ def _build_universal_profiles_for_modality(
                     if v is not None:
                         profile_entry[k] = v
 
+            # Index under both full ID and short key for seamless lollms_client lookup
             model_profiles[prof_name] = profile_entry
-
-        # Include default model as fallback profile ONLY
+            if orig_name not in model_profiles:
+                model_profiles[orig_name] = profile_entry
 
     # Second pass: Dynamically assemble Smart Router groups using member profiles
     for binding in all_bindings:
@@ -878,10 +916,47 @@ def build_lollms_client_from_params(
             user_overrides=stt_params or {}
         )
 
-        # 1. Resolve Primary LLM Binding
+        # 1. Resolve Primary LLM Universal Profile and Config
         primary_binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
         primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
-        actual_model = target_model_name or (primary_binding.default_model_name if primary_binding else "")
+
+        active_prof = None
+        if default_llm_prof and default_llm_prof in llm_model_profiles:
+            active_prof = llm_model_profiles[default_llm_prof]
+        else:
+            for p in llm_model_profiles.values():
+                if p.get("is_default"):
+                    active_prof = p
+                    break
+
+        actual_model = (active_prof.get("model_name") if active_prof else None) or target_model_name or (primary_binding.default_model_name if primary_binding else "")
+
+        active_ctx = forced_ctx
+        if not active_ctx and active_prof:
+            active_ctx = active_prof.get("forced_context_size") or active_prof.get("ctx_size")
+        if not active_ctx and primary_config.get("ctx_size"):
+            try:
+                parsed_c = int(primary_config["ctx_size"])
+                if parsed_c > 1: active_ctx = parsed_c
+            except (ValueError, TypeError):
+                pass
+        if not active_ctx or active_ctx <= 1:
+            active_ctx = 32000
+
+        primary_config["model_name"] = actual_model
+        primary_config["ctx_size"] = active_ctx
+        primary_config["forced_context_size"] = active_ctx
+
+        # Apply parameters respecting allow_parameters_override
+        if active_prof and not active_prof.get("allow_parameters_override", True):
+            for param_k in ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_activation', 'reasoning_effort', 'reasoning_summary']:
+                if active_prof.get(param_k) is not None:
+                    primary_config[param_k] = active_prof[param_k]
+        else:
+            primary_config.update(final_user_params)
+            primary_config["model_name"] = actual_model
+            primary_config["ctx_size"] = active_ctx
+            primary_config["forced_context_size"] = active_ctx
 
         # 2. Resolve Primary TTS Binding
         target_tts_alias = tts_binding_alias or (user_db.tts_binding_model_name.split('/')[0] if user_db.tts_binding_model_name and '/' in user_db.tts_binding_model_name else None)
@@ -931,55 +1006,6 @@ def build_lollms_client_from_params(
         if stt_params:
             primary_stt_config.update(stt_params)
 
-        found_alias_ctx = None
-        if primary_binding and primary_binding.model_aliases:
-            aliases_map = primary_binding.model_aliases
-            if isinstance(aliases_map, str):
-                try: aliases_map = json.loads(aliases_map)
-                except Exception: aliases_map = {}
-            if isinstance(aliases_map, dict):
-                alias_cfg = None
-                if target_model_name in aliases_map:
-                    alias_item = aliases_map[target_model_name]
-                    alias_cfg = alias_item.get('alias', {}) if isinstance(alias_item, dict) and 'alias' in alias_item else (alias_item if isinstance(alias_item, dict) else {})
-                else:
-                    for orig_k, a_val in aliases_map.items():
-                        a_dict = a_val.get('alias', {}) if isinstance(a_val, dict) and 'alias' in a_val else (a_val if isinstance(a_val, dict) else {})
-                        if orig_k == target_model_name or a_dict.get('title') == target_model_name or a_dict.get('name') == target_model_name:
-                            alias_cfg = a_dict
-                            break
-
-                if alias_cfg:
-                    if alias_cfg.get('model_name'):
-                        actual_model = alias_cfg.get('model_name')
-                    alias_ctx = alias_cfg.get('forced_context_size') or alias_cfg.get('ctx_size')
-                    if alias_ctx:
-                        try:
-                            parsed = int(alias_ctx)
-                            if parsed > 1:
-                                found_alias_ctx = parsed
-                        except (ValueError, TypeError):
-                            pass
-                    if not alias_cfg.get('allow_parameters_override', True):
-                        for param_k in ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_activation', 'reasoning_effort', 'reasoning_summary']:
-                            if alias_cfg.get(param_k) is not None:
-                                primary_config[param_k] = alias_cfg[param_k]
-
-        primary_config["model_name"] = actual_model
-
-        if found_alias_ctx and found_alias_ctx > 1:
-            primary_config["ctx_size"] = found_alias_ctx
-        elif forced_ctx and int(forced_ctx) > 1:
-            primary_config["ctx_size"] = int(forced_ctx)
-        elif not primary_config.get("ctx_size") or int(primary_config.get("ctx_size", 0)) <= 1:
-            primary_config["ctx_size"] = 32000
-
-        primary_config.update(final_user_params)
-        primary_config["model_name"] = actual_model
-        # Ensure ctx_size wasn't wiped out by user_params
-        if found_alias_ctx and found_alias_ctx > 1:
-            primary_config["ctx_size"] = found_alias_ctx
-
         client_init_params = {
             "load_llm": load_llm,
             "load_tti": load_tti,
@@ -1021,6 +1047,15 @@ def build_lollms_client_from_params(
 
                 try:
                     lc = LollmsClient(**registry_payload, callback=callback)
+                    if hasattr(lc, 'llm') and lc.llm:
+                        if hasattr(lc.llm, 'set_forced_ctx_size') and callable(lc.llm.set_forced_ctx_size):
+                            try: lc.llm.set_forced_ctx_size(active_ctx)
+                            except Exception: pass
+                        if hasattr(lc.llm, 'forced_context_size'):
+                            lc.llm.forced_context_size = active_ctx
+                        if hasattr(lc.llm, 'ctx_size'):
+                            lc.llm.ctx_size = active_ctx
+
                     _global_client_registry[registry_key] = lc
                     return lc
                 except Exception as engine_err:
@@ -1228,33 +1263,105 @@ def get_user_notebook_assets_path(username: str, notebook_id: str) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     return path
 
-def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], Optional[str]]:
-    all_bindings = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()
-    clean_search = alias_title.strip().lower()
-    for binding in all_bindings:
-        model_aliases = binding.model_aliases or {}
-        if isinstance(model_aliases, str):
-            try:
-                model_aliases = json.loads(model_aliases)
-            except Exception:
-                continue
+def get_universal_model_profile(
+    db: Session,
+    requested_model: Optional[str],
+    modality: str = "llm"
+) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, Any]]]:
+    """
+    Authoritative Universal Model Profile resolver.
+    Matches incoming requested model by:
+    1. Full profile ID ('binding_alias/profile_key')
+    2. Profile key ('profile_key')
+    3. Profile title or name
+    4. Underlying physical model name
+    Returns (binding_alias, profile_key, profile_dict).
+    """
+    binding_classes = {
+        "llm": DBLLMBinding,
+        "tti": DBTTIBinding,
+        "tts": DBTTSBinding,
+        "stt": DBSTTBinding
+    }
+    binding_cls = binding_classes.get(modality, DBLLMBinding)
+    all_bindings = db.query(binding_cls).filter(binding_cls.is_active == True).all()
 
-        for original_name, alias_data in model_aliases.items():
-            if alias_data:
-                cfg = alias_data.get('alias', {}) if isinstance(alias_data, dict) and 'alias' in alias_data else (alias_data if isinstance(alias_data, dict) else {})
-                title = cfg.get('title') or cfg.get('name') or (str(alias_data) if not isinstance(alias_data, dict) else None)
-                name = cfg.get('name') or cfg.get('title')
-                target = cfg.get('model_name') or original_name
-                if (
-                    alias_title == title or 
-                    alias_title == original_name or 
-                    alias_title == name or
-                    clean_search == (title or '').lower() or
-                    clean_search == (original_name or '').lower() or
-                    clean_search == (name or '').lower()
-                ):
-                    return binding.alias, target or original_name
-    return None, None
+    if not requested_model or not requested_model.strip():
+        if all_bindings:
+            first_b = all_bindings[0]
+            aliases = first_b.model_aliases or {}
+            if isinstance(aliases, str):
+                try: aliases = json.loads(aliases)
+                except Exception: aliases = {}
+            if isinstance(aliases, dict) and aliases:
+                p_key = next(iter(aliases))
+                p_val = aliases[p_key]
+                cfg = p_val.get('alias', p_val) if isinstance(p_val, dict) else {"title": str(p_val)}
+                return first_b.alias, p_key, cfg
+            return first_b.alias, first_b.default_model_name, None
+        return None, None, None
+
+    req_str = requested_model.strip()
+    req_lower = req_str.lower()
+    has_slash = '/' in req_str
+    prefix_alias = req_str.split('/', 1)[0] if has_slash else None
+    suffix_model = req_str.split('/', 1)[1] if has_slash else req_str
+    suffix_lower = suffix_model.lower()
+
+    # Pass 1: Direct matches against bindings and profiles
+    for binding in all_bindings:
+        if prefix_alias and binding.alias != prefix_alias:
+            continue
+
+        aliases = binding.model_aliases or {}
+        if isinstance(aliases, str):
+            try: aliases = json.loads(aliases)
+            except Exception: aliases = {}
+        if not isinstance(aliases, dict):
+            aliases = {}
+
+        # 1. Exact profile key match
+        if suffix_model in aliases:
+            p_val = aliases[suffix_model]
+            cfg = p_val.get('alias', p_val) if isinstance(p_val, dict) else {"title": str(p_val)}
+            return binding.alias, suffix_model, cfg
+
+        # 2. Case-insensitive key, title, name, or model_name match
+        for p_key, p_val in aliases.items():
+            if not isinstance(p_val, dict):
+                p_val = {"title": str(p_val)}
+            cfg = p_val.get('alias', p_val) if isinstance(p_val, dict) else p_val
+            p_title = (cfg.get('title') or '').strip().lower()
+            p_name = (cfg.get('name') or '').strip().lower()
+            p_model = (cfg.get('model_name') or '').strip().lower()
+            p_key_lower = p_key.strip().lower()
+
+            if (
+                suffix_lower == p_key_lower or
+                suffix_lower == p_title or
+                suffix_lower == p_name or
+                suffix_lower == p_model or
+                req_lower == f"{binding.alias}/{p_key}".lower() or
+                req_lower == f"{binding.alias}/{p_title}".lower()
+            ):
+                return binding.alias, p_key, cfg
+
+    # Pass 2: Fallback for raw physical models running on a binding
+    if prefix_alias:
+        target_b = next((b for b in all_bindings if b.alias == prefix_alias), None)
+        if target_b:
+            return target_b.alias, suffix_model, None
+
+    # Pass 3: Global search without slash fallback
+    for binding in all_bindings:
+        if binding.default_model_name and suffix_lower == binding.default_model_name.lower():
+            return binding.alias, binding.default_model_name, None
+
+    return None, None, None
+
+def find_model_by_alias(db: Session, alias_title: str) -> Tuple[Optional[str], Optional[str]]:
+    binding_alias, profile_key, _ = get_universal_model_profile(db, alias_title, modality="llm")
+    return binding_alias, profile_key
 
 def invalidate_model_cache(db: Session):
     db.query(GlobalConfig).filter(GlobalConfig.key == "cache_available_models").delete()
@@ -1266,53 +1373,16 @@ def invalidate_model_cache(db: Session):
     manager.broadcast_internal_event_sync("global_model_cache_invalidate", {})
 
 def resolve_model_name(db: Session, requested_model: str, fallback_to_default: bool = True) -> Tuple[str, str]:
-    if not requested_model:
-        if fallback_to_default:
-            default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
-            if default_binding:
-                return default_binding.alias, default_binding.default_model_name
-        raise HTTPException(status_code=400, detail="Model name is empty.")
+    binding_alias, profile_key, _ = get_universal_model_profile(db, requested_model, modality="llm")
+    if binding_alias and profile_key:
+        return binding_alias, profile_key
 
-    # 1. Check if model is passed in 'binding/model' format
-    if '/' in requested_model:
-        parts = requested_model.split('/', 1)
-        binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == parts[0], DBLLMBinding.is_active == True).first()
-        if binding:
-            model_aliases = binding.model_aliases or {}
-            if isinstance(model_aliases, str):
-                try:
-                    model_aliases = json.loads(model_aliases)
-                except Exception:
-                    model_aliases = {}
-
-            req_lower = parts[1].strip().lower()
-            for original_name, alias_data in model_aliases.items():
-                if alias_data:
-                    cfg = alias_data.get('alias', {}) if isinstance(alias_data, dict) and 'alias' in alias_data else (alias_data if isinstance(alias_data, dict) else {})
-                    title = cfg.get('title') or cfg.get('name')
-                    name = cfg.get('name') or cfg.get('title')
-                    target = cfg.get('model_name') or original_name
-                    if (
-                        parts[1] == title or 
-                        parts[1] == original_name or 
-                        parts[1] == name or
-                        req_lower == (title or '').lower() or 
-                        req_lower == (original_name or '').lower() or
-                        req_lower == (name or '').lower()
-                    ):
-                        return parts[0], target or original_name
-            return parts[0], parts[1]
-
-    # 2. Check if model is passed as profile name/title without slash
-    binding_alias, model_name = find_model_by_alias(db, requested_model)
-    if binding_alias:
-        return binding_alias, model_name
-
-    # 3. Fallback to default model if configured
     if fallback_to_default:
         default_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).order_by(DBLLMBinding.id).first()
         if default_binding:
-            ASCIIColors.warning(f"Model '{requested_model}' not found. Falling back to default: {default_binding.alias}/{default_binding.default_model_name}")
-            return default_binding.alias, default_binding.default_model_name
+            def_alias, def_prof, _ = get_universal_model_profile(db, None, modality="llm")
+            target_model = def_prof or default_binding.default_model_name or "default"
+            ASCIIColors.warning(f"Universal profile '{requested_model}' not found. Falling back to default: {default_binding.alias}/{target_model}")
+            return default_binding.alias, target_model
 
-    raise HTTPException(status_code=400, detail=f"Model '{requested_model}' not found. Please use a valid profile name or 'binding/model' format.")
+    raise HTTPException(status_code=400, detail=f"Model profile '{requested_model}' not found. Please use an active universal profile name or 'binding/profile' format.")

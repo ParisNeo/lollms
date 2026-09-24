@@ -1185,19 +1185,26 @@ def build_llm_generation_router(router: APIRouter):
             discussion_id, current_user, db, 'interact'
         )
 
-        # 2. Setup LLM Client
+        # 2. Setup LLM Client with active Universal Model Profile
         user_model_full = current_user.lollms_model_name
         binding_alias = None
+        target_model = None
         if user_model_full and '/' in user_model_full:
-            binding_alias, _ = user_model_full.split('/', 1)
+            binding_alias, target_model = user_model_full.split('/', 1)
+        elif user_model_full:
+            target_model = user_model_full
 
-        lc = get_user_lollms_client(owner_username, binding_alias)
+        lc = get_user_lollms_client(
+            username=owner_username,
+            binding_alias_override=binding_alias,
+            model_name_override=target_model
+        )
         reset_client_state(lc)
         discussion_obj.lollms_client = lc
 
         # Ensure max_context_size is updated with the active model profile
         try:
-            ctx = lc.get_ctx_size()
+            ctx = lc.get_ctx_size(target_model) or lc.get_ctx_size()
             if ctx and int(ctx) > 1:
                 discussion_obj.max_context_size = int(ctx)
             else:
@@ -2105,28 +2112,17 @@ def build_llm_generation_router(router: APIRouter):
                     except Exception as e:
                         print(f"Warning: Failed to retrieve get_user_memory_manager: {e}")
 
-                    # Resolve if current model supports vision defensively by querying registered aliases
+                    # Resolve vision support from the active Universal Model Profile
                     model_supports_vision = True
                     try:
-                        # Inspect the active model settings
-                        user_model_full = current_user.lollms_model_name
-                        if user_model_full and '/' in user_model_full:
-                            binding_alias_key, model_key = user_model_full.split('/', 1)
-                            db_verify = next(get_db())
-                            try:
-                                binding_rec = db_verify.query(DBLLMBinding).filter(DBLLMBinding.alias == binding_alias_key).first()
-                                if binding_rec and binding_rec.model_aliases:
-                                    aliases = binding_rec.model_aliases
-                                    if isinstance(aliases, str):
-                                        aliases = json.loads(aliases)
-                                    alias_info = aliases.get(model_key)
-                                    if alias_info:
-                                        alias_config = alias_info.get('alias', {}) if 'alias' in alias_info else alias_info
-                                        # If has_vision is explicitly defined and False, flag it
-                                        if alias_config.get('has_vision') is False:
-                                            model_supports_vision = False
-                            finally:
-                                db_verify.close()
+                        from backend.session import get_universal_model_profile
+                        db_verify = next(get_db())
+                        try:
+                            _, _, prof_info = get_universal_model_profile(db_verify, current_user.lollms_model_name, modality="llm")
+                            if prof_info and prof_info.get('vision_enabled') is False and prof_info.get('has_vision') is False:
+                                model_supports_vision = False
+                        finally:
+                            db_verify.close()
                     except Exception as vision_ex:
                         print(f"Warning: Failed to parse vision support profile, defaulting to True: {vision_ex}")
 
