@@ -404,6 +404,15 @@ export const useDataStore = defineStore('data', () => {
         return response.data;
     }
 
+    async function generateSparql({ storeId, query, modelBinding = null, modelName = null }) {
+        const response = await apiClient.post(`/api/store/${storeId}/graph/generate-sparql`, {
+            query,
+            model_binding: modelBinding,
+            model_name: modelName
+        });
+        return response.data;
+    }
+
     async function queryDataStoreGraphHybrid({ storeId, query, top_k = 5, dense_weight = 0.4, bm25_weight = 0.3, graph_weight = 0.3 }) {
         const response = await apiClient.post(`/api/store/${storeId}/graph/query-hybrid`, {
             query,
@@ -978,6 +987,7 @@ export const useDataStore = defineStore('data', () => {
         findGraphPath,
         queryDataStoreGraph,
         querySparqlGraph,
+        generateSparql,
         queryDataStoreGraphHybrid,
         queryDataStore,
         queryDataStoreAndAnswer,

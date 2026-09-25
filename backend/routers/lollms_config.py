@@ -162,3 +162,45 @@ async def get_stt_models(
         })
 
     return sorted(all_models, key=lambda x: x['name'])
+
+@lollms_config_router.get("/ttm-models", response_model=List[ModelInfo])
+async def get_ttm_models(
+    db: Session = Depends(get_db)
+):
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    profiles_dict = await get_all_universal_profiles(modality="ttm", db=db)
+    model_profiles = profiles_dict.get("profiles", {})
+
+    all_models = []
+    for prof_id, prof_info in model_profiles.items():
+        if prof_info.get("is_available") is False:
+            continue
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "alias": prof_info
+        })
+
+    return sorted(all_models, key=lambda x: x['name'])
+
+@lollms_config_router.get("/ttv-models", response_model=List[ModelInfo])
+async def get_ttv_models(
+    db: Session = Depends(get_db)
+):
+    from backend.routers.admin.bindings_management import get_all_universal_profiles
+    profiles_dict = await get_all_universal_profiles(modality="ttv", db=db)
+    model_profiles = profiles_dict.get("profiles", {})
+
+    all_models = []
+    for prof_id, prof_info in model_profiles.items():
+        if prof_info.get("is_available") is False:
+            continue
+        title = prof_info.get("title") or prof_info.get("name") or prof_id
+        all_models.append({
+            "id": prof_id,
+            "name": title,
+            "alias": prof_info
+        })
+
+    return sorted(all_models, key=lambda x: x['name'])

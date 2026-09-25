@@ -23,6 +23,7 @@ import IconShare from '../../assets/icons/IconShare.vue';
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconChatBubbleLeftRight from '../../assets/icons/IconChatBubbleLeftRight.vue';
+import IconMusicalNote from '../../assets/icons/IconMusicalNote.vue';
 import IconPencil from '../../assets/icons/IconPencil.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 
@@ -41,9 +42,10 @@ const isSidebarOpen = computed(() => uiStore.isSidebarOpen);
 const isSidebarPinned = computed(() => uiStore.isSidebarPinned);
 const logoSrc = computed(() => authStore.welcome_logo_url || logoDefault);
 
-const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name);
-const isSttConfigured = computed(() => !!user.value?.stt_binding_model_name);
-const isVoicesStudioAvailable = computed(() => isTtsConfigured.value || isSttConfigured.value);
+const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name || (Array.isArray(dataStore.availableTtsModels) && dataStore.availableTtsModels.length > 0));
+const isVoicesStudioAvailable = computed(() => isTtsConfigured.value);
+const isImageStudioAvailable = computed(() => !!user.value?.tti_binding_model_name || (Array.isArray(dataStore.availableTtiModels) && dataStore.availableTtiModels.length > 0));
+const isMusicStudioAvailable = computed(() => !!user.value?.ttm_binding_model_name || (Array.isArray(dataStore.availableTtmModels) && dataStore.availableTtmModels.length > 0));
 
 const activityTimeout = ref(null);
 const sidebarRef = ref(null);
@@ -106,6 +108,7 @@ const currentContext = computed(() => {
     if (path.startsWith('/datastores')) return 'data';
     if (path.startsWith('/flow-studio')) return 'flows';
     if (path.startsWith('/image-studio')) return 'images';
+    if (path.startsWith('/music-studio')) return 'music';
     if (path.startsWith('/personality-studio')) return 'personality';
     if (path.startsWith('/profile')) return 'feed';
     return 'chat';
@@ -117,6 +120,7 @@ const plusButtonTitle = computed(() => {
         case 'data': return 'New Data Store';
         case 'flows': return 'New Workflow';
         case 'images': return 'New Album';
+        case 'music': return 'New Song';
         case 'personality': return 'New Personality';
         default: return 'New Discussion';
     }
@@ -266,12 +270,23 @@ async function handlePlusClick() {
             </router-link>
 
             <router-link
+              v-if="isImageStudioAvailable"
               to="/image-studio"
               class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
               title="Image Studio"
               active-class="bg-pink-100/50 text-pink-600 dark:bg-pink-900/20"
             >
                 <IconPhoto class="w-5 h-5 text-pink-500" />
+            </router-link>
+
+            <router-link
+              v-if="isMusicStudioAvailable"
+              to="/music-studio"
+              class="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-slate-100 dark:hover:bg-gray-700 transition-colors" 
+              title="Music Studio (MiniMax Music 3)"
+              active-class="bg-amber-100/50 text-amber-600 dark:bg-amber-900/20"
+            >
+                <IconMusicalNote class="w-5 h-5 text-amber-500" />
             </router-link>
 
             <router-link

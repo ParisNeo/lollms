@@ -106,6 +106,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/music-studio',
+    name: 'MusicStudio',
+    component: () => import('../views/MusicStudioView.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/image-studio',
     name: 'ImageStudio',
     component: () => import('../views/ImageStudioView.vue'),

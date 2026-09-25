@@ -20,7 +20,8 @@ from backend.db.models.datastore import DataStore as DBDataStore, SharedDataStor
 from backend.db.models.personality import Personality as DBPersonality
 from backend.db.models.config import (
     GlobalConfig, LLMBinding as DBLLMBinding, TTIBinding as DBTTIBinding,
-    TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding
+    TTSBinding as DBTTSBinding, STTBinding as DBSTTBinding,
+    TTVBinding as DBTTVBinding, TTMBinding as DBTTMBinding
 )
 from lollms_client import LollmsClient
 from backend.models.user import UserAuthDetails
@@ -815,10 +816,18 @@ def build_lollms_client_from_params(
     stt_binding_alias: Optional[str] = None,
     stt_model_name: Optional[str] = None,
     stt_params: Optional[Dict[str, Any]] = None,
+    ttv_binding_alias: Optional[str] = None,
+    ttv_model_name: Optional[str] = None,
+    ttv_params: Optional[Dict[str, Any]] = None,
+    ttm_binding_alias: Optional[str] = None,
+    ttm_model_name: Optional[str] = None,
+    ttm_params: Optional[Dict[str, Any]] = None,
     load_llm: bool = True,
     load_tti: bool = False,
     load_tts: bool = False,
     load_stt: bool = False,
+    load_ttv: bool = False,
+    load_ttm: bool = False,
     load_mcp: bool = True,
     callback: Optional[Callable] = None
 ) -> LollmsClient:
@@ -918,6 +927,22 @@ def build_lollms_client_from_params(
             user_overrides=stt_params or {}
         )
 
+        ttv_binding_profiles, ttv_model_profiles, _ = _build_universal_profiles_for_modality(
+            db=db,
+            binding_model_cls=DBTTVBinding,
+            active_binding_alias=ttv_binding_alias,
+            active_model_name=ttv_model_name,
+            user_overrides=ttv_params or {}
+        )
+
+        ttm_binding_profiles, ttm_model_profiles, _ = _build_universal_profiles_for_modality(
+            db=db,
+            binding_model_cls=DBTTMBinding,
+            active_binding_alias=ttm_binding_alias,
+            active_model_name=ttm_model_name,
+            user_overrides=ttm_params or {}
+        )
+
         # 1. Resolve Primary LLM Universal Profile and Config
         primary_binding = db.query(DBLLMBinding).filter(DBLLMBinding.alias == target_binding_alias, DBLLMBinding.is_active == True).first()
         primary_config = primary_binding.config.copy() if primary_binding and primary_binding.config else {}
@@ -1008,11 +1033,41 @@ def build_lollms_client_from_params(
         if stt_params:
             primary_stt_config.update(stt_params)
 
+        # 5. Resolve Primary TTV Binding
+        target_ttv_alias = ttv_binding_alias or settings.get("default_ttv_binding_model")
+        if target_ttv_alias and '/' in target_ttv_alias:
+            target_ttv_alias = target_ttv_alias.split('/')[0]
+        if not target_ttv_alias:
+            def_ttv_b = db.query(DBTTVBinding).filter(DBTTVBinding.is_active == True).order_by(DBTTVBinding.id).first()
+            if def_ttv_b:
+                target_ttv_alias = def_ttv_b.alias
+
+        primary_ttv_binding = db.query(DBTTVBinding).filter(DBTTVBinding.alias == target_ttv_alias, DBTTVBinding.is_active == True).first() if target_ttv_alias else None
+        primary_ttv_config = primary_ttv_binding.config.copy() if primary_ttv_binding and primary_ttv_binding.config else {}
+        if ttv_params:
+            primary_ttv_config.update(ttv_params)
+
+        # 6. Resolve Primary TTM Binding
+        target_ttm_alias = ttm_binding_alias or settings.get("default_ttm_binding_model")
+        if target_ttm_alias and '/' in target_ttm_alias:
+            target_ttm_alias = target_ttm_alias.split('/')[0]
+        if not target_ttm_alias:
+            def_ttm_b = db.query(DBTTMBinding).filter(DBTTMBinding.is_active == True).order_by(DBTTMBinding.id).first()
+            if def_ttm_b:
+                target_ttm_alias = def_ttm_b.alias
+
+        primary_ttm_binding = db.query(DBTTMBinding).filter(DBTTMBinding.alias == target_ttm_alias, DBTTMBinding.is_active == True).first() if target_ttm_alias else None
+        primary_ttm_config = primary_ttm_binding.config.copy() if primary_ttm_binding and primary_ttm_binding.config else {}
+        if ttm_params:
+            primary_ttm_config.update(ttm_params)
+
         client_init_params = {
             "load_llm": load_llm,
             "load_tti": load_tti,
             "load_tts": load_tts,
             "load_stt": load_stt,
+            "load_ttv": load_ttv,
+            "load_ttm": load_ttm,
             "llm_binding_profiles": llm_binding_profiles,
             "llm_model_profiles": llm_model_profiles,
             "tti_binding_profiles": tti_binding_profiles,
@@ -1021,6 +1076,10 @@ def build_lollms_client_from_params(
             "tts_model_profiles": tts_model_profiles,
             "stt_binding_profiles": stt_binding_profiles,
             "stt_model_profiles": stt_model_profiles,
+            "ttv_binding_profiles": ttv_binding_profiles,
+            "ttv_model_profiles": ttv_model_profiles,
+            "ttm_binding_profiles": ttm_binding_profiles,
+            "ttm_model_profiles": ttm_model_profiles,
             "llm_binding_name": primary_binding.name if primary_binding else None,
             "llm_binding_config": primary_config,
             "tts_binding_name": primary_tts_binding.name if primary_tts_binding else None,
@@ -1028,7 +1087,11 @@ def build_lollms_client_from_params(
             "tti_binding_name": primary_tti_binding.name if primary_tti_binding else None,
             "tti_binding_config": primary_tti_config,
             "stt_binding_name": primary_stt_binding.name if primary_stt_binding else None,
-            "stt_binding_config": primary_stt_config
+            "stt_binding_config": primary_stt_config,
+            "ttv_binding_name": primary_ttv_binding.name if primary_ttv_binding else None,
+            "ttv_binding_config": primary_ttv_config,
+            "ttm_binding_name": primary_ttm_binding.name if primary_ttm_binding else None,
+            "ttm_binding_config": primary_ttm_config
         }
 
         if load_llm and load_mcp:
@@ -1217,6 +1280,20 @@ def get_safe_store_instance(
             )
             ss_instance.name = datastore_record.name
             ss_instance.description = datastore_record.description
+
+            # Inject active LollmsClient generator into SafeStore instance
+            try:
+                from backend.routers.stores import _make_safe_store_llm_generator
+                active_lc = get_user_lollms_client(requesting_user_username)
+                if active_lc:
+                    gen = _make_safe_store_llm_generator(active_lc)
+                    if hasattr(ss_instance, "set_llm_generator"):
+                        ss_instance.set_llm_generator(gen)
+                    else:
+                        ss_instance.llm_generator = gen
+            except Exception as gen_attach_err:
+                pass
+
             session.setdefault("safe_store_instances", {})[datastore_id] = ss_instance
         except Exception as e:
             trace_exception(e)
@@ -1292,7 +1369,9 @@ def get_universal_model_profile(
         "llm": DBLLMBinding,
         "tti": DBTTIBinding,
         "tts": DBTTSBinding,
-        "stt": DBSTTBinding
+        "stt": DBSTTBinding,
+        "ttv": DBTTVBinding,
+        "ttm": DBTTMBinding
     }
     binding_cls = binding_classes.get(modality, DBLLMBinding)
     all_bindings = db.query(binding_cls).filter(binding_cls.is_active == True).all()

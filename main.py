@@ -83,6 +83,7 @@ from backend.routers.zoos.skills_zoo import skills_zoo_router
 from backend.routers.discussion_groups import discussion_groups_router
 from backend.routers.voices_studio import voices_studio_router
 from backend.routers.image_studio import image_studio_router
+from backend.routers.music_studio import music_studio_router
 from backend.routers.notes import notes_router 
 from backend.routers.notebooks import router as notebooks_router
 from backend.routers.public import public_router
@@ -659,6 +660,7 @@ app.include_router(build_discussions_router())
 app.include_router(discussion_groups_router)
 app.include_router(voices_studio_router)
 app.include_router(image_studio_router)
+app.include_router(music_studio_router)
 app.include_router(notes_router)
 app.include_router(notebooks_router) 
 app.include_router(public_router)

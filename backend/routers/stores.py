@@ -257,33 +257,81 @@ def _clean_llm_json_response(raw: str) -> str:
 
     return text.strip()
 
-def _make_llm_graph_executor(llm_client):
-    def llm_executor_callback(prompt: str) -> str:
-        try:
-            raw = llm_client.generate_text(prompt, n_predict=2048, temperature=0.1)
-        except TypeError:
+def _make_safe_store_llm_generator(llm_client):
+    """
+    Builds a standard SafeStore 3.6.1 LLM generator protocol callback backed by the active LollmsClient instance:
+    (prompt: str, system_prompt: Optional[str] = None, json_mode: bool = False, **kwargs: Any) -> str
+    """
+    def safe_store_generator(
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        json_mode: bool = False,
+        **kwargs: Any
+    ) -> str:
+        max_tokens = kwargs.get("max_new_tokens") or kwargs.get("n_predict") or kwargs.get("max_tokens") or 2048
+        temperature = kwargs.get("temperature", 0.1)
+
+        combined_system = (system_prompt or "").strip()
+        is_json_request = json_mode or any(k in prompt.lower() for k in ["json", "format:", "schema", "extract_entities", "decision", "merge"])
+        if is_json_request and "json" not in combined_system.lower():
+            combined_system = (combined_system + "\nOutput strictly valid, parseable JSON only.").strip()
+
+        raw = None
+        # 1. Use generate_code if json is requested
+        if is_json_request and hasattr(llm_client, "generate_code") and callable(llm_client.generate_code):
             try:
-                raw = llm_client.generate_text(prompt, max_new_tokens=2048, temperature=0.1)
+                raw = llm_client.generate_code(
+                    prompt=prompt,
+                    system_prompt=combined_system if combined_system else None,
+                    language="json",
+                    max_new_tokens=max_tokens,
+                    temperature=temperature
+                )
+            except Exception:
+                raw = None
+
+        # 2. Standard generate_text fallback
+        if raw is None:
+            try:
+                raw = llm_client.generate_text(
+                    prompt=prompt,
+                    system_prompt=combined_system if combined_system else None,
+                    n_predict=max_tokens,
+                    temperature=temperature
+                )
             except TypeError:
-                raw = llm_client.generate_text(prompt)
+                try:
+                    raw = llm_client.generate_text(
+                        prompt=prompt,
+                        system_prompt=combined_system if combined_system else None,
+                        max_new_tokens=max_tokens,
+                        temperature=temperature
+                    )
+                except TypeError:
+                    full_p = f"{combined_system}\n\n{prompt}" if combined_system else prompt
+                    raw = llm_client.generate_text(full_p)
 
-        if any(keyword in prompt.lower() for keyword in ["json", "format:", "schema", "decision", "extract_entities", "merge"]):
-            return _clean_llm_json_response(raw)
+        raw_str = str(raw) if raw is not None else ""
+        if is_json_request:
+            return _clean_llm_json_response(raw_str)
 
-        cleaned = re.sub(r'<think>[\s\S]*?</think>', '', raw, flags=re.IGNORECASE)
+        cleaned = re.sub(r'<think>[\s\S]*?</think>', '', raw_str, flags=re.IGNORECASE)
         cleaned = re.sub(r'<thought>[\s\S]*?</thought>', '', cleaned, flags=re.IGNORECASE)
         return cleaned.strip()
 
-    return llm_executor_callback
+    return safe_store_generator
+
+# Backward compatibility alias
+_make_llm_graph_executor = _make_safe_store_llm_generator
 
 def _resolve_user_llm_client(username: str, db: Session, request_data: dict = None):
-    """Resolves a valid LollmsClient for the user using their active model preferences."""
+    """Resolves the user's active LollmsClient instance using their configured model profile."""
     request_data = request_data or {}
-    user_db = db.query(DBUser).filter(DBUser.username == username).first()
     model_binding = request_data.get("model_binding")
     model_name = request_data.get("model_name")
 
     if not model_binding or not model_name:
+        user_db = db.query(DBUser).filter(DBUser.username == username).first()
         user_model_full = user_db.lollms_model_name if user_db else None
         if user_model_full and '/' in user_model_full:
             model_binding, model_name = user_model_full.split('/', 1)
@@ -294,18 +342,12 @@ def _resolve_user_llm_client(username: str, db: Session, request_data: dict = No
             except Exception:
                 pass
 
-    if not model_binding or not model_name:
-        active_binding = db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).first()
-        if active_binding:
-            model_binding = active_binding.alias
-            model_name = active_binding.default_model_name
-
-    return build_lollms_client_from_params(
+    return get_user_lollms_client(
         username=username,
-        binding_alias=model_binding,
-        model_name=model_name,
-        load_llm=True
+        binding_alias_override=model_binding,
+        model_name_override=model_name
     )
+
 
 def _generate_llm_answer(llm_client, full_prompt: str, max_tokens: int, temperature: float) -> str:
     """Invokes the LLM client defensively handling parameter signatures."""
@@ -520,25 +562,58 @@ def _generate_graph_task(task: Task, username: str, datastore_id: str, request_d
 
         if text_docs and build_mode != "declarative":
             llm_client = _resolve_user_llm_client(username, db, request_data)
-            llm_executor_callback = _make_llm_graph_executor(llm_client)
+            engine_name = getattr(llm_client, "model_name", None) or getattr(llm_client, "llm_binding_name", None) or "Active LoLLMs Model"
+            task.log(f"Configuring GraphStore with active LoLLMs engine: {engine_name}...")
+
+            llm_generator = _make_safe_store_llm_generator(llm_client)
 
             with ss:
-                gs = GraphStore(store=ss, llm_executor_callback=llm_executor_callback)
-                for i, doc in enumerate(text_docs):
-                    if task.cancellation_event.is_set():
-                        break
-                    doc_id = doc.get("doc_id") or doc.get("id")
-                    doc_name = Path(doc.get("file_path", "Unknown")).name
-                    task.set_file_info(file_name=doc_name, total_files=len(text_docs))
-                    try:
-                        if hasattr(gs, "build_graph_for_document"):
-                            gs.build_graph_for_document(doc_id, guidance=custom_ontology)
-                        elif hasattr(gs, "build_graph"):
-                            gs.build_graph(doc_id, guidance=custom_ontology)
-                    except Exception as doc_err:
-                        task.log(f"Entity notice for {doc_name}: {doc_err}", level="WARNING")
+                if hasattr(ss, "set_llm_generator"):
+                    ss.set_llm_generator(llm_generator)
+                else:
+                    ss.llm_generator = llm_generator
 
-                    task.set_progress(int(40 + 55 * (i + 1) / max(len(text_docs), 1)))
+                gs = GraphStore(store=ss, llm_executor_callback=llm_generator)
+                if hasattr(gs, "llm_generator"):
+                    gs.llm_generator = llm_generator
+
+                extraction_mode = 'document' if build_mode in ('document', 'fast_hybrid') else ('batch_chunks' if build_mode == 'batch_chunks' else 'chunk')
+
+                if hasattr(gs, "build_graph_for_all_documents"):
+                    task.log(f"Running high-speed extraction across {len(text_docs)} document(s) (Mode: {extraction_mode})...")
+                    try:
+                        def progress_cb(info):
+                            current_doc = info.get("document_name") or info.get("doc_title") or "Document"
+                            pct = info.get("progress_percent")
+                            if pct is not None:
+                                task.set_progress(int(40 + 0.55 * pct))
+                            task.log(f"Extracting knowledge graph from {current_doc}...")
+
+                        gs.build_graph_for_all_documents(
+                            mode=extraction_mode,
+                            guidance=custom_ontology,
+                            chunks_per_batch=request_data.get("chunks_per_batch", 10),
+                            callback=progress_cb
+                        )
+                    except TypeError:
+                        gs.build_graph_for_all_documents(mode=extraction_mode, guidance=custom_ontology)
+                else:
+                    for i, doc in enumerate(text_docs):
+                        if task.cancellation_event.is_set():
+                            break
+                        doc_id = doc.get("doc_id") or doc.get("id")
+                        doc_name = Path(doc.get("file_path", "Unknown")).name
+                        task.set_file_info(file_name=doc_name, total_files=len(text_docs))
+                        task.log(f"Extracting graph from {doc_name} ({i+1}/{len(text_docs)})...")
+                        try:
+                            if hasattr(gs, "build_graph_for_document"):
+                                gs.build_graph_for_document(doc_id, guidance=custom_ontology)
+                            elif hasattr(gs, "build_graph"):
+                                gs.build_graph(doc_id, guidance=custom_ontology)
+                        except Exception as doc_err:
+                            task.log(f"Entity notice for {doc_name}: {doc_err}", level="WARNING")
+
+                        task.set_progress(int(40 + 55 * (i + 1) / max(len(text_docs), 1)))
 
         task.set_progress(100)
         task.result = {"message": "Knowledge graph construction complete."}
@@ -558,12 +633,22 @@ def _update_graph_task(task: Task, username: str, datastore_id: str, request_dat
     db = next(get_db())
     try:
         llm_client = _resolve_user_llm_client(username, db, request_data)
-        llm_executor_callback = _make_llm_graph_executor(llm_client)
+        engine_name = getattr(llm_client, "model_name", None) or getattr(llm_client, "llm_binding_name", None) or "Active LoLLMs Model"
+        task.log(f"Updating graph using active LoLLMs engine: {engine_name}...")
 
+        llm_generator = _make_safe_store_llm_generator(llm_client)
         ss = get_safe_store_instance(username, datastore_id, db, permission_level="revectorize")
 
         with ss:
-            gs = GraphStore(store=ss, llm_executor_callback=llm_executor_callback)
+            if hasattr(ss, "set_llm_generator"):
+                ss.set_llm_generator(llm_generator)
+            else:
+                ss.llm_generator = llm_generator
+
+            gs = GraphStore(store=ss, llm_executor_callback=llm_generator)
+            if hasattr(gs, "llm_generator"):
+                gs.llm_generator = llm_generator
+
             guidance = request_data.get("ontology")
             docs = ss.list_documents()
             total_docs = len(docs)
@@ -1300,26 +1385,15 @@ async def query_datastore_and_answer(
         "=== GROUNDED ANSWER ==="
     )
 
-    # 3. Resolve Active User LLM Client
+    # 3. Resolve Active User LLM Client from session registry
     llm_client = None
     try:
-        user_model_full = current_user.lollms_model_name
-        binding_alias = None
-        model_name = None
-        if user_model_full and '/' in user_model_full:
-            binding_alias, model_name = user_model_full.split('/', 1)
-
-        llm_client = build_lollms_client_from_params(
-            username=current_user.username,
-            binding_alias=binding_alias,
-            model_name=model_name,
-            load_llm=True
-        )
+        llm_client = _resolve_user_llm_client(current_user.username, db, {})
     except Exception as e:
         try:
-            llm_client = _resolve_user_llm_client(current_user.username, db, {})
+            llm_client = get_user_lollms_client(current_user.username)
         except Exception as resolve_err:
-            print(f"Failed to resolve LLM client: {resolve_err}")
+            print(f"Failed to resolve active LLM client: {resolve_err}")
 
     max_tokens_val = request_data.max_tokens or 2048
     temp_val = request_data.temperature if request_data.temperature is not None else 0.2
@@ -1644,10 +1718,16 @@ class ShortestPathRequest(BaseModel):
     source_uri: str
     target_uri: str
 
+def _safe_extract_node_id(record: Dict[str, Any], keys: List[str]) -> Optional[str]:
+    for k in keys:
+        if k in record and record[k] is not None:
+            return str(record[k])
+    return None
+
 @store_files_router.get("/graph", response_model=Dict)
 async def get_datastore_graph(
     datastore_id: str,
-    mode: str = "tbox_summary",
+    mode: str = "abox",
     current_user: UserAuthDetails = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ) -> Dict:
@@ -1696,37 +1776,62 @@ async def get_datastore_graph(
                     }
                 })
 
+            # Bundle multi-edges and self-loops by (source_class, target_class) to eliminate the fan-out artifact
             edge_aggs = {}
-            node_type_map = {str(n.get("id")): n.get("label") for n in sanitized_nodes}
+            node_type_map = {str(n.get("id")): (n.get("label") or "Entity") for n in sanitized_nodes}
 
             for e in sanitized_edges:
-                src_id = str(e.get("from") or e.get("source") or e.get("source_id"))
-                tgt_id = str(e.get("to") or e.get("target") or e.get("target_id"))
+                src_id = _safe_extract_node_id(e, ["from", "source", "source_id"])
+                tgt_id = _safe_extract_node_id(e, ["to", "target", "target_id"])
                 src_type = node_type_map.get(src_id)
                 tgt_type = node_type_map.get(tgt_id)
-                pred = e.get("label") or e.get("type") or "relatedTo"
+                pred = str(e.get("label") or e.get("type") or "relates_to").strip()
 
                 if src_type and tgt_type:
-                    key = (f"class__{src_type}", pred, f"class__{tgt_type}")
-                    edge_aggs[key] = edge_aggs.get(key, 0) + 1
+                    key = (f"class__{src_type}", f"class__{tgt_type}")
+                    if key not in edge_aggs:
+                        edge_aggs[key] = {"count": 0, "predicates": set()}
+                    edge_aggs[key]["count"] += 1
+                    edge_aggs[key]["predicates"].add(pred)
 
             edges_out = []
-            for idx, ((s, p, o), count) in enumerate(edge_aggs.items()):
+            for idx, ((s, o), agg) in enumerate(edge_aggs.items()):
+                preds = sorted(list(agg["predicates"]))
+                total = agg["count"]
+
+                if len(preds) == 1:
+                    edge_label = f"{preds[0]} ({total})"
+                elif len(preds) == 2:
+                    edge_label = f"{preds[0]}, {preds[1]} ({total})"
+                else:
+                    edge_label = f"{preds[0]} +{len(preds)-1} ({total})"
+
+                is_self_loop = (s == o)
                 edges_out.append({
                     "data": {
                         "id": f"agg_e_{idx}",
                         "source": s,
                         "target": o,
-                        "label": p,
-                        "count": count,
+                        "label": edge_label,
+                        "count": total,
                         "box": "tbox",
-                        "kind": "hierarchy" if p in ("subClassOf", "type") else "data"
+                        "predicates": preds,
+                        "is_self_loop": is_self_loop,
+                        "kind": "hierarchy" if any(p in ("subClassOf", "type", "is_a") for p in preds) else "data"
                     }
                 })
         else:
             for n in sanitized_nodes:
                 nid = str(n.get("id"))
-                nlabel = str(n.get("properties", {}).get("identifying_value") or n.get("properties", {}).get("name") or n.get("properties", {}).get("label") or n.get("label") or nid)
+                props = n.get("properties") or {}
+                nlabel = str(
+                    props.get("identifying_value")
+                    or props.get("name")
+                    or props.get("title")
+                    or props.get("label")
+                    or n.get("label")
+                    or nid
+                )
                 ntype = n.get("label") or "Entity"
                 nodes_out.append({
                     "data": {
@@ -1736,24 +1841,28 @@ async def get_datastore_graph(
                         "box": "tbox" if mode == "tbox" else "abox",
                         "group": ntype,
                         "uri": f"http://example.org/onto#{nlabel}",
-                        "properties": n.get("properties", {})
+                        "properties": props
                     }
                 })
 
+            valid_node_ids = {n["data"]["id"] for n in nodes_out}
             edges_out = []
             for idx, e in enumerate(sanitized_edges):
-                src_id = str(e.get("from") or e.get("source") or e.get("source_id"))
-                tgt_id = str(e.get("to") or e.get("target") or e.get("target_id"))
-                edges_out.append({
-                    "data": {
-                        "id": str(e.get("id") or f"e_{idx}"),
-                        "source": src_id,
-                        "target": tgt_id,
-                        "label": e.get("label") or e.get("type") or "relates_to",
-                        "box": "tbox" if mode == "tbox" else "abox",
-                        "predicate": e.get("label") or e.get("type") or "relates_to"
-                    }
-                })
+                src_id = _safe_extract_node_id(e, ["from", "source", "source_id"])
+                tgt_id = _safe_extract_node_id(e, ["to", "target", "target_id"])
+
+                if src_id in valid_node_ids and tgt_id in valid_node_ids:
+                    edges_out.append({
+                        "data": {
+                            "id": str(e.get("id") or f"e_{idx}"),
+                            "source": src_id,
+                            "target": tgt_id,
+                            "label": str(e.get("label") or e.get("type") or "relates_to"),
+                            "box": "tbox" if mode == "tbox" else "abox",
+                            "predicate": str(e.get("label") or e.get("type") or "relates_to"),
+                            "properties": e.get("properties") or {}
+                        }
+                    })
 
         return {
             "nodes": nodes_out,
@@ -1901,6 +2010,63 @@ async def find_shortest_graph_path(
         "edges": [{"data": {"id": f"path_e_{i}", "source": e["source"], "target": e["target"], "label": e["label"], "box": "abox"}} for i, e in enumerate(path_edges)]
     }
 
+class GenerateSparqlRequest(BaseModel):
+    query: str
+    model_binding: Optional[str] = None
+    model_name: Optional[str] = None
+
+@store_files_router.post("/graph/generate-sparql", response_model=Dict[str, str])
+async def generate_sparql_query_endpoint(
+    datastore_id: str,
+    request_data: GenerateSparqlRequest,
+    current_user: UserAuthDetails = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+) -> Dict[str, str]:
+    """Generates a standard W3C SPARQL 1.1 query from natural language using the active LoLLMs client instance."""
+    if not GraphStore:
+        raise HTTPException(status_code=501, detail="GraphStore is not available.")
+
+    ss = get_safe_store_instance(current_user.username, datastore_id, db, permission_level="read_query")
+    req_dict = request_data.model_dump()
+    llm_client = _resolve_user_llm_client(current_user.username, db, req_dict)
+    gen = _make_safe_store_llm_generator(llm_client)
+
+    with ss:
+        if hasattr(ss, "set_llm_generator"):
+            ss.set_llm_generator(gen)
+        gs = GraphStore(store=ss, llm_executor_callback=gen)
+        if hasattr(gs, "generate_sparql") and callable(gs.generate_sparql):
+            try:
+                sparql = gs.generate_sparql(request_data.query)
+                if sparql and "SELECT" in sparql.upper():
+                    return {"sparql": sparql}
+            except Exception as se:
+                ASCIIColors.warning(f"Native generate_sparql notice: {se}")
+
+    # Grounded fallback SPARQL generator using active LoLLMs instance
+    with ss:
+        gs = GraphStore(store=ss)
+        raw_nodes = gs.get_all_nodes_for_visualization(limit=30) if hasattr(gs, "get_all_nodes_for_visualization") else []
+        raw_edges = gs.get_all_relationships_for_visualization(limit=50) if hasattr(gs, "get_all_relationships_for_visualization") else []
+
+    classes = list({n.get("label") for n in raw_nodes if n.get("label")})
+    predicates = list({e.get("label") or e.get("type") for e in raw_edges if e.get("label") or e.get("type")})
+
+    system_prompt = (
+        "You are an expert Semantic Web and W3C SPARQL 1.1 engineer.\n"
+        "Generate a valid SPARQL 1.1 query answering the user question based on the knowledge graph schema.\n"
+        f"Available entity classes: {classes[:20]}\n"
+        f"Available predicates: {predicates[:30]}\n"
+        "Output ONLY the SPARQL query code inside ```sparql ... ``` without extra commentary."
+    )
+
+    prompt = f"User Request: {request_data.query}\nOutput SPARQL 1.1 query now."
+    raw_res = gen(prompt, system_prompt=system_prompt)
+    match = re.search(r'```(?:sparql)?\s*([\s\S]+?)\s*```', raw_res)
+    sparql_code = match.group(1).strip() if match else raw_res.strip()
+
+    return {"sparql": sparql_code}
+
 @store_files_router.post("/graph/query", response_model=List[Dict])
 async def query_datastore_graph(
     datastore_id: str,
@@ -1913,17 +2079,20 @@ async def query_datastore_graph(
     
     try:
         llm_client = _resolve_user_llm_client(current_user.username, db, {})
-        def llm_executor_callback(prompt: str) -> str:
-            return llm_client.generate_text(prompt, max_new_tokens=2048)
-            
+        gen = _make_safe_store_llm_generator(llm_client)
+
         ss = get_safe_store_instance(current_user.username, datastore_id, db)
         with ss:
-            gs = GraphStore(store=ss, llm_executor_callback=llm_executor_callback)
+            if hasattr(ss, "set_llm_generator"):
+                ss.set_llm_generator(gen)
+            gs = GraphStore(store=ss, llm_executor_callback=gen)
             results = gs.query_graph(request_data.query, output_mode="chunks_summary")
         return _sanitize_numpy(results)
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Error querying graph: {e}")
+
+
 
 @store_files_router.post("/graph/query-hybrid", response_model=Dict)
 async def query_datastore_graph_hybrid(

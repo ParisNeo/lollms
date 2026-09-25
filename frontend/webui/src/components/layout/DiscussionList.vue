@@ -42,6 +42,7 @@ import IconServer from '../../assets/icons/IconServer.vue';
 import IconDatabase from '../../assets/icons/IconDatabase.vue'; 
 import IconTrash from '../../assets/icons/IconTrash.vue'; 
 import IconPhoto from '../../assets/icons/IconPhoto.vue';
+import IconMusicalNote from '../../assets/icons/IconMusicalNote.vue';
 import IconUser from '../../assets/icons/IconUser.vue';
 import IconShare from '../../assets/icons/IconShare.vue';
 import IconRefresh from '../../assets/icons/IconRefresh.vue';
@@ -67,9 +68,13 @@ const route = useRoute();
 const { user } = storeToRefs(authStore);
 const { isLoadingDiscussions, discussionGroupsTree, sharedWithMe, sortedDiscussions } = storeToRefs(store);
 const { notebooks } = storeToRefs(notebookStore);
-const { ownedDataStores, sharedDataStores, availableVectorizers, userPersonalities, publicPersonalities } = storeToRefs(dataStore);
+const { ownedDataStores, sharedDataStores, availableVectorizers, userPersonalities, publicPersonalities, availableTtiModels, availableTtsModels, availableTtmModels } = storeToRefs(dataStore);
 const { friends, socialGroups } = storeToRefs(socialStore);
 const hasActiveVectorizers = computed(() => Array.isArray(availableVectorizers.value) && availableVectorizers.value.length > 0);
+const isTtsConfigured = computed(() => !!user.value?.tts_binding_model_name || (Array.isArray(availableTtsModels.value) && availableTtsModels.value.length > 0));
+const isVoicesStudioAvailable = computed(() => isTtsConfigured.value);
+const isImageStudioAvailable = computed(() => !!user.value?.tti_binding_model_name || (Array.isArray(availableTtiModels.value) && availableTtiModels.value.length > 0));
+const isMusicStudioAvailable = computed(() => !!user.value?.ttm_binding_model_name || (Array.isArray(availableTtmModels.value) && availableTtmModels.value.length > 0));
 const { flows } = storeToRefs(flowStore);
 
 const newsArticles = ref([]);
@@ -293,6 +298,8 @@ function handleTabClick(tab) {
         if (!route.path.startsWith('/image-studio')) router.push('/image-studio');
         imageStore.fetchAlbums();
         imageStore.fetchImages();
+    } else if (tab === 'music') {
+        if (!route.path.startsWith('/music-studio')) router.push('/music-studio');
     }
 }
 
@@ -318,6 +325,8 @@ watch(() => route.path, (path) => {
         activeTab.value = 'data';
     } else if (path.startsWith('/image-studio')) {
         activeTab.value = 'images';
+    } else if (path.startsWith('/music-studio')) {
+        activeTab.value = 'music';
     } else if (path === '/' || path.startsWith('/chat')) {
         activeTab.value = uiStore.mainView === 'feed' ? 'feed' : 'chat';
     }
@@ -720,13 +729,24 @@ function handleCopyDiscussionMarkdown() {
                     <span>PERS</span>
                 </button>
                 <button 
+                    v-if="isImageStudioAvailable"
                     @click="handleTabClick('images')" 
                     class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
                     :class="activeTab === 'images' ? 'bg-white dark:bg-gray-900/50 text-pink-600 dark:text-pink-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
-                    title="Images"
+                    title="Image Studio"
                 >
                     <IconPhoto class="w-3.5 h-3.5 mb-0.5" />
                     <span>IMG</span>
+                </button>
+                <button 
+                    v-if="isMusicStudioAvailable"
+                    @click="handleTabClick('music')" 
+                    class="flex-1 py-1.5 px-2 text-[9px] font-bold rounded-md transition-colors flex flex-col items-center justify-center min-w-[50px]"
+                    :class="activeTab === 'music' ? 'bg-white dark:bg-gray-900/50 text-amber-600 dark:text-amber-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                    title="Music Studio"
+                >
+                    <IconMusicalNote class="w-3.5 h-3.5 mb-0.5" />
+                    <span>MUSIC</span>
                 </button>
                 <button 
                     @click="handleTabClick('notebooks')" 

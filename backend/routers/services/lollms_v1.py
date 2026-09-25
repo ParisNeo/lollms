@@ -6,12 +6,17 @@ import json
 import base64
 import uuid
 import asyncio
+import os
+import tempfile
+import re
+import io
 from typing import List, Optional, Dict, Any, Union
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query, UploadFile, File, Form
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from werkzeug.utils import secure_filename
 from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
 from pydantic import BaseModel, Field, ConfigDict
@@ -128,15 +133,25 @@ class CapabilitiesResponse(BaseModel):
     capabilities: List[str]
     active_bindings: Dict[str, List[str]]
 
-# --- NEW: TTS Models ---
+# --- Multimodal Audio, Speech, Music & Video Models ---
+
 class TTSRequest(BaseModel):
     input: str = Field(..., description="The text to generate audio for.")
     voice: Optional[str] = Field(default=None, description="The voice to use (binding voice name, 'alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer', a user custom voice ID, or a path to a voice file)")
-    audio_sample: Optional[str] = Field(default=None, description="Optional base64-encoded audio sample to use as the voice (e.g., a short voice recording for instant voice cloning). If provided, this takes precedence over 'voice'.")
+    audio_sample: Optional[str] = Field(default=None, description="Optional base64-encoded audio sample to use as the voice (for instant zero-shot voice cloning).")
     model: Optional[str] = Field(default=None, description="The TTS model to use (format: 'binding_alias/model_name' or just model name)")
-    response_format: Optional[str] = Field(default="mp3", description="The format of the audio output (mp3, opus, aac, flac, wav, pcm)")
-    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="The speed of the generated audio")
-    language: Optional[str] = None
+    response_format: Optional[str] = Field(default="mp3", description="The format of the audio output ('mp3', 'wav', 'ogg', 'opus', 'flac', 'aac', 'b64_json')")
+    speed: Optional[float] = Field(default=1.0, ge=0.25, le=4.0, description="The speed/rate of the generated speech")
+    pitch: Optional[float] = Field(default=1.0, description="Optional pitch adjustment multiplier")
+    language: Optional[str] = Field(default="en", description="Language code (e.g., 'en', 'fr', 'es', 'de')")
+    return_json: Optional[bool] = Field(default=False, description="If true, returns a JSON object with base64 encoded audio instead of binary stream")
+
+class TTSJsonResponse(BaseModel):
+    object: str = "audio.speech"
+    audio_format: str
+    b64_audio: str
+    text_length: int
+    duration_seconds: Optional[float] = None
 
 class VoiceInfo(BaseModel):
     voice_id: str
@@ -149,6 +164,67 @@ class VoiceInfo(BaseModel):
 class VoicesListResponse(BaseModel):
     object: str = "list"
     data: List[VoiceInfo]
+
+# --- Speech to Text (STT) Models ---
+class STTRequest(BaseModel):
+    audio: Optional[str] = Field(default=None, description="Base64 encoded audio string (if not uploading as multipart form)")
+    file_path: Optional[str] = Field(default=None, description="Optional local file path to an audio file")
+    model: Optional[str] = Field(default=None, description="STT model to use ('binding_alias/model' or model name)")
+    language: Optional[str] = Field(default=None, description="Language hint (e.g. 'en', 'fr')")
+    prompt: Optional[str] = Field(default=None, description="Optional prompt or vocabulary hint")
+    response_format: Optional[str] = Field(default="json", description="'json', 'text', or 'verbose_json'")
+    temperature: Optional[float] = Field(default=0.0, description="Sampling temperature")
+
+class STTResponse(BaseModel):
+    text: str
+    language: Optional[str] = None
+    duration: Optional[float] = None
+
+class STTVerboseResponse(BaseModel):
+    task: str = "transcribe"
+    language: Optional[str] = None
+    duration: Optional[float] = None
+    text: str
+    segments: List[Dict[str, Any]] = Field(default_factory=list)
+
+# --- Text to Music (TTM) Models ---
+class TTMRequest(BaseModel):
+    prompt: str = Field(..., description="Description of the music or audio track to generate")
+    negative_prompt: Optional[str] = Field(default="", description="Negative prompt for unwanted acoustic elements")
+    duration: Optional[int] = Field(default=15, ge=1, le=300, description="Duration in seconds")
+    bpm: Optional[int] = Field(default=None, ge=40, le=240, description="Beats per minute")
+    genre: Optional[str] = Field(default=None, description="Musical genre or style tag")
+    model: Optional[str] = Field(default=None, description="TTM model to use ('binding_alias/model_name' or model name)")
+    response_format: Optional[str] = Field(default="audio", description="'audio' (binary stream), 'b64_json', or 'url'")
+
+class TTMResponse(BaseModel):
+    object: str = "audio.music"
+    b64_audio: Optional[str] = None
+    url: Optional[str] = None
+    duration: int
+    prompt: str
+
+# --- Text to Video (TTV) Models ---
+class TTVRequest(BaseModel):
+    prompt: str = Field(..., description="Description of the video clip to generate")
+    negative_prompt: Optional[str] = Field(default="", description="Negative prompt")
+    image: Optional[str] = Field(default=None, description="Optional initial frame (base64 or URL) for Image-to-Video generation")
+    model: Optional[str] = Field(default=None, description="TTV model ('binding_alias/model_name' or model name)")
+    width: Optional[int] = Field(default=512, ge=128, le=1920)
+    height: Optional[int] = Field(default=512, ge=128, le=1080)
+    num_frames: Optional[int] = Field(default=24, ge=8, le=240, description="Total frame count")
+    fps: Optional[int] = Field(default=12, ge=1, le=60, description="Frames per second")
+    response_format: Optional[str] = Field(default="url", description="'url', 'b64_json', or 'video' (binary stream)")
+    seed: Optional[int] = Field(default=-1)
+
+class TTVResponse(BaseModel):
+    object: str = "video.generation"
+    b64_video: Optional[str] = None
+    url: Optional[str] = None
+    width: int
+    height: int
+    num_frames: int
+    prompt: str
 
 # --- NEW: RAG Database Models ---
 class RagDatabaseInfo(BaseModel):
@@ -394,29 +470,41 @@ async def get_capabilities(user: DBUser = Depends(get_user_for_lollms_service), 
     
     def _fetch_capabilities():
         caps = ["tokenize", "detokenize", "long_context_processing"]
-        
+
         # Check RAG
         from backend.session import safe_store
         if safe_store is not None:
             caps.append("rag_query")
-        
+
         # Check TTI
         tti_bindings = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).all()
         if tti_bindings:
             caps.append("image_generation")
             caps.append("image_editing")
-            
+
         # Check TTS/STT
-        if db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).first():
+        tts_bindings = db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).all()
+        if tts_bindings:
             caps.append("text_to_speech")
-        if db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).first():
+        stt_bindings = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).all()
+        if stt_bindings:
             caps.append("speech_to_text")
+
+        # Check TTV / TTM
+        ttv_bindings = db.query(DBTTVBinding).filter(DBTTVBinding.is_active == True).all()
+        if ttv_bindings:
+            caps.append("text_to_video")
+        ttm_bindings = db.query(DBTTMBinding).filter(DBTTMBinding.is_active == True).all()
+        if ttm_bindings:
+            caps.append("text_to_music")
 
         active_bindings = {
             "llm": [b.alias for b in db.query(DBLLMBinding).filter(DBLLMBinding.is_active == True).all()],
             "tti": [b.alias for b in tti_bindings],
-            "tts": [b.alias for b in db.query(DBTTSBinding).filter(DBTTSBinding.is_active == True).all()],
-            "stt": [b.alias for b in db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).all()],
+            "tts": [b.alias for b in tts_bindings],
+            "stt": [b.alias for b in stt_bindings],
+            "ttv": [b.alias for b in ttv_bindings],
+            "ttm": [b.alias for b in ttm_bindings],
             "rag": [b.alias for b in db.query(DBRAGBinding).filter(DBRAGBinding.is_active == True).all()]
         }
         return CapabilitiesResponse(capabilities=caps, active_bindings=active_bindings)
@@ -722,6 +810,32 @@ async def create_speech(
                 except Exception:
                     pass  # Best effort cleanup
 
+        # Normalize audio bytes
+        final_bytes = audio_bytes
+        if isinstance(audio_bytes, str):
+            if audio_bytes.startswith("data:audio"):
+                audio_bytes = audio_bytes.split(",", 1)[1]
+            try:
+                final_bytes = base64.b64decode(audio_bytes)
+            except Exception:
+                final_bytes = audio_bytes.encode('utf-8')
+        elif hasattr(audio_bytes, 'getvalue'):
+            final_bytes = audio_bytes.getvalue()
+        elif hasattr(audio_bytes, 'read'):
+            final_bytes = audio_bytes.read()
+
+        fmt_clean = (request.response_format or "mp3").lower().strip()
+
+        # If JSON response requested
+        if request.return_json or fmt_clean in ("b64_json", "json"):
+            b64_str = base64.b64encode(final_bytes).decode('utf-8')
+            return TTSJsonResponse(
+                audio_format=fmt_clean if fmt_clean != "b64_json" else "mp3",
+                b64_audio=b64_str,
+                text_length=len(cleaned_text),
+                duration_seconds=None
+            )
+
         # Map response format to content type
         format_to_mime = {
             "mp3": "audio/mpeg",
@@ -729,14 +843,15 @@ async def create_speech(
             "aac": "audio/aac",
             "flac": "audio/flac",
             "wav": "audio/wav",
+            "ogg": "audio/ogg",
             "pcm": "audio/pcm"
         }
-        content_type = format_to_mime.get(request.response_format, "audio/mpeg")
+        content_type = format_to_mime.get(fmt_clean, "audio/mpeg")
 
         return Response(
-            content=audio_bytes,
+            content=final_bytes,
             media_type=content_type,
-            headers={"Content-Disposition": f"attachment; filename=speech.{request.response_format}"}
+            headers={"Content-Disposition": f"attachment; filename=speech.{fmt_clean}"}
         )
 
     except HTTPException as e:
@@ -830,6 +945,434 @@ async def list_voices(
         return VoicesListResponse(data=voices)
 
     return await loop.run_in_executor(executor, _fetch_voices)
+
+
+# --- NEW: Speech to Text (STT) Endpoints ---
+
+def _execute_stt_transcription_raw(stt_engine, audio_data: bytes, **kwargs) -> str:
+    """Polymorphic helper that runs transcription across varying STT binding interfaces."""
+    if hasattr(stt_engine, 'transcribe_audio'):
+        try:
+            res = stt_engine.transcribe_audio(audio_data, **kwargs)
+            if res is not None:
+                return str(res).strip()
+        except TypeError:
+            try:
+                res = stt_engine.transcribe_audio(audio_data)
+                if res is not None:
+                    return str(res).strip()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    if hasattr(stt_engine, 'transcribe'):
+        try:
+            res = stt_engine.transcribe(audio_data, **kwargs)
+            if res is not None:
+                return str(res).strip()
+        except TypeError:
+            try:
+                res = stt_engine.transcribe(audio_data)
+                if res is not None:
+                    return str(res).strip()
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    # File-based fallback for subprocesses / whisper CLI
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp.write(audio_data)
+        tmp_path = tmp.name
+
+    try:
+        if hasattr(stt_engine, 'transcribe_audio'):
+            res = stt_engine.transcribe_audio(tmp_path)
+        elif hasattr(stt_engine, 'transcribe_file'):
+            res = stt_engine.transcribe_file(tmp_path)
+        elif hasattr(stt_engine, 'transcribe'):
+            res = stt_engine.transcribe(tmp_path)
+        else:
+            raise AttributeError(f"STT binding '{type(stt_engine).__name__}' has no recognized transcription method.")
+        return str(res).strip() if res else ""
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
+
+@lollms_v1_router.post("/audio/transcriptions")
+async def transcribe_speech(
+    request: Request,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Transcribes spoken audio into text. Supports both:
+    1. Standard multipart/form-data with file upload ('file', 'model', 'language', 'prompt', 'response_format')
+    2. JSON application/json payload with base64 encoded audio ('audio', 'model', etc.)
+    """
+    loop = asyncio.get_running_loop()
+    content_type = request.headers.get("content-type", "").lower()
+
+    audio_bytes = None
+    model_param = None
+    language_param = None
+    prompt_param = None
+    response_format = "json"
+    temperature_val = 0.0
+
+    if "multipart/form-data" in content_type:
+        form = await request.form()
+        uploaded_file = form.get("file")
+        if not uploaded_file or not hasattr(uploaded_file, "read"):
+            raise HTTPException(status_code=400, detail="Missing required 'file' upload in form-data.")
+        audio_bytes = await uploaded_file.read()
+        model_param = form.get("model")
+        language_param = form.get("language")
+        prompt_param = form.get("prompt")
+        response_format = form.get("response_format", "json")
+        try:
+            temperature_val = float(form.get("temperature", 0.0))
+        except (ValueError, TypeError):
+            temperature_val = 0.0
+    else:
+        try:
+            body = await request.json()
+            stt_req = STTRequest(**body)
+            model_param = stt_req.model
+            language_param = stt_req.language
+            prompt_param = stt_req.prompt
+            response_format = stt_req.response_format or "json"
+            temperature_val = stt_req.temperature or 0.0
+
+            if stt_req.audio:
+                raw_b64 = stt_req.audio
+                if "base64," in raw_b64:
+                    raw_b64 = raw_b64.split("base64,")[1]
+                audio_bytes = base64.b64decode(raw_b64)
+            elif stt_req.file_path and os.path.exists(stt_req.file_path):
+                audio_bytes = Path(stt_req.file_path).read_bytes()
+            else:
+                raise HTTPException(status_code=400, detail="Provide 'audio' (base64) or upload an audio file.")
+        except Exception as e:
+            if isinstance(e, HTTPException): raise e
+            raise HTTPException(status_code=400, detail=f"Invalid request: {e}")
+
+    if not audio_bytes:
+        raise HTTPException(status_code=400, detail="Empty audio content.")
+
+    stt_binding_alias = None
+    stt_model_name = None
+    if model_param:
+        if "/" in str(model_param):
+            stt_binding_alias, stt_model_name = str(model_param).split("/", 1)
+        else:
+            stt_model_name = str(model_param)
+
+    if not stt_binding_alias:
+        user_stt = user.stt_binding_model_name
+        if user_stt and "/" in user_stt:
+            stt_binding_alias, stt_model_name = user_stt.split("/", 1)
+        else:
+            def_stt = db.query(DBSTTBinding).filter(DBSTTBinding.is_active == True).order_by(DBSTTBinding.id).first()
+            if not def_stt:
+                raise HTTPException(status_code=400, detail="No active STT binding configured.")
+            stt_binding_alias = def_stt.alias
+            stt_model_name = def_stt.default_model_name
+
+    lc = await loop.run_in_executor(
+        executor,
+        lambda: build_lollms_client_from_params(
+            username=user.username,
+            load_llm=False,
+            load_stt=True,
+            stt_binding_alias=stt_binding_alias,
+            stt_model_name=stt_model_name
+        )
+    )
+
+    if not hasattr(lc, "stt") or not lc.stt:
+        raise HTTPException(status_code=500, detail=f"STT binding '{stt_binding_alias}' could not be initialized.")
+
+    kwargs = {}
+    if language_param: kwargs["language"] = language_param
+    if prompt_param: kwargs["prompt"] = prompt_param
+    if temperature_val: kwargs["temperature"] = temperature_val
+
+    transcript = await loop.run_in_executor(
+        executor,
+        lambda: _execute_stt_transcription_raw(lc.stt, audio_bytes, **kwargs)
+    )
+
+    fmt = str(response_format).lower().strip()
+    if fmt == "text":
+        return Response(content=transcript, media_type="text/plain")
+    elif fmt == "verbose_json":
+        return STTVerboseResponse(
+            task="transcribe",
+            language=language_param or "en",
+            duration=None,
+            text=transcript,
+            segments=[{"id": 0, "text": transcript}]
+        )
+    else:
+        return STTResponse(text=transcript, language=language_param)
+
+@lollms_v1_router.post("/audio/translations")
+async def translate_speech(
+    request: Request,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """Translates audio from any spoken language to English text."""
+    return await transcribe_speech(request, user, db)
+
+
+# --- NEW: Text to Music (TTM) Endpoints ---
+
+def _execute_music_generation_raw(ttm_engine, prompt: str, **kwargs) -> bytes:
+    """Invokes the configured Text-to-Music engine defensively."""
+    for method_name in ('generate_music', 'generate_audio', 'generate', 'text_to_music'):
+        if hasattr(ttm_engine, method_name) and callable(getattr(ttm_engine, method_name)):
+            fn = getattr(ttm_engine, method_name)
+            try:
+                res = fn(prompt=prompt, **kwargs)
+            except TypeError:
+                res = fn(prompt)
+
+            if isinstance(res, bytes):
+                return res
+            if isinstance(res, io.BytesIO):
+                return res.getvalue()
+            if isinstance(res, str):
+                if res.startswith("data:audio"):
+                    return base64.b64decode(res.split(",", 1)[1])
+                file_p = Path(res)
+                if file_p.exists() and file_p.is_file():
+                    return file_p.read_bytes()
+                try:
+                    return base64.b64decode(res)
+                except Exception:
+                    pass
+
+    raise AttributeError("Configured TTM engine does not support audio generation or produced an empty track.")
+
+@lollms_v1_router.post("/audio/music")
+async def generate_music(
+    request: TTMRequest,
+    fastapi_request: Request,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Generates music and audio tracks from text descriptions using active TTM bindings.
+    Returns binary audio stream (default), base64 JSON, or server-hosted URL.
+    """
+    loop = asyncio.get_running_loop()
+
+    ttm_alias = None
+    ttm_model = None
+    if request.model:
+        if "/" in request.model:
+            ttm_alias, ttm_model = request.model.split("/", 1)
+        else:
+            ttm_model = request.model
+
+    if not ttm_alias:
+        def_ttm = db.query(DBTTMBinding).filter(DBTTMBinding.is_active == True).order_by(DBTTMBinding.id).first()
+        if not def_ttm:
+            raise HTTPException(status_code=501, detail="No active Text-to-Music (TTM) binding configured on the server.")
+        ttm_alias = def_ttm.alias
+        ttm_model = ttm_model or def_ttm.default_model_name
+
+    lc = await loop.run_in_executor(
+        executor,
+        lambda: build_lollms_client_from_params(
+            username=user.username,
+            load_llm=False,
+            load_ttm=True,
+            ttm_binding_alias=ttm_alias,
+            ttm_model_name=ttm_model
+        )
+    )
+
+    if not hasattr(lc, "ttm") or not lc.ttm:
+        raise HTTPException(status_code=500, detail=f"TTM binding '{ttm_alias}' is not operational.")
+
+    kwargs = {
+        "duration": request.duration,
+        "negative_prompt": request.negative_prompt
+    }
+    if request.bpm: kwargs["bpm"] = request.bpm
+    if request.genre: kwargs["genre"] = request.genre
+
+    try:
+        audio_bytes = await loop.run_in_executor(
+            executor,
+            lambda: _execute_music_generation_raw(lc.ttm, request.prompt, **kwargs)
+        )
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Music generation error: {e}")
+
+    fmt_clean = (request.response_format or "audio").lower().strip()
+
+    if fmt_clean in ("b64_json", "json"):
+        b64_audio = base64.b64encode(audio_bytes).decode("utf-8")
+        return TTMResponse(
+            b64_audio=b64_audio,
+            duration=request.duration or 15,
+            prompt=request.prompt
+        )
+    elif fmt_clean == "url":
+        user_music_path = get_user_data_root(user.username) / "generated_audio"
+        user_music_path.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.wav"
+        (user_music_path / filename).write_bytes(audio_bytes)
+        base_url = str(fastapi_request.base_url).rstrip("/")
+        return TTMResponse(
+            url=f"{base_url}/api/files/generated/{filename}",
+            duration=request.duration or 15,
+            prompt=request.prompt
+        )
+
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+        headers={"Content-Disposition": f"attachment; filename=track_{uuid.uuid4().hex[:8]}.wav"}
+    )
+
+
+# --- NEW: Text to Video (TTV) Endpoints ---
+
+def _execute_video_generation_raw(ttv_engine, prompt: str, **kwargs) -> bytes:
+    """Invokes the configured Text-to-Video engine defensively."""
+    for method_name in ('generate_video', 'text_to_video', 'image_to_video', 'generate'):
+        if hasattr(ttv_engine, method_name) and callable(getattr(ttv_engine, method_name)):
+            fn = getattr(ttv_engine, method_name)
+            try:
+                res = fn(prompt=prompt, **kwargs)
+            except TypeError:
+                try:
+                    res = fn(prompt)
+                except Exception:
+                    continue
+
+            if isinstance(res, bytes):
+                return res
+            if isinstance(res, io.BytesIO):
+                return res.getvalue()
+            if isinstance(res, str):
+                if res.startswith("data:video"):
+                    return base64.b64decode(res.split(",", 1)[1])
+                file_p = Path(res)
+                if file_p.exists() and file_p.is_file():
+                    return file_p.read_bytes()
+                try:
+                    return base64.b64decode(res)
+                except Exception:
+                    pass
+
+    raise AttributeError("Configured TTV engine does not support video generation or produced an empty video stream.")
+
+@lollms_v1_router.post("/video/generations", response_model=Union[TTVResponse, Any])
+async def generate_video(
+    request: TTVRequest,
+    fastapi_request: Request,
+    user: DBUser = Depends(get_user_for_lollms_service),
+    db: Session = Depends(get_db)
+):
+    """
+    Generates video clips from text prompts or initial image frames using active TTV bindings.
+    Returns URL to hosted video file, base64 json, or binary stream.
+    """
+    loop = asyncio.get_running_loop()
+
+    ttv_alias = None
+    ttv_model = None
+    if request.model:
+        if "/" in request.model:
+            ttv_alias, ttv_model = request.model.split("/", 1)
+        else:
+            ttv_model = request.model
+
+    if not ttv_alias:
+        def_ttv = db.query(DBTTVBinding).filter(DBTTVBinding.is_active == True).order_by(DBTTVBinding.id).first()
+        if not def_ttv:
+            raise HTTPException(status_code=501, detail="No active Text-to-Video (TTV) binding configured on the server.")
+        ttv_alias = def_ttv.alias
+        ttv_model = ttv_model or def_ttv.default_model_name
+
+    lc = await loop.run_in_executor(
+        executor,
+        lambda: build_lollms_client_from_params(
+            username=user.username,
+            load_llm=False,
+            load_ttv=True,
+            ttv_binding_alias=ttv_alias,
+            ttv_model_name=ttv_model
+        )
+    )
+
+    if not hasattr(lc, "ttv") or not lc.ttv:
+        raise HTTPException(status_code=500, detail=f"TTV binding '{ttv_alias}' is not operational.")
+
+    kwargs = {
+        "width": request.width or 512,
+        "height": request.height or 512,
+        "num_frames": request.num_frames or 24,
+        "fps": request.fps or 12,
+        "negative_prompt": request.negative_prompt,
+        "seed": request.seed
+    }
+    if request.image:
+        clean_img = request.image
+        if "base64," in clean_img:
+            clean_img = clean_img.split("base64,")[1]
+        kwargs["image"] = clean_img
+
+    try:
+        video_bytes = await loop.run_in_executor(
+            executor,
+            lambda: _execute_video_generation_raw(lc.ttv, request.prompt, **kwargs)
+        )
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Video generation error: {e}")
+
+    fmt_clean = (request.response_format or "url").lower().strip()
+
+    if fmt_clean == "b64_json":
+        b64_video = base64.b64encode(video_bytes).decode("utf-8")
+        return TTVResponse(
+            b64_video=b64_video,
+            width=request.width or 512,
+            height=request.height or 512,
+            num_frames=request.num_frames or 24,
+            prompt=request.prompt
+        )
+    elif fmt_clean == "video":
+        return Response(
+            content=video_bytes,
+            media_type="video/mp4",
+            headers={"Content-Disposition": f"attachment; filename=clip_{uuid.uuid4().hex[:8]}.mp4"}
+        )
+    else:  # Default: URL
+        user_video_path = get_user_data_root(user.username) / "generated_videos"
+        user_video_path.mkdir(parents=True, exist_ok=True)
+        filename = f"{uuid.uuid4().hex}.mp4"
+        (user_video_path / filename).write_bytes(video_bytes)
+        base_url = str(fastapi_request.base_url).rstrip("/")
+        return TTVResponse(
+            url=f"{base_url}/api/files/generated/{filename}",
+            width=request.width or 512,
+            height=request.height or 512,
+            num_frames=request.num_frames or 24,
+            prompt=request.prompt
+        )
 
 # --- Per-Binding-Type Model Listing Endpoints ---
 

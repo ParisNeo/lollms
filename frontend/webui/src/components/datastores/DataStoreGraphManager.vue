@@ -1,32 +1,33 @@
+<!-- frontend/webui/src/components/datastores/DataStoreGraphManager.vue -->
 <template>
     <div class="h-full flex flex-col overflow-hidden bg-white dark:bg-gray-950">
         <!-- Top Toolbar & Navigation -->
         <header class="px-4 py-2.5 bg-gray-50 dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3 shrink-0 z-20">
-            <!-- Mode Tabs (TBox Summary / TBox Raw / ABox Instances) -->
-            <div class="flex items-center gap-1 p-1 bg-gray-200/80 dark:bg-gray-800 rounded-xl">
+            <!-- Mode Tabs (Knowledge Graph Instances / Class Schema / Ontology) -->
+            <div class="flex items-center gap-1 p-1 bg-gray-200/80 dark:bg-gray-800 rounded-xl select-none">
+                <button @click="switchGraphMode('abox')" 
+                        :class="['px-3.5 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer', 
+                                 currentGraphMode === 'abox' ? 'bg-white dark:bg-gray-700 text-emerald-600 dark:text-emerald-400 shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200']">
+                    Knowledge Graph (Entities)
+                </button>
                 <button @click="switchGraphMode('tbox_summary')" 
-                        :class="['px-4 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all', 
+                        :class="['px-3.5 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer', 
                                  currentGraphMode === 'tbox_summary' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200']">
-                    TBox · Summary
+                    Class Schema (Summary)
                 </button>
                 <button @click="switchGraphMode('tbox')" 
-                        :class="['px-4 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all', 
-                                 currentGraphMode === 'tbox' ? 'bg-white dark:bg-gray-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200']">
-                    TBox · Terminology
-                </button>
-                <button @click="switchGraphMode('abox')" 
-                        :class="['px-4 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all', 
-                                 currentGraphMode === 'abox' ? 'bg-white dark:bg-gray-700 text-emerald-600 dark:text-emerald-400 shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200']">
-                    ABox · Instances
+                        :class="['px-3.5 py-1.5 text-xs font-black uppercase tracking-wider rounded-lg transition-all cursor-pointer', 
+                                 currentGraphMode === 'tbox' ? 'bg-white dark:bg-gray-700 text-purple-600 dark:text-purple-400 shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200']">
+                    Ontology (TBox)
                 </button>
             </div>
 
             <!-- Layout & Visual Toggles -->
             <div class="flex items-center gap-2">
                 <select v-model="currentLayout" @change="applyLayout(currentLayout)" class="input-field !py-1 !px-2.5 text-xs font-bold bg-white dark:bg-gray-800">
+                    <option value="cose">Force-Directed (Clustered)</option>
                     <option value="concentric">Concentric Layout</option>
                     <option value="breadthfirst">Hierarchical (DAG)</option>
-                    <option value="cose">Force-Directed (CoSE)</option>
                     <option value="circle">Circle Layout</option>
                     <option value="grid">Grid Layout</option>
                 </select>
@@ -38,9 +39,10 @@
             </div>
 
             <!-- Action Panel Toggles & Rebuild Controls -->
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
                 <button @click="toggleAside('sparql')" :class="['btn btn-sm px-3 h-8 text-xs font-bold', activeAside === 'sparql' ? 'btn-primary' : 'btn-secondary']">
-                    SPARQL 1.1
+                    <IconSparkles class="w-3.5 h-3.5 mr-1 text-purple-400" />
+                    <span>SPARQL 1.1</span>
                 </button>
                 <button @click="toggleAside('path')" :class="['btn btn-sm px-3 h-8 text-xs font-bold', activeAside === 'path' ? 'btn-primary' : 'btn-secondary']">
                     Shortest Path
@@ -49,16 +51,33 @@
                     Inspector
                 </button>
 
-                <div class="h-4 w-px bg-gray-300 dark:bg-gray-700 mx-1"></div>
+                <div class="h-4 w-px bg-gray-300 dark:bg-gray-700 mx-1 hidden sm:block"></div>
 
-                <!-- Graph Build Mode Selector -->
-                <select v-model="graphBuildMode" class="input-field !py-1 !px-2 text-xs font-bold bg-white dark:bg-gray-800 border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300" title="Graph Construction Strategy">
-                    <option value="fast_hybrid">⚡ Fast Hybrid (Tabular Zero-LLM + Schema)</option>
-                    <option value="declarative">📋 Pure Declarative (Zero-LLM)</option>
-                    <option value="llm_deep">🧠 Deep LLM Extraction (Slow)</option>
+                <!-- Active LoLLMs Engine Selector -->
+                <div class="flex items-center gap-1.5 bg-purple-50/70 dark:bg-purple-950/30 px-2.5 py-1 rounded-xl border border-purple-200 dark:border-purple-800/60" title="Active LoLLMs Client Model used for Graph Extraction">
+                    <IconCpuChip class="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                    <select v-model="selectedModel" class="bg-transparent border-none text-[11px] font-bold text-purple-900 dark:text-purple-200 focus:ring-0 p-0 pr-4 cursor-pointer">
+                        <option :value="user?.lollms_model_name || ''">
+                            Default ({{ user?.lollms_model_name || 'Active System Model' }})
+                        </option>
+                        <optgroup v-for="g in availableLLMModelsGrouped" :key="g.label" :label="g.label">
+                            <option v-for="m in g.items" :key="m.id" :value="m.id">
+                                {{ m.name }}
+                            </option>
+                        </optgroup>
+                    </select>
+                </div>
+
+                <!-- Graph Build Mode Strategy -->
+                <select v-model="graphBuildMode" class="input-field !py-1 !px-2 text-xs font-bold bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-700 text-gray-700 dark:text-gray-300" title="Graph Construction Strategy (SafeStore 3.6.1)">
+                    <option value="fast_hybrid">⚡ Fast Hybrid (1 Call/Doc + Tables)</option>
+                    <option value="document">📄 Full Document (1 Call per Doc)</option>
+                    <option value="batch_chunks">📦 Batched Chunks (10 Chunks/Call)</option>
+                    <option value="declarative">📋 Declarative Tables (Zero-LLM)</option>
+                    <option value="chunk">🔬 Granular Chunks (Legacy)</option>
                 </select>
 
-                <button @click="handleAutoExtractOntology" :disabled="isExtractingOntology" class="btn btn-secondary btn-sm h-8 text-purple-600 dark:text-purple-300 border-purple-200 dark:border-purple-800" title="Extract schema from documents">
+                <button @click="handleAutoExtractOntology" :disabled="isExtractingOntology" class="btn btn-secondary btn-sm h-8 text-purple-600 dark:text-purple-300 border-purple-200 dark:border-purple-800" title="Extract schema from documents with LoLLMs">
                     <IconAnimateSpin v-if="isExtractingOntology" class="w-3.5 h-3.5 mr-1 animate-spin" />
                     <IconSparkles v-else class="w-3.5 h-3.5 mr-1 text-purple-500" />
                     <span>Auto-Schema</span>
@@ -78,6 +97,8 @@
                 <span class="text-blue-500 font-bold">{{ graphStats.nodes }} nodes</span>
                 <span>/</span>
                 <span class="text-purple-500 font-bold">{{ graphStats.edges }} edges</span>
+                <span class="text-gray-400">·</span>
+                <span class="text-purple-600 dark:text-purple-400 font-bold">Engine: {{ activeEngineDisplayName }}</span>
             </div>
         </div>
 
@@ -133,12 +154,21 @@
                     </div>
 
                     <!-- Literal Properties -->
+                    <div v-if="selectedElementData.predicates && selectedElementData.predicates.length > 0">
+                        <label class="text-[10px] font-bold uppercase text-gray-400 block mb-1">Bundled Relationships ({{ selectedElementData.predicates.length }})</label>
+                        <div class="p-2.5 bg-gray-50 dark:bg-gray-950 rounded-xl border dark:border-gray-800 text-xs font-mono max-h-48 overflow-y-auto custom-scrollbar space-y-1">
+                            <div v-for="pred in selectedElementData.predicates" :key="pred" class="text-emerald-600 dark:text-emerald-400 font-bold">
+                                • {{ pred }}
+                            </div>
+                        </div>
+                    </div>
+
                     <div v-if="selectedElementData.properties && Object.keys(selectedElementData.properties).length > 0">
                         <label class="text-[10px] font-bold uppercase text-gray-400 block mb-2">Properties</label>
                         <JsonRenderer :json="selectedElementData.properties" class="p-2.5 bg-gray-50 dark:bg-gray-950 rounded-xl border dark:border-gray-800 text-[10px]" />
                     </div>
 
-                    <!-- Connect / Relationship Tools -->
+                    <!-- Quick Path Actions -->
                     <div class="pt-4 border-t border-gray-100 dark:border-gray-800 space-y-2">
                         <label class="text-[10px] font-black uppercase text-gray-400">Quick Actions</label>
                         <button @click="setPathNode('source')" class="btn btn-secondary btn-xs w-full text-left py-2">Set as Path Source</button>
@@ -148,20 +178,47 @@
                 <div v-else class="text-center py-20 text-xs text-gray-400 italic">Click any node or edge on the canvas to inspect its axioms and properties.</div>
             </aside>
 
-            <!-- 2. SPARQL 1.1 Panel -->
+            <!-- 2. SPARQL 1.1 Panel (Enhanced with AI Generator) -->
             <aside v-if="activeAside === 'sparql'" class="w-80 lg:w-96 shrink-0 h-full border-l border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col z-30 p-4 space-y-3 overflow-hidden">
                 <div class="flex items-center justify-between border-b dark:border-gray-800 pb-2 shrink-0">
-                    <h3 class="font-black text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300">SPARQL 1.1 Console</h3>
+                    <h3 class="font-black text-sm uppercase tracking-wider text-gray-700 dark:text-gray-300">SPARQL 1.1 Studio</h3>
                     <button @click="activeAside = null" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">✕</button>
                 </div>
 
+                <!-- AI SPARQL Generator (Natural Language to SPARQL 1.1 via LoLLMs) -->
+                <div class="p-3 bg-purple-50/70 dark:bg-purple-950/30 rounded-xl border border-purple-200/80 dark:border-purple-800/60 space-y-2 shrink-0">
+                    <span class="text-[10px] font-black uppercase tracking-wider text-purple-700 dark:text-purple-300 flex items-center gap-1.5">
+                        <IconSparkles class="w-3.5 h-3.5 text-purple-500" />
+                        <span>AI SPARQL Generator (LoLLMs)</span>
+                    </span>
+                    <div class="flex items-center gap-1.5">
+                        <input 
+                            v-model="aiSparqlPrompt" 
+                            @keyup.enter="handleGenerateSparql" 
+                            type="text" 
+                            placeholder="e.g. 'All tools depending on X'..." 
+                            class="input-field text-xs grow !py-1 !px-2 bg-white dark:bg-gray-800"
+                        />
+                        <button 
+                            @click="handleGenerateSparql" 
+                            :disabled="isGeneratingSparql || !aiSparqlPrompt.trim()" 
+                            class="btn btn-primary btn-xs px-2.5 h-7 shrink-0 font-bold bg-purple-600 hover:bg-purple-700 border-none text-white shadow-xs"
+                        >
+                            <IconAnimateSpin v-if="isGeneratingSparql" class="w-3 h-3 animate-spin" />
+                            <IconSparkles v-else class="w-3 h-3" />
+                            <span>Ask</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quick Snippets -->
                 <div class="flex gap-1 shrink-0 overflow-x-auto pb-1">
                     <button @click="applySparqlSnippet('all')" class="btn btn-secondary btn-xs text-[10px]">All Triples</button>
                     <button @click="applySparqlSnippet('counts')" class="btn btn-secondary btn-xs text-[10px]">Type Counts</button>
                     <button @click="applySparqlSnippet('construct')" class="btn btn-secondary btn-xs text-[10px]">Construct</button>
                 </div>
 
-                <textarea v-model="sparqlQuery" class="input-field font-mono text-xs h-32 shrink-0 resize-none" spellcheck="false"></textarea>
+                <textarea v-model="sparqlQuery" class="input-field font-mono text-xs h-28 shrink-0 resize-none" spellcheck="false"></textarea>
 
                 <div class="flex justify-end gap-2 shrink-0">
                     <button @click="runSPARQLQuery" :disabled="isExecutingSparql" class="btn btn-primary btn-xs px-4 h-7">
@@ -170,8 +227,9 @@
                     </button>
                 </div>
 
+                <!-- Results Table -->
                 <div class="grow overflow-y-auto custom-scrollbar bg-gray-50 dark:bg-gray-950 rounded-xl border dark:border-gray-800 p-2 text-xs">
-                    <div v-if="!sparqlResultData" class="text-center py-10 text-gray-400 italic">Execute a query to inspect results table.</div>
+                    <div v-if="!sparqlResultData" class="text-center py-10 text-gray-400 italic">Execute a query or generate one with LoLLMs.</div>
                     <table v-else-if="sparqlResultData.rows" class="w-full text-[11px] font-mono text-left">
                         <thead>
                             <tr class="border-b dark:border-gray-800 text-gray-400">
@@ -234,6 +292,7 @@ import JsonRenderer from '../ui/JsonRenderer.vue';
 import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 import IconSparkles from '../../assets/icons/IconSparkles.vue';
 import IconPlay from '../../assets/icons/IconPlayCircle.vue';
+import IconCpuChip from '../../assets/icons/IconCpuChip.vue';
 
 const props = defineProps({
     store: { type: Object, required: true },
@@ -244,12 +303,13 @@ const dataStore = useDataStore();
 const uiStore = useUiStore();
 const authStore = useAuthStore();
 const { user } = storeToRefs(authStore);
+const { availableLLMModelsGrouped } = storeToRefs(dataStore);
 
 const cyContainer = ref(null);
 let cyInstance = null;
 
-const currentGraphMode = ref('tbox_summary'); // 'tbox_summary' | 'tbox' | 'abox'
-const currentLayout = ref('concentric');
+const currentGraphMode = ref('abox'); // Default directly to the real Knowledge Graph!
+const currentLayout = ref('cose'); // Default to Force-Directed clustering
 const showLabels = ref(true);
 const activeAside = ref(null); // 'inspector' | 'sparql' | 'path' | null
 
@@ -257,11 +317,16 @@ const graphStats = ref({ nodes: 0, edges: 0 });
 const selectedElementData = ref(null);
 const tooltip = ref({ visible: false, x: 0, y: 0, data: null });
 
+// LoLLMs Client Active Instance & Strategy Configuration
+const selectedModel = ref('');
+const graphBuildMode = ref('fast_hybrid'); // 'fast_hybrid', 'document', 'batch_chunks', 'declarative', 'chunk'
+
 const isExtractingOntology = ref(false);
-const graphBuildMode = ref('fast_hybrid'); // 'fast_hybrid', 'declarative', 'llm_deep'
 const isExecutingSparql = ref(false);
+const isGeneratingSparql = ref(false);
 const isFindingPath = ref(false);
 
+const aiSparqlPrompt = ref('');
 const sparqlQuery = ref('SELECT ?subject ?predicate ?object\nWHERE {\n  ?subject ?predicate ?object .\n}\nLIMIT 25');
 const sparqlResultData = ref(null);
 
@@ -269,10 +334,14 @@ const pathSource = ref(null);
 const pathTarget = ref(null);
 const pathResult = ref(null);
 
+const activeEngineDisplayName = computed(() => {
+    return selectedModel.value || user.value?.lollms_model_name || 'Active LoLLMs Client';
+});
+
 const modeDescriptions = {
-    tbox_summary: 'Aggregated class-to-class schema overview. Double-click classes with gold borders to expand instances.',
-    tbox: 'Raw Terminology Graph: Classes, Object Properties, Domain, Range, and SubClassOf hierarchy.',
-    abox: 'Raw Assertion Graph: Individual instances and direct factual relationships.'
+    abox: 'Knowledge Graph (ABox): All extracted entities, concepts, documents, and real-world relationships.',
+    tbox_summary: 'Class Schema Summary: Aggregated high-level overview of entity classes and relationship channels.',
+    tbox: 'Ontology Terminology (TBox): Classes, predicates, domain/range constraints, and class hierarchy.'
 };
 
 const COLORS = {
@@ -319,6 +388,9 @@ function styleSheet() {
                 'target-arrow-color': isDark ? '#4a5064' : '#94a3b8',
                 'target-arrow-shape': 'triangle',
                 'curve-style': 'bezier',
+                'control-point-step-size': 24,
+                'loop-direction': '-45deg',
+                'loop-sweep': '-90deg',
                 'label': showLabels.value ? 'data(label)' : '',
                 'font-size': 8,
                 'color': isDark ? '#9aa0ac' : '#64748b',
@@ -327,6 +399,7 @@ function styleSheet() {
                 'text-background-padding': 2
             }
         },
+        { selector: 'edge[?is_self_loop]', style: { 'control-point-step-size': 35, 'loop-direction': '-45deg', 'loop-sweep': '-90deg' } },
         { selector: 'edge[kind = "hierarchy"]', style: { 'line-color': '#4f7cff', 'target-arrow-color': '#4f7cff', 'width': 2 } },
         { selector: 'edge[kind = "data"]', style: { 'line-color': '#33b679', 'target-arrow-color': '#33b679' } },
         { selector: '.faded', style: { 'opacity': 0.15 } },
@@ -404,12 +477,16 @@ async function initCytoscape() {
     });
 }
 
-function applyLayout(layoutName = 'concentric') {
+function applyLayout(layoutName = 'cose') {
     if (!cyInstance || cyInstance.nodes().length === 0) return;
-    const opts = { name: layoutName, animate: true, animationDuration: 400, padding: 40, fit: true };
+    const opts = { name: layoutName, animate: true, animationDuration: 450, padding: 50, fit: true };
     if (layoutName === 'cose') {
-        opts.nodeRepulsion = 12000;
-        opts.idealEdgeLength = 100;
+        opts.nodeRepulsion = 500000;
+        opts.idealEdgeLength = 120;
+        opts.edgeElasticity = 100;
+        opts.nestingFactor = 5;
+        opts.gravity = 60;
+        opts.numIter = 1000;
     }
     if (layoutName === 'breadthfirst') {
         opts.directed = true;
@@ -538,6 +615,38 @@ function applySparqlSnippet(type) {
     if (type === 'construct') sparqlQuery.value = `CONSTRUCT { ?s ?p ?o }\nWHERE { ?s ?p ?o }\nLIMIT 50`;
 }
 
+async function handleGenerateSparql() {
+    if (!aiSparqlPrompt.value.trim() || isGeneratingSparql.value) return;
+    isGeneratingSparql.value = true;
+
+    let modelBinding = null;
+    let modelName = null;
+    if (selectedModel.value && selectedModel.value.includes('/')) {
+        const parts = selectedModel.value.split('/');
+        modelBinding = parts[0];
+        modelName = parts.slice(1).join('/');
+    } else if (selectedModel.value) {
+        modelName = selectedModel.value;
+    }
+
+    try {
+        const res = await dataStore.generateSparql({
+            storeId: props.store.id,
+            query: aiSparqlPrompt.value,
+            modelBinding,
+            modelName
+        });
+        if (res && res.sparql) {
+            sparqlQuery.value = res.sparql;
+            uiStore.addNotification('SPARQL query written by LoLLMs!', 'success');
+        }
+    } catch (e) {
+        uiStore.addNotification('Failed to generate SPARQL query.', 'error');
+    } finally {
+        isGeneratingSparql.value = false;
+    }
+}
+
 async function runSPARQLQuery() {
     if (!sparqlQuery.value.trim()) return;
     isExecutingSparql.value = true;
@@ -568,7 +677,7 @@ async function handleAutoExtractOntology() {
         const res = await dataStore.extractStoreOntology(props.store.id);
         if (res.nodes) {
             loadGraphData('tbox');
-            uiStore.addNotification("Domain schema auto-extracted from documents!", "success");
+            uiStore.addNotification("Domain schema auto-extracted from documents using LoLLMs!", "success");
         }
     } catch (e) {
         uiStore.addNotification(e.response?.data?.detail || "Extraction failed.", "error");
@@ -578,17 +687,34 @@ async function handleAutoExtractOntology() {
 }
 
 function handleGenerateGraph() {
+    let modelBinding = null;
+    let modelName = null;
+    if (selectedModel.value && selectedModel.value.includes('/')) {
+        const parts = selectedModel.value.split('/');
+        modelBinding = parts[0];
+        modelName = parts.slice(1).join('/');
+    } else if (selectedModel.value) {
+        modelName = selectedModel.value;
+    }
+
     dataStore.generateDataStoreGraph({
         storeId: props.store.id,
         graphData: {
             graph_type: 'knowledge_graph',
             mode: graphBuildMode.value,
+            model_binding: modelBinding,
+            model_name: modelName,
             ontology: dataStore.storeOntologies?.[props.store.id] || ''
         }
     });
 }
 
 onMounted(() => {
+    dataStore.fetchAvailableLollmsModels();
+    if (user.value?.lollms_model_name && !selectedModel.value) {
+        selectedModel.value = user.value.lollms_model_name;
+    }
+
     nextTick(async () => {
         await initCytoscape();
         loadGraphData();
@@ -599,6 +725,12 @@ onUnmounted(() => {
     if (cyInstance) {
         cyInstance.destroy();
         cyInstance = null;
+    }
+});
+
+watch(user, (u) => {
+    if (u?.lollms_model_name && !selectedModel.value) {
+        selectedModel.value = u.lollms_model_name;
     }
 });
 
