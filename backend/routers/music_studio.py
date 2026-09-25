@@ -20,13 +20,17 @@ from backend.session import (
     get_current_active_user, get_user_data_root, 
     build_lollms_client_from_params, get_universal_model_profile
 )
-from backend.task_manager import task_manager, Task
 
 music_studio_router = APIRouter(
     prefix="/api/music-studio",
     tags=["Music Studio"],
     dependencies=[Depends(get_current_active_user)]
 )
+router = music_studio_router
+
+__all__ = ["music_studio_router", "router"]
+
+from backend.task_manager import task_manager, Task
 
 def get_user_music_path(username: str) -> Path:
     safe_uname = secure_filename(username)
@@ -88,7 +92,6 @@ def _generate_song_task(task: Task, username: str, request_data: dict):
     instrumental = bool(request_data.get("instrumental", False))
     user_prompt = request_data.get("prompt", "").strip()
 
-    # Assemble comprehensive musical prompt
     prompt_parts = []
     if user_prompt:
         prompt_parts.append(user_prompt)
@@ -129,7 +132,6 @@ def _generate_song_task(task: Task, username: str, request_data: dict):
     task.set_progress(45)
 
     audio_bytes = None
-    # 1. Primary: generate_song_from_lyrics for vocal songs
     if not instrumental and lyrics:
         if hasattr(lc, "generate_song_from_lyrics") and callable(lc.generate_song_from_lyrics):
             audio_bytes = lc.generate_song_from_lyrics(
@@ -144,7 +146,6 @@ def _generate_song_task(task: Task, username: str, request_data: dict):
                 duration=duration
             )
 
-    # 2. Instrumental or fallback to standard music generation
     if not audio_bytes:
         if hasattr(lc, "generate_music") and callable(lc.generate_music):
             audio_bytes = lc.generate_music(prompt=final_prompt, duration=duration)
@@ -158,7 +159,6 @@ def _generate_song_task(task: Task, username: str, request_data: dict):
     if not audio_bytes:
         raise Exception("TTM generator returned empty audio data.")
 
-    # Normalize bytes
     if isinstance(audio_bytes, io.BytesIO):
         audio_bytes = audio_bytes.getvalue()
     elif isinstance(audio_bytes, str):
@@ -290,7 +290,6 @@ Rules:
 
     try:
         lyrics = lc.generate_text(user_prompt, system_prompt=system_prompt, max_new_tokens=1024, temperature=0.7).strip()
-        # Clean any accidental outer code block fences
         lyrics = re.sub(r'^```(?:\w+)?\n', '', lyrics)
         lyrics = re.sub(r'\n```$', '', lyrics).strip()
         return {"lyrics": lyrics}
@@ -334,7 +333,6 @@ Output strictly valid JSON with keys: 'global_metadata', 'vocal_details', 'arran
         }
     except Exception as e:
         trace_exception(e)
-        # Fallback heuristic
         return {
             "global_metadata": f"Genre: {payload.description}. Tempo: 110 BPM. Key: C Major. Modern polished production.",
             "vocal_details": "Lead expressive vocal with gentle reverb and warm presence.",

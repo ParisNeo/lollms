@@ -311,14 +311,32 @@ export const useAdminStore = defineStore('admin', () => {
     
     // TTV
     async function fetchTtvBindings(force = false) { if (!force && ttvBindings.value.length > 0) return; isLoadingTtvBindings.value = true; try { const r = await apiClient.get('/api/admin/ttv-bindings'); ttvBindings.value = r.data; } finally { isLoadingTtvBindings.value = false; } }
-    async function fetchAvailableTtvBindingTypes(force = false) { if (!force && availableTtvBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttv-bindings/available_types'); availableTtvBindingTypes.value = Array.isArray(r.data) ? r.data : []; }
+    async function fetchAvailableTtvBindingTypes(force = false) { 
+        if (!force && availableTtvBindingTypes.value.length > 0) return; 
+        try {
+            const r = await apiClient.get('/api/admin/ttv-bindings/available_types'); 
+            availableTtvBindingTypes.value = Array.isArray(r.data) ? r.data : []; 
+        } catch (e) {
+            console.error("Failed to fetch available TTV binding types:", e);
+            availableTtvBindingTypes.value = [];
+        }
+    }
     async function addTtvBinding(payload) { const r = await apiClient.post('/api/admin/ttv-bindings', payload); ttvBindings.value.push(r.data); uiStore.addNotification(`TTV Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtvBinding(id, payload) { const r = await apiClient.put(`/api/admin/ttv-bindings/${id}`, payload); const i = ttvBindings.value.findIndex(b => b.id === id); if (i !== -1) ttvBindings.value[i] = r.data; uiStore.addNotification(`TTV Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtvBinding(id) { await apiClient.delete(`/api/admin/ttv-bindings/${id}`); ttvBindings.value = ttvBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTV Binding deleted.', 'success'); }
 
     // TTM
     async function fetchTtmBindings(force = false) { if (!force && ttmBindings.value.length > 0) return; isLoadingTtmBindings.value = true; try { const r = await apiClient.get('/api/admin/ttm-bindings'); ttmBindings.value = r.data; } finally { isLoadingTtmBindings.value = false; } }
-    async function fetchAvailableTtmBindingTypes(force = false) { if (!force && availableTtmBindingTypes.value.length > 0) return; const r = await apiClient.get('/api/admin/ttm-bindings/available_types'); availableTtmBindingTypes.value = Array.isArray(r.data) ? r.data : []; }
+    async function fetchAvailableTtmBindingTypes(force = false) { 
+        if (!force && availableTtmBindingTypes.value.length > 0) return; 
+        try {
+            const r = await apiClient.get('/api/admin/ttm-bindings/available_types'); 
+            availableTtmBindingTypes.value = Array.isArray(r.data) ? r.data : []; 
+        } catch (e) {
+            console.error("Failed to fetch available TTM binding types:", e);
+            availableTtmBindingTypes.value = [];
+        }
+    }
     async function addTtmBinding(payload) { const r = await apiClient.post('/api/admin/ttm-bindings', payload); ttmBindings.value.push(r.data); uiStore.addNotification(`TTM Binding '${r.data.alias}' created.`, 'success'); }
     async function updateTtmBinding(id, payload) { const r = await apiClient.put(`/api/admin/ttm-bindings/${id}`, payload); const i = ttmBindings.value.findIndex(b => b.id === id); if (i !== -1) ttmBindings.value[i] = r.data; uiStore.addNotification(`TTM Binding '${r.data.alias}' updated.`, 'success'); }
     async function deleteTtmBinding(id) { await apiClient.delete(`/api/admin/ttm-bindings/${id}`); ttmBindings.value = ttmBindings.value.filter(b => b.id !== id); uiStore.addNotification('TTM Binding deleted.', 'success'); }

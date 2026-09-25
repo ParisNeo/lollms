@@ -123,8 +123,8 @@ watch(() => form.value.name, (newName, oldName) => {
 });
 
 onMounted(() => {
-    adminStore.fetchTtmBindings();
-    adminStore.fetchAvailableTtmBindingTypes();
+    adminStore.fetchTtmBindings(true);
+    adminStore.fetchAvailableTtmBindingTypes(true);
 });
 
 function showAddForm() {

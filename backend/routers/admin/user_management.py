@@ -31,6 +31,8 @@ from ascii_colors import trace_exception
 
 from sqlalchemy import func, desc, or_, and_
 
+from collections import defaultdict
+
 user_management_router = APIRouter()
 
 def safe_datetime(value: Any) -> datetime:
