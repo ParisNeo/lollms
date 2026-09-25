@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-25 01:33]
+
+- fix(doc-parser): update safe-store version to v3.7.3
+
 ## [2026-09-25 01:32]
 
 - Update LLM-related CLI and service module configurations to integrate STT (Speech-to-Text) and TTV (Text-to-Voice) bindings into the existing LLMs infrastructure, with support for model graph execution utilities.

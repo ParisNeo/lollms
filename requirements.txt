@@ -41,7 +41,7 @@ numpy==2.2.6
 Pillow==12.3.0
 
 # --- SafeStore & Vector / Graph Engine ---
-safe_store==3.7.2
+safe_store==3.7.3
 wcwidth==0.2.14
 
 # --- Document Parsing, Ingestion & Office Formats ---
