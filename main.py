@@ -611,14 +611,41 @@ app = FastAPI(
     on_shutdown=[shutdown_event]
 )
 
+from fastapi.responses import JSONResponse
+from fastapi import Request
+
 # Robust, Top-Level CORS Middleware Setup (Universal for all workers and preflight OPTIONS requests)
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex="https?://.*",
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:9642",
+        "http://127.0.0.1:9642"
+    ],
+    allow_origin_regex=r"^https?://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
+
+@app.exception_handler(Exception)
+async def global_unhandled_exception_handler(request: Request, exc: Exception):
+    """
+    Guarantees that unhandled 500 exceptions are returned with proper CORS headers,
+    preventing the browser from blocking error details under CORS policy.
+    """
+    trace_exception(exc)
+    origin = request.headers.get("origin") or "http://localhost:5173"
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {str(exc)}"},
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true"
+        }
+    )
 
 app.include_router(auth_router)
 app.include_router(admin_router)

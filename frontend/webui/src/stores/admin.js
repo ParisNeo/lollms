@@ -81,6 +81,8 @@ export const useAdminStore = defineStore('admin', () => {
     const ttmBindings = ref([]);
     const isLoadingTtmBindings = ref(false);
     const availableTtmBindingTypes = ref([]);
+    const isLoadingAvailableTtmBindingTypes = ref(false);
+    const ttmSetupStatusMessage = ref('');
     
     const ragBindings = ref([]);
     const isLoadingRagBindings = ref(false);
@@ -329,12 +331,16 @@ export const useAdminStore = defineStore('admin', () => {
     async function fetchTtmBindings(force = false) { if (!force && ttmBindings.value.length > 0) return; isLoadingTtmBindings.value = true; try { const r = await apiClient.get('/api/admin/ttm-bindings'); ttmBindings.value = r.data; } finally { isLoadingTtmBindings.value = false; } }
     async function fetchAvailableTtmBindingTypes(force = false) { 
         if (!force && availableTtmBindingTypes.value.length > 0) return; 
+        isLoadingAvailableTtmBindingTypes.value = true;
         try {
             const r = await apiClient.get('/api/admin/ttm-bindings/available_types'); 
             availableTtmBindingTypes.value = Array.isArray(r.data) ? r.data : []; 
+            ttmSetupStatusMessage.value = '';
         } catch (e) {
             console.error("Failed to fetch available TTM binding types:", e);
             availableTtmBindingTypes.value = [];
+        } finally {
+            isLoadingAvailableTtmBindingTypes.value = false;
         }
     }
     async function addTtmBinding(payload) { const r = await apiClient.post('/api/admin/ttm-bindings', payload); ttmBindings.value.push(r.data); uiStore.addNotification(`TTM Binding '${r.data.alias}' created.`, 'success'); }
@@ -755,7 +761,7 @@ export const useAdminStore = defineStore('admin', () => {
         ttsBindings, isLoadingTtsBindings, availableTtsBindingTypes,
         sttBindings, isLoadingSttBindings, availableSttBindingTypes,
         ttvBindings, isLoadingTtvBindings, availableTtvBindingTypes,
-        ttmBindings, isLoadingTtmBindings, availableTtmBindingTypes,
+        ttmBindings, isLoadingTtmBindings, availableTtmBindingTypes, isLoadingAvailableTtmBindingTypes, ttmSetupStatusMessage,
         ragBindings, isLoadingRagBindings, availableRagBindingTypes, availableRagVectorizers,
         zooRepositories, isLoadingZooRepositories, mcpZooRepositories, isLoadingMcpZooRepositories, promptZooRepositories, isLoadingPromptZooRepositories, personalityZooRepositories, isLoadingPersonalityZooRepositories,
         zooApps, isLoadingZooApps, zooMcps, isLoadingZooMcps, zooPrompts, isLoadingZooPrompts, zooPersonalities, isLoadingZooPersonalities,

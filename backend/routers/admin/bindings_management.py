@@ -476,17 +476,27 @@ async def get_all_universal_profiles(
                         if mid: raw_models.append(str(mid))
 
             if not raw_models and binding.name != 'smart_router':
-                config = _get_effective_config(binding)
-                service = _get_binding_instance(mod, binding.name, config)
-                if service and hasattr(service, 'list_models'):
-                    raw_list = service.list_models() or []
-                    for r in raw_list:
-                        mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
-                        if mid: raw_models.append(str(mid))
+                # Avoid freezing the event loop if the underlying engine is building an environment
+                if mod in ("ttm", "ttv") and binding.name in ("diffusers", "audiocraft", "musicgen"):
+                    raw_models = []
+                else:
+                    try:
+                        config = _get_effective_config(binding)
+                        loop = asyncio.get_running_loop()
+                        def _probe_models():
+                            service = _get_binding_instance(mod, binding.name, config)
+                            if service and hasattr(service, 'list_models'):
+                                return service.list_models() or []
+                            return []
+                        raw_list = await asyncio.wait_for(loop.run_in_executor(None, _probe_models), timeout=3.0)
+                        for r in raw_list:
+                            mid = r if isinstance(r, str) else (r.get("name") or r.get("id") or r.get("model_name"))
+                            if mid: raw_models.append(str(mid))
+                    except Exception:
+                        pass
 
             raw_models = _filter_models_by_modality(raw_models, mod)
         except Exception as e:
-            trace_exception(e)
             is_online = False
             raw_models = []
 
@@ -1741,6 +1751,11 @@ def _fetch_available_types_for_modality(modality: str, default_fallback: List[st
     elif modality == "stt":
         candidates.extend(["speech_to_text", "transcription", "whisper"])
 
+    if default_fallback:
+        for fb in default_fallback:
+            if fb not in names:
+                names.append(fb)
+
     for mod_tag in candidates:
         try:
             raw_names = list_bindings(mod_tag)
@@ -1751,11 +1766,47 @@ def _fetch_available_types_for_modality(modality: str, default_fallback: List[st
         except Exception:
             pass
 
-    if not names and default_fallback:
-        names = list(default_fallback)
-
     desc_list = []
+    # Known fast-path descriptors that shouldn't block on virtualenv installations
+    known_instant_descriptors = {
+        "minimax": {
+            "title": "MiniMax Music 3",
+            "description": "MiniMax Music 3 API for vocal tracks, lyrics orchestration, and instrumental songs.",
+            "input_parameters": [
+                {"name": "api_key", "type": "str", "mandatory": True, "description": "MiniMax API Key (JWT or group token)"},
+                {"name": "group_id", "type": "str", "mandatory": False, "description": "MiniMax Group ID"},
+                {"name": "host_address", "type": "str", "mandatory": False, "description": "API Base URL (default: https://api.minimax.chat/v1)"},
+                {"name": "model_name", "type": "str", "mandatory": False, "description": "Default model (music-01, music-02)"}
+            ]
+        },
+        "diffusers": {
+            "title": "HuggingFace Diffusers (Local)",
+            "description": "Local open-weights music diffusion pipeline using HuggingFace Diffusers.",
+            "input_parameters": [
+                {"name": "model_name", "type": "str", "mandatory": False, "description": "Hugging Face model repository ID or local path"},
+                {"name": "device", "type": "str", "mandatory": False, "options": ["cuda", "cpu", "mps"], "description": "Inference compute device"},
+                {"name": "server_url", "type": "str", "mandatory": False, "description": "Shared TTM daemon address (default: http://127.0.0.1:9637)"}
+            ]
+        },
+        "musicgen": {
+            "title": "Meta MusicGen (AudioCraft)",
+            "description": "Meta AudioCraft MusicGen autoregressive transformer model for music generation.",
+            "input_parameters": [
+                {"name": "model_size", "type": "str", "mandatory": False, "options": ["small", "medium", "melody", "large"], "description": "MusicGen model size"},
+                {"name": "device", "type": "str", "mandatory": False, "options": ["cuda", "cpu"], "description": "Inference compute device"}
+            ]
+        }
+    }
+
     for name in names:
+        if name in known_instant_descriptors and modality == "ttm":
+            fast_info = known_instant_descriptors[name].copy()
+            fast_info["name"] = name
+            fast_info["binding_name"] = name
+            fast_info["is_degraded"] = False
+            desc_list.append(fast_info)
+            continue
+
         raw = None
         for mod_tag in candidates:
             try:

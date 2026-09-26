@@ -20,7 +20,13 @@ const adminStore = useAdminStore();
 const uiStore = useUiStore();
 const tasksStore = useTasksStore();
 
-const { ttmBindings, availableTtmBindingTypes, isLoadingTtmBindings } = storeToRefs(adminStore);
+const { 
+    ttmBindings, 
+    availableTtmBindingTypes, 
+    isLoadingTtmBindings,
+    isLoadingAvailableTtmBindingTypes,
+    ttmSetupStatusMessage 
+} = storeToRefs(adminStore);
 const { tasks } = storeToRefs(tasksStore);
 
 const isFormVisible = ref(false);
@@ -89,25 +95,42 @@ watch(currentTask, (newTask) => {
     }
 }, { deep: true });
 
+function getGlobalParametersFromBinding(bindingType) {
+    if (!bindingType) return [];
+    const seen = new Set();
+    const result = [];
+    const sources = [
+        bindingType.global_input_parameters,
+        bindingType.input_parameters,
+        bindingType.parameters
+    ];
+    for (const src of sources) {
+        if (Array.isArray(src)) {
+            for (const param of src) {
+                if (param && param.name && !seen.has(param.name) && param.name !== 'model_name' && param.name !== 'model') {
+                    seen.add(param.name);
+                    result.push(param);
+                }
+            }
+        }
+    }
+    return result;
+}
+
 const allFormParameters = computed(() => {
-    if (!selectedBindingType.value) return [];
-    
-    const paramsFromDesc = selectedBindingType.value.input_parameters || [];
+    const paramsFromDesc = getGlobalParametersFromBinding(selectedBindingType.value);
     const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
-    const modelParams = selectedBindingType.value.model_parameters || [];
-    const modelParamNames = new Set(modelParams.map(p => p.name));
 
     const paramsFromConfig = Object.keys(form.value.config || {})
-        .filter(key => !paramNamesFromDesc.has(key) && !modelParamNames.has(key) && key !== 'model_name' && key !== 'model' && key !== 'class')
+        .filter(key => !paramNamesFromDesc.has(key) && key !== 'model_name' && key !== 'model' && key !== 'class')
         .map(key => ({
             name: key,
             type: typeof form.value.config[key] === 'boolean' ? 'bool' : (typeof form.value.config[key] === 'number' ? 'float' : 'str'),
             description: `(Parameter not in binding description)`,
             mandatory: false,
         }));
-        
-    const filteredGlobals = paramsFromDesc.filter(p => !modelParamNames.has(p.name) && p.name !== 'model_name');
-    return [...filteredGlobals, ...paramsFromConfig];
+
+    return [...paramsFromDesc, ...paramsFromConfig];
 });
 
 watch(() => form.value.name, (newName, oldName) => {
@@ -252,6 +275,19 @@ async function executeCommand(cmd, bindingId, params) {
             </div>
 
             <div v-if="activeTab === 'settings'">
+                <!-- Live Installation / Environment Setup Banner -->
+                <div v-if="isLoadingAvailableTtmBindingTypes || ttmSetupStatusMessage" class="mb-5 p-4 bg-amber-50 dark:bg-amber-950/40 border-2 border-dashed border-amber-300 dark:border-amber-700 rounded-2xl flex items-start gap-3 animate-pulse shadow-sm">
+                    <IconAnimateSpin class="w-5 h-5 text-amber-600 dark:text-amber-400 animate-spin shrink-0 mt-0.5" />
+                    <div class="space-y-1 min-w-0">
+                        <h4 class="text-xs font-black uppercase tracking-wider text-amber-800 dark:text-amber-200">
+                            Setting Up Music Engine Environment (First-Time Setup)
+                        </h4>
+                        <p class="text-xs text-amber-700 dark:text-amber-300 leading-relaxed font-mono">
+                            {{ ttmSetupStatusMessage || 'Creating virtual environment and installing dependencies in the background. Please keep this tab open...' }}
+                        </p>
+                    </div>
+                </div>
+
                 <form @submit.prevent="handleSubmit" class="space-y-6">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
@@ -259,9 +295,16 @@ async function executeCommand(cmd, bindingId, params) {
                             <input type="text" id="alias" v-model="form.alias" class="input-field mt-1" required placeholder="e.g., local_music" autocomplete="off">
                         </div>
                         <div>
-                            <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
-                            <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode">
-                                <option disabled value="">Select a type</option>
+                            <div class="flex items-center justify-between">
+                                <label for="name" class="block text-sm font-medium">Binding Type <span class="text-red-500">*</span></label>
+                                <span v-if="isLoadingAvailableTtmBindingTypes" class="text-[10px] font-bold text-amber-600 dark:text-amber-400 animate-pulse">
+                                    Installing / Probing engines...
+                                </span>
+                            </div>
+                            <select id="name" v-model="form.name" class="input-field mt-1" required :disabled="isEditMode || isLoadingAvailableTtmBindingTypes">
+                                <option disabled value="">
+                                    {{ isLoadingAvailableTtmBindingTypes ? '⏳ Setting up & probing engines (please wait)...' : 'Select a type' }}
+                                </option>
                                 <option v-for="type in availableTtmBindingTypes" :key="type.binding_name || type.name" :value="type.binding_name || type.name">{{ type.title || type.name }}</option>
                             </select>
                         </div>
@@ -276,7 +319,7 @@ async function executeCommand(cmd, bindingId, params) {
                             <select v-if="param.options && param.options.length > 0" :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field">
                                 <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
                             </select>
-                            <div v-else-if="['str', 'int', 'float'].includes(param.type)">
+                            <div v-else-if="['str', 'int', 'float', 'list', 'text'].includes(param.type)">
                                 <div class="relative">
                                     <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'"
                                         :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field"
@@ -341,6 +384,15 @@ async function executeCommand(cmd, bindingId, params) {
                 <h2 class="text-2xl font-bold">Text-to-Music Bindings</h2>
                 <div class="flex items-center gap-4">
                     <button @click="showAddForm" class="btn btn-primary self-end">+ Add New TTM Binding</button>
+                </div>
+            </div>
+
+            <!-- Background Setup Progress Banner on Main List -->
+            <div v-if="isLoadingAvailableTtmBindingTypes || ttmSetupStatusMessage" class="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-3 text-xs text-amber-800 dark:text-amber-200 mb-4 animate-pulse">
+                <IconAnimateSpin class="w-4 h-4 text-amber-600 animate-spin shrink-0" />
+                <div class="flex flex-col min-w-0">
+                    <span class="font-bold">Music Engine Environment Setup Active</span>
+                    <span class="text-[11px] font-mono opacity-80 truncate">{{ ttmSetupStatusMessage || 'Creating virtual environment and installing PyTorch/Diffusers dependencies...' }}</span>
                 </div>
             </div>
 

@@ -71,110 +71,129 @@ def build_discussions_router():
         Optimized to bypass LollmsDiscussion ORM instantiation and full message history
         queries, reducing database roundtrips during frontend startup.
         """
-        username = current_user.username
-        db_user = db.query(DBUser).filter(DBUser.username == username).one()
-        dm = get_user_discussion_manager(username)
+        try:
+            username = current_user.username
+            db_user = db.query(DBUser).filter(DBUser.username == username).first()
+            if not db_user:
+                return []
+            dm = get_user_discussion_manager(username)
 
-        # Retrieve flat conversation entries (lightweight ID/metadata dictionary)
-        discussions_from_db = dm.list_discussions()
-        starred_ids = {star.discussion_id for star in db.query(UserStarredDiscussion.discussion_id).filter(UserStarredDiscussion.user_id == db_user.id).all()}
+            discussions_from_db = dm.list_discussions() or []
+            starred_ids = {star.discussion_id for star in db.query(UserStarredDiscussion.discussion_id).filter(UserStarredDiscussion.user_id == db_user.id).all()}
+            owned_shared_ids = {row[0] for row in db.query(SharedDiscussionLink.discussion_id).filter(SharedDiscussionLink.owner_user_id == db_user.id).distinct().all()}
 
-        # Get set of discussion IDs that the current user has shared
-        owned_shared_ids = {row[0] for row in db.query(SharedDiscussionLink.discussion_id).filter(SharedDiscussionLink.owner_user_id == db_user.id).distinct().all()}
+            def _parse_meta(d_entry):
+                raw = d_entry.get('discussion_metadata') if isinstance(d_entry, dict) else getattr(d_entry, 'discussion_metadata', None)
+                if raw is None and isinstance(d_entry, dict):
+                    raw = d_entry.get('metadata')
+                if isinstance(raw, str):
+                    try:
+                        return json.loads(raw)
+                    except Exception:
+                        return {}
+                elif isinstance(raw, dict):
+                    return raw
+                return {}
 
-        def _parse_meta(d_entry):
-            raw = d_entry.get('discussion_metadata') if isinstance(d_entry, dict) else getattr(d_entry, 'discussion_metadata', None)
-            if raw is None and isinstance(d_entry, dict):
-                raw = d_entry.get('metadata')
-            if isinstance(raw, str):
+            def _is_placeholder_title(t):
+                if not t or not isinstance(t, str):
+                    return True
+                s = t.strip()
+                return s == "" or s == "Untitled" or s.startswith("New Discussion") or s.startswith("Discussion ")
+
+            healed_titles = {}
+            placeholder_ids = [
+                d['id'] for d in discussions_from_db 
+                if isinstance(d, dict) and 'id' in d and _is_placeholder_title(_parse_meta(d).get('title') or d.get('title'))
+            ]
+
+            if placeholder_ids:
                 try:
-                    return json.loads(raw)
-                except Exception:
-                    return {}
-            elif isinstance(raw, dict):
-                return raw
-            return {}
+                    with dm.get_session() as s_dm:
+                        user_msgs = s_dm.query(
+                            dm.MessageModel.discussion_id,
+                            dm.MessageModel.content
+                        ).filter(
+                            dm.MessageModel.discussion_id.in_(placeholder_ids),
+                            dm.MessageModel.sender_type == 'user'
+                        ).order_by(dm.MessageModel.created_at.asc()).all()
 
-        def _is_placeholder_title(t):
-            if not t or not isinstance(t, str):
-                return True
-            s = t.strip()
-            return s == "" or s == "Untitled" or s.startswith("New Discussion") or s.startswith("Discussion ")
+                        first_msg_map = {}
+                        for d_id, content in user_msgs:
+                            if d_id not in first_msg_map and content and content.strip():
+                                first_msg_map[d_id] = content.strip()
 
-        # Batch self-heal placeholder titles for discussions with existing user messages
-        healed_titles = {}
-        placeholder_ids = [
-            d['id'] for d in discussions_from_db 
-            if isinstance(d, dict) and 'id' in d and _is_placeholder_title(_parse_meta(d).get('title') or d.get('title'))
-        ]
+                        if first_msg_map:
+                            for d_id, content in first_msg_map.items():
+                                clean_line = re.sub(r'[*#_`~>\[\]()]', '', content).strip().split('\n')[0].strip()
+                                if clean_line:
+                                    new_title = clean_line[:40].strip() + ("..." if len(clean_line) > 40 else "")
+                                    healed_titles[d_id] = new_title
+                                    disc_rec = s_dm.query(dm.DiscussionModel).filter(dm.DiscussionModel.id == d_id).first()
+                                    if disc_rec:
+                                        meta_dict = _parse_meta({'discussion_metadata': disc_rec.discussion_metadata})
+                                        meta_dict['title'] = new_title
+                                        disc_rec.discussion_metadata = meta_dict
+                            s_dm.commit()
+                except Exception as heal_err:
+                    print(f"Warning: Self-healing placeholder titles: {heal_err}")
 
-        if placeholder_ids:
-            try:
-                with dm.get_session() as s_dm:
-                    user_msgs = s_dm.query(
-                        dm.MessageModel.discussion_id,
-                        dm.MessageModel.content
-                    ).filter(
-                        dm.MessageModel.discussion_id.in_(placeholder_ids),
-                        dm.MessageModel.sender_type == 'user'
-                    ).order_by(dm.MessageModel.created_at.asc()).all()
+            infos = []
+            for disc_data in discussions_from_db:
+                try:
+                    disc_id = disc_data['id']
+                    metadata = _parse_meta(disc_data)
+                    is_shared_by_me = disc_id in owned_shared_ids
+                    has_art = bool(metadata.get("has_artefacts", False))
 
-                    first_msg_map = {}
-                    for d_id, content in user_msgs:
-                        if d_id not in first_msg_map and content and content.strip():
-                            first_msg_map[d_id] = content.strip()
+                    resolved_title = (
+                        healed_titles.get(disc_id)
+                        or metadata.get('title')
+                        or disc_data.get('title')
+                        or f"Discussion {disc_id[:8]}"
+                    )
 
-                    if first_msg_map:
-                        for d_id, content in first_msg_map.items():
-                            clean_line = re.sub(r'[*#_`~>\[\]()]', '', content).strip().split('\n')[0].strip()
-                            if clean_line:
-                                new_title = clean_line[:40].strip() + ("..." if len(clean_line) > 40 else "")
-                                healed_titles[d_id] = new_title
-                                disc_rec = s_dm.query(dm.DiscussionModel).filter(dm.DiscussionModel.id == d_id).first()
-                                if disc_rec:
-                                    meta_dict = _parse_meta({'discussion_metadata': disc_rec.discussion_metadata})
-                                    meta_dict['title'] = new_title
-                                    disc_rec.discussion_metadata = meta_dict
-                        s_dm.commit()
-            except Exception as heal_err:
-                print(f"Warning: Self-healing placeholder titles: {heal_err}")
+                    info = DiscussionInfo(
+                        id=disc_id,
+                        title=resolved_title,
+                        is_starred=(disc_id in starred_ids),
+                        rag_datastore_ids=metadata.get('rag_datastore_ids'),
+                        active_tools=metadata.get('active_tools', []),
+                        active_branch_id=disc_data.get('active_branch_id'),
+                        created_at=disc_data.get('created_at'),
+                        last_activity_at=disc_data.get('updated_at'),
+                        discussion_images=[], 
+                        active_discussion_images=[], 
+                        group_id=metadata.get('group_id'),
+                        owner_username=None,
+                        permission_level="shared_by_me" if is_shared_by_me else None,
+                        share_id=None,
+                        has_artefacts=has_art
+                    )
+                    infos.append(info)
+                except Exception as e:
+                    trace_exception(e)
 
-        infos = []
-        for disc_data in discussions_from_db:
-            try:
-                disc_id = disc_data['id']
-                metadata = _parse_meta(disc_data)
-                is_shared_by_me = disc_id in owned_shared_ids
-                has_art = bool(metadata.get("has_artefacts", False))
+            from datetime import timezone
+            def _safe_timestamp(val):
+                if not val:
+                    return 0.0
+                if isinstance(val, (int, float)):
+                    return float(val)
+                if isinstance(val, datetime):
+                    return val.replace(tzinfo=timezone.utc).timestamp() if val.tzinfo is None else val.timestamp()
+                if isinstance(val, str):
+                    try:
+                        dt = datetime.fromisoformat(val.replace("Z", "+00:00"))
+                        return dt.replace(tzinfo=timezone.utc).timestamp() if dt.tzinfo is None else dt.timestamp()
+                    except Exception:
+                        return 0.0
+                return 0.0
 
-                resolved_title = (
-                    healed_titles.get(disc_id)
-                    or metadata.get('title')
-                    or disc_data.get('title')
-                    or f"Discussion {disc_id[:8]}"
-                )
-
-                info = DiscussionInfo(
-                    id=disc_id,
-                    title=resolved_title,
-                    is_starred=(disc_id in starred_ids),
-                    rag_datastore_ids=metadata.get('rag_datastore_ids'),
-                    active_tools=metadata.get('active_tools', []),
-                    active_branch_id=disc_data.get('active_branch_id'),
-                    created_at=disc_data.get('created_at'),
-                    last_activity_at=disc_data.get('updated_at'),
-                    discussion_images=[], 
-                    active_discussion_images=[], 
-                    group_id=metadata.get('group_id'),
-                    owner_username=None,
-                    permission_level="shared_by_me" if is_shared_by_me else None,
-                    share_id=None,
-                    has_artefacts=has_art
-                )
-                infos.append(info)
-            except Exception as e:
-                trace_exception(e)
-        return sorted(infos, key=lambda d: d.last_activity_at or datetime.min, reverse=True)
+            return sorted(infos, key=lambda d: _safe_timestamp(d.last_activity_at or d.created_at), reverse=True)
+        except Exception as e:
+            trace_exception(e)
+            return []
 
     @router.put("/{discussion_id}/tools", response_model=DiscussionInfo)
     async def update_discussion_tools(

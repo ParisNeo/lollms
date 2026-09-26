@@ -107,19 +107,35 @@ async function handleHealProfiles() {
     }
 }
 
+function getGlobalParametersFromBinding(bindingType) {
+    if (!bindingType) return [];
+    const seen = new Set();
+    const result = [];
+    const sources = [
+        bindingType.global_input_parameters,
+        bindingType.input_parameters,
+        bindingType.parameters
+    ];
+    for (const src of sources) {
+        if (Array.isArray(src)) {
+            for (const param of src) {
+                if (param && param.name && !seen.has(param.name) && param.name !== 'model_name' && param.name !== 'model') {
+                    seen.add(param.name);
+                    result.push(param);
+                }
+            }
+        }
+    }
+    return result;
+}
+
 const allFormParameters = computed(() => {
-    if (!selectedBindingType.value) return [];
-    
-    const paramsFromDesc = selectedBindingType.value.input_parameters || [];
+    const paramsFromDesc = getGlobalParametersFromBinding(selectedBindingType.value);
     const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
-    
-    const modelParams = selectedBindingType.value.model_parameters || [];
-    const modelParamNames = new Set(modelParams.map(p => p.name));
 
     const paramsFromConfig = Object.keys(form.value.config || {})
         .filter(key => 
             !paramNamesFromDesc.has(key) && 
-            !modelParamNames.has(key) && 
             key !== 'model_name' &&
             key !== 'model' &&
             key !== 'class'
@@ -130,11 +146,9 @@ const allFormParameters = computed(() => {
             description: `(Parameter not in binding description)`,
             mandatory: false,
         }));
-        
-    const filteredGlobals = paramsFromDesc.filter(p => !modelParamNames.has(p.name) && p.name !== 'model_name');
 
     return [
-        ...filteredGlobals, 
+        ...paramsFromDesc, 
         ...paramsFromConfig
     ];
 });
@@ -348,7 +362,7 @@ async function executeCommand(cmd, bindingId, params) {
                                 <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
                             </select>
                             
-                            <div v-else-if="['str', 'int', 'float'].includes(param.type)">
+                            <div v-else-if="['str', 'int', 'float', 'list', 'text'].includes(param.type)">
                                 <div class="relative">
                                     <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'"
                                         :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field"

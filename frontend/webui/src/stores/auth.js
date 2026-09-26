@@ -377,6 +377,11 @@ export const useAuthStore = defineStore('auth', () => {
                 case 'new_message_from_task': 
                     getDiscussionsStore().then(s => s.handleNewMessageFromTask(data.data)); 
                     break;
+                case 'binding_setup_status':
+                    import('./admin').then(m => {
+                        m.useAdminStore().ttmSetupStatusMessage = data.data.message || '';
+                    });
+                    break;
                 case 'admin_broadcast': 
                     uiStore.addNotification(data.data.message, 'broadcast', 0, true, data.data.sender); 
                     break;

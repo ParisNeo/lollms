@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-09-26 12:07]
+
+- `fix(bindings): update LLMS and RAG bindings management API to support new universal profiles feature`
+
 ## [2026-09-25 08:27]
 
 - v1

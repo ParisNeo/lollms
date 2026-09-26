@@ -159,24 +159,35 @@ watch(currentTask, (newTask) => {
     }
 }, { deep: true });
 
+function getGlobalParametersFromBinding(bindingType) {
+    if (!bindingType) return [];
+    const seen = new Set();
+    const result = [];
+    const sources = [
+        bindingType.global_input_parameters,
+        bindingType.input_parameters,
+        bindingType.parameters
+    ];
+    for (const src of sources) {
+        if (Array.isArray(src)) {
+            for (const param of src) {
+                if (param && param.name && !seen.has(param.name) && param.name !== 'model_name' && param.name !== 'model') {
+                    seen.add(param.name);
+                    result.push(param);
+                }
+            }
+        }
+    }
+    return result;
+}
+
 const allFormParameters = computed(() => {
-    const paramsFromDesc = selectedBindingType.value ? (
-        selectedBindingType.value.input_parameters || 
-        selectedBindingType.value.global_input_parameters || 
-        selectedBindingType.value.parameters || []
-    ) : [];
-    
+    const paramsFromDesc = getGlobalParametersFromBinding(selectedBindingType.value);
     const paramNamesFromDesc = new Set(paramsFromDesc.map(p => p.name));
-    const modelParams = selectedBindingType.value ? (
-        selectedBindingType.value.model_parameters || 
-        selectedBindingType.value.model_input_parameters || []
-    ) : [];
-    const modelParamNames = new Set(modelParams.map(p => p.name));
-    
+
     const paramsFromConfig = Object.keys(form.value.config || {})
         .filter(key => 
             !paramNamesFromDesc.has(key) && 
-            !modelParamNames.has(key) && 
             key !== 'model_name' &&
             key !== 'model' &&
             key !== 'class' &&
@@ -188,9 +199,9 @@ const allFormParameters = computed(() => {
             description: `(Configuration parameter)`,
             mandatory: false,
         }));
-        
+
     return [
-        ...paramsFromDesc.filter(p => !modelParamNames.has(p.name) && p.name !== 'model_name'), 
+        ...paramsFromDesc, 
         ...paramsFromConfig
     ];
 });
@@ -232,7 +243,16 @@ function showEditForm(binding) {
     checkZooAvailability(binding.id);
     fetchConnectionModels(binding.id);
 
+    // Auto-populate default values for declared parameters that are not yet set
     const bType = availableBindingTypes.value.find(b => (b.binding_name || b.name) === binding.name);
+    if (bType) {
+        const descParams = getGlobalParametersFromBinding(bType);
+        descParams.forEach(p => {
+            if (form.value.config[p.name] === undefined && p.default !== undefined && p.default !== null) {
+                form.value.config[p.name] = p.default;
+            }
+        });
+    }
     if (bType && bType.commands && Array.isArray(bType.commands)) {
         const params = {};
         bType.commands.forEach(cmd => {
@@ -288,7 +308,7 @@ function hideForm() {
 
 function parseOptions(options) {
     if (typeof options === 'string') return options.split(',').map(o => o.trim()).filter(Boolean);
-    if (Array.isArray(options)) return options.filter(Boolean);
+    if (Array.isArray(options)) return options.map(o => typeof o === 'object' && o !== null ? (o.value || o.name || o.label || JSON.stringify(o)) : String(o)).filter(Boolean);
     return [];
 }
 
@@ -507,11 +527,11 @@ async function handleHealProfiles() {
                                 <option v-for="option in parseOptions(param.options)" :key="option" :value="option">{{ option }}</option>
                             </select>
 
-                            <div v-else-if="['str', 'int', 'float'].includes(param.type)">
+                            <div v-else-if="['str', 'int', 'float', 'list', 'text'].includes(param.type)">
                                 <div class="relative">
                                     <input :type="(param.name.includes('key') || param.name.includes('token')) && !isKeyVisible[param.name] ? 'password' : 'text'" 
                                         :id="`param-${param.name}`" v-model="form.config[param.name]" class="input-field text-xs"
-                                        :required="param.mandatory" :placeholder="param.description" autocomplete="off">
+                                        :required="param.mandatory" :placeholder="param.description || String(param.default || '')" autocomplete="off">
                                     <button v-if="param.name.includes('key') || param.name.includes('token')" type="button" @click="isKeyVisible[param.name] = !isKeyVisible[param.name]" class="absolute inset-y-0 right-0 px-3 flex items-center text-gray-400 hover:text-gray-600">
                                         <IconEyeOff v-if="isKeyVisible[param.name]" class="w-4 h-4" />
                                         <IconEye v-else class="w-4 h-4" />
