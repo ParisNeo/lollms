@@ -230,3 +230,50 @@ def test_responses_api_endpoint():
     assert data["status"] == "completed"
     assert len(data["output"]) == 1
     assert data["output"][0]["content"][0]["text"] == "This is a response from the new Responses API primitive."
+
+def test_chat_completions_forwards_think_and_thinking_effort_none():
+    client = TestClient(app)
+
+    mock_lc = MagicMock()
+    mock_lc.generate_from_messages.return_value = "Non-reasoning answer."
+    mock_lc.count_tokens.return_value = 10
+
+    with patch("backend.routers.services.openai_v1.build_lollms_client_from_params", return_value=mock_lc) as mock_builder:
+        response = client.post("/v1/chat/completions", json={
+            "model": "test_llm/mock_model",
+            "messages": [{"role": "user", "content": "What is 1+1?"}],
+            "reasoning_effort": "none"
+        })
+
+    assert response.status_code == 200
+    # Verify builder received literal None for thinking_effort and think
+    builder_call_kwargs = mock_builder.call_args[1]
+    assert builder_call_kwargs["llm_params"]["thinking_effort"] is None
+    assert builder_call_kwargs["llm_params"]["think"] is None
+    assert builder_call_kwargs["llm_params"]["reasoning_effort"] is None
+
+    # Verify generate_from_messages was invoked with literal None
+    gen_call_kwargs = mock_lc.generate_from_messages.call_args[1]
+    assert gen_call_kwargs["think"] is None
+    assert gen_call_kwargs["thinking_effort"] is None
+    assert gen_call_kwargs["reasoning_effort"] is None
+
+def test_chat_completions_forwards_thinking_effort_when_set():
+    client = TestClient(app)
+
+    mock_lc = MagicMock()
+    mock_lc.generate_from_messages.return_value = "<think>Calculating.</think>Result is 2."
+    mock_lc.count_tokens.return_value = 12
+
+    with patch("backend.routers.services.openai_v1.build_lollms_client_from_params", return_value=mock_lc) as mock_builder:
+        response = client.post("/v1/chat/completions", json={
+            "model": "test_llm/mock_model",
+            "messages": [{"role": "user", "content": "Calculate 1+1"}],
+            "reasoning_effort": "high"
+        })
+
+    assert response.status_code == 200
+    gen_call_kwargs = mock_lc.generate_from_messages.call_args[1]
+    assert gen_call_kwargs["thinking_effort"] == "high"
+    assert gen_call_kwargs["reasoning_effort"] == "high"
+    assert gen_call_kwargs["think"] is True

@@ -36,15 +36,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 return;
             }
         }
-        
-        if (!currentDiscussionId.value) {
-            try {
-                await getActions().createNewDiscussion();
-            } catch (err) {
-                uiStore.addNotification('Failed to create a new discussion.', 'error');
-                return;
-            }
-        }
 
         if (currentDiscussionId.value && !discussions.value[currentDiscussionId.value]) {
             discussions.value[currentDiscussionId.value] = {
@@ -120,6 +111,24 @@ export function useDiscussionGeneration(state, stores, getActions) {
 
         if (!finalPrompt.trim() && imagesToSend.length > 0) finalPrompt = "Analyze this image";
 
+        // Resolve thinking parameters from payload or read active UI toggle for resends/regenerations
+        let effectiveThinking = payload.thinking;
+        let effectiveReasoningEffort = payload.reasoning_effort;
+
+        if (effectiveThinking === undefined || effectiveThinking === null) {
+            const storedReasoningActive = localStorage.getItem('lollms_input_reasoning_active');
+            if (storedReasoningActive === 'false') {
+                effectiveThinking = 'false';
+                effectiveReasoningEffort = 'none';
+            } else if (storedReasoningActive === 'true') {
+                effectiveThinking = 'true';
+                effectiveReasoningEffort = localStorage.getItem('lollms_input_reasoning_effort') || 'low';
+            } else {
+                effectiveThinking = authStore.user?.reasoning_activation ? 'true' : 'false';
+                effectiveReasoningEffort = authStore.user?.reasoning_activation ? (authStore.user?.reasoning_effort || 'low') : 'none';
+            }
+        }
+
         const formData = new FormData();
         formData.append('prompt', finalPrompt);
         formData.append('image_server_paths_json', JSON.stringify(imagesToSend));
@@ -132,9 +141,9 @@ export function useDiscussionGeneration(state, stores, getActions) {
         if (payload.max_nb_rounds !== undefined && payload.max_nb_rounds !== null) {
             formData.append('max_nb_rounds', payload.max_nb_rounds);
         }
-        if (payload.reasoning_effort !== undefined && payload.reasoning_effort !== null && payload.reasoning_effort !== '') {
-            formData.append('reasoning_effort', payload.reasoning_effort);
-        }
+
+        formData.append('reasoning_effort', effectiveReasoningEffort || 'none');
+        formData.append('thinking', effectiveThinking || 'false');
 
         const messageToUpdate = messages.value.find(m => m.id === tempAiMessage.id);
 
@@ -149,9 +158,33 @@ export function useDiscussionGeneration(state, stores, getActions) {
             if (!messageToUpdate) return;
 
             switch (data.type) {
-                case 'chunk':
-                    messageToUpdate.content += data.content;
+                case 'chunk': {
+                    let chunkStr = data.content || '';
+                    if (chunkStr.includes('<think>') || chunkStr.includes('<thought>')) {
+                        const tag = chunkStr.includes('<think>') ? '<think>' : '<thought>';
+                        const [before, after] = chunkStr.split(tag, 2);
+                        if (before) messageToUpdate.content += before;
+                        state._inStreamThink = true;
+                        chunkStr = after || '';
+                    }
+
+                    if (state._inStreamThink) {
+                        const closeTag = chunkStr.includes('</think>') ? '</think>' : (chunkStr.includes('</thought>') ? '</thought>' : null);
+                        if (closeTag) {
+                            const [thoughtPart, rest] = chunkStr.split(closeTag, 2);
+                            if (!messageToUpdate.thoughts) messageToUpdate.thoughts = '';
+                            messageToUpdate.thoughts += thoughtPart;
+                            state._inStreamThink = false;
+                            if (rest) messageToUpdate.content += rest;
+                        } else {
+                            if (!messageToUpdate.thoughts) messageToUpdate.thoughts = '';
+                            messageToUpdate.thoughts += chunkStr;
+                        }
+                    } else {
+                        messageToUpdate.content += chunkStr;
+                    }
                     break;
+                }
 
                 case 'ttft':
                     generationState.value = { status: 'streaming', details: `ttft: ${data.content}ms` };
@@ -212,14 +245,6 @@ export function useDiscussionGeneration(state, stores, getActions) {
                     import('../notes').then(n => n.useNotesStore().fetchNotes());
                     break;
 
-                case 'skill_done':
-                    import('../skills').then(s => s.useSkillsStore().fetchSkills());
-                    break;
-
-                case 'note_done':
-                    import('../notes').then(n => n.useNotesStore().fetchNotes());
-                    break;
-
                 case 'form_ready':
                     if (data.content) {
                         if (!messageToUpdate.forms) messageToUpdate.forms = [];
@@ -259,8 +284,12 @@ export function useDiscussionGeneration(state, stores, getActions) {
                         messageToUpdate.metadata = finalAi.metadata || {};
                         if (finalAi.sources && finalAi.sources.length > 0) {
                             messageToUpdate.sources = finalAi.sources;
-                        } else if (finalAi.metadata?.sources) {
+                            if (!messageToUpdate.metadata) messageToUpdate.metadata = {};
+                            messageToUpdate.metadata.sources = finalAi.sources;
+                        } else if (finalAi.metadata?.sources && finalAi.metadata.sources.length > 0) {
                             messageToUpdate.sources = finalAi.metadata.sources;
+                            if (!messageToUpdate.metadata) messageToUpdate.metadata = {};
+                            messageToUpdate.metadata.sources = finalAi.metadata.sources;
                         }
                         if (finalAi.events && finalAi.events.length > 0) {
                             messageToUpdate.events = finalAi.events;

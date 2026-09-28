@@ -1198,43 +1198,83 @@ def build_llm_generation_router(router: APIRouter):
         # Resolve reasoning effort and thinking activation upfront
         resolved_effort = None
         explicit_thinking = None
-        if thinking is not None and thinking.strip():
-            c_th = thinking.strip().lower()
+        if thinking is not None and str(thinking).strip():
+            c_th = str(thinking).strip().lower()
             if c_th in ['true', '1', 'yes', 'on', 'enabled']:
                 explicit_thinking = True
             elif c_th in ['false', '0', 'no', 'off', 'disabled']:
                 explicit_thinking = False
 
-        if reasoning_effort is not None and reasoning_effort.strip():
-            clean_effort = reasoning_effort.strip().lower()
+        if reasoning_effort is not None and str(reasoning_effort).strip():
+            clean_effort = str(reasoning_effort).strip().lower()
             if clean_effort in ['low', 'medium', 'high', 'max']:
                 resolved_effort = clean_effort
+                explicit_thinking = True
             elif clean_effort in ['none', 'off', 'disabled', 'false']:
                 resolved_effort = None
                 explicit_thinking = False
             else:
                 resolved_effort = clean_effort
-        elif explicit_thinking is False:
-            resolved_effort = None
-        elif owner_db_user.reasoning_effort:
-            resolved_effort = owner_db_user.reasoning_effort
-        elif owner_db_user.reasoning_activation or explicit_thinking is True:
-            resolved_effort = "low"
+                explicit_thinking = True
 
-        runtime_llm_params = {}
-        if explicit_thinking is not None:
-            runtime_llm_params["reasoning_activation"] = explicit_thinking
-        if resolved_effort is not None or explicit_thinking is False:
-            runtime_llm_params["reasoning_effort"] = resolved_effort
+        # Strictly enforce thinking deactivation
+        if explicit_thinking is False:
+            resolved_effort = None
+        elif explicit_thinking is True:
+            resolved_effort = resolved_effort or (owner_db_user.reasoning_effort if owner_db_user.reasoning_activation else None) or "low"
+        elif explicit_thinking is None:
+            if owner_db_user.reasoning_activation:
+                explicit_thinking = True
+                resolved_effort = owner_db_user.reasoning_effort or "low"
+            else:
+                try:
+                    from backend.session import get_universal_model_profile
+                    db_prof = next(get_db())
+                    try:
+                        _, _, prof_info = get_universal_model_profile(db_prof, current_user.lollms_model_name, modality="llm")
+                        if prof_info and prof_info.get("reasoning_activation"):
+                            explicit_thinking = True
+                            resolved_effort = prof_info.get("reasoning_effort") or "low"
+                        else:
+                            explicit_thinking = False
+                            resolved_effort = None
+                    finally:
+                        db_prof.close()
+                except Exception:
+                    explicit_thinking = False
+                    resolved_effort = None
+
+        is_think_on = bool(explicit_thinking and resolved_effort and str(resolved_effort).lower() not in ("none", "off", "disabled", "false"))
+
+        runtime_llm_params = {
+            "reasoning_activation": is_think_on,
+            "reasoning_effort": resolved_effort if is_think_on else None,
+            "thinking_effort": resolved_effort if is_think_on else None,
+            "think": is_think_on
+        }
 
         lc = get_user_lollms_client(
             username=owner_username,
             binding_alias_override=binding_alias,
             model_name_override=target_model,
-            llm_params=runtime_llm_params if runtime_llm_params else None
+            llm_params=runtime_llm_params
         )
         reset_client_state(lc)
         discussion_obj.lollms_client = lc
+
+        # Unconditionally force reasoning state on client and its binding instance
+        for target in [lc, getattr(lc, 'llm', None)]:
+            if target is not None:
+                if hasattr(target, "reasoning_activation"):
+                    setattr(target, "reasoning_activation", is_think_on)
+                if hasattr(target, "reasoning_effort"):
+                    setattr(target, "reasoning_effort", resolved_effort if is_think_on else None)
+                if hasattr(target, "thinking_effort"):
+                    setattr(target, "thinking_effort", resolved_effort if is_think_on else None)
+                if hasattr(target, "think"):
+                    setattr(target, "think", is_think_on)
+                if hasattr(target, "thinking"):
+                    setattr(target, "thinking", is_think_on)
 
         # Ensure max_context_size is updated with the active model profile
         try:
@@ -1336,25 +1376,25 @@ def build_llm_generation_router(router: APIRouter):
 
                     sources = []
                     for entry in retrieved_chunks:
-                        chunk_text = entry.get("chunk_text", entry.get("content", ""))
+                        chunk_text = entry.get("chunk_text") or entry.get("content") or entry.get("text") or ""
                         if not chunk_text: continue
 
-                        score_val = entry.get("similarity_percent", entry.get("score", entry.get("fused_score", 0.0)))
+                        score_val = entry.get("similarity_percent")
+                        if score_val is None:
+                            score_val = entry.get("score")
+                        if score_val is None:
+                            score_val = entry.get("fused_score", 100.0)
+
                         try: score_val = float(score_val)
-                        except (ValueError, TypeError): score_val = 0.0
+                        except (ValueError, TypeError): score_val = 100.0
 
                         file_path = entry.get("file_path", "unknown")
-                        doc_title = Path(file_path).name if file_path else "Document Chunk"
-
-                        # Strictly enforce relevance threshold
-                        sim_val = entry.get("similarity_percent", score_val if score_val > 1.0 else score_val * 100.0)
-                        if sim_val < effective_min_sim:
-                            continue
+                        doc_title = Path(file_path).name if file_path else (entry.get("title") or entry.get("document_title") or "Document Chunk")
 
                         sources.append({
                             "title": f"{store_name} / {doc_title}",
                             "content": chunk_text,
-                            "score": score_val,
+                            "score": score_val if score_val > 1.0 else (score_val * 100.0),
                             "source": f"{store_name} / {doc_title}",
                             "metadata": entry.get('document_metadata', entry.get('metadata', {}))
                         })
@@ -1398,6 +1438,9 @@ def build_llm_generation_router(router: APIRouter):
                     }
 
                 multi_rag_data_sources.append(kb_source)
+
+                # Also register as an active agentic tool for tool-calling models
+                agentic_tools[f"search_{kb_name}"] = build_rag_tool(ss, owner_db_user, current_user)
             except Exception as e:
                 print(f"Failed to register multi-source RAG datastore {ds_id}: {e}")
 
@@ -1857,31 +1900,20 @@ def build_llm_generation_router(router: APIRouter):
                 data_sources=multi_rag_data_sources if multi_rag_data_sources else None
             )
             
-        # Resolve reasoning effort and thinking activation
-        resolved_effort = None
-        explicit_thinking = None
-        if thinking is not None and thinking.strip():
-            c_th = thinking.strip().lower()
-            if c_th in ['true', '1', 'yes', 'on', 'enabled']:
-                explicit_thinking = True
-            elif c_th in ['false', '0', 'no', 'off', 'disabled']:
-                explicit_thinking = False
-
-        if reasoning_effort is not None and reasoning_effort.strip():
-            clean_effort = reasoning_effort.strip().lower()
-            if clean_effort in ['low', 'medium', 'high', 'max']:
-                resolved_effort = clean_effort
-            elif clean_effort in ['none', 'off', 'disabled', 'false']:
-                resolved_effort = None
-                explicit_thinking = False
-            else:
-                resolved_effort = clean_effort
-        elif explicit_thinking is False:
-            resolved_effort = None
-        elif owner_db_user.reasoning_effort:
-            resolved_effort = owner_db_user.reasoning_effort
-        elif owner_db_user.reasoning_activation or explicit_thinking is True:
-            resolved_effort = "low"
+        # Ensure client generation settings reflect resolved thinking mode
+        is_think_on = bool(explicit_thinking)
+        for target in [lc, getattr(lc, 'llm', None)]:
+            if target is not None:
+                if hasattr(target, "reasoning_activation"):
+                    setattr(target, "reasoning_activation", is_think_on)
+                if hasattr(target, "reasoning_effort"):
+                    setattr(target, "reasoning_effort", resolved_effort if is_think_on else None)
+                if hasattr(target, "thinking_effort"):
+                    setattr(target, "thinking_effort", resolved_effort if is_think_on else None)
+                if hasattr(target, "think"):
+                    setattr(target, "think", is_think_on)
+                if hasattr(target, "thinking"):
+                    setattr(target, "thinking", is_think_on)
 
         # Resolve temperature
         effective_temp = None
@@ -1950,22 +1982,50 @@ def build_llm_generation_router(router: APIRouter):
                 nonlocal collected_forms, collected_sources, all_events
                 start_time = time.time()
                 first_chunk_time = None
+                in_stream_reasoning = False
 
                 def llm_callback(chunk: Any, msg_type: Any, params: Optional[Dict] = None, **kwargs) -> bool:
-                    nonlocal first_chunk_time
+                    nonlocal first_chunk_time, in_stream_reasoning
                     if stop_event.is_set() or (lc and lc.cancel_generation): return False
                     if lc and hasattr(lc, 'llm') and lc.llm:
                         if getattr(lc.llm, 'cancelled', False) or (hasattr(lc.llm, 'is_cancelled') and lc.llm.is_cancelled()):
                             return False
 
                     mtype_val = msg_type.value if hasattr(msg_type, 'value') else msg_type
+
+                    # Inline <think> tag detector for streaming chunks
+                    if mtype_val in (MSG_TYPE.MSG_TYPE_CHUNK.value, MSG_TYPE.MSG_TYPE_CONTENT.value) and isinstance(chunk, str):
+                        chunk_str = chunk
+                        if "<think>" in chunk_str or "<thought>" in chunk_str:
+                            tag = "<think>" if "<think>" in chunk_str else "<thought>"
+                            parts = chunk_str.split(tag, 1)
+                            if parts[0]:
+                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "chunk", "content": parts[0]}) + "\n")
+                            in_stream_reasoning = True
+                            chunk_str = parts[1]
+
+                        if in_stream_reasoning:
+                            close_tag = "</think>" if "</think>" in chunk_str else ("</thought>" if "</thought>" in chunk_str else None)
+                            if close_tag:
+                                parts = chunk_str.split(close_tag, 1)
+                                if parts[0]:
+                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "thought", "content": parts[0]}) + "\n")
+                                in_stream_reasoning = False
+                                if parts[1]:
+                                    main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "chunk", "content": parts[1]}) + "\n")
+                                return True
+                            else:
+                                main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps({"type": "thought", "content": chunk_str}) + "\n")
+                                return True
+                        chunk = chunk_str
                     
                     # Capture sources into local list for persistence
-                    if mtype_val == MSG_TYPE.MSG_TYPE_SOURCES_LIST.value and params:
-                        if isinstance(params, list):
-                            collected_sources.extend(params)
-                        else:
-                            collected_sources.append(params)
+                    if (mtype_val == MSG_TYPE.MSG_TYPE_SOURCES_LIST.value or mtype_val == 37) and (params or chunk):
+                        src_payload = params if params is not None else chunk
+                        if isinstance(src_payload, list):
+                            collected_sources.extend(src_payload)
+                        elif isinstance(src_payload, dict):
+                            collected_sources.append(src_payload)
 
                     # Capture forms into local list for persistence
                     form_entry = None
@@ -1975,18 +2035,34 @@ def build_llm_generation_router(router: APIRouter):
                             form_entry = target_data.get('form', target_data)
                         elif isinstance(target_data, list):
                             form_entry = {"id": f"form_{int(time.time()*1000)}", "title": "Interactive Form", "fields": target_data}
-                        elif isinstance(target_data, str) and ('"fields"' in target_data or '<field' in target_data):
+                        elif isinstance(target_data, str):
                             try:
                                 parsed = json.loads(target_data)
                                 if isinstance(parsed, dict):
                                     form_entry = parsed.get('form', parsed)
                             except Exception:
-                                pass
+                                if '<field' in target_data or '<lollms_form' in target_data:
+                                    f_title_match = re.search(r'title=["\']([^"\']+)["\']', target_data)
+                                    f_title = f_title_match.group(1) if f_title_match else "Interactive Form"
+                                    f_id_match = re.search(r'id=["\']([^"\']+)["\']', target_data)
+                                    f_id = f_id_match.group(1) if f_id_match else f"form_{int(time.time()*1000)}"
+                                    parsed_fields = []
+                                    field_matches = re.finditer(r'<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)', target_data, re.DOTALL | re.IGNORECASE)
+                                    for fm in field_matches:
+                                        f_attrs = dict(re.findall(r'(\w+)=["\']([^"\']*)["\']', fm.group(1)))
+                                        inner_opts = re.findall(r'<option[^>]*>(.*?)<\/option>', fm.group(2) or '', re.DOTALL | re.IGNORECASE)
+                                        if inner_opts:
+                                            f_attrs['options'] = [o.strip() for o in inner_opts if o.strip()]
+                                        if f_attrs.get('name') or f_attrs.get('label'):
+                                            parsed_fields.append(f_attrs)
+                                    if parsed_fields:
+                                        form_entry = {"id": f_id, "title": f_title, "fields": parsed_fields}
 
                         if form_entry and isinstance(form_entry, dict):
                             if 'fields' not in form_entry and 'form_fields' in form_entry:
                                 form_entry['fields'] = form_entry['form_fields']
-                            collected_forms.append(form_entry)
+                            if form_entry.get('fields'):
+                                collected_forms.append(form_entry)
 
                     tip = discussion_obj.get_message(discussion_obj.active_branch_id)
                     current_content_len = len(tip.content) if tip else 0
@@ -1999,6 +2075,8 @@ def build_llm_generation_router(router: APIRouter):
                     # Relay structural events if present in chunk metadata
                     if mtype_val == MSG_TYPE.MSG_TYPE_CHUNK.value and params and "type" in params:
                         main_loop.call_soon_threadsafe(stream_queue.put_nowait, json.dumps(jsonable_encoder(params)) + "\n")
+
+                    # Never drop thought chunks; if the model emits them, always route them to the thought stream
 
                     thought_chunk = chunk
                     if mtype_val == MSG_TYPE.MSG_TYPE_THOUGHT_CHUNK.value and isinstance(thought_chunk, str):
@@ -2178,8 +2256,13 @@ def build_llm_generation_router(router: APIRouter):
                         print(f"Warning: Failed to parse vision support profile, defaulting to True: {vision_ex}")
 
                     chat_extra_kwargs = {}
+
                     if effective_temp is not None:
                         chat_extra_kwargs["temperature"] = effective_temp
+
+                    if not is_think_on:
+                        chat_extra_kwargs["chat_template_kwargs"] = {"thinking": False}
+                        chat_extra_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
                     result = {}
                     try:
@@ -2189,8 +2272,14 @@ def build_llm_generation_router(router: APIRouter):
                             branch_tip_id=effective_parent_id,
                             images=images_for_message,
                             streaming_callback=llm_callback, 
-                            reasoning_effort=resolved_effort,
+
+                            think=is_think_on,
+                            thinking=is_think_on,
+                            reasoning_activation=is_think_on,
+                            reasoning_effort=resolved_effort if is_think_on else None,
+                            thinking_effort=resolved_effort if is_think_on else None,
                             reasoning_summary=owner_db_user.reasoning_summary,
+
                             max_nb_rounds=effective_max_rounds,
                             add_user_message=False,
                             tools=agentic_tools,
@@ -2277,17 +2366,24 @@ def build_llm_generation_router(router: APIRouter):
                         # 2. ai_msg.metadata["sources"] (agentic RAG tool sources)
                         # 3. collected_sources (stream callback sources)
                         result_sources = result.get('sources', []) if isinstance(result.get('sources'), list) else []
+                        rag_sources = result.get('rag_sources', []) if isinstance(result.get('rag_sources'), list) else []
                         lib_sources = ai_msg.metadata.get('sources', []) if isinstance(ai_msg.metadata.get('sources'), list) else []
+                        msg_direct_sources = getattr(ai_msg, 'sources', []) if isinstance(getattr(ai_msg, 'sources', []), list) else []
 
                         unique_sources = []
                         seen_sources = set()
-                        for s in result_sources + collected_sources + lib_sources:
+                        for s in result_sources + rag_sources + collected_sources + lib_sources + msg_direct_sources:
+                            if not isinstance(s, dict):
+                                if isinstance(s, str): s = {"title": s, "source": s, "content": s}
+                                else: continue
                             key = s.get('source') or s.get('title') or s.get('content', '')[:30]
                             if key and key not in seen_sources:
+                                s['index'] = len(unique_sources) + 1
                                 unique_sources.append(s)
                                 seen_sources.add(key)
 
                         ai_msg.set_metadata_item('sources', unique_sources, discussion_obj)
+                        ai_msg.sources = unique_sources
 
                         # Emit sources list to frontend stream if available
                         if unique_sources:
@@ -2300,9 +2396,24 @@ def build_llm_generation_router(router: APIRouter):
                         if not m: return None
                         meta = m.metadata or {}
                         thoughts_val = getattr(m, 'thoughts', None) or meta.get('thoughts') or meta.get('reasoning_content')
-                        if thoughts_val and isinstance(thoughts_val, str):
+
+                        # Extract embedded <think>...</think> from content if thoughts_val is not set
+                        if not thoughts_val and m.content and ('<think>' in m.content or '<thought>' in m.content):
+                            think_match = re.search(r'<(?:think|thought)>([\s\S]*?)</(?:think|thought)>', m.content, re.IGNORECASE)
+                            if think_match:
+                                thoughts_val = think_match.group(1).strip()
+                                m.content = re.sub(r'<(?:think|thought)>[\s\S]*?</(?:think|thought)>', '', m.content, flags=re.IGNORECASE).strip()
+
+                        if explicit_thinking is False:
+                            thoughts_val = None
+                            meta.pop('thoughts', None)
+                            meta.pop('reasoning_content', None)
+                            if m.content and ('<think>' in m.content or '<thought>' in m.content):
+                                m.content = re.sub(r'<(?:think|thought)>[\s\S]*?</(?:think|thought)>', '', m.content, flags=re.IGNORECASE).strip()
+                        elif thoughts_val and isinstance(thoughts_val, str):
                             thoughts_val = re.sub(r'^[\s\r\n]*<(?:think|thought)\b[^>]*>[\s\r\n]*', '', thoughts_val, flags=re.IGNORECASE).strip()
                             thoughts_val = re.sub(r'[\s\r\n]*</(?:think|thought)>[\s\r\n]*$', '', thoughts_val, flags=re.IGNORECASE).strip()
+
                         if thoughts_val and 'thoughts' not in meta:
                             meta['thoughts'] = thoughts_val
                         return {

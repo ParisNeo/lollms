@@ -38,7 +38,7 @@ from backend.security import verify_api_key
 from backend.session import (
     user_sessions, build_lollms_client_from_params, get_user_data_root, 
     find_model_by_alias, resolve_model_name, invalidate_model_cache,
-    _build_universal_profiles_for_modality, reset_client_state,
+    get_universal_model_profile, _build_universal_profiles_for_modality, reset_client_state,
     cancel_client_generation, evict_client_from_registry
 )
 from backend.settings import settings
@@ -556,7 +556,7 @@ def extract_reasoning_parameters(request_obj: Any) -> Tuple[Optional[str], Optio
             return val
         return extra.get(key, default)
 
-    effort = _get("reasoning_effort")
+    effort = _get("reasoning_effort") or _get("thinking_effort")
     thinking_val = _get("thinking")
     reasoning_val = _get("reasoning")
     think_val = _get("think")
@@ -1051,10 +1051,19 @@ async def chat_completions(
         "temperature": request.temperature,
         "max_output_tokens": effective_max_tokens
     }
-    if client_thinking is not None:
-        llm_runtime_params["reasoning_activation"] = client_thinking
-    if client_effort is not None or client_thinking is False:
+
+    if client_effort is None or str(client_effort).lower() in ("none", "null", "off", "disabled", "false"):
+        llm_runtime_params["think"] = None
+        llm_runtime_params["thinking_effort"] = None
+        llm_runtime_params["reasoning_effort"] = None
+        llm_runtime_params["thinking"] = False
+        llm_runtime_params["reasoning_activation"] = False
+    else:
+        llm_runtime_params["think"] = True
+        llm_runtime_params["thinking"] = True
+        llm_runtime_params["thinking_effort"] = client_effort
         llm_runtime_params["reasoning_effort"] = client_effort
+        llm_runtime_params["reasoning_activation"] = True
 
     # Client building can be slow, might involve model loading.
     try:
@@ -1094,12 +1103,20 @@ async def chat_completions(
         openai_messages = handle_response_format_injection(openai_messages, request.response_format)
 
     generation_kwargs = {}
-    if client_thinking is not None:
-        generation_kwargs["reasoning_activation"] = client_thinking
-        generation_kwargs["thinking"] = client_thinking
-        generation_kwargs["think"] = client_thinking
-    if client_effort is not None or client_thinking is False:
+    if client_effort is None or str(client_effort).lower() in ("none", "null", "off", "disabled", "false") or client_thinking is False:
+        generation_kwargs["think"] = None
+        generation_kwargs["thinking_effort"] = None
+        generation_kwargs["reasoning_effort"] = None
+        generation_kwargs["thinking"] = False
+        generation_kwargs["reasoning_activation"] = False
+        generation_kwargs["chat_template_kwargs"] = {"thinking": False}
+        generation_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    else:
+        generation_kwargs["think"] = True
+        generation_kwargs["thinking"] = True
+        generation_kwargs["thinking_effort"] = client_effort
         generation_kwargs["reasoning_effort"] = client_effort
+        generation_kwargs["reasoning_activation"] = True
     generation_kwargs.update(extra_thinking_kwargs)
 
     if request.top_p is not None:
@@ -1562,6 +1579,58 @@ async def chat_completions(
             raise HTTPException(status_code=500, detail=f"Generation error: {e}")
         
         
+def resolve_tti_model(db: Session, user: DBUser, requested_model: Optional[str]) -> Tuple[str, str]:
+    """Resolves an incoming TTI model name, universal profile, alias, or active system default."""
+    if requested_model and requested_model.strip():
+        req_clean = requested_model.strip()
+        if '/' in req_clean:
+            alias, model_part = req_clean.split('/', 1)
+            return alias, model_part
+
+        b_alias, p_key, _ = get_universal_model_profile(db, req_clean, modality="tti")
+        if b_alias:
+            return b_alias, p_key or ""
+
+        target_b = db.query(DBTTIBinding).filter(
+            (DBTTIBinding.alias == req_clean) | (DBTTIBinding.name == req_clean),
+            DBTTIBinding.is_active == True
+        ).first()
+        if target_b:
+            return target_b.alias, target_b.default_model_name or req_clean
+
+    if user.tti_binding_model_name:
+        if '/' in user.tti_binding_model_name:
+            return user.tti_binding_model_name.split('/', 1)
+        return user.tti_binding_model_name, ""
+
+    default_tti = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
+    if default_tti:
+        return default_tti.alias, default_tti.default_model_name or "default"
+
+    raise HTTPException(status_code=501, detail="No active Text-to-Image (TTI) binding configured on the server.")
+
+def _normalize_image_bytes(raw_output: Any) -> bytes:
+    if isinstance(raw_output, bytes):
+        return raw_output
+    if isinstance(raw_output, (list, tuple)) and raw_output:
+        return _normalize_image_bytes(raw_output[0])
+    if hasattr(raw_output, 'read') and callable(raw_output.read):
+        return raw_output.read()
+    if isinstance(raw_output, io.BytesIO):
+        return raw_output.getvalue()
+    if isinstance(raw_output, str):
+        if raw_output.startswith("data:image"):
+            b64_part = raw_output.split(",", 1)[1] if "," in raw_output else raw_output
+            return base64.b64decode(b64_part)
+        file_p = Path(raw_output)
+        if file_p.exists() and file_p.is_file():
+            return file_p.read_bytes()
+        try:
+            return base64.b64decode(raw_output)
+        except Exception:
+            pass
+    raise ValueError("TTI binding returned empty or invalid image data.")
+
 @openai_v1_router.post("/images/generations", response_model=ImageGenerationResponse)
 async def create_image_generation(
     request_data: ImageGenerationRequest,
@@ -1569,20 +1638,20 @@ async def create_image_generation(
     user: DBUser = Depends(get_user_from_api_key),
     db: Session = Depends(get_db)
 ):
-    if request_data.model is None:
-        if user.tti_binding_model_name:
-            request_data.model = user.tti_binding_model_name
-        else:
-            default_binding = db.query(DBTTIBinding).filter(DBTTIBinding.is_active == True).order_by(DBTTIBinding.id).first()
-            if not default_binding:
-                raise HTTPException(status_code=400, detail="No TTI model specified in request and no default TTI binding configured for user or system.")
-            request_data.model = f"{default_binding.alias}/{default_binding.default_model_name or ''}"
-
-    if '/' not in request_data.model:
-        raise HTTPException(status_code=400, detail="Invalid model name. Must be in 'tti_binding_alias/model_name' format.")
-
-    tti_binding_alias, tti_model_name = request_data.model.split('/', 1)
+    """
+    OpenAI-compatible Image Generation endpoint (POST /v1/images/generations).
+    Generates images from text descriptions.
+    """
+    tti_binding_alias, tti_model_name = resolve_tti_model(db, user, request_data.model)
     loop = asyncio.get_running_loop()
+
+    width, height = 1024, 1024
+    if request_data.size and "x" in request_data.size:
+        try:
+            w_str, h_str = request_data.size.split("x", 1)
+            width, height = int(w_str), int(h_str)
+        except ValueError:
+            pass
 
     try:
         lc = await loop.run_in_executor(
@@ -1595,50 +1664,158 @@ async def create_image_generation(
                 load_tti=True
             )
         )
-        
+
         if not hasattr(lc, 'tti') or not lc.tti:
             raise HTTPException(status_code=500, detail=f"TTI functionality is not available for binding '{tti_binding_alias}'.")
-        
+
         generated_images_data = []
+        user_generated_path = get_user_data_root(user.username) / "generated_images"
 
-        for i in range(request_data.n):
-            # Use executor for image generation (potentially blocking)
-            image_bytes = await loop.run_in_executor(
-                executor, 
-                lambda: lc.tti.generate_image(
-                    prompt=request_data.prompt,
-                    size=request_data.size, 
-                    quality=request_data.quality, 
-                    style=request_data.style
-                )
-            )
+        for _ in range(request_data.n or 1):
+            def _generate():
+                try:
+                    return lc.tti.generate_image(
+                        prompt=request_data.prompt,
+                        width=width,
+                        height=height,
+                        quality=request_data.quality,
+                        style=request_data.style
+                    )
+                except TypeError:
+                    try:
+                        return lc.tti.generate_image(
+                            prompt=request_data.prompt,
+                            size=request_data.size,
+                            quality=request_data.quality,
+                            style=request_data.style
+                        )
+                    except TypeError:
+                        return lc.tti.generate_image(prompt=request_data.prompt)
 
-            if not image_bytes:
-                raise Exception("TTI binding returned empty image data.")
+            raw_img = await loop.run_in_executor(executor, _generate)
+            image_bytes = _normalize_image_bytes(raw_img)
 
-            if request_data.response_format == "b64_json":
+            fmt_clean = (request_data.response_format or "url").lower().strip()
+            if fmt_clean in ("b64_json", "json"):
                 b64_json = base64.b64encode(image_bytes).decode('utf-8')
                 generated_images_data.append(ImageObject(b64_json=b64_json))
-            else: # "url"
-                user_generated_path = get_user_data_root(user.username) / "generated_images"
+            else:
                 user_generated_path.mkdir(parents=True, exist_ok=True)
-                
                 filename = f"{uuid.uuid4().hex}.png"
                 file_path = user_generated_path / filename
                 with open(file_path, "wb") as f:
                     f.write(image_bytes)
-                
+
                 base_url = str(fastapi_request.base_url).rstrip('/')
                 image_url = f"{base_url}/api/files/generated/{filename}"
                 generated_images_data.append(ImageObject(url=image_url))
 
         return ImageGenerationResponse(data=generated_images_data)
 
-    except HTTPException as e:
-        raise e
+    except HTTPException:
+        raise
     except Exception as e:
         trace_exception(e)
         raise HTTPException(status_code=500, detail=f"Image generation failed: {str(e)}")
+
+@openai_v1_router.post("/images/variations", response_model=ImageGenerationResponse)
+async def create_image_variation(
+    fastapi_request: Request,
+    image: List[UploadFile] = File(..., description="The source image (PNG/JPEG/WEBP) to generate variations of."),
+    model: Optional[str] = Form(None),
+    n: int = Form(1, ge=1, le=10),
+    size: Optional[str] = Form("1024x1024"),
+    response_format: Optional[str] = Form("b64_json"),
+    user: DBUser = Depends(get_user_from_api_key),
+    db: Session = Depends(get_db)
+):
+    """
+    OpenAI-compatible Image Variations endpoint (POST /v1/images/variations).
+    Creates variations of a supplied image.
+    """
+    tti_binding_alias, tti_model_name = resolve_tti_model(db, user, model)
+    loop = asyncio.get_running_loop()
+
+    width, height = 1024, 1024
+    if size and "x" in size:
+        try:
+            w_str, h_str = size.split("x", 1)
+            width, height = int(w_str), int(h_str)
+        except ValueError:
+            pass
+
+    async def _read(upload: UploadFile) -> bytes:
+        try:
+            return await upload.read()
+        finally:
+            await upload.close()
+
+    source_bytes_list = [await _read(img) for img in image]
+    images_b64 = [base64.b64encode(b).decode("utf-8") for b in source_bytes_list]
+
+    try:
+        lc = await loop.run_in_executor(
+            executor,
+            lambda: build_lollms_client_from_params(
+                username=user.username,
+                tti_binding_alias=tti_binding_alias,
+                tti_model_name=tti_model_name,
+                load_llm=False,
+                load_tti=True,
+            )
+        )
+
+        if not hasattr(lc, "tti") or not lc.tti:
+            raise HTTPException(status_code=500, detail=f"TTI functionality is not available for binding '{tti_binding_alias}'.")
+
+        generated = []
+        user_generated_path = get_user_data_root(user.username) / "generated_images"
+
+        for _ in range(n):
+            def _make_variation():
+                if hasattr(lc.tti, 'edit_image'):
+                    try:
+                        return lc.tti.edit_image(
+                            images=images_b64,
+                            prompt="Create a high-quality creative variation of this image",
+                            width=width,
+                            height=height
+                        )
+                    except Exception:
+                        pass
+                if hasattr(lc.tti, 'generate_image'):
+                    try:
+                        return lc.tti.generate_image(
+                            image=images_b64[0],
+                            prompt="Create a variation of this image",
+                            width=width,
+                            height=height
+                        )
+                    except TypeError:
+                        return lc.tti.generate_image(prompt="Create a variation of this image")
+                raise ValueError("Configured TTI binding does not support image variation or img2img.")
+
+            raw_res = await loop.run_in_executor(executor, _make_variation)
+            result_bytes = _normalize_image_bytes(raw_res)
+
+            fmt_clean = (response_format or "b64_json").lower().strip()
+            if fmt_clean == "url":
+                user_generated_path.mkdir(parents=True, exist_ok=True)
+                filename = f"{uuid.uuid4().hex}.png"
+                (user_generated_path / filename).write_bytes(result_bytes)
+                base_url = str(fastapi_request.base_url).rstrip("/")
+                generated.append(ImageObject(url=f"{base_url}/api/files/generated/{filename}"))
+            else:
+                b64 = base64.b64encode(result_bytes).decode("utf-8")
+                generated.append(ImageObject(b64_json=b64))
+
+        return ImageGenerationResponse(data=generated)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        trace_exception(e)
+        raise HTTPException(status_code=500, detail=f"Image variation failed: {e}")
 
 
 @openai_v1_router.post("/images/edits", response_model=ImageGenerationResponse)
@@ -2266,10 +2443,19 @@ async def create_response_openai(
         "temperature": request.temperature,
         "max_output_tokens": request.max_output_tokens
     }
-    if resp_thinking is not None:
-        llm_runtime_params["reasoning_activation"] = resp_thinking
-    if resp_effort is not None or resp_thinking is False:
+
+    if resp_effort is None or str(resp_effort).lower() in ("none", "null", "off", "disabled", "false"):
+        llm_runtime_params["think"] = None
+        llm_runtime_params["thinking_effort"] = None
+        llm_runtime_params["reasoning_effort"] = None
+        llm_runtime_params["thinking"] = False
+        llm_runtime_params["reasoning_activation"] = False
+    else:
+        llm_runtime_params["think"] = True
+        llm_runtime_params["thinking"] = True
+        llm_runtime_params["thinking_effort"] = resp_effort
         llm_runtime_params["reasoning_effort"] = resp_effort
+        llm_runtime_params["reasoning_activation"] = True
 
     lc = await loop.run_in_executor(
         executor,
@@ -2283,12 +2469,20 @@ async def create_response_openai(
     )
 
     generation_kwargs = {}
-    if resp_thinking is not None:
-        generation_kwargs["reasoning_activation"] = resp_thinking
-        generation_kwargs["thinking"] = resp_thinking
-        generation_kwargs["think"] = resp_thinking
-    if resp_effort is not None or resp_thinking is False:
+    if resp_effort is None or str(resp_effort).lower() in ("none", "null", "off", "disabled", "false") or resp_thinking is False:
+        generation_kwargs["think"] = None
+        generation_kwargs["thinking_effort"] = None
+        generation_kwargs["reasoning_effort"] = None
+        generation_kwargs["thinking"] = False
+        generation_kwargs["reasoning_activation"] = False
+        generation_kwargs["chat_template_kwargs"] = {"thinking": False}
+        generation_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    else:
+        generation_kwargs["think"] = True
+        generation_kwargs["thinking"] = True
+        generation_kwargs["thinking_effort"] = resp_effort
         generation_kwargs["reasoning_effort"] = resp_effort
+        generation_kwargs["reasoning_activation"] = True
     generation_kwargs.update(resp_extra_thinking)
 
     _prepare_generation(lc)

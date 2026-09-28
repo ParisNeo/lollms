@@ -143,10 +143,19 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
         "temperature": request.temperature,
         "max_output_tokens": request.max_tokens or request.max_completion_tokens
     }
-    if client_thinking is not None:
-        llm_runtime_params["reasoning_activation"] = client_thinking
-    if client_effort is not None or client_thinking is False:
+
+    if client_effort is None or str(client_effort).lower() in ("none", "null", "off", "disabled", "false") or client_thinking is False:
+        llm_runtime_params["think"] = None
+        llm_runtime_params["thinking_effort"] = None
+        llm_runtime_params["reasoning_effort"] = None
+        llm_runtime_params["thinking"] = False
+        llm_runtime_params["reasoning_activation"] = False
+    else:
+        llm_runtime_params["think"] = True
+        llm_runtime_params["thinking"] = True
+        llm_runtime_params["thinking_effort"] = client_effort
         llm_runtime_params["reasoning_effort"] = client_effort
+        llm_runtime_params["reasoning_activation"] = True
 
     # Wrap client build
     lc = await loop.run_in_executor(
@@ -170,12 +179,20 @@ async def chat_completions(request: ChatCompletionRequest, user: DBUser = Depend
     if request.tools: openai_messages = handle_tools_injection(openai_messages, request.tools)
 
     generation_kwargs = {}
-    if client_thinking is not None:
-        generation_kwargs["reasoning_activation"] = client_thinking
-        generation_kwargs["thinking"] = client_thinking
-        generation_kwargs["think"] = client_thinking
-    if client_effort is not None or client_thinking is False:
+    if client_effort is None or str(client_effort).lower() in ("none", "null", "off", "disabled", "false") or client_thinking is False:
+        generation_kwargs["think"] = None
+        generation_kwargs["thinking_effort"] = None
+        generation_kwargs["reasoning_effort"] = None
+        generation_kwargs["thinking"] = False
+        generation_kwargs["reasoning_activation"] = False
+        generation_kwargs["chat_template_kwargs"] = {"thinking": False}
+        generation_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+    else:
+        generation_kwargs["think"] = True
+        generation_kwargs["thinking"] = True
+        generation_kwargs["thinking_effort"] = client_effort
         generation_kwargs["reasoning_effort"] = client_effort
+        generation_kwargs["reasoning_activation"] = True
     generation_kwargs.update(extra_thinking_kwargs)
 
     if request.stream:

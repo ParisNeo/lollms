@@ -24,7 +24,7 @@ const resolvedFields = computed(() => {
 
     let rawFields = null;
 
-    // 1. Direct fields array or object (only if non-empty array)
+    // 1. Direct fields array or object
     if (props.form.fields !== undefined && props.form.fields !== null && (Array.isArray(props.form.fields) ? props.form.fields.length > 0 : true)) {
         rawFields = props.form.fields;
     } else if (props.form.form && props.form.form.fields !== undefined && props.form.form.fields !== null && (Array.isArray(props.form.form.fields) ? props.form.form.fields.length > 0 : true)) {
@@ -52,10 +52,10 @@ const resolvedFields = computed(() => {
             try {
                 const parsed = JSON.parse(trimmed);
                 if (Array.isArray(parsed) || (typeof parsed === 'object' && parsed !== null)) {
-                    rawFields = parsed;
+                    rawFields = parsed.fields || parsed.form_fields || parsed;
                 }
             } catch (e) {
-                // Not valid JSON, continue to XML check
+                // Continue
             }
         }
     }
@@ -73,20 +73,24 @@ const resolvedFields = computed(() => {
     // 4. In-place XML parser fallback if raw markup is present
     if (!rawFields || (Array.isArray(rawFields) && rawFields.length === 0)) {
         const rawXml = props.form.raw || props.form.content || props.form.raw_xml || (typeof props.form.form === 'string' ? props.form.form : '') || (typeof props.form.description === 'string' && props.form.description.includes('<field') ? props.form.description : '');
-        if (typeof rawXml === 'string' && (rawXml.includes('<field') || rawXml.includes('<lollms_form') || rawXml.includes('<processing'))) {
+        if (typeof rawXml === 'string' && (rawXml.includes('<field') || rawXml.includes('<lollms_form'))) {
             const extracted = [];
-            const fieldRegex = /<field\b([^>]*?)(?:>([\s\S]*?)<\/field>|\s*\/?>)/gi;
+            const fieldRegex = /<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)/gis;
             const matches = [...rawXml.matchAll(fieldRegex)];
             for (const m of matches) {
                 const fieldAttrsStr = m[1] || '';
                 const innerContent = (m[2] || '').trim();
                 const fAttrs = {};
-                const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
+                const attrRegex = /(\w+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g;
                 for (const ma of fieldAttrsStr.matchAll(attrRegex)) {
-                    fAttrs[ma[1]] = ma[2] !== undefined ? ma[2] : ma[3];
+                    fAttrs[ma[1]] = ma[2] !== undefined ? ma[2] : (ma[3] !== undefined ? ma[3] : ma[4]);
                 }
                 if (innerContent) {
-                    const options = [...innerContent.matchAll(/<option[^>]*>([\s\S]*?)<\/option>/gi)].map(om => om[1].trim());
+                    const options = [...innerContent.matchAll(/<option\b([^>]*)>(.*?)<\/option>/gis)].map(om => {
+                        const valMatch = (om[1] || '').match(/value=["']([^"']*)["']/i);
+                        const val = valMatch ? valMatch[1] : om[2].trim();
+                        return { label: om[2].trim() || val, value: val };
+                    });
                     if (options.length > 0) {
                         fAttrs.options = options;
                     } else if (!fAttrs.default && !innerContent.includes('<')) {
@@ -112,7 +116,11 @@ const resolvedFields = computed(() => {
 });
 
 const formTitle = computed(() => {
-    return props.form?.title || props.form?.form?.title || props.form?.name || 'Interactive Form';
+    const raw = props.form?.title || props.form?.form?.title || props.form?.name || '';
+    if (!raw || ['lollms_form', 'form', 'interactive_form', 'processing', 'process'].includes(raw.toLowerCase().replace(/[^a-z0-9]/g, ''))) {
+        return 'Interactive Form';
+    }
+    return raw.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
 });
 
 const formDescription = computed(() => {
@@ -123,7 +131,7 @@ const formSubmitLabel = computed(() => {
     return props.form?.submit_label || props.form?.form?.submit_label || 'Send Response';
 });
 
-// Helper to parse options (handles comma-strings, arrays of strings/objects, and bracketed lists)
+// Normalized options helper: Always outputs [{ label: string, value: string }]
 const getOptions = (field) => {
     let opts = field.options || field.choices || field.values || field.items || field.content || [];
 
@@ -139,22 +147,25 @@ const getOptions = (field) => {
                 opts = parsed;
             }
         } catch (e) {
-            console.warn("Failed to parse options string as JSON array:", e);
+            // Keep fallback
         }
+    }
+
+    if (typeof opts === 'string' && opts.trim().length > 0) {
+        const separator = opts.includes('\n') ? /\n/ : ',';
+        opts = opts.split(separator).map(o => o.trim()).filter(Boolean);
     }
 
     if (Array.isArray(opts)) {
         return opts.map(o => {
             if (typeof o === 'object' && o !== null) {
-                return o.label || o.value || o.text || o.name || Object.values(o)[0];
+                const val = o.value !== undefined ? String(o.value) : (o.id !== undefined ? String(o.id) : (o.label || o.name || ''));
+                const lbl = o.label !== undefined ? String(o.label) : (o.title !== undefined ? String(o.title) : (o.name || val));
+                return { label: lbl, value: val };
             }
-            return String(o);
+            const s = String(o).trim();
+            return { label: s, value: s };
         });
-    }
-
-    if (typeof opts === 'string' && opts.trim().length > 0) {
-        const separator = opts.includes('\n') ? /\n/ : ',';
-        return opts.split(separator).map(o => o.trim()).filter(Boolean);
     }
 
     return [];
@@ -162,25 +173,36 @@ const getOptions = (field) => {
 
 const initAnswers = () => {
     const fieldsList = resolvedFields.value;
-    if (!Array.isArray(fieldsList) || fieldsList.length === 0) return;
+    if (!Array.isArray(fieldsList) || fieldsList.length === 0) {
+        if (answers['response'] === undefined) {
+            answers['response'] = '';
+        }
+        return;
+    }
 
     fieldsList.forEach(field => {
         if (!field || !field.name) return;
 
         if (answers[field.name] !== undefined) return;
 
-        if (field.default !== undefined) {
-            if (field.type === 'checkbox') {
-                answers[field.name] = (field.default === 'true' || field.default === true);
-            } else if (field.type === 'number' || field.type === 'range') {
+        const fType = (field.type || 'text').toLowerCase();
+
+        if (field.default !== undefined && field.default !== null && field.default !== '') {
+            if (fType === 'checkbox') {
+                answers[field.name] = (field.default === 'true' || field.default === true || field.default === '1');
+            } else if (fType === 'number' || fType === 'range') {
                 answers[field.name] = Number(field.default);
             } else {
                 answers[field.name] = field.default;
             }
         }
-        else if (field.type === 'checkbox') answers[field.name] = false;
-        else if (field.type === 'number' || field.type === 'range') answers[field.name] = Number(field.min) || 0;
-        else if (field.type === 'rating') answers[field.name] = 3;
+        else if (fType === 'checkbox') answers[field.name] = false;
+        else if (fType === 'number' || fType === 'range') answers[field.name] = Number(field.min) || 0;
+        else if (fType === 'rating') answers[field.name] = 3;
+        else if (fType === 'radio') {
+            const opts = getOptions(field);
+            answers[field.name] = opts.length > 0 ? opts[0].value : '';
+        }
         else answers[field.name] = '';
     });
 
@@ -202,11 +224,12 @@ watch(() => props.form?.submitted, (newVal) => {
 });
 
 async function submitForm() {
+    if (isSubmitting.value || isDone.value) return;
     isSubmitting.value = true;
     try {
-        const formId = props.form.id || props.form.form_id || props.form.form?.id || props.form.form?.form_id || formTitle.value;
+        const formId = props.form.id || props.form.form_id || props.form.form?.id || props.form.form?.form_id || 'form';
 
-        // 1. Submit answers to backend resume endpoint (if generation was waiting)
+        // 1. Submit answers to backend endpoint
         try {
             await apiClient.post(`/api/discussions/${props.discussionId}/forms/${encodeURIComponent(formId)}/submit`, {
                 answers: { ...answers }
@@ -225,7 +248,7 @@ async function submitForm() {
             ? answerEntries.map(([k, v]) => `- **${k}**: ${v}`).join('\n')
             : "No field values filled.";
 
-        const promptMessage = `[FORM_SUBMISSION: ${titleText}]\nUser provided the following data:\n${formattedAnswers}\n\nPlease analyze this data and continue your task.`;
+        const promptMessage = `[FORM_SUBMISSION: ${titleText}]\nUser provided the following data:\n${formattedAnswers}\n\nPlease proceed with your task using this input.`;
 
         // 3. Send message so the AI processes the form submission in chat
         await discussionsStore.sendMessage({
@@ -242,137 +265,159 @@ async function submitForm() {
 </script>
 
 <template>
-    <div class="my-8 border border-gray-200 dark:border-gray-700 rounded-3xl overflow-hidden bg-white dark:bg-gray-900 shadow-2xl transition-all max-w-2xl mx-auto">
+    <div class="my-4 border border-blue-200/80 dark:border-blue-900/60 rounded-2xl overflow-hidden bg-white dark:bg-gray-900 shadow-lg transition-all max-w-xl mx-auto not-prose">
         <!-- Form Header -->
-        <div class="px-8 py-6 bg-gray-50 dark:bg-gray-800/50 border-b dark:border-gray-800 flex items-center justify-between">
-            <div class="flex items-center gap-4">
-                <div class="p-3 bg-blue-600 text-white rounded-2xl shadow-lg ring-4 ring-blue-500/10">
-                    <IconCheckCircle v-if="isDone" class="w-6 h-6" />
-                    <IconPlus v-else class="w-6 h-6" />
+        <div class="px-5 py-3.5 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 dark:from-blue-950/40 dark:to-gray-800/60 border-b border-blue-100 dark:border-gray-800 flex items-center justify-between">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="p-2 bg-blue-600 text-white rounded-xl shadow-xs shrink-0">
+                    <IconCheckCircle v-if="isDone" class="w-4 h-4" />
+                    <IconPlus v-else class="w-4 h-4" />
                 </div>
-                <div>
-                    <h4 class="font-black text-lg uppercase tracking-tight text-gray-900 dark:text-white">{{ formTitle }}</h4>
-                    <p v-if="formDescription" class="text-sm text-gray-500 dark:text-gray-400 mt-1 font-medium">{{ formDescription }}</p>
+                <div class="min-w-0">
+                    <h4 class="font-bold text-sm tracking-tight text-gray-900 dark:text-white truncate">{{ formTitle }}</h4>
+                    <p v-if="formDescription" class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 truncate">{{ formDescription }}</p>
                 </div>
             </div>
-            <div v-if="isDone" class="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full border border-green-500/20">
-                <IconCheckCircle class="w-4 h-4" />
-                <span class="text-[10px] font-black uppercase tracking-widest">Locked</span>
+            <div v-if="isDone" class="flex items-center gap-1.5 px-2.5 py-1 bg-green-500/10 text-green-600 dark:text-green-400 rounded-full border border-green-500/20 shrink-0">
+                <IconCheckCircle class="w-3.5 h-3.5" />
+                <span class="text-[9px] font-black uppercase tracking-wider">Submitted</span>
             </div>
         </div>
 
-        <!-- Form Fields -->
-        <div class="p-8 space-y-8">
-            <div v-if="resolvedFields.length === 0" class="text-center py-6 text-xs text-gray-400 italic">
-                <IconAnimateSpin v-if="form?.isLoading" class="w-5 h-5 mx-auto mb-2 text-blue-500 animate-spin" />
-                <span>{{ form?.isLoading ? 'Loading form fields...' : 'No fields defined for this form.' }}</span>
+        <!-- Form Fields Body -->
+        <div class="p-5 space-y-4">
+            <div v-if="form?.isLoading && resolvedFields.length === 0" class="text-center py-4 text-xs text-gray-400 italic flex items-center justify-center gap-2">
+                <IconAnimateSpin class="w-4 h-4 text-blue-500 animate-spin" />
+                <span>Loading form questions...</span>
             </div>
 
-            <div v-for="field in resolvedFields" :key="field.name || field.id" class="group/field transition-all">
-                <!-- TYPE: Section / Header -->
-                <div v-if="field.type === 'section'" class="pt-6 pb-2 border-b-2 border-gray-100 dark:border-gray-800">
-                    <h5 class="text-xs font-black uppercase tracking-[0.2em] text-blue-500">{{ field.label || field.name }}</h5>
+            <!-- Fields Render List -->
+            <template v-if="resolvedFields.length > 0">
+                <div v-for="field in resolvedFields" :key="field.name || field.id" class="group/field transition-all">
+                    <!-- TYPE: Section / Header -->
+                    <div v-if="field.type === 'section'" class="pt-3 pb-1 border-b dark:border-gray-800">
+                        <h5 class="text-xs font-black uppercase tracking-wider text-blue-600 dark:text-blue-400">{{ field.label || field.name }}</h5>
+                    </div>
+
+                    <!-- INPUT FIELDS -->
+                    <template v-else>
+                        <div class="flex justify-between items-baseline mb-1">
+                            <label class="block text-xs font-bold text-gray-700 dark:text-gray-200">
+                                {{ field.label || field.name }}
+                                <span v-if="field.required" class="text-red-500 ml-0.5">*</span>
+                            </label>
+                            <span v-if="field.hint" class="text-[10px] text-gray-400 italic">{{ field.hint }}</span>
+                        </div>
+
+                        <!-- TYPE: Text / Number / Email / Date / Password / Url -->
+                        <input v-if="['text', 'number', 'email', 'date', 'password', 'url'].includes(field.type) || !field.type" 
+                               :type="field.type || 'text'"
+                               v-model="answers[field.name]" 
+                               :placeholder="field.placeholder || ''" 
+                               :min="field.min"
+                               :max="field.max"
+                               :step="field.step"
+                               class="input-field text-xs py-2 px-3" 
+                               :disabled="isDone">
+
+                        <!-- TYPE: Textarea -->
+                        <textarea v-else-if="field.type === 'textarea'" 
+                                  v-model="answers[field.name]" 
+                                  :rows="field.rows || 3" 
+                                  class="input-field text-xs py-2 px-3 resize-none" 
+                                  :placeholder="field.placeholder || ''"
+                                  :disabled="isDone"></textarea>
+
+                        <!-- TYPE: Select (Dropdown) -->
+                        <div v-else-if="field.type === 'select'" class="relative">
+                            <select v-model="answers[field.name]" 
+                                    class="input-field text-xs py-2 px-3 appearance-none pr-8 cursor-pointer" 
+                                    :disabled="isDone">
+                                <option value="" disabled>{{ field.placeholder || 'Select an option...' }}</option>
+                                <option v-for="opt in getOptions(field)" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+                            </select>
+                            <div class="absolute inset-y-0 right-0 flex items-center pr-2.5 pointer-events-none text-gray-400">
+                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                            </div>
+                        </div>
+
+                        <!-- TYPE: Radio Buttons -->
+                        <div v-else-if="field.type === 'radio'" class="flex flex-wrap gap-4 pt-1">
+                            <label v-for="opt in getOptions(field)" :key="opt.value" class="flex items-center gap-2 cursor-pointer select-none">
+                                <input type="radio" :name="field.name" :value="opt.value" v-model="answers[field.name]" :disabled="isDone" class="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 dark:border-gray-600 bg-transparent">
+                                <span class="text-xs text-gray-700 dark:text-gray-300">{{ opt.label }}</span>
+                            </label>
+                        </div>
+
+                        <!-- TYPE: Range (Slider) -->
+                        <div v-else-if="field.type === 'range'" class="pt-1">
+                            <div class="flex items-center gap-4">
+                                <input type="range" :min="field.min || 0" :max="field.max || 100" :step="field.step || 1" 
+                                       v-model.number="answers[field.name]" 
+                                       class="grow h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600" 
+                                       :disabled="isDone">
+                                <div class="min-w-[3rem] text-center px-2 py-0.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg font-mono font-bold text-xs border border-blue-100 dark:border-blue-800">
+                                    {{ answers[field.name] }}
+                                </div>
+                            </div>
+                            <div class="flex justify-between mt-1 text-[9px] font-mono text-gray-400">
+                                <span>{{ field.min || 0 }}</span>
+                                <span>{{ field.max || 100 }}</span>
+                            </div>
+                        </div>
+
+                        <!-- TYPE: Rating (Stars) -->
+                        <div v-else-if="field.type === 'rating'" class="flex items-center gap-1 pt-1">
+                            <button v-for="i in (Number(field.max) || 5)" :key="i" 
+                                    @click="!isDone && (answers[field.name] = i)" 
+                                    type="button"
+                                    class="text-xl transition-all hover:scale-110" 
+                                    :class="[
+                                        answers[field.name] >= i ? 'text-amber-400' : 'text-gray-300 dark:text-gray-600',
+                                        isDone ? 'cursor-default' : 'cursor-pointer'
+                                    ]">
+                                ★
+                            </button>
+                            <span class="ml-2 font-mono text-xs text-gray-400">{{ answers[field.name] }} / {{ field.max || 5 }}</span>
+                        </div>
+
+                        <!-- TYPE: Checkbox (Toggle Style) -->
+                        <label v-else-if="field.type === 'checkbox'" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border dark:border-gray-700">
+                            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ field.hint || 'Enable this option' }}</span>
+                            <div class="relative inline-flex items-center cursor-pointer">
+                                <input type="checkbox" v-model="answers[field.name]" :disabled="isDone" class="sr-only peer">
+                                <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
+                            </div>
+                        </label>
+                    </template>
                 </div>
+            </template>
 
-                <!-- INPUT FIELDS -->
-                <template v-else>
-                    <div class="flex justify-between items-baseline mb-2">
-                        <label class="block text-sm font-black text-gray-700 dark:text-gray-200 uppercase tracking-wide">
-                            {{ field.label || field.name }}
-                            <span v-if="field.required" class="text-red-500 ml-1">*</span>
-                        </label>
-                        <span v-if="field.hint" class="text-[10px] font-medium text-gray-400 italic">{{ field.hint }}</span>
-                    </div>
-
-                    <!-- TYPE: Text -->
-                    <input v-if="field.type === 'text' || !field.type" 
-                           v-model="answers[field.name]" 
-                           :placeholder="field.placeholder" 
-                           class="input-field focus:ring-4 focus:ring-blue-500/10" 
-                           :disabled="isDone">
-
-                    <!-- TYPE: Textarea -->
-                    <textarea v-else-if="field.type === 'textarea'" 
-                              v-model="answers[field.name]" 
-                              :rows="field.rows || 4" 
-                              class="input-field focus:ring-4 focus:ring-blue-500/10 resize-none" 
-                              :disabled="isDone"></textarea>
-
-                    <!-- TYPE: Select (Dropdown) -->
-                    <div v-else-if="field.type === 'select'" class="relative">
-                        <select v-model="answers[field.name]" 
-                                class="input-field appearance-none pr-10 focus:ring-4 focus:ring-blue-500/10" 
-                                :disabled="isDone">
-                            <option value="" disabled>Select an option...</option>
-                            <option v-for="opt in getOptions(field)" :key="opt" :value="opt">{{ opt }}</option>
-                        </select>
-                        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-400">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                        </div>
-                    </div>
-
-                    <!-- TYPE: Radio Buttons -->
-                    <div v-else-if="field.type === 'radio'" class="flex flex-wrap gap-6 pt-2">
-                        <label v-for="opt in getOptions(field)" :key="opt" class="flex items-center gap-3 cursor-pointer group/radio">
-                            <div class="relative flex items-center justify-center">
-                                <input type="radio" :name="field.name" :value="opt" v-model="answers[field.name]" :disabled="isDone" class="peer h-5 w-5 border-2 border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500/20 bg-transparent transition-all">
-                                <div class="absolute h-2 w-2 rounded-full bg-blue-500 scale-0 peer-checked:scale-100 transition-transform"></div>
-                            </div>
-                            <span class="text-sm font-bold text-gray-600 dark:text-gray-400 peer-checked:text-gray-900 dark:peer-checked:text-white transition-colors">{{ opt }}</span>
-                        </label>
-                    </div>
-
-                    <!-- TYPE: Range (Slider) -->
-                    <div v-else-if="field.type === 'range'" class="pt-2">
-                        <div class="flex items-center gap-6">
-                            <input type="range" :min="field.min || 0" :max="field.max || 100" :step="field.step || 1" 
-                                   v-model.number="answers[field.name]" 
-                                   class="grow h-2 bg-gray-200 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-600" 
-                                   :disabled="isDone">
-                            <div class="min-w-[4rem] text-center px-3 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl font-mono font-black text-sm border border-blue-100 dark:border-blue-800">
-                                {{ answers[field.name] }}
-                            </div>
-                        </div>
-                        <div class="flex justify-between mt-2 text-[10px] font-black uppercase text-gray-400 tracking-widest">
-                            <span>{{ field.min || 0 }}</span>
-                            <span>{{ field.max || 100 }}</span>
-                        </div>
-                    </div>
-
-                    <!-- TYPE: Rating (Stars) -->
-                    <div v-else-if="field.type === 'rating'" class="flex items-center gap-2 pt-1">
-                        <button v-for="i in (Number(field.max) || 5)" :key="i" 
-                                @click="!isDone && (answers[field.name] = i)" 
-                                type="button"
-                                class="text-3xl transition-all transform hover:scale-125" 
-                                :class="[
-                                    answers[field.name] >= i ? 'text-yellow-400 drop-shadow-sm' : 'text-gray-200 dark:text-gray-700',
-                                    isDone ? 'cursor-default' : 'cursor-pointer'
-                                ]">
-                            ★
-                        </button>
-                        <span class="ml-4 font-mono font-black text-gray-400 dark:text-gray-500">{{ answers[field.name] }} / {{ field.max || 5 }}</span>
-                    </div>
-
-                    <!-- TYPE: Checkbox (Toggle Style) -->
-                    <label v-else-if="field.type === 'checkbox'" class="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800/40 rounded-2xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border border-transparent hover:border-blue-200 dark:hover:border-blue-900/30">
-                        <span class="text-sm font-bold text-gray-600 dark:text-gray-300">Enable this option</span>
-                        <div class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" v-model="answers[field.name]" :disabled="isDone" class="sr-only peer">
-                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                        </div>
+            <!-- Graceful Fallback: Free-Form Response Input when fields are not pre-declared -->
+            <div v-else-if="!form?.isLoading" class="space-y-2">
+                <div class="flex items-center justify-between">
+                    <label class="block text-xs font-bold text-gray-700 dark:text-gray-200">
+                        Your Response
                     </label>
-                </template>
+                    <span class="text-[10px] text-gray-400 italic">Enter parameters or response</span>
+                </div>
+                <textarea 
+                    v-model="answers['response']" 
+                    rows="3" 
+                    class="input-field text-xs py-2.5 px-3.5 resize-none w-full" 
+                    placeholder="Type your response or answers here..." 
+                    :disabled="isDone"
+                ></textarea>
             </div>
         </div>
 
         <!-- Form Footer -->
-        <div v-if="!isDone" class="px-8 py-6 bg-gray-50 dark:bg-gray-950/40 border-t dark:border-gray-800 flex justify-end">
+        <div v-if="!isDone" class="px-5 py-3 bg-gray-50 dark:bg-gray-950/40 border-t dark:border-gray-800 flex justify-end">
             <button @click="submitForm" 
-                    class="btn btn-primary px-10 py-3 rounded-2xl shadow-xl shadow-blue-500/20 font-black uppercase text-xs tracking-[0.2em] transition-all hover:-translate-y-0.5 active:translate-y-0" 
+                    class="btn btn-primary px-6 py-2 rounded-xl shadow-md font-bold text-xs uppercase tracking-wider transition-all" 
                     :disabled="isSubmitting">
-                <IconAnimateSpin v-if="isSubmitting" class="w-4 h-4 mr-3 animate-spin" />
-                {{ form.submit_label || 'Send Response' }}
+                <IconAnimateSpin v-if="isSubmitting" class="w-3.5 h-3.5 mr-2 animate-spin" />
+                {{ formSubmitLabel }}
             </button>
         </div>
     </div>
@@ -381,12 +426,12 @@ async function submitForm() {
 <style scoped>
 @reference "tailwindcss";
 .input-field {
-    @apply w-full px-5 py-3.5 bg-gray-50 dark:bg-gray-800 border-2 border-gray-100 dark:border-gray-700 rounded-2xl text-gray-900 dark:text-white placeholder-gray-400 transition-all outline-none;
+    @apply w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-gray-900 dark:text-white placeholder-gray-400 transition-all outline-none;
 }
 .input-field:focus {
-    @apply border-blue-500 bg-white dark:bg-gray-900;
+    @apply border-blue-500 bg-white dark:bg-gray-900 ring-2 ring-blue-500/20;
 }
 .input-field:disabled {
-    @apply opacity-60 grayscale cursor-not-allowed border-gray-200 dark:border-gray-800;
+    @apply opacity-60 cursor-not-allowed;
 }
 </style>

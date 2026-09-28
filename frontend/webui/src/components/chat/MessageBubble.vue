@@ -233,35 +233,25 @@ function togglePreview(index) {
 
 // Function to handle clicking citation buttons in the content
 function handleCitationClick(index) {
-    // Ensure sources are visible
     isSourcesVisible.value = true;
-    
-    // Find the source item. Assuming sortedSources order matches if we use index from props
-    // We try to match by the 'index' property if available, or just use array index 
-    // BUT sortedSources is sorted by score. The citation [1] refers to the index property we added in backend.
-    
+
+    const targetSource = sortedSources.value.find(s => s.index === index) || sortedSources.value[index - 1];
+
     nextTick(() => {
-        // Find the element ref. We need to map index to the sorted list index or iterate
         const targetSourceIndex = sortedSources.value.findIndex(s => s.index === index);
-        
-        if (targetSourceIndex !== -1) {
-            const el = sourceRefs.value[targetSourceIndex];
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                // Optional: Flash highlight effect
-                el.classList.add('bg-yellow-100', 'dark:bg-yellow-900/50');
-                setTimeout(() => {
-                    el.classList.remove('bg-yellow-100', 'dark:bg-yellow-900/50');
-                }, 2000);
-            }
-        } else {
-             // Fallback to direct array index if no explicit index property
-             const el = sourceRefs.value[index - 1]; // citations are 1-based
-             if (el) {
-                 el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                 el.classList.add('bg-yellow-100', 'dark:bg-yellow-900/50');
-                 setTimeout(() => el.classList.remove('bg-yellow-100', 'dark:bg-yellow-900/50'), 2000);
-             }
+        const refIndex = targetSourceIndex !== -1 ? targetSourceIndex : (index - 1);
+        const el = sourceRefs.value[refIndex];
+
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('ring-4', 'ring-blue-400', 'bg-blue-50', 'dark:bg-blue-900/30');
+            setTimeout(() => {
+                el.classList.remove('ring-4', 'ring-blue-400', 'bg-blue-50', 'dark:bg-blue-900/30');
+            }, 2500);
+        }
+
+        if (targetSource) {
+            showSourceDetails(targetSource);
         }
     });
 }
@@ -468,19 +458,25 @@ const senderName = computed(() => {
 });
 
 const hasEvents = computed(() => (props.message.events && props.message.events.length > 0) || (props.message.metadata?.events && props.message.metadata.events.length > 0));
-const hasSources = computed(() => {
-    const s = props.message.sources || props.message.metadata?.sources;
-    return Array.isArray(s) && s.length > 0;
-});
-
 const sortedSources = computed(() => {
-    const raw = props.message.sources || props.message.metadata?.sources;
+    let raw = props.message.sources || props.message.metadata?.sources;
+    if ((!raw || !raw.length) && Array.isArray(props.message.events)) {
+        const srcEvt = props.message.events.find(e => e.type === 'sources');
+        if (srcEvt && Array.isArray(srcEvt.content)) {
+            raw = srcEvt.content;
+        }
+    }
     if (!Array.isArray(raw) || !raw.length) return [];
-    return [...raw].sort((a, b) => {
+    return [...raw].map((s, idx) => ({
+        ...s,
+        index: s.index || (idx + 1)
+    })).sort((a, b) => {
         if (a.index && b.index) return a.index - b.index;
         return (b.score || 0) - (a.score || 0);
     });
 });
+
+const hasSources = computed(() => sortedSources.value.length > 0);
 
 watch(hasSources, (has) => {
     if (has) isSourcesVisible.value = true;
@@ -1039,7 +1035,8 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
 
                     <div v-if="isSourcesVisible" class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div v-for="(source, index) in sortedSources" :key="index" 
-                                class="flex flex-col gap-2 group/source transition-all duration-300">
+                                :ref="(el) => { if (el) sourceRefs[index] = el; }"
+                                class="flex flex-col gap-2 group/source transition-all duration-300 rounded-2xl">
 
                             <div @click="showSourceDetails(source)" 
                                     class="p-4 bg-gray-50/50 dark:bg-gray-900/40 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-blue-500/30 cursor-pointer shadow-sm hover:shadow-md transition-all relative overflow-hidden">

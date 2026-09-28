@@ -126,7 +126,7 @@ const customRounds = ref(parseInt(localStorage.getItem('lollms_input_rounds_val'
 const isReasoningEffortActive = ref(
     localStorage.getItem('lollms_input_reasoning_active') !== null
         ? localStorage.getItem('lollms_input_reasoning_active') === 'true'
-        : Boolean(user.value?.reasoning_activation || user.value?.reasoning_effort)
+        : Boolean(user.value?.reasoning_activation)
 );
 const reasoningEffort = ref(
     localStorage.getItem('lollms_input_reasoning_effort') || 
@@ -154,7 +154,7 @@ watch(reasoningEffort, (val) => {
 
 watch(user, (u) => {
     if (u && localStorage.getItem('lollms_input_reasoning_active') === null) {
-        isReasoningEffortActive.value = Boolean(u.reasoning_activation || u.reasoning_effort);
+        isReasoningEffortActive.value = Boolean(u.reasoning_activation);
         if (u.reasoning_effort) reasoningEffort.value = u.reasoning_effort.toLowerCase();
     }
 });
@@ -1455,7 +1455,8 @@ async function handleSendMessage() {
             webSearchEnabled: isWebSearchActive.value,
             temperature: isCustomTemp.value ? Number(customTemp.value) : null,
             max_nb_rounds: isCustomRounds.value ? parseInt(customRounds.value, 10) : null,
-            reasoning_effort: isReasoningEffortActive.value ? (reasoningEffort.value || 'low') : 'none'
+            reasoning_effort: isReasoningEffortActive.value ? (reasoningEffort.value || 'low') : 'none',
+            thinking: isReasoningEffortActive.value ? 'true' : 'false'
         }); 
     } catch(err) { 
         console.error("SendMessage failed:", err); 

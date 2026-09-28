@@ -20,6 +20,76 @@ def test_message_output_includes_forms_field():
     assert len(msg.forms) == 1
     assert msg.forms[0]["title"] == "Form System Test"
 
+def test_form_xml_parser_extracts_fields_robustly():
+    """Verify that form XML with varied field tags and options is parsed properly into fields."""
+    import re
+    xml_input = '''<lollms_form title="User Survey">
+        <field name="username" label="Name" type="text" placeholder="Your name"/>
+        <field name="age" label="Age" type="number" min="1" max="120" default="30"/>
+        <field name="role" label="Role" type="select">
+            <option>Developer</option>
+            <option>Designer</option>
+        </field>
+        <field name="newsletter" label="Subscribe" type="checkbox" default="true"/>
+    </lollms_form>'''
+
+    f_title_match = re.search(r'title=["\']([^"\']+)["\']', xml_input)
+    assert f_title_match is not None
+    assert f_title_match.group(1) == "User Survey"
+
+    field_matches = list(re.finditer(r'<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)', xml_input, re.DOTALL | re.IGNORECASE))
+    assert len(field_matches) == 4
+
+    roles = re.findall(r'<option[^>]*>(.*?)<\/option>', field_matches[2].group(2) or '', re.DOTALL | re.IGNORECASE)
+    assert len(roles) == 2
+    assert [r.strip() for r in roles] == ["Developer", "Designer"]
+
+def test_form_presence_in_message_output():
+    """Verify that forms always stay present in message payload and metadata."""
+    msg = MessageOutput(
+        id="test-msg-form",
+        sender="assistant",
+        sender_type="assistant",
+        content="<processing type=\"lollms_form\" title=\"lollms_form\"></processing>",
+        forms=[{
+            "id": "form_1",
+            "title": "Interactive Form",
+            "fields": [{"name": "response", "label": "Your Response", "type": "textarea"}]
+        }]
+    )
+    assert msg.forms is not None
+    assert len(msg.forms) == 1
+    assert msg.forms[0]["fields"][0]["name"] == "response"
+
+def test_sources_indexed_and_preserved_in_message_output():
+    """Verify that sources retain index property [1], [2] for citation navigation."""
+    sources_data = [
+        {"title": "LoLLMs Architecture", "source": "docs/architecture.md", "content": "RAG engine...", "score": 92.5, "index": 1}
+    ]
+    msg = MessageOutput(
+        id="test-msg-sources",
+        sender="assistant",
+        sender_type="assistant",
+        content="According to the documentation [1], RAG is supported.",
+        sources=sources_data
+    )
+    assert msg.sources is not None
+    assert len(msg.sources) == 1
+    assert msg.sources[0]["index"] == 1
+    assert msg.sources[0]["title"] == "LoLLMs Architecture"
+
+def test_thinking_extracted_from_content_when_thoughts_not_populated():
+    """Verify that thoughts are isolated from message content into thoughts property."""
+    import re
+    raw_content = "<think>Planning the implementation.\nChecking constraints.</think>Here is the final answer."
+    think_match = re.search(r'<(?:think|thought)>([\s\S]*?)</(?:think|thought)>', raw_content, re.IGNORECASE)
+    assert think_match is not None
+    extracted_thoughts = think_match.group(1).strip()
+    clean_content = re.sub(r'<(?:think|thought)>[\s\S]*?</(?:think|thought)>', '', raw_content, flags=re.IGNORECASE).strip()
+
+    assert extracted_thoughts == "Planning the implementation.\nChecking constraints."
+    assert clean_content == "Here is the final answer."
+
 def test_form_submission_endpoint_resilient():
     """Verify that form submission endpoint returns 200 without raising 404 even when generation was not suspended."""
     from fastapi.testclient import TestClient

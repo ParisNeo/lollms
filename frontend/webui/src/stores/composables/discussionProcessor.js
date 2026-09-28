@@ -89,6 +89,25 @@ export function processSingleMessage(msg) {
         }
     }
 
+    // [FIX] Form Recovery: Promote form definitions from events or metadata into top-level forms array
+    let forms = Array.isArray(msg.forms) && msg.forms.length > 0 
+                ? [...msg.forms] 
+                : (Array.isArray(metadata.forms) ? [...metadata.forms] : []);
+
+    if (forms.length === 0 && Array.isArray(events)) {
+        events.forEach(e => {
+            if ((e.type === 'form_ready' || e.type === 46 || e.type === 'form') && e.content) {
+                const formObj = e.content.form || e.content;
+                if (formObj && typeof formObj === 'object') {
+                    const fid = formObj.id || formObj.form_id || formObj.title;
+                    if (!forms.some(f => (f.id && f.id === fid) || (f.title && f.title === formObj.title))) {
+                        forms.push(formObj);
+                    }
+                }
+            }
+        });
+    }
+
     const thoughts = msg.thoughts || metadata.thoughts || metadata.reasoning_content || null;
 
     // Ensure all image references are sanitized against double headers
@@ -113,7 +132,7 @@ export function processSingleMessage(msg) {
         sender_type: senderType,
         events,
         sources,
-        forms: msg.forms || metadata.forms || [],
+        forms: forms,
         image_references: normalizedImageRefs,
         active_images: msg.active_images || [],
         inline_widgets: normalizedWidgets,

@@ -979,6 +979,8 @@ def build_lollms_client_from_params(
             for param_k in ['temperature', 'top_k', 'top_p', 'repeat_penalty', 'repeat_last_n', 'reasoning_activation', 'reasoning_effort', 'reasoning_summary']:
                 if active_prof.get(param_k) is not None:
                     primary_config[param_k] = active_prof[param_k]
+            if llm_params:
+                primary_config.update(llm_params)
         else:
             primary_config.update(final_user_params)
             primary_config["model_name"] = actual_model
@@ -1106,9 +1108,18 @@ def build_lollms_client_from_params(
 
             with _registry_lock:
                 if registry_key in _global_client_registry:
+                    cached_lc = _global_client_registry[registry_key]
+                    if "reasoning_activation" in primary_config:
+                        setattr(cached_lc, 'reasoning_activation', primary_config["reasoning_activation"])
+                        if hasattr(cached_lc, 'llm') and cached_lc.llm:
+                            setattr(cached_lc.llm, 'reasoning_activation', primary_config["reasoning_activation"])
+                    if "reasoning_effort" in primary_config:
+                        setattr(cached_lc, 'reasoning_effort', primary_config["reasoning_effort"])
+                        if hasattr(cached_lc, 'llm') and cached_lc.llm:
+                            setattr(cached_lc.llm, 'reasoning_effort', primary_config["reasoning_effort"])
                     if callback:
                         callback("⚡ Universal Engine cached - Instant access enabled.", 28, {})
-                    return _global_client_registry[registry_key]
+                    return cached_lc
 
                 try:
                     lc = LollmsClient(**registry_payload, callback=callback)
