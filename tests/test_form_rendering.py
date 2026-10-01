@@ -23,26 +23,58 @@ def test_message_output_includes_forms_field():
 def test_form_xml_parser_extracts_fields_robustly():
     """Verify that form XML with varied field tags and options is parsed properly into fields."""
     import re
-    xml_input = '''<lollms_form title="User Survey">
-        <field name="username" label="Name" type="text" placeholder="Your name"/>
-        <field name="age" label="Age" type="number" min="1" max="120" default="30"/>
-        <field name="role" label="Role" type="select">
-            <option>Developer</option>
-            <option>Designer</option>
+    xml_input = '''<lollms_form title="Multi-Field Test Form">
+        <field name="favorite_language" label="Favorite Language" type="select">
+            <option>Python</option>
+            <option>JavaScript</option>
         </field>
-        <field name="newsletter" label="Subscribe" type="checkbox" default="true"/>
+        <field name="experience_level" label="Experience Level" type="radio">
+            <option>Beginner</option>
+            <option>Intermediate</option>
+        </field>
+        <field name="age" label="Age" type="number" min="1" max="120" default="30"/>
+        <field name="newsletter" label="Subscribe to newsletter" type="checkbox" default="true"/>
+        <field name="start_date" label="Start Date" type="date"/>
     </lollms_form>'''
 
     f_title_match = re.search(r'title=["\']([^"\']+)["\']', xml_input)
     assert f_title_match is not None
-    assert f_title_match.group(1) == "User Survey"
+    assert f_title_match.group(1) == "Multi-Field Test Form"
 
     field_matches = list(re.finditer(r'<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)', xml_input, re.DOTALL | re.IGNORECASE))
-    assert len(field_matches) == 4
+    assert len(field_matches) == 5
 
-    roles = re.findall(r'<option[^>]*>(.*?)<\/option>', field_matches[2].group(2) or '', re.DOTALL | re.IGNORECASE)
-    assert len(roles) == 2
-    assert [r.strip() for r in roles] == ["Developer", "Designer"]
+    langs = re.findall(r'<option[^>]*>(.*?)<\/option>', field_matches[0].group(2) or '', re.DOTALL | re.IGNORECASE)
+    assert len(langs) == 2
+    assert [l.strip() for l in langs] == ["Python", "JavaScript"]
+
+def test_form_line_based_specification_fallback():
+    """Verify that text lines like 'Field — type' are parsed properly into fields."""
+    import re
+    lines_input = """Favorite Language — select dropdown
+Experience Level — radio buttons
+Age — number
+Subscribe to newsletter — checkbox
+Start Date — date"""
+
+    fields = []
+    for line in lines_input.split('\n'):
+        sep_match = re.match(r'^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|-|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$', line.strip())
+        assert sep_match is not None
+        raw_label = sep_match.group(1).strip()
+        fields.append({
+            "name": re.sub(r'[^a-z0-9_]+', '_', raw_label.lower()).strip('_'),
+            "label": raw_label,
+            "type": sep_match.group(2).strip()
+        })
+
+    assert len(fields) == 5
+    assert fields[0]["name"] == "favorite_language"
+    assert fields[0]["label"] == "Favorite Language"
+    assert fields[1]["name"] == "experience_level"
+    assert fields[2]["name"] == "age"
+    assert fields[3]["name"] == "subscribe_to_newsletter"
+    assert fields[4]["name"] == "start_date"
 
 def test_form_presence_in_message_output():
     """Verify that forms always stay present in message payload and metadata."""

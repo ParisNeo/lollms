@@ -108,6 +108,35 @@ export function processSingleMessage(msg) {
         });
     }
 
+    // Direct recovery from message content if forms array was not persisted in metadata or contains only empty fields
+    const needsFormRecovery = forms.length === 0 || (forms.length === 1 && (!forms[0].fields || forms[0].fields.length === 0 || (forms[0].fields.length === 1 && forms[0].fields[0].name === 'response')));
+    if (needsFormRecovery && typeof cleanContent === 'string') {
+        const lines = cleanContent.split('\n');
+        const textFields = [];
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('<') || trimmed.startsWith('#')) continue;
+            const match = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|-|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
+            if (match) {
+                const rawLabel = match[1].trim().replace(/^[*_]+|[*_]+$/g, '');
+                const rawType = match[2].trim();
+                textFields.push({
+                    name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, ''),
+                    label: rawLabel,
+                    type: rawType
+                });
+            }
+        }
+
+        if (textFields.length > 0) {
+            let tTitle = 'Multi-Field Form';
+            const titleMatch = cleanContent.match(/title=["']([^"']*)["']/i);
+            if (titleMatch && titleMatch[1]) tTitle = titleMatch[1];
+            forms.length = 0;
+            forms.push({ id: 'form_recovered', title: tTitle, fields: textFields });
+        }
+    }
+
     const thoughts = msg.thoughts || metadata.thoughts || metadata.reasoning_content || null;
 
     // Ensure all image references are sanitized against double headers

@@ -9,7 +9,8 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const props = defineProps({
     form: { type: Object, required: true },
-    discussionId: { type: String, required: true }
+    discussionId: { type: String, required: true },
+    messageContent: { type: String, default: '' }
 });
 
 const uiStore = useUiStore();
@@ -17,6 +18,66 @@ const discussionsStore = useDiscussionsStore();
 const answers = reactive({});
 const isSubmitting = ref(false);
 const isDone = ref(!!props.form?.submitted);
+
+// Normalize messy or descriptive types produced by various LLMs
+const normalizeFieldType = (type) => {
+    if (!type) return 'text';
+    const t = String(type).toLowerCase().trim();
+    if (t.includes('select') || t.includes('dropdown') || t.includes('combo') || t.includes('choice') || t.includes('menu')) return 'select';
+    if (t.includes('radio')) return 'radio';
+    if (t.includes('check') || t.includes('bool') || t.includes('toggle') || t.includes('switch')) return 'checkbox';
+    if (t.includes('textarea') || t.includes('multiline') || t.includes('paragraph') || t.includes('area') || t.includes('long')) return 'textarea';
+    if (t.includes('num') || t.includes('int') || t.includes('float') || t.includes('digit') || t.includes('age') || t.includes('count')) return 'number';
+    if (t.includes('range') || t.includes('slider')) return 'range';
+    if (t.includes('rating') || t.includes('star') || t.includes('score')) return 'rating';
+    if (t.includes('date') || t.includes('calendar') || t.includes('day') || t.includes('year') || t.includes('month')) return 'date';
+    if (t.includes('time') || t.includes('hour')) return 'time';
+    if (t.includes('email') || t.includes('mail')) return 'email';
+    if (t.includes('pass')) return 'password';
+    if (t.includes('url') || t.includes('link') || t.includes('web') || t.includes('site')) return 'url';
+    if (t.includes('section') || t.includes('header') || t.includes('divider') || t.includes('title')) return 'section';
+    return 'text';
+};
+
+function getFallbackOptions(label, name) {
+    const combined = `${label || ''} ${name || ''}`.toLowerCase();
+    if (combined.includes('lang')) {
+        return ['Python', 'JavaScript', 'TypeScript', 'C++', 'Java', 'Rust', 'Go'];
+    }
+    if (combined.includes('experience') || combined.includes('level')) {
+        return ['Beginner', 'Intermediate', 'Advanced', 'Expert'];
+    }
+    if (combined.includes('status')) {
+        return ['Active', 'Pending', 'Completed'];
+    }
+    if (combined.includes('gender')) {
+        return ['Female', 'Male', 'Non-binary', 'Prefer not to say'];
+    }
+    return ['Option 1', 'Option 2', 'Option 3'];
+}
+
+function parseTextLinesForFields(rawText) {
+    if (!rawText || typeof rawText !== 'string') return [];
+    const lines = rawText.split('\n');
+    const fields = [];
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith('<') || trimmed.startsWith('#')) continue;
+        const match = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|-|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
+        if (match) {
+            const rawLabel = match[1].trim().replace(/^[*_]+|[*_]+$/g, '');
+            const rawType = match[2].trim();
+            const normType = normalizeFieldType(rawType);
+            const name = rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
+            fields.push({
+                name: name || `field_${fields.length + 1}`,
+                label: rawLabel,
+                type: normType
+            });
+        }
+    }
+    return fields;
+}
 
 // Defensive Field Normalizer: Resolves fields across all library/event structures
 const resolvedFields = computed(() => {
@@ -73,9 +134,9 @@ const resolvedFields = computed(() => {
     // 4. In-place XML parser fallback if raw markup is present
     if (!rawFields || (Array.isArray(rawFields) && rawFields.length === 0)) {
         const rawXml = props.form.raw || props.form.content || props.form.raw_xml || (typeof props.form.form === 'string' ? props.form.form : '') || (typeof props.form.description === 'string' && props.form.description.includes('<field') ? props.form.description : '');
-        if (typeof rawXml === 'string' && (rawXml.includes('<field') || rawXml.includes('<lollms_form'))) {
+        if (typeof rawXml === 'string') {
             const extracted = [];
-            const fieldRegex = /<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)/gis;
+            const fieldRegex = /<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>|>)/gis;
             const matches = [...rawXml.matchAll(fieldRegex)];
             for (const m of matches) {
                 const fieldAttrsStr = m[1] || '';
@@ -109,10 +170,60 @@ const resolvedFields = computed(() => {
             if (extracted.length > 0) {
                 rawFields = extracted;
             }
+
+            // 5. Line-based field specification fallback (e.g. "Favorite Language — select dropdown")
+            if ((!rawFields || rawFields.length === 0) && rawXml) {
+                const lines = rawXml.split('\n').map(l => l.trim()).filter(Boolean);
+                const textFields = [];
+                for (const line of lines) {
+                    if (line.startsWith('<') && line.endsWith('>')) continue;
+                    const sepMatch = line.match(/^[-*•]?\s*([A-Za-z0-9_\s]+?)\s*(?:—|–|-|:)\s*([A-Za-z0-9_\s\(\)]+)$/);
+                    if (sepMatch) {
+                        const rawLabel = sepMatch[1].trim();
+                        const rawType = sepMatch[2].trim();
+                        const normType = normalizeFieldType(rawType);
+                        textFields.push({
+                            name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_'),
+                            label: rawLabel,
+                            type: normType
+                        });
+                    }
+                }
+                if (textFields.length > 0) {
+                    rawFields = textFields;
+                }
+            }
         }
     }
 
-    return Array.isArray(rawFields) ? rawFields : [];
+    // 6. Direct parent message recovery if fields are empty or only contain the dummy response input
+    const isOnlyFallback = !rawFields || rawFields.length === 0 || (rawFields.length === 1 && (rawFields[0].name === 'response' || rawFields[0].name === 'answers'));
+    if (isOnlyFallback && props.messageContent) {
+        const textFields = parseTextLinesForFields(props.messageContent);
+        if (textFields.length > 0) {
+            rawFields = textFields;
+        }
+    }
+
+    if (!Array.isArray(rawFields) || rawFields.length === 0) return [];
+
+    // Ensure all fields have sanitized names, labels, and normalized types
+    return rawFields.map((f, idx) => {
+        const normType = normalizeFieldType(f.type);
+        const name = f.name || f.id || (f.label ? f.label.toLowerCase().replace(/[^a-z0-9_]+/g, '_') : `field_${idx}`);
+        const label = f.label || (f.name ? f.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : `Field ${idx + 1}`);
+        let opts = f.options;
+        if ((normType === 'select' || normType === 'radio') && (!opts || opts.length === 0)) {
+            opts = getFallbackOptions(label, name);
+        }
+        return {
+            ...f,
+            name,
+            label,
+            type: normType,
+            options: opts
+        };
+    });
 });
 
 const formTitle = computed(() => {
@@ -199,7 +310,7 @@ const initAnswers = () => {
         else if (fType === 'checkbox') answers[field.name] = false;
         else if (fType === 'number' || fType === 'range') answers[field.name] = Number(field.min) || 0;
         else if (fType === 'rating') answers[field.name] = 3;
-        else if (fType === 'radio') {
+        else if (fType === 'radio' || fType === 'select') {
             const opts = getOptions(field);
             answers[field.name] = opts.length > 0 ? opts[0].value : '';
         }
@@ -309,9 +420,9 @@ async function submitForm() {
                             <span v-if="field.hint" class="text-[10px] text-gray-400 italic">{{ field.hint }}</span>
                         </div>
 
-                        <!-- TYPE: Text / Number / Email / Date / Password / Url -->
-                        <input v-if="['text', 'number', 'email', 'date', 'password', 'url'].includes(field.type) || !field.type" 
-                               :type="field.type || 'text'"
+                        <!-- TYPE: Text / Number / Email / Date / Password / Url / Time -->
+                        <input v-if="['text', 'number', 'email', 'date', 'password', 'url', 'time'].includes(field.type)" 
+                               :type="field.type"
                                v-model="answers[field.name]" 
                                :placeholder="field.placeholder || ''" 
                                :min="field.min"
@@ -383,12 +494,20 @@ async function submitForm() {
 
                         <!-- TYPE: Checkbox (Toggle Style) -->
                         <label v-else-if="field.type === 'checkbox'" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800/40 rounded-xl cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors border dark:border-gray-700">
-                            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ field.hint || 'Enable this option' }}</span>
+                            <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">{{ field.hint || field.label || 'Enable this option' }}</span>
                             <div class="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" v-model="answers[field.name]" :disabled="isDone" class="sr-only peer">
                                 <div class="w-9 h-5 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
                             </div>
                         </label>
+
+                        <!-- Resilient Fallback: Any unrecognized input type renders as standard text input -->
+                        <input v-else
+                               type="text"
+                               v-model="answers[field.name]" 
+                               :placeholder="field.placeholder || ''"
+                               class="input-field text-xs py-2 px-3" 
+                               :disabled="isDone">
                     </template>
                 </div>
             </template>

@@ -1827,12 +1827,7 @@ def build_llm_generation_router(router: APIRouter):
         
         # [FIX] Local import to break circular dependency and ensure settings instance is available
         from backend.settings import settings
-        if settings.get("enable_forms", True):
-             preamble_parts.append("## Interactive Forms: Use <lollms_form title=\"Title\"><field name=\"id\" label=\"Label\" type=\"TYPE\"/></lollms_form>.\n"
-                                   "CRITICAL SYNTAX FOR SELECTIONS:\n"
-                                   "If type is 'select' or 'radio', you MUST provide options as nested child tags. "
-                                   "Example: <field type=\"select\" label=\"...\" name=\"...\"><option>Opt 1</option><option>Opt 2</option></field>\n"
-                                   "DANGER: Using an 'options' attribute is DEPRECATED and will result in an EMPTY list. Always use <option> tags.")
+
         if getattr(owner_db_user, 'skills_building_enabled', False):
             preamble_parts.append("## Skill Building: If the user asks to save this as a skill, learn a new trick, or remember a pattern, wrap the detailed documentation or code pattern in `<skill title=\"Clear Name\" description=\"What this teaches/provides\" category=\"programming/language/feature\">content</skill>`. Make sure the category uses forward slashes.")
         preamble_parts.append("## YouTube Embeds: To embed a YouTube video or playlist, use `<youtube>https://www.youtube.com/watch?v=VIDEO_ID</youtube>` or `<youtube>https://www.youtube.com/playlist?list=PLAYLIST_ID</youtube>`.")
@@ -2049,11 +2044,16 @@ def build_llm_generation_router(router: APIRouter):
                                     parsed_fields = []
                                     field_matches = re.finditer(r'<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)', target_data, re.DOTALL | re.IGNORECASE)
                                     for fm in field_matches:
-                                        f_attrs = dict(re.findall(r'(\w+)=["\']([^"\']*)["\']', fm.group(1)))
+                                        raw_attrs = fm.group(1) or ''
+                                        f_attrs = dict(re.findall(r'(\w+)\s*=\s*["\']([^"\']*)["\']', raw_attrs))
                                         inner_opts = re.findall(r'<option[^>]*>(.*?)<\/option>', fm.group(2) or '', re.DOTALL | re.IGNORECASE)
                                         if inner_opts:
                                             f_attrs['options'] = [o.strip() for o in inner_opts if o.strip()]
+                                        elif 'options' in f_attrs and isinstance(f_attrs['options'], str):
+                                            f_attrs['options'] = [o.strip() for o in f_attrs['options'].split(',') if o.strip()]
                                         if f_attrs.get('name') or f_attrs.get('label'):
+                                            if not f_attrs.get('name'):
+                                                f_attrs['name'] = re.sub(r'[^a-z0-9_]+', '_', f_attrs.get('label', '').lower()).strip('_')
                                             parsed_fields.append(f_attrs)
                                     if parsed_fields:
                                         form_entry = {"id": f_id, "title": f_title, "fields": parsed_fields}

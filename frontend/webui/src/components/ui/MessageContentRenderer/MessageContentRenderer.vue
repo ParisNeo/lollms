@@ -810,8 +810,8 @@ function _parse_form_xml(attrs_str, body) {
             }
         }
 
-        // 2. Parse XML <field> tags
-        const fieldRegex = /<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)/gis;
+        // 2. Flexible Parse for XML <field> tags (handles self-closing, closed, or open)
+        const fieldRegex = /<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>|>)/gis;
         const matches = [...body.matchAll(fieldRegex)];
         for (const m of matches) {
             const fieldAttrsStr = m[1] || '';
@@ -842,6 +842,24 @@ function _parse_form_xml(attrs_str, body) {
                 if (!fAttrs.name && fAttrs.id) fAttrs.name = fAttrs.id;
                 if (!fAttrs.name && fAttrs.label) fAttrs.name = fAttrs.label.toLowerCase().replace(/[^a-z0-9_]+/g, '_');
                 fields.push(fAttrs);
+            }
+        }
+
+        // 3. Fallback for text-based form declarations (e.g. "Favorite Language — select dropdown")
+        if (fields.length === 0 && trimmedBody) {
+            const lines = trimmedBody.split('\n').map(l => l.trim()).filter(Boolean);
+            for (const line of lines) {
+                if (line.startsWith('<') && line.endsWith('>')) continue;
+                const sepMatch = line.match(/^[-*•]?\s*([A-Za-z0-9_\s]+?)\s*(?:—|–|-|:)\s*([A-Za-z0-9_\s\(\)]+)$/);
+                if (sepMatch) {
+                    const rawLabel = sepMatch[1].trim();
+                    const rawType = sepMatch[2].trim();
+                    fields.push({
+                        name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_'),
+                        label: rawLabel,
+                        type: rawType
+                    });
+                }
             }
         }
     }
@@ -1075,14 +1093,48 @@ const messageParts = computed(() => {
             });
 
             activeElements.forEach((el, index) => {
-                if (el.start > cursor) {
-                    const text = segContent.substring(cursor, el.start);
+                let text = segContent.substring(cursor, el.start);
+
+                let parsedFormCandidate = null;
+                if (el.type === 'tool' && (el.raw.includes('<lollms_form') || el.raw.includes('type="lollms_form"'))) {
+                    parsedFormCandidate = parseSpecialBlock(el.raw);
+                    const currentFields = parsedFormCandidate?.form?.fields || [];
+                    const hasOnlyFallback = currentFields.length === 0 || (currentFields.length === 1 && currentFields[0].name === 'response');
+
+                    if (parsedFormCandidate?.type === 'form_ready' && hasOnlyFallback) {
+                        const lines = text.split('\n');
+                        const extractedFields = [];
+                        const keptLines = [];
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            const sepMatch = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|-|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
+                            if (sepMatch) {
+                                const rawLabel = sepMatch[1].trim().replace(/^[*_]+|[*_]+$/g, '');
+                                const rawType = sepMatch[2].trim();
+                                extractedFields.push({
+                                    name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, ''),
+                                    label: rawLabel,
+                                    type: rawType
+                                });
+                            } else {
+                                keptLines.push(line);
+                            }
+                        }
+                        if (extractedFields.length > 0) {
+                            if (!parsedFormCandidate.form) parsedFormCandidate.form = {};
+                            parsedFormCandidate.form.fields = extractedFields;
+                            text = keptLines.join('\n');
+                        }
+                    }
+                }
+
+                if (text.trim().length > 0) {
                     parts.push({ type: 'content', content: text, id: `text-${parts.length}-${cursor}` });
                 }
 
                 let uniqueKey = null;
                 if (el.type === 'tool') {
-                     const p = parseSpecialBlock(el.raw);
+                     const p = parsedFormCandidate || parseSpecialBlock(el.raw);
                      if (p.id) uniqueKey = `${p.type}-${p.id}`;
                 } else if (el.type === 'form_ready') {
                      let actualForm = el.form;
@@ -1110,7 +1162,7 @@ const messageParts = computed(() => {
                         parts.push({ type: 'code', lang, code: inner, id: `code-${parts.length}-${el.start}` });
                     }
                 } else if (el.type === 'tool') {
-                    const parsed = parseSpecialBlock(el.raw);
+                    const parsed = parsedFormCandidate || parseSpecialBlock(el.raw);
                     if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
                     parts.push({ ...parsed, id: `${parsed.type}-${parts.length}-${el.start}` });
                 } else if (el.type === 'block_doc') {
@@ -1899,6 +1951,7 @@ function onMermaidReady({ svg }, partIndex) {
                   <InteractiveForm 
                       :form="part.form" 
                       :discussion-id="currentDiscussionId"
+                      :message-content="content"
                   />
                </div>
           </template>
