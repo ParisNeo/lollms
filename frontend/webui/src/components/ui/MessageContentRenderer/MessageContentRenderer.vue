@@ -53,8 +53,11 @@ const props = defineProps({
   hasImages: { type: Boolean, default: false },
   lastUserImage: { type: String, default: null },
   messageId: { type: String, default: null },
+  discussionId: { type: String, default: null },
   metadata: { type: Object, default: () => ({}) }
 });
+
+const effectiveDiscussionId = computed(() => props.discussionId || discussionsStore.currentDiscussionId || '');
 
 const emit = defineEmits(['regenerate', 'citation-click']);
 
@@ -192,7 +195,7 @@ function wrapInIsolatedShell(source, partId) {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        html, body { 
+        html { 
             margin: 0; 
             padding: 16px; 
             font-family: system-ui, -apple-system, sans-serif; 
@@ -200,6 +203,24 @@ function wrapInIsolatedShell(source, partId) {
             position: relative;
             background: ${isDarkMode ? '#030712' : '#ffffff'};
             color: ${isDarkMode ? '#f3f4f6' : '#111827'};
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+        }
+        #lollms-widget-root {
+            width: 100%;
+            max-width: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #lollms-widget-root > * {
+            width: 100%;
         }
         * { box-sizing: border-box; }
     </style>
@@ -527,6 +548,49 @@ const parseSpecialBlock = (rawBlock, match = null) => {
         const formBody = formMatch ? (formMatch[2] || '') : '';
         const parsedForm = _parse_form_xml(formAttrs, formBody);
         parsedForm.raw = rawBlock;
+
+        const formId = parsedForm.id;
+        const formTitle = parsedForm.title;
+
+        // Check if props.forms or props.events has already parsed or submitted version
+        const allEvents = [...(props.events || []), ...(props.metadata?.events || [])];
+        let matchedForm = null;
+        if (props.forms && props.forms.length > 0) {
+            matchedForm = props.forms.find(f => f && (f.id === formId || f.form_id === formId || f.title === formTitle));
+        }
+        if (!matchedForm && allEvents.length > 0) {
+            const formEvent = allEvents.find(e => 
+                (e.type === 'form_ready' || e.type === 46 || e.type === 'form') && e.content
+            );
+            if (formEvent) {
+                const candidate = formEvent.content.form || formEvent.content;
+                if (candidate && typeof candidate === 'object' && (candidate.id === formId || candidate.title === formTitle)) {
+                    matchedForm = candidate;
+                }
+            }
+        }
+        if (matchedForm) {
+            if ((!matchedForm.fields || matchedForm.fields.length === 0) && parsedForm.fields && parsedForm.fields.length > 0) {
+                matchedForm.fields = parsedForm.fields;
+            }
+            if (!parsedForm.fields || parsedForm.fields.length === 0) {
+                parsedForm.fields = matchedForm.fields;
+            }
+            if (matchedForm.submitted) {
+                parsedForm.submitted = true;
+                parsedForm.answers = matchedForm.answers;
+            }
+        }
+
+        const submissionEvent = allEvents.find(e => 
+            (e.type === 'form_submitted' || e.type === 47) && e.content && 
+            (e.content.form_id === formId || e.content.id === formId)
+        );
+        if (submissionEvent) {
+            parsedForm.submitted = true;
+            parsedForm.answers = submissionEvent.content.answers;
+        }
+
         return {
             type: 'form_ready',
             form: parsedForm,
@@ -810,11 +874,11 @@ function _parse_form_xml(attrs_str, body) {
             }
         }
 
-        // 2. Flexible Parse for XML <field> tags (handles self-closing, closed, or open)
-        const fieldRegex = /<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>|>)/gis;
+        // 2. Flexible Parse for XML <field> tags (handles self-closing, closed, open, or malformed missing prefix)
+        const fieldRegex = /<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>|>)|(?:^|\n|\s)((?:\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)\s*){2,})/gis;
         const matches = [...body.matchAll(fieldRegex)];
         for (const m of matches) {
-            const fieldAttrsStr = m[1] || '';
+            const fieldAttrsStr = m[1] || m[3] || '';
             const innerContent = (m[2] || '').trim();
             const fAttrs = {};
             if (typeof fieldAttrsStr === 'string') {
@@ -890,7 +954,8 @@ const getEventIcon = (eventType) => {
 
 const messageParts = computed(() => {
     const rawExplicitThoughts = (props.thoughts || props.metadata?.thoughts || props.metadata?.reasoning_content || '').trim();
-    if (!props.content && !rawExplicitThoughts) return [];
+    const hasForms = (props.forms && props.forms.length > 0) || (props.events && props.events.some(e => e.type === 'form_ready' || e.type === 46 || e.type === 'form'));
+    if (!props.content && !rawExplicitThoughts && !hasForms) return [];
 
     let content = props.content || '';
     
@@ -983,6 +1048,7 @@ const messageParts = computed(() => {
     }
 
     const parts = [];
+    const renderedFormIds = new Set();
 
     // Prepend explicit thoughts (from streaming or metadata) if thoughts are not already embedded in content as <think> or <thought>
     const cleanedExplicitThoughts = cleanThoughtContent(rawExplicitThoughts);
@@ -1026,7 +1092,7 @@ const messageParts = computed(() => {
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b[^>]*>[\s\S]*?(?:<\/processing>(?:\s*<!--\s*status:[a-zA-Z0-9_-]+\s*-->)?|$))/gi },
-                { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form\s+([^>]*)>([\s\S]*?)<\/lollms_form>)/gi },
+                { type: 'tool', regex: /(<lollms_form\b([^>]*)>([\s\S]*?)(?:<\/lollms_form>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<tool_call[^>]*>([\s\S]*?)(?:<\/tool_call>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<mem_load\s+id=["']([^"']+)["']\s*\/?>)/gi },
@@ -1071,8 +1137,6 @@ const messageParts = computed(() => {
             }
 
             let cursor = 0;
-            const renderedFormIds = new Set();
-            
             const lastOccurrenceMap = new Map();
             activeElements.forEach((el, index) => {
                 let uniqueKey = null;
@@ -1156,6 +1220,17 @@ const messageParts = computed(() => {
                 if (el.type === 'code') {
                     const lang = (el.match && el.match[2] ? el.match[2] : 'plaintext').trim();
                     const inner = el.match && el.match[3] ? el.match[3] : '';
+                    if (inner.includes('<lollms_form')) {
+                        const parsedForm = parseSpecialBlock(inner);
+                        if (parsedForm.type === 'form_ready' && parsedForm.form) {
+                            if (parsedForm.form.id) renderedFormIds.add(parsedForm.form.id);
+                            if (parsedForm.form.form_id) renderedFormIds.add(parsedForm.form.form_id);
+                            if (parsedForm.form.title) renderedFormIds.add(parsedForm.form.title);
+                            parts.push({ ...parsedForm, id: `form-${parts.length}-${el.start}` });
+                            cursor = Math.max(cursor, el.end);
+                            return;
+                        }
+                    }
                     if (lang.toLowerCase() === 'mermaid') {
                         parts.push({ type: 'mermaid', code: inner.trim(), id: `mermaid-${parts.length}-${el.start}` });
                     } else {
@@ -1163,7 +1238,11 @@ const messageParts = computed(() => {
                     }
                 } else if (el.type === 'tool') {
                     const parsed = parsedFormCandidate || parseSpecialBlock(el.raw);
-                    if (parsed.type === 'form_ready' && parsed.form) renderedFormIds.add(parsed.form.id);
+                    if (parsed.type === 'form_ready' && parsed.form) {
+                        if (parsed.form.id) renderedFormIds.add(parsed.form.id);
+                        if (parsed.form.form_id) renderedFormIds.add(parsed.form.form_id);
+                        if (parsed.form.title) renderedFormIds.add(parsed.form.title);
+                    }
                     parts.push({ ...parsed, id: `${parsed.type}-${parts.length}-${el.start}` });
                 } else if (el.type === 'block_doc') {
                     const subType = (el.match && el.match[1] ? el.match[1] : 'document').toLowerCase();
@@ -1193,6 +1272,81 @@ const messageParts = computed(() => {
             id: `datagrid-${idx}-${parts.length}`
         });
     });
+
+    // Unrendered Forms from props.forms or props.events that were not embedded as inline tags in text
+    if (props.forms && props.forms.length > 0) {
+        props.forms.forEach((f, fIdx) => {
+            if (!f) return;
+            const fid = f.id || f.form_id || f.title || `form_${fIdx}`;
+            
+            // Robust deduplication check against already rendered XML forms
+            const isAlreadyRendered = Array.from(renderedFormIds).some(rid => 
+                rid === fid || rid === f.id || rid === f.form_id || rid === f.title
+            );
+
+            if (!isAlreadyRendered) {
+                const allEvents = [...(props.events || []), ...(props.metadata?.events || [])];
+                const formCopy = JSON.parse(JSON.stringify(f));
+                const submissionEvent = allEvents.find(e => 
+                    (e.type === 'form_submitted' || e.type === 47) && e.content && 
+                    (e.content.form_id === fid || e.content.id === fid || e.content.form_id === formCopy.id || e.content.id === formCopy.id)
+                );
+                if (submissionEvent) {
+                    formCopy.submitted = true;
+                    formCopy.answers = submissionEvent.content.answers;
+                }
+                parts.push({
+                    type: 'form_ready',
+                    form: formCopy,
+                    id: fid,
+                    raw: ''
+                });
+                renderedFormIds.add(fid);
+                if (f.id) renderedFormIds.add(f.id);
+                if (f.form_id) renderedFormIds.add(f.form_id);
+                if (f.title) renderedFormIds.add(f.title);
+            }
+        });
+    }
+
+    if (props.events && props.events.length > 0) {
+        props.events.forEach((e, eIdx) => {
+            if ((e.type === 'form_ready' || e.type === 46 || e.type === 'form') && e.content) {
+                const fObj = e.content.form || e.content;
+                if (fObj && typeof fObj === 'object') {
+                    const fid = fObj.id || fObj.form_id || fObj.title || `event_form_${eIdx}`;
+                    
+                    // Robust deduplication check
+                    const isAlreadyRendered = Array.from(renderedFormIds).some(rid => 
+                        rid === fid || rid === fObj.id || rid === fObj.form_id || rid === fObj.title
+                    );
+
+                    if (!isAlreadyRendered) {
+                        const allEvents = [...(props.events || []), ...(props.metadata?.events || [])];
+                        const formCopy = JSON.parse(JSON.stringify(fObj));
+                        const submissionEvent = allEvents.find(ev => 
+                            (ev.type === 'form_submitted' || ev.type === 47) && ev.content && 
+                            (ev.content.form_id === fid || ev.content.id === fid || ev.content.form_id === formCopy.id || ev.content.id === formCopy.id)
+                        );
+                        if (submissionEvent) {
+                            formCopy.submitted = true;
+                            formCopy.answers = submissionEvent.content.answers;
+                        }
+                        parts.push({
+                            type: 'form_ready',
+                            form: formCopy,
+                            id: fid,
+                            raw: ''
+                        });
+                        renderedFormIds.add(fid);
+                        if (fObj.id) renderedFormIds.add(fObj.id);
+                        if (fObj.form_id) renderedFormIds.add(fObj.form_id);
+                        if (fObj.title) renderedFormIds.add(fObj.title);
+                    }
+                }
+            }
+        });
+    }
 
     return parts;
 });
@@ -1950,7 +2104,7 @@ function onMermaidReady({ svg }, partIndex) {
                <div v-if="part.form" class="my-4">
                   <InteractiveForm 
                       :form="part.form" 
-                      :discussion-id="currentDiscussionId"
+                      :discussion-id="effectiveDiscussionId"
                       :message-content="content"
                   />
                </div>
@@ -2030,7 +2184,7 @@ function onMermaidReady({ svg }, partIndex) {
                         :key="`${part.id}-${isStreaming ? 'live' : 'stable'}`"
                         :srcdoc="wrapInIsolatedShell(getWidgetContent(part.widget), part.id)" 
                         class="w-full border-none pointer-events-auto bg-white transition-[height] duration-300" 
-                        style="height: 400px;"
+                        style="height: 400px; display: block; margin-left: auto; margin-right: auto;"
                         sandbox="allow-scripts allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>

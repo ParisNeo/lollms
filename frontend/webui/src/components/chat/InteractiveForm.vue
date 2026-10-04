@@ -9,12 +9,13 @@ import IconAnimateSpin from '../../assets/icons/IconAnimateSpin.vue';
 
 const props = defineProps({
     form: { type: Object, required: true },
-    discussionId: { type: String, required: true },
+    discussionId: { type: String, default: '' },
     messageContent: { type: String, default: '' }
 });
 
 const uiStore = useUiStore();
 const discussionsStore = useDiscussionsStore();
+const activeDiscussionId = computed(() => props.discussionId || discussionsStore.currentDiscussionId || '');
 const answers = reactive({});
 const isSubmitting = ref(false);
 const isDone = ref(!!props.form?.submitted);
@@ -212,7 +213,11 @@ const resolvedFields = computed(() => {
         const normType = normalizeFieldType(f.type);
         const name = f.name || f.id || (f.label ? f.label.toLowerCase().replace(/[^a-z0-9_]+/g, '_') : `field_${idx}`);
         const label = f.label || (f.name ? f.name.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) : `Field ${idx + 1}`);
-        let opts = f.options;
+        let opts = f.options || f.choices || f.values;
+        if (typeof opts === 'string' && opts.trim()) {
+            const sep = opts.includes('\n') ? /\n/ : ',';
+            opts = opts.split(sep).map(o => o.trim()).filter(Boolean);
+        }
         if ((normType === 'select' || normType === 'radio') && (!opts || opts.length === 0)) {
             opts = getFallbackOptions(label, name);
         }
@@ -310,9 +315,12 @@ const initAnswers = () => {
         else if (fType === 'checkbox') answers[field.name] = false;
         else if (fType === 'number' || fType === 'range') answers[field.name] = Number(field.min) || 0;
         else if (fType === 'rating') answers[field.name] = 3;
-        else if (fType === 'radio' || fType === 'select') {
+        else if (fType === 'radio') {
             const opts = getOptions(field);
             answers[field.name] = opts.length > 0 ? opts[0].value : '';
+        }
+        else if (fType === 'select') {
+            answers[field.name] = '';
         }
         else answers[field.name] = '';
     });
@@ -330,36 +338,48 @@ watch(resolvedFields, () => {
     initAnswers();
 }, { deep: true });
 
-watch(() => props.form?.submitted, (newVal) => {
-    isDone.value = Boolean(newVal);
-});
+watch(() => [props.form?.submitted, props.form?.answers], ([sub, ans]) => {
+    if (sub !== undefined) {
+        isDone.value = Boolean(sub);
+    }
+    if (ans && typeof ans === 'object') {
+        Object.assign(answers, ans);
+    }
+}, { immediate: true, deep: true });
 
 async function submitForm() {
     if (isSubmitting.value || isDone.value) return;
     isSubmitting.value = true;
     try {
         const formId = props.form.id || props.form.form_id || props.form.form?.id || props.form.form?.form_id || 'form';
+        const targetDiscussionId = activeDiscussionId.value;
 
         // 1. Submit answers to backend endpoint
-        try {
-            await apiClient.post(`/api/discussions/${props.discussionId}/forms/${encodeURIComponent(formId)}/submit`, {
-                answers: { ...answers }
-            });
-        } catch (apiErr) {
-            console.warn("Backend form submission notice:", apiErr);
+        if (targetDiscussionId) {
+            try {
+                await apiClient.post(`/api/discussions/${targetDiscussionId}/forms/${encodeURIComponent(formId)}/submit`, {
+                    answers: { ...answers }
+                });
+            } catch (apiErr) {
+                console.warn("Backend form submission notice:", apiErr);
+            }
         }
 
         isDone.value = true;
         uiStore.addNotification("Response submitted successfully.", "success");
 
-        // 2. Build structured message prompt to send to chat
-        const titleText = formTitle.value;
+        // 2. Build structured answers using human-readable field labels
+        const fieldsMap = {};
+        resolvedFields.value.forEach(f => {
+            fieldsMap[f.name] = f.label || f.name;
+        });
+
         const answerEntries = Object.entries(answers);
         const formattedAnswers = answerEntries.length > 0
-            ? answerEntries.map(([k, v]) => `- **${k}**: ${v}`).join('\n')
+            ? answerEntries.map(([k, v]) => `* **${fieldsMap[k] || k}**: ${v}`).join('\n')
             : "No field values filled.";
 
-        const promptMessage = `[FORM_SUBMISSION: ${titleText}]\nUser provided the following data:\n${formattedAnswers}\n\nPlease proceed with your task using this input.`;
+        const promptMessage = `${formattedAnswers}\n\n*Form submitted successfully.*`;
 
         // 3. Send message so the AI processes the form submission in chat
         await discussionsStore.sendMessage({

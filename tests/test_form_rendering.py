@@ -76,6 +76,23 @@ Start Date — date"""
     assert fields[3]["name"] == "subscribe_to_newsletter"
     assert fields[4]["name"] == "start_date"
 
+def test_form_unquoted_attributes_and_options_extraction():
+    """Verify that unquoted attributes like min=1 max=100 required=true and comma-separated options are parsed."""
+    import re
+    raw_attrs = 'name=volume min=1 max=100 required=true options="Low,Medium,High"'
+    f_attrs = {}
+    for k, v1, v2, v3 in re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', raw_attrs):
+        f_attrs[k] = v1 if v1 != '' else (v2 if v2 != '' else v3)
+    
+    assert f_attrs["name"] == "volume"
+    assert f_attrs["min"] == "1"
+    assert f_attrs["max"] == "100"
+    assert f_attrs["required"] == "true"
+    assert f_attrs["options"] == "Low,Medium,High"
+    
+    parsed_opts = [o.strip() for o in f_attrs["options"].split(",") if o.strip()]
+    assert parsed_opts == ["Low", "Medium", "High"]
+
 def test_form_presence_in_message_output():
     """Verify that forms always stay present in message payload and metadata."""
     msg = MessageOutput(

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-04 22:37]
+
+- Update frontend asset bundle by removing deprecated/legacy UI components (e.g., AboutView, AddFriend) and consolidate router configurations.
+
 ## [2026-10-01 23:32]
 
 - refactor(llm,ui): improve LLM generation router import and update frontend message rendering and discussion processing logic

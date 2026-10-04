@@ -1822,6 +1822,8 @@ def build_llm_generation_router(router: APIRouter):
             preamble_parts.append(f"## User Personal Information:\n{owner_db_user.user_personal_info}")
 
         # Feature Specific Instructions
+        if getattr(owner_db_user, 'form_building_enabled', True):
+            preamble_parts.append("## Interactive Forms: When the user asks for a form, questionnaire, survey, or to collect structured input, create an interactive form using:\n<lollms_form title=\"Form Title\" description=\"Brief description\" submit_label=\"Submit\">\n    <field name=\"field_name\" label=\"Field Label\" type=\"text|textarea|number|range|select|radio|checkbox|rating|date|time|email\" required=\"true\" placeholder=\"...\" options=\"Option 1,Option 2\" />\n</lollms_form>")
         if owner_db_user.image_annotation_enabled: preamble_parts.append("## Image Annotation: Use <annotate>[JSON]</annotate> for bounding boxes/points.")
         if getattr(owner_db_user, 'note_generation_enabled', False): preamble_parts.append("## Notes: Use <note title=\"Title\">...</note> for structured data.")
         
@@ -2045,7 +2047,9 @@ def build_llm_generation_router(router: APIRouter):
                                     field_matches = re.finditer(r'<field\b([^>]*?)(?:>(.*?)<\/field>|\s*\/?>)', target_data, re.DOTALL | re.IGNORECASE)
                                     for fm in field_matches:
                                         raw_attrs = fm.group(1) or ''
-                                        f_attrs = dict(re.findall(r'(\w+)\s*=\s*["\']([^"\']*)["\']', raw_attrs))
+                                        f_attrs = {}
+                                        for k, v1, v2, v3 in re.findall(r'(\w+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', raw_attrs):
+                                            f_attrs[k] = v1 if v1 != '' else (v2 if v2 != '' else v3)
                                         inner_opts = re.findall(r'<option[^>]*>(.*?)<\/option>', fm.group(2) or '', re.DOTALL | re.IGNORECASE)
                                         if inner_opts:
                                             f_attrs['options'] = [o.strip() for o in inner_opts if o.strip()]

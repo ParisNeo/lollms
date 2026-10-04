@@ -120,6 +120,24 @@ def build_message_router(router: APIRouter):
         except Exception as e:
             trace_exception(e)
 
+        # Persist form submission status and answers into message metadata
+        try:
+            for msg in discussion_obj.get_all_messages_flat():
+                if msg.metadata and isinstance(msg.metadata, dict):
+                    msg_forms = msg.metadata.get('forms', [])
+                    if isinstance(msg_forms, list):
+                        updated = False
+                        for f in msg_forms:
+                            if isinstance(f, dict) and (f.get('id') == form_id or f.get('form_id') == form_id or f.get('title') == form_id):
+                                f['submitted'] = True
+                                f['answers'] = payload.answers
+                                updated = True
+                        if updated:
+                            msg.set_metadata_item('forms', msg_forms, discussion_obj)
+            discussion_obj.commit()
+        except Exception as e:
+            print(f"Warning: Could not update form submission in message metadata: {e}")
+
         try:
             from backend.ws_manager import manager
             manager.send_personal_message_sync({
