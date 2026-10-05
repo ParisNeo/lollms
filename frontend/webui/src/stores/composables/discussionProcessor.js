@@ -111,15 +111,26 @@ export function processSingleMessage(msg) {
     // Direct recovery from message content if forms array was not persisted in metadata or contains only empty fields
     const needsFormRecovery = forms.length === 0 || (forms.length === 1 && (!forms[0].fields || forms[0].fields.length === 0 || (forms[0].fields.length === 1 && forms[0].fields[0].name === 'response')));
     if (needsFormRecovery && typeof cleanContent === 'string') {
-        const lines = cleanContent.split('\n');
+        // Sanitize: strip non-form content regions so code (e.g. "transparent: true") cannot be misread
+        const sanitizedForRecovery = cleanContent
+            .replace(/<lollms_inline\b[\s\S]*?(?:<\/lollms_inline>|$)/gi, '\n')
+            .replace(/<lollms_form\b[\s\S]*?(?:<\/lollms_form>|$)/gi, '\n')
+            .replace(/<processing\b[\s\S]*?(?:<\/processing>|$)/gi, '\n')
+            .replace(/<lollms_widget\b[^>]*\/?>/gi, '\n')
+            .replace(/```[\s\S]*?```/g, '\n')
+            .replace(/`[^`\n]*`/g, ' ');
+        const LINE_SPEC_TYPE_PHRASE_RE = /^(text|textarea|number|select|multiselect|radio|checkbox|date|time|datetime|datetime-local|slider|range|rating|email|password|url|tel|color|file)(\s+(dropdown|input|field|buttons?|picker|control|box|area))?$/i;
+        const lines = sanitizedForRecovery.split('\n');
         const textFields = [];
         for (const line of lines) {
             const trimmed = line.trim();
             if (!trimmed || trimmed.startsWith('<') || trimmed.startsWith('#')) continue;
-            const match = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|-|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
+            const match = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|\s-\s|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
             if (match) {
                 const rawLabel = match[1].trim().replace(/^[*_]+|[*_]+$/g, '');
                 const rawType = match[2].trim();
+                // Strict full-phrase type whitelist — rejects hyphen-splits ("real-time as ...") and prose ("Random wandering").
+                if (!LINE_SPEC_TYPE_PHRASE_RE.test(rawType) || !rawLabel || rawLabel.length < 2) continue;
                 textFields.push({
                     name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, ''),
                     label: rawLabel,

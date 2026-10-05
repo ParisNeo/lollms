@@ -911,13 +911,15 @@ function _parse_form_xml(attrs_str, body) {
 
         // 3. Fallback for text-based form declarations (e.g. "Favorite Language — select dropdown")
         if (fields.length === 0 && trimmedBody) {
+            const LINE_SPEC_TYPE_PHRASE_RE = /^(text|textarea|number|select|multiselect|radio|checkbox|date|time|datetime|datetime-local|slider|range|rating|email|password|url|tel|color|file)(\s+(dropdown|input|field|buttons?|picker|control|box|area))?$/i;
             const lines = trimmedBody.split('\n').map(l => l.trim()).filter(Boolean);
             for (const line of lines) {
                 if (line.startsWith('<') && line.endsWith('>')) continue;
-                const sepMatch = line.match(/^[-*•]?\s*([A-Za-z0-9_\s]+?)\s*(?:—|–|-|:)\s*([A-Za-z0-9_\s\(\)]+)$/);
+                const sepMatch = line.match(/^[-*•]?\s*([A-Za-z0-9_\s]+?)\s*(?:—|–|\s-\s|:)\s*([A-Za-z0-9_\s\(\)]+)$/);
                 if (sepMatch) {
                     const rawLabel = sepMatch[1].trim();
                     const rawType = sepMatch[2].trim();
+                    if (!LINE_SPEC_TYPE_PHRASE_RE.test(rawType) || !rawLabel || rawLabel.length < 2) continue;
                     fields.push({
                         name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_'),
                         label: rawLabel,
@@ -1063,8 +1065,23 @@ const messageParts = computed(() => {
 
     segments.forEach(segment => {
         if (segment.type === 'think') {
-            const cleanedSegment = cleanThoughtContent(segment.content);
-            if (cleanedSegment || !segment.isClosed) {
+            // [FIX] Extract any <round .../> markers the model embedded mid-thought so they never render inside a "Thinking Process" card.
+            const ROUND_TAG_RE = /<round\b[^>]*\/?>(?:[\s\S]*?<\/round>)?/gi;
+            const roundInsertions = [];
+            let segmentWithoutRounds = segment.content.replace(ROUND_TAG_RE, (m) => {
+                const idMatch = m.match(/id\s*=\s*["']([^"']*)["']/i);
+                const innerMatch = m.match(/<round\b[^>]*>([\s\S]*?)<\/round>/i);
+                roundInsertions.push({
+                    roundId: idMatch ? idMatch[1] : '',
+                    content: innerMatch ? innerMatch[1].trim() : '',
+                    raw: m
+                });
+                return '\n';
+            });
+            const cleanedSegment = cleanThoughtContent(segmentWithoutRounds);
+            const isLoneTagOnly = cleanedSegment.length > 0 && /^<\/?[A-Za-z][\w:-]*\b[^>]*\/?>$/.test(cleanedSegment);
+            const hasRealThought = cleanedSegment.length > 0 && !isLoneTagOnly;
+            if (hasRealThought || (!segment.isClosed && roundInsertions.length === 0)) {
                 parts.push({
                     type: 'think',
                     content: cleanedSegment,
@@ -1072,6 +1089,15 @@ const messageParts = computed(() => {
                     id: `think-${parts.length}`
                 });
             }
+            roundInsertions.forEach(r => {
+                parts.push({
+                    type: 'round',
+                    roundId: r.roundId || '1',
+                    content: r.content,
+                    raw: r.raw,
+                    id: `round-${parts.length}-${r.roundId || 'x'}`
+                });
+            });
         } else {
             const segContent = segment.content;
             const patterns = [
@@ -1091,7 +1117,7 @@ const messageParts = computed(() => {
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_form_anchor\s+id=["']([^"']+)["']\s*\/?>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<lollms_working[^>]*\/>)/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<artefact_image\s+id=["']([^"']+)["']\s*\/?>)/gi },
-                { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b[^>]*>[\s\S]*?(?:<\/processing>(?:\s*<!--\s*status:[a-zA-Z0-9_-]+\s*-->)?|$))/gi },
+                { type: 'tool', regex: /(?:\n|^)[ \t]*(<processing\b[^>]*>[\s\S]*?(?:<\/processing>(?:\s*<!--\s*status:[a-zA-Z0-9_-]+\s*-->)?|(?=<round\b|<think>|<thought>|$)))/gi },
                 { type: 'tool', regex: /(<lollms_form\b([^>]*)>([\s\S]*?)(?:<\/lollms_form>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<owl>([\s\S]*?)(?:<\/owl>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<tool_call[^>]*>([\s\S]*?)(?:<\/tool_call>|$))/gi },
@@ -1166,15 +1192,27 @@ const messageParts = computed(() => {
                     const hasOnlyFallback = currentFields.length === 0 || (currentFields.length === 1 && currentFields[0].name === 'response');
 
                     if (parsedFormCandidate?.type === 'form_ready' && hasOnlyFallback) {
-                        const lines = text.split('\n');
+                        const sanitizedText = text
+                            .replace(/<lollms_inline\b[\s\S]*?(?:<\/lollms_inline>|$)/gi, '\n')
+                            .replace(/<lollms_form\b[\s\S]*?(?:<\/lollms_form>|$)/gi, '\n')
+                            .replace(/<processing\b[\s\S]*?(?:<\/processing>|$)/gi, '\n')
+                            .replace(/<lollms_widget\b[^>]*\/?>/gi, '\n')
+                            .replace(/```[\s\S]*?```/g, '\n')
+                            .replace(/`[^`\n]*`/g, ' ');
+                        const LINE_SPEC_TYPE_PHRASE_RE = /^(text|textarea|number|select|multiselect|radio|checkbox|date|time|datetime|datetime-local|slider|range|rating|email|password|url|tel|color|file)(\s+(dropdown|input|field|buttons?|picker|control|box|area))?$/i;
+                        const lines = sanitizedText.split('\n');
                         const extractedFields = [];
                         const keptLines = [];
                         for (const line of lines) {
                             const trimmed = line.trim();
-                            const sepMatch = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|-|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
+                            const sepMatch = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|\s-\s|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
                             if (sepMatch) {
                                 const rawLabel = sepMatch[1].trim().replace(/^[*_]+|[*_]+$/g, '');
                                 const rawType = sepMatch[2].trim();
+                                if (!LINE_SPEC_TYPE_PHRASE_RE.test(rawType) || !rawLabel || rawLabel.length < 2) {
+                                    keptLines.push(line);
+                                    continue;
+                                }
                                 extractedFields.push({
                                     name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, ''),
                                     label: rawLabel,
@@ -1307,6 +1345,26 @@ const messageParts = computed(() => {
                 if (f.title) renderedFormIds.add(f.title);
             }
         });
+    }
+
+    // Round divider visibility policy: hide the very first round divider unless multiple rounds exist.
+    // Also collapse multiple think-blocks and think-blocks whose content is only a lone self-closing tag (residual marker leakage).
+    for (let i = parts.length - 1; i >= 0; i--) {
+        const p = parts[i];
+        if (p && p.type === 'think') {
+            const c = String(p.content || '').trim();
+            const loneTag = c.length > 0 && /^<\/?[A-Za-z][\w:-]*\b[^>]*\/?>$/.test(c);
+            if (!c || loneTag) parts.splice(i, 1);
+        }
+    }
+    const roundIndices = [];
+    for (let i = 0; i < parts.length; i++) {
+        if (parts[i] && parts[i].type === 'round') roundIndices.push(i);
+    }
+    if (roundIndices.length <= 1) {
+        for (let k = roundIndices.length - 1; k >= 0; k--) {
+            parts.splice(roundIndices[k], 1);
+        }
     }
 
     if (props.events && props.events.length > 0) {

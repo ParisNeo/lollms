@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-05 09:31]
+
+- `cleanup: remove unused JS assets for admin user interface components -- includes removal of about view, account settings, add friend, admin create user modal, admin panel and related utility files from the frontend assets folder`
+
 ## [2026-10-04 22:37]
 
 - Update frontend asset bundle by removing deprecated/legacy UI components (e.g., AboutView, AddFriend) and consolidate router configurations.

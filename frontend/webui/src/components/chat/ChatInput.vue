@@ -818,9 +818,45 @@ async function toggleUserPref(key) {
     }
 }
 
+// ─── Capabilities Toggles (Misc / Feature Hub inside Generation Controls) ───
+const isCapabilitiesOpen = ref(false);
+
+const capabilityFlags = [
+    { key: 'form_building_enabled',      label: 'Interactive Forms',    emoji: '📋', description: 'Let the AI deploy interactive forms with fields, selects, sliders.' },
+    { key: 'inline_widgets_enabled',     label: 'Inline Widgets',       emoji: '🧩', description: 'Render live sandbox HTML mini-apps inline in the message stream.' },
+    { key: 'artefacts_enabled',          label: 'Workspace Artefacts',  emoji: '📦', description: 'Create versioned files, documents & code inside the discussion workspace.' },
+    { key: 'note_generation_enabled',    label: 'AI Notes',             emoji: '📝', description: 'The AI can emit structured <note> blocks saved to your library.' },
+    { key: 'skills_building_enabled',    label: 'Skill Building',       emoji: '✨', description: 'The AI captures useful patterns as reusable skills.' },
+    { key: 'skills_library_enabled',     label: 'Skill Auto-Search',    emoji: '🔎', description: 'Inject the most relevant saved skill automatically per turn.' },
+    { key: 'image_generation_enabled',   label: 'Image Generation',     emoji: '🎨', description: '<generate_image> tag renders via the active TTI binding.' },
+    { key: 'image_editing_enabled',      label: 'Image Editing',        emoji: '🖌️', description: 'Modify previously generated images via <edit_image>.' },
+    { key: 'slide_maker_enabled',        label: 'Slide Maker',          emoji: '📊', description: 'Generate slide decks from a topic or per-slide prompts.' },
+    { key: 'book_generation_enabled',    label: 'Book Building',        emoji: '📚', description: 'Assemble long-form documents / PDF books.' },
+    { key: 'memory_enabled',             label: 'Long-Term Memory',     emoji: '🐘', description: 'Deep recall and new memory recording on every turn.' },
+    { key: 'auto_memory_enabled',        label: 'Auto-Dream Cycle',     emoji: '💤', description: 'Auto-consolidate, reinforce & decay memories in background.' },
+    { key: 'scheduler_enabled',          label: 'Task Scheduler',       emoji: '⏰', description: 'Schedule recurring prompts using cron syntax.' },
+    { key: 'street_view_enabled',        label: 'Street View',          emoji: '🗺️', description: 'Fetch Google Street View images for a location.' },
+    { key: 'herd_mode_enabled',          label: 'Herd Mode',            emoji: '🐺', description: 'Multiple AI agents debate & critique before answering (multi-agent).' },
+];
+
+function isCapabilityOn(cap) {
+    return Boolean(user.value?.[cap.key]);
+}
+
+function toggleCapability(cap) {
+    toggleUserPref(cap.key);
+}
+
 function navigateToContextSettings() {
     router.push('/settings?section=context');
 }
+
+// Prepared list for the AI Character Sheet modal with computed state
+const activeCapabilities = computed(() => capabilityFlags.filter(c => isCapabilityOn(c)));
+const capabilitiesForModal = computed(() => capabilityFlags.map(c => ({
+    ...c,
+    active: isCapabilityOn(c)
+})));
 
 function handleOpenCreateDatastoreModal() {
     uiStore.openModal('createDataStoreFromArtefacts', {
@@ -2172,6 +2208,86 @@ onUnmounted(() => {
                                         Deactivated. Discussion default (20 rounds) will apply.
                                     </p>
                                 </div>
+
+                                <!-- 4. Capabilities (Misc Feature Hub) -->
+                                <div class="space-y-2 border-t dark:border-gray-800 pt-3">
+                                    <button
+                                        type="button"
+                                        @click="isCapabilitiesOpen = !isCapabilitiesOpen"
+                                        class="w-full flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/60 -mx-2 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                    >
+                                        <div class="flex items-center gap-1.5">
+                                            <IconSparkles class="w-4 h-4 text-purple-500" />
+                                            <span class="text-xs font-bold">Capabilities</span>
+                                            <span class="px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold"
+                                                  :class="capabilityFlags.filter(isCapabilityOn).length > 0 ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'">
+                                                {{ capabilityFlags.filter(isCapabilityOn).length }}/{{ capabilityFlags.length }} on
+                                            </span>
+                                        </div>
+                                        <IconChevronRight class="w-3.5 h-3.5 text-gray-400 transition-transform duration-200" :class="{'rotate-90': isCapabilitiesOpen}" />
+                                    </button>
+
+                                    <Transition
+                                        enter-active-class="transition ease-out duration-150"
+                                        enter-from-class="opacity-0 -translate-y-1"
+                                        enter-to-class="opacity-100 translate-y-0"
+                                        leave-active-class="transition ease-in duration-100"
+                                        leave-from-class="opacity-100 translate-y-0"
+                                        leave-to-class="opacity-0 -translate-y-1"
+                                    >
+                                        <div v-if="isCapabilitiesOpen" class="space-y-1.5 max-h-[260px] overflow-y-auto custom-scrollbar -mx-1 px-1">
+                                            <div
+                                                v-for="cap in capabilityFlags"
+                                                :key="cap.key"
+                                                class="flex items-center justify-between gap-2 p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-purple-300 dark:hover:border-purple-700 hover:bg-purple-50/40 dark:hover:bg-purple-950/20 transition-colors group/cap"
+                                                :title="cap.description"
+                                            >
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <span class="text-sm shrink-0">{{ cap.emoji }}</span>
+                                                    <span class="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">{{ cap.label }}</span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    @click="toggleCapability(cap)"
+                                                    :class="[isCapabilityOn(cap) ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
+                                                    :title="isCapabilityOn(cap) ? `Disable ${cap.label}` : `Enable ${cap.label}`"
+                                                >
+                                                    <span :class="[isCapabilityOn(cap) ? 'translate-x-3.5' : 'translate-x-0', 'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 my-[1px]']"></span>
+                                                </button>
+                                            </div>
+
+                                            <!-- Internet Search gets a dedicated row linked to existing flow -->
+                                            <div
+                                                class="flex items-center justify-between gap-2 p-2 rounded-xl border border-blue-100 dark:border-blue-900/50 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors"
+                                                :title="'Live web search via Google/DDG/Wiki. Configure API keys under Settings > User Context.'"
+                                            >
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <span class="text-sm shrink-0">🛰️</span>
+                                                    <span class="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">Internet Search <span class="opacity-60 font-mono">({{ currentProviderName }})</span></span>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    @click="toggleWebSearch()"
+                                                    :class="[isWebSearchActive ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
+                                                    :title="isWebSearchActive ? 'Disable Internet Search' : 'Enable Internet Search'"
+                                                >
+                                                    <span :class="[isWebSearchActive ? 'translate-x-3.5' : 'translate-x-0', 'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 my-[1px]']"></span>
+                                                </button>
+                                            </div>
+
+                                            <div class="pt-1 border-t dark:border-gray-800 mt-2">
+                                                <button 
+                                                    type="button" 
+                                                    @click="navigateToContextSettings(); isTuningOpen = false;"
+                                                    class="w-full text-center text-[10px] font-bold text-gray-400 hover:text-purple-500 hover:underline transition-colors cursor-pointer py-1"
+                                                    title="Open full User Context settings for advanced configuration (API keys, Herd pools, providers, etc.)"
+                                                >
+                                                    ⚙️ Advanced configuration → User Context Settings
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </Transition>
+                                </div>
                             </div>
                         </Transition>
                     </div>
@@ -2297,6 +2413,45 @@ onUnmounted(() => {
                                 <p class="text-[9px] text-gray-400 leading-tight">Agentic loop budget.</p>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- AI Capabilities (Misc Feature Hub) -->
+                    <div class="space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">⚡ AI Capabilities ({{ activeCapabilities.length }}/{{ capabilityFlags.length }})</span>
+                            <button 
+                                type="button"
+                                @click="isLoadoutModalOpen = false; navigateToContextSettings();"
+                                class="text-[9px] font-black uppercase text-purple-500 hover:text-purple-700 hover:underline cursor-pointer"
+                                title="Open full User Context settings"
+                            >
+                                Manage →
+                            </button>
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5">
+                            <div
+                                v-for="cap in capabilitiesForModal"
+                                :key="`modal-cap-${cap.key}`"
+                                @click="toggleCapability(cap)"
+                                class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border transition-all cursor-pointer group/modalcap select-none"
+                                :class="cap.active 
+                                    ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 dark:border-purple-700 shadow-2xs' 
+                                    : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 opacity-60 hover:opacity-100'"
+                                :title="cap.description"
+                            >
+                                <div class="flex items-center gap-1.5 min-w-0">
+                                    <span class="text-sm shrink-0">{{ cap.emoji }}</span>
+                                    <span class="text-[10px] font-bold truncate" :class="cap.active ? 'text-purple-900 dark:text-purple-200' : 'text-gray-600 dark:text-gray-400'">{{ cap.label }}</span>
+                                </div>
+                                <span 
+                                    class="w-1.5 h-1.5 rounded-full shrink-0 transition-colors" 
+                                    :class="cap.active ? 'bg-purple-500 animate-pulse' : 'bg-gray-300 dark:bg-gray-600'"
+                                ></span>
+                            </div>
+                        </div>
+                        <p class="text-[9px] text-gray-400 italic px-1">
+                            Toggle structural capabilities — forms, widgets, artefacts, memory, image gen & more. Internet Search & Herd Mode have dedicated controls elsewhere.
+                        </p>
                     </div>
 
                     <!-- Active Buffs & Equipped Inventory -->

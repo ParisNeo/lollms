@@ -74,6 +74,21 @@ watch([isSidebarOpen, isSidebarPinned], ([isOpen, isPinned]) => {
     }
 });
 
+const STUDIO_ROUTES = [
+    '/notes-studio', '/skills-studio', '/artefacts-studio', 
+    '/personality-studio', '/flow-studio', '/voices-studio', 
+    '/music-studio', '/image-studio', '/notebooks', '/notebook-studio',
+    '/datastores'
+];
+
+watch(() => route.path, (newPath) => {
+    const isStudio = STUDIO_ROUTES.some(prefix => newPath.startsWith(prefix));
+    if (isStudio && !isSidebarOpen.value) {
+        uiStore.openSidebar();
+        resetActivityTimer();
+    }
+});
+
 onMounted(() => {
     const sidebarElement = sidebarRef.value;
     if (sidebarElement) {

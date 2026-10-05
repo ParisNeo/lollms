@@ -57,17 +57,29 @@ function getFallbackOptions(label, name) {
     return ['Option 1', 'Option 2', 'Option 3'];
 }
 
+const LINE_SPEC_TYPE_PHRASE_RE = /^(text|textarea|number|select|multiselect|radio|checkbox|date|time|datetime|datetime-local|slider|range|rating|email|password|url|tel|color|file)(\s+(dropdown|input|field|buttons?|picker|control|box|area))?$/i;
+const isValidLineSpecType = (rawType) => LINE_SPEC_TYPE_PHRASE_RE.test(String(rawType || '').trim());
+const sanitizeForLineSpec = (txt) => String(txt || '')
+    .replace(/<lollms_inline\b[\s\S]*?(?:<\/lollms_inline>|$)/gi, '\n')
+    .replace(/<lollms_form\b[\s\S]*?(?:<\/lollms_form>|$)/gi, '\n')
+    .replace(/<processing\b[\s\S]*?(?:<\/processing>|$)/gi, '\n')
+    .replace(/<lollms_widget\b[^>]*\/?>/gi, '\n')
+    .replace(/```[\s\S]*?```/g, '\n')
+    .replace(/`[^`\n]*`/g, ' ');
+
 function parseTextLinesForFields(rawText) {
     if (!rawText || typeof rawText !== 'string') return [];
-    const lines = rawText.split('\n');
+    const sanitized = sanitizeForLineSpec(rawText);
+    const lines = sanitized.split('\n');
     const fields = [];
     for (const line of lines) {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('<') || trimmed.startsWith('#')) continue;
-        const match = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|-|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
+        const match = trimmed.match(/^(?:[-*•]|\d+\.)?\s*([A-Za-z0-9_][A-Za-z0-9_\s]*?)\s*(?:—|–|\s-\s|:|\|)\s*([A-Za-z0-9_\s\(\)\/]+?)$/i);
         if (match) {
             const rawLabel = match[1].trim().replace(/^[*_]+|[*_]+$/g, '');
             const rawType = match[2].trim();
+            if (!isValidLineSpecType(rawType) || !rawLabel || rawLabel.length < 2) continue;
             const normType = normalizeFieldType(rawType);
             const name = rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, '');
             fields.push({
@@ -174,14 +186,16 @@ const resolvedFields = computed(() => {
 
             // 5. Line-based field specification fallback (e.g. "Favorite Language — select dropdown")
             if ((!rawFields || rawFields.length === 0) && rawXml) {
-                const lines = rawXml.split('\n').map(l => l.trim()).filter(Boolean);
+                const sanitizedXml = sanitizeForLineSpec(rawXml);
+                const lines = sanitizedXml.split('\n').map(l => l.trim()).filter(Boolean);
                 const textFields = [];
                 for (const line of lines) {
                     if (line.startsWith('<') && line.endsWith('>')) continue;
-                    const sepMatch = line.match(/^[-*•]?\s*([A-Za-z0-9_\s]+?)\s*(?:—|–|-|:)\s*([A-Za-z0-9_\s\(\)]+)$/);
+                    const sepMatch = line.match(/^[-*•]?\s*([A-Za-z0-9_\s]+?)\s*(?:—|–|\s-\s|:)\s*([A-Za-z0-9_\s\(\)]+)$/);
                     if (sepMatch) {
                         const rawLabel = sepMatch[1].trim();
                         const rawType = sepMatch[2].trim();
+                        if (!isValidLineSpecType(rawType) || !rawLabel || rawLabel.length < 2) continue;
                         const normType = normalizeFieldType(rawType);
                         textFields.push({
                             name: rawLabel.toLowerCase().replace(/[^a-z0-9_]+/g, '_'),
