@@ -25,6 +25,7 @@ argon2-cffi==25.1.0
 python-jose[cryptography]==3.5.0
 Authlib==1.6.12
 bleach==6.4.0
+python-dotenv==1.2.4
 
 # --- LoLLMs Ecosystem & Client Library ---
 lollms-client==1.20.10
