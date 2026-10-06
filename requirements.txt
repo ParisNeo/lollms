@@ -45,7 +45,7 @@ safe_store==3.7.3
 wcwidth==0.2.14
 
 # --- Document Parsing, Ingestion & Office Formats ---
-pypdf==6.16.1
+pypdf==6.19.0
 PyMuPDF==1.28.0
 python-docx==1.2.0
 docx2python==3.5.0
