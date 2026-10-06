@@ -1,0 +1,26 @@
+/* Sunset Warmth Vibe */
+.vibe-sunset {
+  --brand-primary: #f97316;
+  --brand-primary-hover: #ea580c;
+  --brand-accent: #f59e0b;
+  --brand-bg-app: #fff7ed;
+  --brand-bg-app-hover: #ffedd5;
+  --brand-bg-card: #ffffff;
+  --brand-border-main: #fed7aa;
+  --border-muted: #ffedd5;
+  --brand-text-main: #7c2d12;
+  --brand-text-dim: #c2410c;
+}
+
+.dark.vibe-sunset {
+  --brand-primary: #fb923c;
+  --brand-primary-hover: #f97316;
+  --brand-accent: #fbbf24;
+  --brand-bg-app: #1c1917;
+  --brand-bg-app-hover: #44403c;
+  --brand-bg-card: #292524;
+  --brand-border-main: #44403c;
+  --brand-border-muted: #57534e;
+  --brand-text-main: #fafaf9;
+  --brand-text-dim: #fdba74;
+}

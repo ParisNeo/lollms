@@ -1,0 +1,51 @@
+/* Lavender Fields - Elegant Purple */
+
+:root, .vibe-lavender {
+  --brand-primary: #8b5cf6;
+  --brand-primary-hover: #7c3aed;
+  --brand-accent: #c084fc;
+  
+  --brand-bg-app: #faf5ff;
+  --brand-bg-app-hover: #f3e8ff;
+  --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #faf5ff;
+  --brand-bg-hover: #e9d5ff;
+  
+  --brand-border-main: #e9d5ff;
+  --brand-border-muted: #f3e8ff;
+  --brand-border-strong: #d8b4fe;
+  
+  --brand-text-main: #581c87;
+  --brand-text-dim: #9333ea;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #e9d5ff;
+}
+
+.dark.vibe-lavender {
+  --brand-primary: #a78bfa;
+  --brand-primary-hover: #8b5cf6;
+  --brand-accent: #d8b4fe;
+  
+  --brand-bg-app: #1e1b4b;
+  --brand-bg-app-hover: #2e1065;
+  --brand-bg-card: #2e1065;
+  --brand-bg-elevated: #4c1d95;
+  --brand-bg-overlay: rgba(46, 16, 101, 0.95);
+  --brand-bg-sidebar: #1e1b4b;
+  --brand-bg-hover: #4c1d95;
+  
+  --brand-border-main: #4c1d95;
+  --brand-border-muted: #5b21b6;
+  --brand-border-strong: #7c3aed;
+  
+  --brand-text-main: #f3e8ff;
+  --brand-text-dim: #d8b4fe;
+  --brand-text-on-primary: #1e1b4b;
+  
+  --brand-input-bg: #2e1065;
+  --brand-input-border: #5b21b6;
+}

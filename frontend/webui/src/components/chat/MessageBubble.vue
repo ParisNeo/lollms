@@ -746,10 +746,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     <div v-if="isSystem" class="w-full flex justify-center my-2" :data-message-id="message.id">
         <div class="system-bubble" v-html="parsedMarkdown(message.content)"></div>
     </div>
-    <div v-else class="message-row group" :class="{
-        'bg-white dark:bg-gray-900/40': isAi || isOtherUser,
-        'border-t border-gray-200 dark:border-gray-800/50': isAi || isOtherUser
-    }">
+    <div v-else class="message-row group" :class="{ 'is-ai': isAi || isOtherUser }" style="background-color: var(--brand-bg-card); border-top: 1px solid var(--brand-border-muted);">
         <div class="message-content-container">
             <!-- Avatar -->
             <div class="shrink-0 pt-1">
@@ -760,7 +757,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
             <div class="flex-1 min-w-0">
                 <div class="mb-4 flex items-center justify-between">
                     <div class="flex items-center flex-wrap gap-x-3 gap-y-1">
-                        <span class="font-bold text-sm text-gray-900 dark:text-gray-100">{{ senderName }}</span>
+                        <span class="font-bold text-sm text-primary">{{ senderName }}</span>
                         
                         <!-- Editorial Metadata Breadcrumbs -->
                         <div v-if="isAi && message.model_name" class="flex items-center gap-2">
@@ -778,8 +775,8 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
 
                     <!-- Editorial Branch Navigation (Top Right) -->
                     <div v-if="branchInfo" class="flex items-center gap-2">
-                        <span class="text-[9px] font-black uppercase tracking-widest text-gray-400">{{ branchInfo.current }} / {{ branchInfo.total }} versions</span>
-                        <div class="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+                        <span class="text-[9px] font-black uppercase tracking-widest text-secondary">{{ branchInfo.current }} / {{ branchInfo.total }} versions</span>
+                        <div class="flex items-center surface-1 rounded-lg p-0.5">
                             <button @click="navigateBranch(-1)" class="p-1 hover:text-blue-500 transition-colors"><IconChevronRight class="w-3 h-3 rotate-180" /></button>
                             <button @click="navigateBranch(1)" class="p-1 hover:text-blue-500 transition-colors"><IconChevronRight class="w-3 h-3" /></button>
                         </div>
@@ -824,14 +821,14 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                 enter-from-class="max-h-0 opacity-0 -translate-y-2"
                                 enter-to-class="max-h-[800px] opacity-100 translate-y-0"
                             >
-                                <div v-if="!isEventsCollapsed" class="ml-1.5 pl-4 border-l border-gray-100 dark:border-gray-800 space-y-6">
+                                <div v-if="!isEventsCollapsed" class="ml-1.5 pl-4 border-l border-secondary space-y-6">
                                     <div v-for="(event, idx) in uniqueEvents" :key="idx" class="relative group/step">
                                         <!-- Timeline Dot -->
-                                        <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full border-2 bg-white dark:bg-gray-900 transition-colors"
-                                             :class="idx === uniqueEvents.length - 1 && message.isStreaming ? 'border-blue-500 animate-pulse' : 'border-gray-200 dark:border-gray-700'"></div>
+                                        <div class="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full border-2 surface-1 transition-colors"
+                                             :class="idx === uniqueEvents.length - 1 && message.isStreaming ? 'border-accent animate-pulse' : 'border-primary'"></div>
                                         
                                         <div class="flex flex-col gap-1">
-                                            <span class="text-[10px] font-black uppercase tracking-widest text-gray-400 opacity-60">{{ event.type.replace('_', ' ') }}</span>
+                                            <span class="text-[10px] font-black uppercase tracking-widest text-secondary opacity-60">{{ event.type.replace('_', ' ') }}</span>
                                             
                                             <!-- Complex Content: Collapsible Renderer -->
                                             <div v-if="isComplexContent(event)" class="mt-1">
@@ -840,7 +837,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                                         <IconChevronRight class="w-2.5 h-2.5 transition-transform group-open/event-detail:rotate-90" />
                                                         <span>show details</span>
                                                     </summary>
-                                                    <div class="mt-3 p-4 bg-gray-50/50 dark:bg-gray-800/30 rounded-xl border border-gray-100 dark:border-gray-800 shadow-inner overflow-hidden">
+                                                    <div class="mt-3 p-4 card shadow-inner overflow-hidden">
                                                         <MessageContentRenderer 
                                                             :content="formatTimelineContent(event.content)" 
                                                             class="!text-[11px]"
@@ -851,12 +848,12 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
 
                                             <!-- Simple Content: Inline -->
                                             <div v-else class="max-w-3xl">
-                                                <p class="text-[11px] text-gray-600 dark:text-gray-400 leading-relaxed font-mono italic">{{ event.content }}</p>
+                                                <p class="text-[11px] text-secondary leading-relaxed font-mono italic">{{ event.content }}</p>
                                             </div>
                                         </div>
                                     </div>
                                     
-                                    <div v-if="message.isStreaming" class="flex items-center gap-2 text-[10px] text-blue-500/60 font-mono italic animate-pulse">
+                                    <div v-if="message.isStreaming" class="flex items-center gap-2 text-[10px] text-accent/60 font-mono italic animate-pulse">
                                         <span class="h-1.5 w-1.5 rounded-full bg-current"></span>
                                         Synchronizing next milestone...
                                     </div>
@@ -871,7 +868,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             <!-- Iterate over Groups -->
                             <div v-for="group in imageGroups" :key="group.id" class="image-group-container">
                                 <!-- Group Header (for generated series or uploaded packs) -->
-                                <div class="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-1 flex justify-between">
+                                <div class="text-xs font-semibold text-secondary mb-1 flex justify-between">
                                     <span class="truncate" :title="group.title">{{ group.title }}</span>
                                     <span class="text-[10px] bg-gray-200 dark:bg-gray-700 px-1.5 rounded">{{ group.images.length }} version(s)</span>
                                 </div>
@@ -998,9 +995,9 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                  <!-- TTS Player (Background Task Driven) -->
                  <div v-if="isAi && isTtsActive" class="mt-4 animate-in fade-in slide-in-from-top-1">
                     <!-- Task Running State -->
-                    <div v-if="message.isGeneratingAudio && !message.metadata?.audio_url" class="flex items-center gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100/50 dark:border-blue-800/30">
-                        <IconAnimateSpin class="w-4 h-4 text-blue-500 animate-spin" />
-                        <span class="text-xs font-bold text-gray-500 dark:text-gray-400">Synthesizing Voice...</span>
+                    <div v-if="message.isGeneratingAudio && !message.metadata?.audio_url" class="flex items-center gap-3 p-3 card">
+                        <IconAnimateSpin class="w-4 h-4 text-accent animate-spin" />
+                        <span class="text-xs font-bold text-secondary">Synthesizing Voice...</span>
                     </div>
 
                     <!-- Completed State: Player -->
@@ -1022,7 +1019,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                 </div>
 
                 <!-- Unified Editorial Sources Grid -->
-                <div v-if="hasSources" class="mt-8 border-t border-gray-100 dark:border-gray-800/50 pt-8 animate-in fade-in slide-in-from-bottom-2">
+                <div v-if="hasSources" class="mt-8 border-t border-primary pt-8 animate-in fade-in slide-in-from-bottom-2">
                     <div class="flex items-center justify-between mb-6">
                         <button @click="isSourcesVisible = !isSourcesVisible" class="utility-link">
                             <IconGather class="w-4 h-4" />
@@ -1040,36 +1037,36 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                                 class="flex flex-col gap-2 group/source transition-all duration-300 rounded-2xl">
 
                             <div @click="showSourceDetails(source)" 
-                                    class="p-4 bg-gray-50/50 dark:bg-gray-900/40 rounded-2xl border border-gray-100 dark:border-gray-700 hover:border-blue-500/30 cursor-pointer shadow-sm hover:shadow-md transition-all relative overflow-hidden">
+                                    class="p-4 card cursor-pointer transition-all relative overflow-hidden">
 
                                 <div class="flex items-start justify-between gap-3 mb-2 relative z-10">
                                     <div class="flex items-center gap-2.5 min-w-0">
                                         <!-- Favicon for Web / Index for RAG -->
-                                        <img v-if="isUrl(source.source)" :src="getFavicon(source.source)" class="w-6 h-6 rounded-lg bg-white p-0.5 shadow-sm shrink-0 border dark:border-gray-600" alt="" />
-                                        <div v-else class="shrink-0 w-6 h-6 flex items-center justify-center bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg text-[10px] font-black">
+                                        <img v-if="isUrl(source.source)" :src="getFavicon(source.source)" class="w-6 h-6 rounded-lg surface-0 p-0.5 shadow-sm shrink-0 border border-primary" alt="" />
+                                        <div v-else class="shrink-0 w-6 h-6 flex items-center justify-center surface-2 text-accent rounded-lg text-[10px] font-black">
                                             {{ source.index || index + 1 }}
                                         </div>
 
-                                        <span class="font-bold text-sm truncate text-gray-800 dark:text-gray-100 group-hover/source:text-blue-600 transition-colors">{{ source.title || 'Untitled Source' }}</span>
+                                        <span class="font-bold text-sm truncate text-primary group-hover/source:text-accent transition-colors">{{ source.title || 'Untitled Source' }}</span>
                                     </div>
 
-                                    <div v-if="source.score" class="shrink-0 text-[9px] font-mono font-bold text-emerald-500 bg-emerald-50 dark:bg-emerald-900/20 px-1.5 py-0.5 rounded-full border border-emerald-100 dark:border-emerald-800/50">
+                                    <div v-if="source.score" class="shrink-0 chip-success">
                                         {{ Math.round(source.score > 1 ? source.score : source.score * 100) }}%
                                     </div>
                                 </div>
 
                                 <!-- Hint / Snippet Preview -->
-                                <p v-if="source.content" class="mt-2 text-[11px] text-gray-500 dark:text-gray-400 line-clamp-2 leading-relaxed italic relative z-10">
+                                <p v-if="source.content" class="mt-2 text-[11px] text-secondary line-clamp-2 leading-relaxed italic relative z-10">
                                     "{{ source.content }}"
                                 </p>
 
                                 <div class="mt-3 flex items-center justify-between relative z-10">
-                                    <span class="text-[8px] font-mono text-gray-400 truncate max-w-[70%] opacity-60">{{ source.source }}</span>
+                                    <span class="text-[8px] font-mono text-secondary truncate max-w-[70%] opacity-60">{{ source.source }}</span>
                                     <div class="flex items-center gap-1">
-                                        <button v-if="isUrl(source.source)" @click.stop="togglePreview(index)" class="p-1 text-gray-400 hover:text-purple-500 transition-colors" title="Instant Preview">
+                                        <button v-if="isUrl(source.source)" @click.stop="togglePreview(index)" class="p-1 text-secondary hover:text-accent transition-colors" title="Instant Preview">
                                             <IconEye class="w-3.5 h-3.5" />
                                         </button>
-                                        <span class="text-[9px] font-black text-blue-500 uppercase tracking-widest opacity-0 group-hover/source:opacity-100 transform translate-x-2 group-hover/source:translate-x-0 transition-all">Details &rarr;</span>
+                                        <span class="text-[9px] font-black text-accent uppercase tracking-widest opacity-0 group-hover/source:opacity-100 transform translate-x-2 group-hover/source:translate-x-0 transition-all">Details &rarr;</span>
                                     </div>
                                 </div>
 
@@ -1148,35 +1145,33 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     </div>
 </template>
 <style scoped>
-@reference "tailwindcss";
-@reference "@/assets/css/main.css";
-
 .message-prose {
-    @apply prose prose-lg dark:prose-invert max-w-none break-words;
+    max-width: none;
+    overflow-wrap: break-word;
     font-family: Georgia, serif;
     font-size: var(--message-font-size, 1.2rem);
     line-height: 1.7;
 }
 
-
-
-
 .custom-scrollbar::-webkit-scrollbar { width: 4px; height: 4px; }
-.custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-200 dark:bg-gray-800 rounded-full; }
-.btn-icon-sm { @apply p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center; }
-.think-block { @apply bg-blue-50 dark:bg-gray-900/40 border border-blue-200 dark:border-blue-800/30 rounded-lg; }
-details[open] > .think-summary { @apply border-b border-blue-200 dark:border-blue-800/30; }
-details[open] > .think-summary .think-arrow { transform: rotate(90deg); }
-.think-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-blue-800 dark:text-blue-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
-.think-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
-.think-summary::-webkit-details-marker { display: none; }
-.think-content { @apply p-3; }
-.document-block { @apply bg-gray-50 dark:bg-gray-900/40 border border-gray-200 dark:border-gray-700/50 rounded-lg; }
-.document-summary { @apply flex items-center gap-2 p-2 text-sm font-semibold text-gray-800 dark:text-gray-200 cursor-pointer list-none select-none; -webkit-tap-highlight-color: transparent; }
-.document-summary:focus-visible { @apply ring-2 ring-blue-400 outline-none; }
-.document-summary::-webkit-details-marker { display: none; }
-details[open] > .document-summary { @apply border-b border-gray-200 dark:border-gray-700/50; }
-.document-content { @apply p-3; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background-color: #e5e7eb; border-radius: 9999px; }
+.dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: #1f2937; }
+.btn-icon-sm {
+    padding: 0.375rem;
+    border-radius: 0.5rem;
+    transition-property: background-color;
+    transition-duration: 150ms;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.btn-icon-sm:hover { background-color: #e5e7eb; }
+.dark .btn-icon-sm:hover { background-color: #374151; }
 .events-details-container summary::-webkit-details-marker { display: none; }
-.step-card { @apply shadow-sm transition-all hover:shadow-md; }
+.step-card {
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.1), 0 1px 2px rgb(0 0 0 / 0.06);
+    transition-property: box-shadow;
+    transition-duration: 150ms;
+}
+.step-card:hover { box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1); }
 </style>

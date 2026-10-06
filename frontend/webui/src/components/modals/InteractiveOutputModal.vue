@@ -193,8 +193,8 @@ function handleClose() {
                                 <!-- HTML / INTERACTIVE RENDERING -->
                                 <div v-else-if="isHtml(key, value)" 
                                      :class="[
-                                         'html-result-container w-full border dark:border-gray-700 rounded-lg overflow-hidden bg-white shadow-sm relative',
-                                         modalProps?.fullScreen ? 'flex-1 !h-full !rounded-none !border-none' : 'h-[600px]'
+                                         'html-result-container w-full overflow-hidden relative',
+                                         modalProps?.fullScreen ? 'flex-1 !h-full !rounded-none !border-none' : 'h-[600px] border dark:border-gray-700 rounded-lg shadow-sm bg-white'
                                      ]">
                                     <!-- Modal Spinner -->
                                     <div v-if="isIframeLoading" class="absolute inset-0 z-20 bg-white dark:bg-gray-900 flex flex-col items-center justify-center">
@@ -204,10 +204,11 @@ function handleClose() {
 
                                     <iframe 
                                         :srcdoc="value" 
-                                        class="w-full h-full" 
+                                        class="w-full h-full border-none" 
                                         @load="isIframeLoading = false"
                                         sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-modals" 
                                         referrerpolicy="no-referrer"
+                                        style="background: transparent;"
                                     ></iframe>
                                     <!-- Actions Overlay -->
                                     <div class="absolute top-2 right-2 flex gap-2 z-10" v-if="!modalProps?.fullScreen">

@@ -1,13 +1,45 @@
-/* Cyberpunk Vibe */
-.vibe-cyberpunk {
-  --brand-primary: #d946ef;
-  --brand-primary-hover: #c084fc;
-  --brand-accent: #06b6d4;
-  --brand-bg-app: #040209;
-  --brand-bg-app-hover: #170b24;
-  --brand-bg-card: #0a0614;
-  --brand-border-main: #2e1047;
-  --brand-border-muted: #4a1d6d;
-  --brand-text-main: #fae8ff;
-  --brand-text-dim: #22d3ee;
+/* Cyberpunk Vibe - Neon Dark Theme */
+:root, .vibe-cyberpunk {
+  --brand-primary: #00ff9d;
+  --brand-primary-hover: #00cc7d;
+  --brand-accent: #ff00a0;
+  
+  --brand-bg-app: #0a0e1a;
+  --brand-bg-app-hover: #12182b;
+  --brand-bg-card: #0f1425;
+  --brand-bg-elevated: #1a2038;
+  --brand-bg-overlay: rgba(15, 20, 37, 0.95);
+  --brand-bg-sidebar: #0a0e1a;
+  --brand-bg-hover: #1a2038;
+  --brand-input-bg: #1a2038;
+  --brand-input-border: #2a3a5a;
+  
+  --brand-border-main: #2a3a5a;
+  --brand-border-muted: #1a2038;
+  --brand-border-strong: #4a5a7a;
+  
+  --brand-text-main: #e0e7ff;
+  --brand-text-dim: #8a9ab8;
+  --brand-text-on-primary: #000000;
+}
+
+/* Ensure all semantic variables are derived from brand variables */
+:root, .vibe-cyberpunk {
+  --bg-app: var(--brand-bg-app);
+  --bg-card: var(--brand-bg-card);
+  --bg-elevated: var(--brand-bg-elevated);
+  --bg-overlay: var(--brand-bg-overlay);
+  --bg-sidebar: var(--brand-bg-sidebar);
+  --bg-hover: var(--brand-bg-hover);
+  --input-bg: var(--brand-input-bg);
+  --input-border: var(--brand-input-border);
+  --text-main: var(--brand-text-main);
+  --text-dim: var(--brand-text-dim);
+  --text-on-primary: var(--brand-text-on-primary);
+  --border-main: var(--brand-border-main);
+  --border-muted: var(--brand-border-muted);
+  --border-strong: var(--brand-border-strong);
+  --primary: var(--brand-primary);
+  --primary-hover: var(--brand-primary-hover);
+  --accent: var(--brand-accent);
 }

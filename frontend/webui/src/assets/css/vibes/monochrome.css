@@ -1,0 +1,51 @@
+/* Monochrome Minimal - Pure B&W */
+
+:root, .vibe-monochrome {
+  --brand-primary: #374151;
+  --brand-primary-hover: #111827;
+  --brand-accent: #6b7280;
+  
+  --brand-bg-app: #f9fafb;
+  --brand-bg-app-hover: #f3f4f6;
+  --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #f9fafb;
+  --brand-bg-hover: #e5e7eb;
+  
+  --brand-border-main: #d1d5db;
+  --brand-border-muted: #e5e7eb;
+  --brand-border-strong: #9ca3af;
+  
+  --brand-text-main: #111827;
+  --brand-text-dim: #6b7280;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #d1d5db;
+}
+
+.dark.vibe-monochrome {
+  --brand-primary: #f3f4f6;
+  --brand-primary-hover: #e5e7eb;
+  --brand-accent: #9ca3af;
+  
+  --brand-bg-app: #111827;
+  --brand-bg-app-hover: #1f2937;
+  --brand-bg-card: #1f2937;
+  --brand-bg-elevated: #374151;
+  --brand-bg-overlay: rgba(31, 41, 55, 0.95);
+  --brand-bg-sidebar: #0d1117;
+  --brand-bg-hover: #374151;
+  
+  --brand-border-main: #374151;
+  --brand-border-muted: #4b5563;
+  --brand-border-strong: #6b7280;
+  
+  --brand-text-main: #f9fafb;
+  --brand-text-dim: #d1d5db;
+  --brand-text-on-primary: #111827;
+  
+  --brand-input-bg: #1f2937;
+  --brand-input-border: #4b5563;
+}

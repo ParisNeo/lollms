@@ -1,0 +1,51 @@
+/* Ocean Breeze - Deep Blue & Cyan */
+
+:root, .vibe-ocean {
+  --brand-primary: #0ea5e9;
+  --brand-primary-hover: #0284c7;
+  --brand-accent: #22d3ee;
+  
+  --brand-bg-app: #f0f9ff;
+  --brand-bg-app-hover: #e0f2fe;
+  --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #e0f2fe;
+  --brand-bg-hover: #bae6fd;
+  
+  --brand-border-main: #bae6fd;
+  --brand-border-muted: #e0f2fe;
+  --brand-border-strong: #7dd3fc;
+  
+  --brand-text-main: #0c4a6e;
+  --brand-text-dim: #0369a1;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #bae6fd;
+}
+
+.dark.vibe-ocean {
+  --brand-primary: #38bdf8;
+  --brand-primary-hover: #0ea5e9;
+  --brand-accent: #67e8f9;
+  
+  --brand-bg-app: #0c1a26;
+  --brand-bg-app-hover: #0f2432;
+  --brand-bg-card: #0f2432;
+  --brand-bg-elevated: #164e63;
+  --brand-bg-overlay: rgba(15, 36, 50, 0.95);
+  --brand-bg-sidebar: #09141e;
+  --brand-bg-hover: #155e75;
+  
+  --brand-border-main: #155e75;
+  --brand-border-muted: #164e63;
+  --brand-border-strong: #0e7490;
+  
+  --brand-text-main: #e0f2fe;
+  --brand-text-dim: #67e8f9;
+  --brand-text-on-primary: #0c1a26;
+  
+  --brand-input-bg: #0f2432;
+  --brand-input-border: #155e75;
+}

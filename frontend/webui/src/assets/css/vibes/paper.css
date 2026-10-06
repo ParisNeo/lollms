@@ -1,0 +1,53 @@
+/* ==========================================================================
+   Paper Effect Layer
+   Warm tones, serif typography, lifted shadows, generous spacing.
+   ========================================================================== */
+
+[data-effect="paper"] {
+    --effect-radius-sm: 0.25rem;
+    --effect-radius-md: 0.375rem;
+    --effect-radius-lg: 0.5rem;
+    --effect-radius-xl: 0.75rem;
+
+    --effect-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
+    --effect-shadow-md: 0 4px 10px rgb(0 0 0 / 0.1), 0 1px 3px rgb(0 0 0 / 0.06);
+    --effect-shadow-lg: 0 8px 20px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.08);
+    --effect-shadow-xl: 0 16px 36px rgb(0 0 0 / 0.16), 0 4px 12px rgb(0 0 0 / 0.1);
+
+    --effect-font-body: 'Georgia', 'Cambria', 'Times New Roman', serif;
+    --effect-font-heading: 'Georgia', 'Cambria', serif;
+    --effect-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* Paper-specific overrides */
+[data-effect="paper"] {
+    --brand-bg-app: #fffbf5;
+    --brand-bg-card: #ffffff;
+}
+
+.dark[data-effect="paper"] {
+    --brand-bg-app: #1a1814;
+    --brand-bg-card: #252118;
+}
+
+[data-effect="paper"] .modal-title,
+[data-effect="paper"] .welcome-title,
+[data-effect="paper"] .processing-card-title {
+    font-family: var(--effect-font-heading);
+}
+
+[data-effect="paper"] .ai-bubble {
+    border-left: 3px solid var(--brand-primary);
+    border-radius: var(--effect-radius-md);
+    box-shadow: var(--effect-shadow-sm);
+}
+
+[data-effect="paper"] .user-bubble {
+    border-radius: var(--effect-radius-md);
+    border-left: 3px solid var(--brand-accent);
+}
+
+[data-effect="paper"] .code-block-container {
+    border-radius: var(--effect-radius-md);
+    border-top: 3px solid var(--brand-accent);
+}

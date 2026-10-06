@@ -1,0 +1,46 @@
+/* ==========================================================================
+   Glassmorphism Effect Layer
+   Translucent surfaces with blur, subtle glows, and floating shadows.
+   ========================================================================== */
+
+[data-effect="glass"] {
+    --effect-surface-opacity: 72%;
+    --effect-surface-blur: 12px;
+    --effect-radius-md: 1rem;
+    --effect-radius-lg: 1.5rem;
+
+    --effect-shadow-sm: 0 2px 8px -1px rgb(0 0 0 / 0.08), 0 1px 3px -1px rgb(0 0 0 / 0.04);
+    --effect-shadow-md: 0 8px 24px -4px rgb(0 0 0 / 0.12), 0 2px 8px -2px rgb(0 0 0 / 0.06);
+    --effect-shadow-lg: 0 16px 48px -8px rgb(0 0 0 / 0.18), 0 4px 16px -4px rgb(0 0 0 / 0.08);
+    --effect-shadow-xl: 0 24px 64px -12px rgb(0 0 0 / 0.22), 0 8px 24px -6px rgb(0 0 0 / 0.1);
+
+    --effect-border-width: 1px;
+    --effect-border-color: color-mix(in srgb, var(--brand-border-main) 50%, transparent);
+}
+
+.dark[data-effect="glass"] {
+    --effect-surface-opacity: 55%;
+    --effect-surface-blur: 16px;
+    --effect-shadow-sm: 0 2px 8px -1px rgb(0 0 0 / 0.25), 0 1px 3px -1px rgb(0 0 0 / 0.15);
+    --effect-shadow-md: 0 8px 32px -4px rgb(0 0 0 / 0.35), 0 2px 8px -2px rgb(0 0 0 / 0.2);
+    --effect-shadow-lg: 0 16px 56px -8px rgb(0 0 0 / 0.45), 0 4px 16px -4px rgb(0 0 0 / 0.3);
+    --effect-shadow-xl: 0 24px 80px -12px rgb(0 0 0 / 0.55), 0 8px 24px -6px rgb(0 0 0 / 0.35);
+}
+
+/* Glass-specific surface treatments */
+[data-effect="glass"] .modal-panel,
+[data-effect="glass"] .artefact-card,
+[data-effect="glass"] .memory-card,
+[data-effect="glass"] .task-item-card,
+[data-effect="glass"] .processing-card,
+[data-effect="glass"] .glass-card {
+    backdrop-filter: blur(var(--effect-surface-blur)) saturate(160%);
+    -webkit-backdrop-filter: blur(var(--effect-surface-blur)) saturate(160%);
+    box-shadow: var(--effect-shadow-lg), inset 0 1px 0 color-mix(in srgb, var(--brand-text-main) 4%, transparent);
+}
+
+[data-effect="glass"] .btn,
+[data-effect="glass"] .input-field {
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+}

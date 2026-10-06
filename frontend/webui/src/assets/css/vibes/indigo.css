@@ -1,26 +1,48 @@
 /* Lollms Indigo Vibe (Default) */
-:root {
+:root, .vibe-indigo {
   --brand-primary: #2563eb;
   --brand-primary-hover: #1d4ed8;
   --brand-accent: #6366f1;
+  
   --brand-bg-app: #f8fafc;
   --brand-bg-app-hover: #f1f5f9;
   --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #f8fafc;
+  --brand-bg-hover: #e2e8f0;
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #e2e8f0;
+  
   --brand-border-main: #e2e8f0;
   --brand-border-muted: #f1f5f9;
+  --brand-border-strong: #cbd5e1;
+  
   --brand-text-main: #0f172a;
   --brand-text-dim: #64748b;
+  --brand-text-on-primary: #ffffff;
 }
 
 .dark {
   --brand-primary: #3b82f6;
   --brand-primary-hover: #2563eb;
   --brand-accent: #818cf8;
+  
   --brand-bg-app: #090d16;
   --brand-bg-app-hover: #141b2d;
   --brand-bg-card: #111625;
+  --brand-bg-elevated: #1e293b;
+  --brand-bg-overlay: rgba(17, 22, 37, 0.95);
+  --brand-bg-sidebar: #090d16;
+  --brand-bg-hover: #1e293b;
+  --brand-input-bg: #1e293b;
+  --brand-input-border: #334155;
+  
   --brand-border-main: #1e2538;
   --brand-border-muted: #27314a;
+  --brand-border-strong: #475569;
+  
   --brand-text-main: #f8fafc;
   --brand-text-dim: #94a3b8;
+  --brand-text-on-primary: #ffffff;
 }

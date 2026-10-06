@@ -140,96 +140,172 @@ function getThoughtSneakPeek(content, isStreaming = false) {
     return text.length > 90 ? text.substring(0, 90) + '...' : text;
 }
 
+const resizeScript = `
+(function() {
+    try {
+        if (window.frameElement && window.frameElement.getAttribute) {
+            const partId = window.frameElement.getAttribute('data-part-id');
+            if (partId) {
+                const reportSize = () => {
+                    const height = Math.max(
+                        document.body.scrollHeight,
+                        document.documentElement.scrollHeight,
+                        document.body.offsetHeight,
+                        document.documentElement.offsetHeight
+                    );
+                    window.parent.postMessage({
+                        type: 'lollms-widget-resize',
+                        height: height,
+                        partId: partId
+                    }, window.location.origin);
+                };
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', reportSize);
+                } else {
+                    reportSize();
+                }
+                window.addEventListener('resize', reportSize);
+                window.addEventListener('load', reportSize);
+            }
+        }
+    } catch(e) {
+        console.error('Resize script failed:', e);
+    }
+})();`;
+
 function wrapInIsolatedShell(source, partId) {
     if (!source) return '';
-
-    const isDarkMode = uiStore.currentTheme === 'dark';
-    const trimmed = source.trim();
-
-    const resizeScript = `
-    <script>
-        const sendHeight = () => {
-            const height = document.documentElement.scrollHeight;
-            window.parent.postMessage({ 
-                type: 'lollms-widget-resize', 
-                height: height,
-                partId: '${partId}'
-            }, '*');
-        };
-        const observer = new ResizeObserver(sendHeight);
-        observer.observe(document.body);
-        window.addEventListener('load', sendHeight);
-        document.addEventListener('click', (e) => {
-            const link = e.target.closest('a');
-            if (link && link.href && !link.href.startsWith('javascript:')) {
-                e.preventDefault();
-                window.open(link.href, '_blank');
-            }
-        });
-    <\/script>`;
-
-    // If source is already a complete HTML document, inject resize script and contained boundary
-    if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || trimmed.toLowerCase().includes('<html')) {
-        const injectedStyles = `<style>
-            html, body {
-                margin: 0;
-                padding: 12px;
-                position: relative;
-                overflow-x: hidden;
-            }
-        </style>`;
-
-        if (source.includes('</head>')) {
-            source = source.replace('</head>', `${injectedStyles}</head>`);
+    
+    // 1. Collect theme vars from CURRENT document context
+    const rootDoc = document.documentElement;
+    const styles = getComputedStyle(rootDoc);
+    
+    // Define the map of variables we want to force onto the iframe
+    // We grab the current effective values from the browser
+    const themeVars = [
+        '--brand-primary', '--brand-primary-hover', '--brand-accent', 
+        '--brand-bg-app', '--brand-bg-card', '--brand-bg-elevated', 
+        '--brand-bg-overlay', '--brand-input-bg', '--brand-input-border',
+        '--brand-text-main', '--brand-text-dim', '--brand-text-on-primary',
+        '--brand-border-main', '--brand-border-muted', '--brand-border-strong',
+        '--effect-radius-sm', '--effect-radius-md', '--effect-radius-lg',
+        '--effect-shadow-sm', '--effect-shadow-md', '--effect-shadow-lg',
+        '--effect-font-body'
+    ].map(prop => {
+        let val = styles.getPropertyValue(prop).trim();
+        // Handle opacity/density cases if needed (fallback to color)
+        if (prop === '--effect-surface-opacity' && val.includes('%')) {
+             val = `rgba(0,0,0,${parseFloat(val)/100})`;
         }
-        if (source.includes('</body>')) {
-            return source.replace('</body>', `${resizeScript}</body>`);
-        }
-        return `${source}${resizeScript}`;
-    }
+        return val ? `${prop}: ${val};` : '';
+    }).join('\n        ');
 
-    return `
-<!DOCTYPE html>
-<html>
+    // Escape the closing script tag to prevent Vue template compilation errors
+    const escapedResizeScript = resizeScript.replace(/<\/script>/g, '<\\/script>');
+
+    // Build the shell HTML using template literals
+    // NOTE: We break up closing HTML tags to prevent Vue compiler from interpreting them
+    const closeStyle = '</style>';
+    const closeScript = '</script' + '>';
+    const closeHead = '</head' + '>';
+    const closeBody = '</body' + '>';
+    const closeHtml = '</html' + '>';
+    
+    const shellHtml = `<!DOCTYPE html>
+<html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>Widget Sandbox</title>
     <style>
-        html { 
-            margin: 0; 
-            padding: 16px; 
-            font-family: system-ui, -apple-system, sans-serif; 
-            overflow-x: hidden;
-            position: relative;
-            background: ${isDarkMode ? '#030712' : '#ffffff'};
-            color: ${isDarkMode ? '#f3f4f6' : '#111827'};
+        :root {
+            color-scheme: normal; /* Prevent default dark iframe styling */
+            ${themeVars}
         }
-        body {
+        
+        /* Strict Reset + Thematic Baseline */
+        html { font-size: 16px; height: 100%; }
+        body { 
+            font-family: var(--effect-font-body); 
+            background-color: transparent;
+            color: var(--brand-text-main);
             margin: 0;
             padding: 0;
+            width: 100%;
+            height: 100%;
+            -webkit-font-smoothing: antialiased;
+            
+            /* Default centering for widgets */
             display: flex;
             flex-direction: column;
             align-items: center;
-            width: 100%;
+            justify-content: center;
+            text-align: center;
+            box-sizing: border-box;
         }
-        #lollms-widget-root {
+        
+        /* Basic Typography */
+        h1, h2, h3, h4, h5, h6 { font-weight: 600; line-height: 1.2; }
+        p { margin: 0.75em 0; }
+        
+        /* Form Elements */
+        input, textarea, select {
+            font-family: inherit;
+            font-size: 0.9rem;
+            padding: 0.5rem 0.75rem;
+            border: 1px solid var(--brand-input-border);
+            background-color: var(--brand-input-bg);
+            color: var(--brand-text-main);
+            border-radius: var(--effect-radius-md);
+            outline: none;
+            transition: border-color 0.2s;
             width: 100%;
+            max-width: 300px;
+        }
+        input:focus, textarea:focus, select:focus {
+            border-color: var(--brand-primary);
+            box-shadow: var(--effect-shadow-sm);
+        }
+
+        /* Buttons */
+        button {
+            font-family: inherit;
+            font-size: 0.9rem;
+            font-weight: 600;
+            padding: 0.5rem 1rem;
+            background-color: var(--brand-primary);
+            color: var(--brand-text-on-primary);
+            border: none;
+            border-radius: var(--effect-radius-md);
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin: 0.25rem;
+        }
+        button:hover { background-color: var(--brand-primary-hover); }
+        
+        /* Widget Container */
+        .widget-container {
+            padding: 1.5rem;
+            background-color: var(--brand-bg-card);
+            border: 1px solid var(--brand-border-muted);
+            border-radius: var(--effect-radius-lg);
+            box-shadow: var(--effect-shadow-sm);
             max-width: 100%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
+            width: fit-content;
+            min-width: 300px;
+            text-align: left; /* Widgets often handle their own text alignment */
         }
-        #lollms-widget-root > * {
-            width: 100%;
-        }
-        * { box-sizing: border-box; }
-    </style>
-</head>
+    ${closeStyle}
+    <script>
+        ${escapedResizeScript}
+    ${closeScript}
+${closeHead}
 <body>
-    <div id="lollms-widget-root">${source}</div>
-    ${resizeScript}
-</body>
-</html>`;
+    ${source}
+${closeBody}
+${closeHtml}`;
+
+    return shellHtml;
 }
 
 function isHtmlDocument(token) {
@@ -1689,12 +1765,15 @@ function openWidgetFullscreen(widget) {
     const title = widget.title || 'Interactive Widget';
     const source = getWidgetContent(widget);
     
+    // Wrap the raw source in our themed, isolated shell before sending to the modal
+    const wrappedSource = wrapInIsolatedShell(source, widget.id || 'fullscreen');
+    
     uiStore.openModal('interactiveOutput', {
         title: title,
         fullScreen: true,
         results: {
             [title]: {
-                "html_output": source
+                "html_output": wrappedSource
             }
         }
     });
@@ -1774,7 +1853,7 @@ function onMermaidReady({ svg }, partIndex) {
       <template v-if="messageParts.length > 0">
         <template v-for="(part, index) in messageParts" :key="part.id">
           <!-- Mermaid diagram -->
-          <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm mermaid-wrapper">
+          <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border shadow-sm mermaid-wrapper card">
             <MermaidViewer 
               :mermaid-code="part.code" 
               :message-id="messageId"
@@ -1784,7 +1863,7 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- Book Artefact Rendering -->
           <div v-else-if="part.type === 'artefact' && part.meta?.type === 'book'" class="book-artefact-container my-6">
-              <div class="book-frame bg-white dark:bg-slate-50 text-slate-900 p-8 sm:p-12 shadow-2xl rounded-sm border-l-8 border-slate-300 dark:border-slate-400 mx-auto max-w-3xl overflow-hidden relative">
+              <div class="book-frame card p-8 sm:p-12 mx-auto max-w-3xl overflow-hidden relative" style="border-left-width: 4px;">
                   <div class="book-content prose prose-slate max-w-none" v-html="part.content"></div>
                   <div class="absolute bottom-4 right-8 text-[10px] font-serif italic text-slate-400">LoLLMs Digital Edition</div>
               </div>
@@ -1811,12 +1890,14 @@ function onMermaidReady({ svg }, partIndex) {
                       </button>
                   </summary>
                   <div class="document-content p-4 max-w-none">
-                    <div v-if="isHtmlDocument(token)" class="w-full rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 bg-white" style="contain: paint; isolation: isolate;">
-                        <iframe 
-                            :srcdoc="wrapInIsolatedShell(token.content, token.uid || 'doc')"
-                            class="w-full h-[500px] border-none"
-                            sandbox="allow-scripts allow-forms allow-modals"
-                        ></iframe>
+                    <div v-if="isHtmlDocument(token)" class="w-full flex justify-center mt-4">
+                        <div class="w-full max-w-[min(100%,800px)] rounded-xl overflow-hidden border border-border-muted dark:border-border-strong bg-white" style="contain: paint; isolation: isolate;">
+                            <iframe 
+                                :srcdoc="wrapInIsolatedShell(token.content, token.uid || 'doc')"
+                                class="w-full h-[500px] border-none"
+                                sandbox="allow-scripts allow-forms allow-modals"
+                            ></iframe>
+                        </div>
                     </div>
                     <CodeBlock 
                         v-else-if="getDocLanguage(token.title) !== 'plaintext' && getDocLanguage(token.title) !== 'markdown'" 
@@ -1837,8 +1918,8 @@ function onMermaidReady({ svg }, partIndex) {
           </template>
 
           <!-- YouTube Video / Playlist Embed -->
-          <div v-else-if="part.type === 'youtube_video'" class="my-6 rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-black shadow-xl max-w-2xl mx-auto group/yt">
-              <div class="px-4 py-2.5 bg-gray-900 border-b border-gray-800 flex items-center justify-between text-xs text-gray-300 select-none">
+          <div v-else-if="part.type === 'youtube_video'" class="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-black shadow-xl max-w-2xl mx-auto group/yt card">
+              <div class="px-4 py-2.5 surface-2 border-b flex items-center justify-between text-xs text-secondary select-none">
                   <div class="flex items-center gap-2 min-w-0">
                       <div class="p-1 rounded bg-red-600 text-white flex items-center justify-center shrink-0">
                           <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
@@ -1887,7 +1968,9 @@ function onMermaidReady({ svg }, partIndex) {
           <!-- Thinking block (Collapsed by default, with live sneak peek in header) -->
           <details 
             v-else-if="part.type === 'think'" 
-            class="think-block my-4 select-none" 
+            class="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full text-accent"
+            role="status"
+            aria-label="streaming"
             :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
           >
@@ -1921,23 +2004,23 @@ function onMermaidReady({ svg }, partIndex) {
           </details>
 
           <!-- Image tool block -->
-          <div v-else-if="part.type === 'image_tool'" class="my-4 p-4 rounded-xl border-2 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50 shadow-sm">
+          <div v-else-if="part.type === 'image_tool'" class="my-4 card p-4">
              <div class="flex items-center justify-between mb-4">
                  <div class="flex items-center gap-2">
-                     <div class="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400">
+                     <div class="p-2 rounded-lg surface-2 text-accent">
                          <IconPencil v-if="part.mode === 'edit'" class="w-5 h-5" />
                          <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-5 h-5" />
                          <IconMap v-else-if="part.mode === 'street_view'" class="w-5 h-5 text-amber-500" />
                          <IconPhoto v-else class="w-5 h-5" />
                      </div>
                      <div class="flex flex-col">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 leading-none mb-1">
+                        <span class="text-[10px] font-black uppercase tracking-widest text-secondary leading-none mb-1">
                             <template v-if="part.mode === 'edit'">Image Edit</template>
                             <template v-else-if="part.mode === 'slides'">Slide Deck</template>
                             <template v-else-if="part.mode === 'street_view'">Street View</template>
                             <template v-else>Image Generation</template>
                         </span>
-                        <span class="text-sm font-bold text-gray-800 dark:text-gray-200">AI Request Block</span>
+                        <span class="text-sm font-bold text-primary">AI Request Block</span>
                      </div>
                  </div>
                  <div class="flex items-center gap-1">
@@ -1966,16 +2049,16 @@ function onMermaidReady({ svg }, partIndex) {
                 <p class="text-[10px] text-gray-500 italic">This will generate a new variant using the updated prompt.</p>
              </div>
              <div v-else class="relative group/prompt">
-                 <div v-if="part.mode === 'street_view'" class="text-sm font-medium text-gray-800 dark:text-gray-200">
+                 <div v-if="part.mode === 'street_view'" class="text-sm font-medium text-primary">
                     Fetching view for: <span class="font-bold">{{ part.prompt }}</span>
                  </div>
                  <template v-else>
-                    <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-purple-200 dark:border-purple-800">
-                        <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-gray-600 dark:text-gray-300 mb-1">
+                    <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-accent">
+                        <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-secondary mb-1">
                             <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
                         </div>
                     </div>
-                    <div v-else class="text-sm font-medium text-gray-800 dark:text-gray-200 italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all">
+                    <div v-else class="text-sm font-medium text-primary italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all">
                         "{{ part.prompt }}"
                     </div>
                  </template>
@@ -1983,15 +2066,15 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- Scheduler block -->
-          <div v-else-if="part.type === 'scheduler'" class="my-4 p-4 rounded-xl border-2 border-indigo-200 dark:border-indigo-800 bg-indigo-50/50 dark:bg-indigo-900/20 shadow-sm">
+          <div v-else-if="part.type === 'scheduler'" class="my-4 p-4 rounded-xl border-2 dark:border-indigo-800 bg-surface-2 backdrop-blur-sm shadow-sm">
              <div class="flex items-center gap-3">
-                 <div class="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400">
+                 <div class="p-2 rounded-lg surface-2 text-accent">
                      <IconClock class="w-6 h-6" />
                  </div>
                  <div class="flex flex-col">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-300 leading-none mb-1">Scheduled Task</span>
-                    <span class="text-sm font-bold text-gray-800 dark:text-gray-200">{{ part.name }}</span>
-                    <span class="text-xs text-gray-600 dark:text-gray-400 italic mt-1">"{{ part.prompt }}"</span>
+                    <span class="text-[10px] font-black uppercase tracking-widest text-secondary leading-none mb-1">Scheduled Task</span>
+                    <span class="text-sm font-bold text-primary">{{ part.name }}</span>
+                    <span class="text-xs text-secondary italic mt-1">"{{ part.prompt }}"</span>
                  </div>
              </div>
           </div>
@@ -1999,7 +2082,7 @@ function onMermaidReady({ svg }, partIndex) {
           <!-- Note block -->
           <details 
             v-else-if="part.type === 'note'" 
-            class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-amber-200 dark:border-amber-800/60"
+            class="note-block my-4 card overflow-hidden"
             :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
           >
@@ -2009,15 +2092,15 @@ function onMermaidReady({ svg }, partIndex) {
                     <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
                 </span>
             </div>
-            <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-amber-50 dark:bg-amber-900/30 border-amber-200 dark:border-amber-800/60 cursor-pointer list-none select-none">
+            <summary class="note-header flex items-center justify-between px-4 py-2.5 cursor-pointer list-none select-none">
               <div class="flex items-center gap-2.5">
                 <IconChevronRight class="w-3 h-3 text-amber-500 transition-transform duration-200 summary-arrow" />
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
                 <div class="flex flex-col leading-tight">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-amber-500 dark:text-amber-400">AI Note</span>
-                  <span class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ part.title }}</span>
+                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary">AI Note</span>
+                  <span class="text-sm font-bold text-primary">{{ part.title }}</span>
                 </div>
               </div>
               <button
@@ -2029,7 +2112,7 @@ function onMermaidReady({ svg }, partIndex) {
                 Save Note
               </button>
             </summary>
-            <div class="note-body px-5 py-4 bg-amber-50/40 dark:bg-amber-950/20 border-t border-amber-200 dark:border-amber-800/60">
+            <div class="note-body px-5 py-4 border-t border-secondary">
               <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
                 <template v-for="(token, ti) in getTokens(liveArtefactBuffers[part.title] || part.content)" :key="`note-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
@@ -2042,7 +2125,7 @@ function onMermaidReady({ svg }, partIndex) {
           <!-- Skill block -->
           <details 
             v-else-if="part.type === 'skill'" 
-            class="note-block my-4 rounded-xl overflow-hidden shadow-md border border-teal-200 dark:border-teal-800/60"
+            class="note-block my-4 card overflow-hidden"
             :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
           >
@@ -2057,8 +2140,8 @@ function onMermaidReady({ svg }, partIndex) {
                 <IconChevronRight class="w-3 h-3 text-teal-500 transition-transform duration-200 summary-arrow" />
                 <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
                 <div class="flex flex-col leading-tight">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-teal-500 dark:text-teal-400">AI Skill Proposal</span>
-                  <span class="text-sm font-bold text-gray-800 dark:text-gray-100">{{ part.title }}</span>
+                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary">AI Skill Proposal</span>
+                  <span class="text-sm font-bold text-primary">{{ part.title }}</span>
                 </div>
               </div>
               <button
@@ -2105,13 +2188,13 @@ function onMermaidReady({ svg }, partIndex) {
           />
 
           <!-- Active Tool Execution -->
-          <div v-else-if="part.type === 'tool_call'" class="my-4 p-4 rounded-xl border border-purple-200 dark:border-purple-800/40 bg-purple-50/30 dark:bg-purple-950/10 shadow-sm flex items-start gap-3 animate-in fade-in">
-              <div class="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 shrink-0">
+          <div v-else-if="part.type === 'tool_call'" class="my-4 card p-4 flex items-start gap-3 animate-in fade-in">
+              <div class="p-2 rounded-lg surface-2 text-accent shrink-0">
                   <IconWrenchScrewdriver class="w-5 h-5" />
               </div>
               <div class="flex-1 min-w-0">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-purple-500 dark:text-purple-400 block mb-1">Active Tool Execution</span>
-                  <h5 class="text-sm font-bold text-gray-800 dark:text-gray-200">{{ part.name }}</h5>
+                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary block mb-1">Active Tool Execution</span>
+                  <h5 class="text-sm font-bold text-primary">{{ part.name }}</h5>
                   <div v-if="Object.keys(part.parameters).length > 0" class="mt-2">
                        <StepDetail :data="part.parameters" :level="1" />
                   </div>
@@ -2119,13 +2202,13 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- Deep Memory Retrieval -->
-          <div v-else-if="part.type === 'mem_load'" class="my-4 p-4 rounded-xl border border-teal-200 dark:border-teal-800/40 bg-teal-50/30 dark:bg-teal-950/10 shadow-sm flex items-start gap-3 animate-in fade-in">
-              <div class="p-2 rounded-lg bg-teal-100 dark:bg-teal-900/30 text-teal-600 dark:text-teal-400 shrink-0">
+          <div v-else-if="part.type === 'mem_load'" class="my-4 card p-4 flex items-start gap-3 animate-in fade-in">
+              <div class="p-2 rounded-lg surface-2 text-accent shrink-0">
                   <IconThinking class="w-5 h-5 animate-pulse" />
               </div>
               <div class="flex-1 min-w-0">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-teal-500 dark:text-teal-400 block mb-1">Deep Memory Retrieval</span>
-                  <h5 class="text-xs font-mono font-bold text-gray-700 dark:text-gray-300">Retrieving Fact ID: [{{ part.memoryId.substring(0, 8) }}...]</h5>
+                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary block mb-1">Deep Memory Retrieval</span>
+                  <h5 class="text-xs font-mono font-bold text-primary">Retrieving Fact ID: [{{ part.memoryId.substring(0, 8) }}...]</h5>
               </div>
           </div>
 
@@ -2147,12 +2230,12 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- OWL Visualization -->
-          <div v-else-if="part.type === 'owl'" class="my-6 border-2 border-indigo-500 rounded-2xl overflow-hidden bg-white dark:bg-gray-950 shadow-xl">
-              <div class="px-4 py-2 bg-indigo-600 text-white flex justify-between items-center">
+          <div v-else-if="part.type === 'owl'" class="my-6 card overflow-hidden" style="border-width: 2px; border-color: var(--brand-accent);">
+              <div class="px-4 py-2 text-text-on-primary flex justify-between items-center" style="background-color: var(--brand-accent);">
                   <span class="text-[10px] font-black uppercase tracking-widest">Semantic OWL / RDF</span>
                   <button @click="uiStore.copyToClipboard(part.content)" class="hover:text-indigo-200"><IconCopy class="w-4 h-4"/></button>
               </div>
-              <div class="p-4 bg-gray-900 text-gray-100 overflow-x-auto text-xs font-mono">
+              <div class="p-4 surface-0 text-primary overflow-x-auto text-xs font-mono">
                   <pre>{{ part.content }}</pre>
               </div>
           </div>
@@ -2170,7 +2253,7 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- Dynamic Spreadsheet View -->
           <template v-else-if="part.type === 'data_grid_view'">
-             <div class="my-6 border dark:border-gray-700 rounded-2xl overflow-hidden shadow-xl bg-white dark:bg-gray-950 h-96">
+             <div class="my-6 card overflow-hidden h-96">
                 <InteractiveDataGrid 
                     :discussionId="currentDiscussionId"
                     :title="part.title"
@@ -2181,7 +2264,7 @@ function onMermaidReady({ svg }, partIndex) {
           </template>
 
           <!-- Artefact Image Anchor -->
-          <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount">
+          <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount card">
              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
                   <div class="relative">
                       <AuthenticatedImage 
@@ -2202,18 +2285,18 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- Interactive Widget -->
           <div v-else-if="part.type === 'interactive_widget' && part.widget" 
-               class="my-4 group/widget-container clear-both" style="isolation: isolate; contain: paint;">
-              <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-950 overflow-hidden shadow-xl transition-all hover:border-blue-500/20" style="contain: paint;">
+               class="my-4 flex justify-center w-full group/widget-container" style="isolation: isolate; contain: paint;">
+              <div class="w-full max-w-[min(100%,800px)] rounded-2xl border-2 border-border-muted dark:border-border-strong bg-surface-1 overflow-hidden shadow-lg transition-all duration-300 hover:border-primary/30 hover:shadow-xl" style="contain: paint;">
 
-                  <div class="px-4 py-2.5 border-b dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex items-center justify-between">
+                  <div class="px-4 py-2.5 border-b border-primary bg-surface-1 flex items-center justify-between">
                       <div class="flex items-center gap-3 min-w-0">
-                          <div class="p-1.5 rounded-lg bg-blue-100 dark:bg-blue-900/40 text-blue-600">
+                          <div class="p-1.5 rounded-lg surface-2 text-accent">
                               <IconAnimateSpin v-if="part.widget.is_loading" class="w-4 h-4 animate-spin" />
                               <IconCpuChip v-else class="w-4 h-4" />
                           </div>
                           <div class="flex flex-col min-w-0">
-                              <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 leading-none mb-1">Sandbox Preview</span>
-                              <h4 class="text-xs font-bold text-gray-700 dark:text-gray-200 truncate">{{ part.widget.title || 'Interactive Component' }}</h4>
+                              <span class="text-[9px] font-black uppercase tracking-widest text-secondary leading-none mb-1">Sandbox Preview</span>
+                              <h4 class="text-xs font-bold text-primary truncate">{{ part.widget.title || 'Interactive Component' }}</h4>
                           </div>
                       </div>
 
@@ -2235,30 +2318,30 @@ function onMermaidReady({ svg }, partIndex) {
                       </div>
                   </div>
 
-                  <div class="relative w-full bg-white transition-all overflow-hidden border-b dark:border-gray-800" style="min-height: 100px; contain: paint;">
-                      <iframe 
+                  <div class="relative w-full bg-surface-1 transition-all overflow-hidden border-b border-primary flex justify-center items-center min-h-[100px]" style="contain: paint;">
+                       <iframe 
                         v-if="getWidgetContent(part.widget)"
                         :data-part-id="part.id"
                         :key="`${part.id}-${isStreaming ? 'live' : 'stable'}`"
                         :srcdoc="wrapInIsolatedShell(getWidgetContent(part.widget), part.id)" 
-                        class="w-full border-none pointer-events-auto bg-white transition-[height] duration-300" 
-                        style="height: 400px; display: block; margin-left: auto; margin-right: auto;"
+                        class="w-full max-w-full border-none pointer-events-auto bg-transparent transition-all duration-300" 
+                        style="height: 400px; display: block;"
                         sandbox="allow-scripts allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>
                       
-                      <div v-else class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50/50 dark:bg-gray-900/50">
+                      <div v-else class="absolute inset-0 flex flex-col items-center justify-center bg-surface-1">
                          <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin mb-3 opacity-30" />
                          <p class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Awaiting source data...</p>
                       </div>
                   </div>
 
-                  <div class="px-4 py-2 bg-gray-50/30 dark:bg-gray-900/20 flex items-center justify-between border-t dark:border-gray-800">
+                  <div class="px-4 py-2 bg-surface-2 flex items-center justify-between border-t border-primary">
                        <div class="flex items-center gap-2">
                           <div class="w-1.5 h-1.5 rounded-full" :class="part.widget.is_loading ? 'bg-gray-400' : 'bg-green-500 animate-pulse'"></div>
-                          <span class="text-[9px] font-bold text-gray-400 uppercase tracking-tighter">{{ part.widget.is_loading ? 'Preparing Environment' : 'Sandbox Ready' }}</span>
+                          <span class="text-[9px] font-bold text-secondary uppercase tracking-tighter">{{ part.widget.is_loading ? 'Preparing Environment' : 'Sandbox Ready' }}</span>
                        </div>
-                       <button v-if="!part.widget.is_loading" @click="openWidgetFullscreen(part.widget)" class="text-[9px] font-black text-blue-500 uppercase tracking-widest hover:underline">
+                       <button v-if="!part.widget.is_loading" @click="openWidgetFullscreen(part.widget)" class="text-[9px] font-black text-accent uppercase tracking-widest hover:underline">
                            Launch Visualizer &rarr;
                        </button>
                   </div>

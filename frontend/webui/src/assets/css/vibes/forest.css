@@ -1,26 +1,51 @@
-/* Forest Vibe */
-.vibe-forest {
+/* Emerald Forest - Natural & Calm */
+
+:root, .vibe-forest {
   --brand-primary: #059669;
   --brand-primary-hover: #047857;
   --brand-accent: #84cc16;
+  
   --brand-bg-app: #f4f9f5;
   --brand-bg-app-hover: #e8f4ec;
   --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #ecfdf5;
+  --brand-bg-hover: #d1ebd9;
+  
   --brand-border-main: #d1ebd9;
   --brand-border-muted: #e6f4ed;
+  --brand-border-strong: #a7d7c4;
+  
   --brand-text-main: #064e3b;
   --brand-text-dim: #059669;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #d1ebd9;
 }
 
 .dark.vibe-forest {
   --brand-primary: #10b981;
   --brand-primary-hover: #34d399;
   --brand-accent: #a3e635;
+  
   --brand-bg-app: #020b08;
-  --brand-bg-app-hover: #092a20;
+  --brand-bg-app-hover: #0a1f18;
   --brand-bg-card: #051812;
-  --brand-border-main: #0e3a29;
-  --brand-border-muted: #134e3b;
+  --brand-bg-elevated: #0a241c;
+  --brand-bg-overlay: rgba(5, 24, 18, 0.95);
+  --brand-bg-sidebar: #020b08;
+  --brand-bg-hover: #134e3b;
+  
+  --brand-border-main: #134e3b;
+  --brand-border-muted: #0e3a29;
+  --brand-border-strong: #065f46;
+  
   --brand-text-main: #f0fdf4;
   --brand-text-dim: #34d399;
+  --brand-text-on-primary: #020b08;
+  
+  --brand-input-bg: #092a20;
+  --brand-input-border: #134e3b;
 }

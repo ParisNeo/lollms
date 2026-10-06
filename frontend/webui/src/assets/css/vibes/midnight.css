@@ -1,13 +1,52 @@
-/* Midnight Vibe - High Contrast Dark Mode only */
-.vibe-midnight {
+/* Midnight Deep - Dark Optimized */
+
+.dark .vibe-midnight, .dark.vibe-midnight {
   --brand-primary: #0ea5e9;
-  --brand-primary-hover: #0284c7; 
+  --brand-primary-hover: #0284c7;
   --brand-accent: #818cf8;
+  
   --brand-bg-app: #030712;
-  --brand-bg-app-hover: #111827;
+  --brand-bg-app-hover: #0b0f19;
   --brand-bg-card: #0b0f19;
+  --brand-bg-elevated: #111827;
+  --brand-bg-overlay: rgba(11, 15, 25, 0.95);
+  --brand-bg-sidebar: #020408;
+  --brand-bg-hover: #1f2937;
+  
   --brand-border-main: #1e293b;
   --brand-border-muted: #334155;
+  --brand-border-strong: #475569;
+  
   --brand-text-main: #f8fafc;
   --brand-text-dim: #64748b;
+  --brand-text-on-primary: #030712;
+  
+  --brand-input-bg: #0f172a;
+  --brand-input-border: #334155;
+}
+
+/* Light Mode Fallback - Don't let Midnight break light mode */
+:root:not(.dark) .vibe-midnight {
+  --brand-primary: #1e40af;
+  --brand-primary-hover: #1e3a8a;
+  --brand-accent: #4338ca;
+  
+  --brand-bg-app: #eff6ff;
+  --brand-bg-app-hover: #dbeafe;
+  --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #dbeafe;
+  --brand-bg-hover: #bfdbfe;
+  
+  --brand-border-main: #bfdbfe;
+  --brand-border-muted: #dbeafe;
+  --brand-border-strong: #93c5fd;
+  
+  --brand-text-main: #1e3a8a;
+  --brand-text-dim: #3b82f6;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #bfdbfe;
 }

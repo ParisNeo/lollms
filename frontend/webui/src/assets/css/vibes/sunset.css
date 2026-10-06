@@ -1,0 +1,51 @@
+/* Sunset Warmth - Cozy & Warm */
+
+:root, .vibe-sunset {
+  --brand-primary: #f97316;
+  --brand-primary-hover: #ea580c;
+  --brand-accent: #f59e0b;
+  
+  --brand-bg-app: #fff7ed;
+  --brand-bg-app-hover: #ffedd5;
+  --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #fff7ed;
+  --brand-bg-hover: #fed7aa;
+  
+  --brand-border-main: #fed7aa;
+  --brand-border-muted: #ffedd5;
+  --brand-border-strong: #fdba74;
+  
+  --brand-text-main: #7c2d12;
+  --brand-text-dim: #c2410c;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #fed7aa;
+}
+
+.dark.vibe-sunset {
+  --brand-primary: #fb923c;
+  --brand-primary-hover: #f97316;
+  --brand-accent: #fbbf24;
+  
+  --brand-bg-app: #1c1917;
+  --brand-bg-app-hover: #292524;
+  --brand-bg-card: #292524;
+  --brand-bg-elevated: #44403c;
+  --brand-bg-overlay: rgba(41, 37, 36, 0.95);
+  --brand-bg-sidebar: #1c1917;
+  --brand-bg-hover: #44403c;
+  
+  --brand-border-main: #44403c;
+  --brand-border-muted: #57534e;
+  --brand-border-strong: #78716c;
+  
+  --brand-text-main: #fafaf9;
+  --brand-text-dim: #fdba74;
+  --brand-text-on-primary: #1c1917;
+  
+  --brand-input-bg: #1c1917;
+  --brand-input-border: #44403c;
+}

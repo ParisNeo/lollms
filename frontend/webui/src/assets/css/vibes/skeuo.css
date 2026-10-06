@@ -1,0 +1,54 @@
+/* ==========================================================================
+   Skeuomorphic Effect Layer
+   Deep shadows, chunky borders, inset highlights, physical feel.
+   ========================================================================== */
+
+[data-effect="skeuo"] {
+    --effect-radius-sm: 0.75rem;
+    --effect-radius-md: 1.25rem;
+    --effect-radius-lg: 1.75rem;
+    --effect-radius-xl: 2rem;
+
+    --effect-shadow-sm: 0 2px 4px rgb(0 0 0 / 0.15), inset 0 1px 0 rgb(255 255 255 / 0.15);
+    --effect-shadow-md: 0 6px 16px -2px rgb(0 0 0 / 0.22), inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 -1px 0 rgb(0 0 0 / 0.1);
+    --effect-shadow-lg: 0 14px 32px -4px rgb(0 0 0 / 0.28), inset 0 2px 0 rgb(255 255 255 / 0.08), inset 0 -2px 0 rgb(0 0 0 / 0.12);
+    --effect-shadow-xl: 0 24px 48px -8px rgb(0 0 0 / 0.35), inset 0 2px 0 rgb(255 255 255 / 0.1), inset 0 -2px 0 rgb(0 0 0 / 0.15);
+
+    --effect-border-width: 2px;
+}
+
+.dark[data-effect="skeuo"] {
+    --effect-shadow-sm: 0 2px 4px rgb(0 0 0 / 0.4), inset 0 1px 0 rgb(255 255 255 / 0.06);
+    --effect-shadow-md: 0 6px 16px -2px rgb(0 0 0 / 0.5), inset 0 1px 0 rgb(255 255 255 / 0.05), inset 0 -1px 0 rgb(0 0 0 / 0.2);
+    --effect-shadow-lg: 0 14px 32px -4px rgb(0 0 0 / 0.6), inset 0 2px 0 rgb(255 255 255 / 0.04), inset 0 -2px 0 rgb(0 0 0 / 0.25);
+    --effect-shadow-xl: 0 24px 48px -8px rgb(0 0 0 / 0.7), inset 0 2px 0 rgb(255 255 255 / 0.05), inset 0 -2px 0 rgb(0 0 0 / 0.3);
+}
+
+/* Skeuo surface enhancements */
+[data-effect="skeuo"] .artefact-card,
+[data-effect="skeuo"] .memory-card,
+[data-effect="skeuo"] .task-item-card,
+[data-effect="skeuo"] .processing-card {
+    border-width: var(--effect-border-width);
+    box-shadow: var(--effect-shadow-md);
+    transform: translateY(0);
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+
+[data-effect="skeuo"] .artefact-card:hover,
+[data-effect="skeuo"] .memory-card:hover,
+[data-effect="skeuo"] .task-item-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--effect-shadow-lg);
+}
+
+[data-effect="skeuo"] .btn {
+    border: 2px solid transparent;
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.2), 0 4px 8px rgb(0 0 0 / 0.15);
+    text-shadow: 0 1px 1px rgb(0 0 0 / 0.2);
+}
+
+[data-effect="skeuo"] .btn:not(:disabled):active {
+    transform: translateY(1px);
+    box-shadow: inset 0 2px 4px rgb(0 0 0 / 0.2);
+}

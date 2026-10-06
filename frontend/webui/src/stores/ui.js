@@ -11,6 +11,7 @@ export const useUiStore = defineStore('ui', {
     notifications: [],
     currentTheme: localStorage.getItem('lollms-theme') || 'light',
     currentVibe: localStorage.getItem('lollms-vibe') || 'default',
+    currentCustomTheme: JSON.parse(localStorage.getItem('lollms-custom-theme') || 'null'),
     currentLanguage: localStorage.getItem('lollms-language') || 'en',
     message_font_size: 14,
     imageViewer: {
@@ -18,6 +19,7 @@ export const useUiStore = defineStore('ui', {
       imageList: [],
       startIndex: 0,
     },
+    currentEffect: localStorage.getItem('lollms-effect') || 'default',
     // Slideshow State
     slideshow: {
         isOpen: false,
@@ -210,13 +212,88 @@ export const useUiStore = defineStore('ui', {
         vibeClasses.forEach(c => root.classList.remove(c));
 
         this.currentVibe = vibe;
+        this.currentCustomTheme = null;
         localStorage.setItem('lollms-vibe', vibe);
+        localStorage.removeItem('lollms-custom-theme');
+
+        // Clear any inline custom properties when reverting to preset vibes
+        const customProps = [
+            '--brand-primary', '--brand-primary-hover', '--brand-accent', 
+            '--brand-bg-app', '--brand-bg-app-hover', '--brand-bg-card', 
+            '--brand-bg-elevated', '--brand-bg-overlay', '--brand-bg-sidebar',
+            '--brand-bg-hover', '--brand-input-bg', '--brand-input-border',
+            '--brand-border-main', '--brand-border-muted', '--brand-border-strong',
+            '--brand-text-main', '--brand-text-dim', '--brand-text-on-primary',
+            '--effect-radius-md', '--effect-radius-lg', '--effect-radius-sm'
+        ];
+        customProps.forEach(prop => root.style.removeProperty(prop));
 
         if (vibe && vibe !== 'default') {
             root.classList.add(`vibe-${vibe}`);
         }
 
         console.log(`[UI] Vibe applied: ${vibe || 'default'}. Active classes:`, root.className);
+    },
+    
+    setEffect(effect) {
+        const root = document.documentElement;
+        if (effect === 'default' || effect === 'none') {
+            root.removeAttribute('data-effect');
+            localStorage.removeItem('lollms-effect');
+        } else {
+            root.setAttribute('data-effect', effect);
+            localStorage.setItem('lollms-effect', effect);
+        }
+        this.currentEffect = effect;
+        console.log(`[UI] Effect applied: ${effect}`);
+    },
+
+    setCustomTheme(themeData) {
+        const root = document.documentElement;
+        this.currentCustomTheme = themeData;
+        this.currentVibe = 'custom';
+        localStorage.setItem('lollms-vibe', 'custom');
+        localStorage.setItem('lollms-custom-theme', JSON.stringify(themeData));
+
+        // Remove preset vibe classes to ensure a clean slate
+        const vibeClasses = Array.from(root.classList).filter(c => c.startsWith('vibe-'));
+        vibeClasses.forEach(c => root.classList.remove(c));
+
+        // Apply CSS variables directly (Inline styles have highest specificity)
+        Object.entries(themeData.colors).forEach(([key, value]) => {
+            // Handle camelCase conversion automatically by regex replacement
+            const cssVar = `--brand-${key.replace(/([A-Z])/g, '-$1').toLowerCase()}`;
+            root.style.setProperty(cssVar, value);
+        });
+
+        // Apply Radius/Effect variables
+        if (themeData.radius !== undefined) {
+            root.style.setProperty('--effect-radius-md', `${themeData.radius}rem`);
+            // Map large radius to lg/sm defaults
+            root.style.setProperty('--effect-radius-lg', `${themeData.radius * 1.5}rem`);
+            root.style.setProperty('--effect-radius-sm', `${themeData.radius * 0.5}rem`);
+        }
+        
+        if (themeData.borderStrength !== undefined) {
+            root.style.setProperty('--effect-border-width', `${themeData.borderStrength}px`);
+        }
+        
+        if (themeData.cardOpacity !== undefined) {
+            root.style.setProperty('--effect-surface-opacity', `${themeData.cardOpacity}%`);
+        }
+
+        // Trigger reflow
+        requestAnimationFrame(() => {
+            window.dispatchEvent(new Event('resize'));
+        });
+
+        console.log('[UI] Custom theme applied:', themeData.name);
+    },
+
+    resetCustomTheme() {
+        this.currentCustomTheme = null;
+        localStorage.removeItem('lollms-custom-theme');
+        this.setVibe('default');
     },
 
     toggleTheme() {
@@ -225,7 +302,14 @@ export const useUiStore = defineStore('ui', {
 
     initializeTheme() {
         this.setTheme(this.currentTheme);
-        this.setVibe(this.currentVibe);
+        if (this.currentEffect && this.currentEffect !== 'default') {
+            this.setEffect(this.currentEffect);
+        }
+        if (this.currentVibe === 'custom' && this.currentCustomTheme) {
+            this.setCustomTheme(this.currentCustomTheme);
+        } else {
+            this.setVibe(this.currentVibe);
+        }
     },
 
     setLanguage(langCode) {
