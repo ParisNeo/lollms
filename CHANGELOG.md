@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-08 22:34]
+
+- fix(deps): remove unused assets for static modules in vite
+
 ## [2026-10-08 22:21]
 
 - fix(discussion): restructure discussion router logic to implement RAG improvements

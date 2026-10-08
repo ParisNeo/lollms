@@ -129,13 +129,14 @@ async function handlePaste(event) {
         <div 
             v-if="isDraggingOver" 
             @click="resetDragState"
-            class="absolute inset-0 bg-white/70 dark:bg-gray-900/70 backdrop-blur-md border-2 border-dashed border-blue-500/50 rounded-2xl z-30 flex items-center justify-center m-6 cursor-pointer select-none transition-all duration-300"
+            class="absolute inset-0 backdrop-blur-md border-2 border-dashed rounded-2xl z-30 flex items-center justify-center m-6 cursor-pointer select-none transition-all duration-300"
+            style="background-color: color-mix(in srgb, var(--bg-app) 70%, transparent); border-color: color-mix(in srgb, var(--primary) 50%, transparent);"
             title="Click anywhere to dismiss"
         >
             <div class="text-center pointer-events-none">
                 <span class="modal-tag">Workspace Ingestion</span>
-                <p class="text-2xl font-serif text-gray-900 dark:text-white">Release to attach files</p>
-                <p class="text-[10px] text-gray-400 mt-2">or click anywhere to cancel</p>
+                <p class="text-2xl font-serif" style="color: var(--text-main);">Release to attach files</p>
+                <p class="text-[10px] mt-2" style="color: var(--text-dim);">or click anywhere to cancel</p>
             </div>
         </div>
 
@@ -146,13 +147,13 @@ async function handlePaste(event) {
                 :class="{ 'border-r-0': isDataZoneVisible }"
             >
                 <!-- Editorial Loading State -->
-                <div v-if="isLoadingMessages" class="absolute inset-0 bg-white dark:bg-gray-900 z-20 flex flex-col items-center justify-center">
+                <div v-if="isLoadingMessages" class="absolute inset-0 z-20 flex flex-col items-center justify-center bg-bg-app">
                     <div class="relative mb-8">
-                        <IconAnimateSpin class="w-12 h-12 text-blue-500 animate-spin" />
-                        <div class="absolute inset-0 blur-xl bg-blue-500/20 animate-pulse"></div>
+                        <IconAnimateSpin class="w-12 h-12 animate-spin" style="color: var(--primary);" />
+                        <div class="absolute inset-0 blur-xl animate-pulse" style="background-color: color-mix(in srgb, var(--primary) 20%, transparent);"></div>
                     </div>
                     <span class="modal-tag">Synchronization</span>
-                    <p class="text-xl font-serif text-gray-600 dark:text-gray-400 italic">Preparing discussion...</p>
+                    <p class="text-xl font-serif italic" style="color: var(--text-dim);">Preparing discussion...</p>
                 </div>
                 
                 <div v-show="!isLoadingMessages" class="flex-1 flex flex-col min-h-0 h-full relative">

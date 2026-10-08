@@ -153,11 +153,11 @@ function addManualMessage(sender_type) {
         <!-- CRITICAL FIX: TransitionGroup children must be single elements. Wrapping separators and bubbles in a div with the message ID as key ensures DOM stability. -->
         <div v-for="(message, index) in activeMessages" :key="message.id">
           <div v-if="shouldShowDateSeparator(index)" class="date-separator">
-              <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
-              <div class="text-xs font-semibold uppercase text-gray-500 dark:text-gray-400">
+              <div class="flex-1 h-px"></div>
+              <div class="text-xs font-semibold uppercase text-text-dim">
                 {{ formatDateSeparator(message.created_at) }}
               </div>
-              <div class="flex-1 h-px bg-gray-200 dark:bg-gray-700"></div>
+              <div class="flex-1 h-px"></div>
           </div>
           <MessageBubble :message="message" />
         </div>
@@ -166,7 +166,7 @@ function addManualMessage(sender_type) {
       <!-- Add Message Button, positioned after messages -->
       <div class="flex justify-center my-6">
         <div class="relative">
-            <button ref="addButtonRef" @click="isAddMenuOpen = !isAddMenuOpen" class="flex items-center justify-center w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200">
+            <button ref="addButtonRef" @click="isAddMenuOpen = !isAddMenuOpen" class="flex items-center justify-center w-8 h-8 rounded-full transition-colors duration-200 hover:bg-bg-hover" style="background-color: var(--bg-hover); color: var(--text-main);">
                 <span class="font-bold text-xl leading-none select-none">+</span>
             </button>
             <Teleport to="body">
@@ -178,12 +178,12 @@ function addManualMessage(sender_type) {
                     leave-from-class="transform opacity-100 scale-100"
                     leave-to-class="transform opacity-0 scale-95"
                 >
-                    <div v-if="isAddMenuOpen" ref="addMenuRef" :style="floatingStyles" class="z-50 w-56 origin-top-left rounded-md bg-white dark:bg-gray-800 shadow-lg ring-1 ring-black ring-opacity-5 dark:ring-gray-700 focus:outline-none py-1">
-                        <button @click="addManualMessage('user')" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm flex items-center">
+                    <div v-if="isAddMenuOpen" ref="addMenuRef" :style="floatingStyles" class="z-50 w-56 origin-top-left rounded-md shadow-lg ring-1 ring-opacity-5 focus:outline-none py-1 glass-card">
+                        <button @click="addManualMessage('user')" class="w-full text-left p-2 rounded-md hover:bg-bg-hover text-sm flex items-center">
                             <IconUserCircle class="w-5 h-5 mr-2" />
                             <span>Add User Message</span>
                         </button>
-                        <button @click="addManualMessage('assistant')" class="w-full text-left p-2 rounded-md hover:bg-gray-200 dark:hover:bg-gray-600 text-sm flex items-center">
+                        <button @click="addManualMessage('assistant')" class="w-full text-left p-2 rounded-md hover:bg-bg-hover text-sm flex items-center">
                             <IconSparkles class="w-5 h-5 mr-2" />
                             <span>Add AI Message</span>
                         </button>
@@ -204,7 +204,7 @@ function addManualMessage(sender_type) {
             leave-to-class="opacity-0"
         >
             <button v-if="!isNearBottom && newMessagesWhileScrolledUp" @click="scrollToBottom(true)"
-                    class="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500">
+                    class="flex items-center gap-2 px-4 py-2 rounded-full shadow-lg focus:outline-none focus:ring-2 focus:ring-offset-2 btn-primary">
                 <IconArrowDown class="w-5 h-5" />
                 <span>New messages</span>
             </button>
