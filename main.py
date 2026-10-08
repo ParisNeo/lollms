@@ -20,7 +20,7 @@ from threading import Lock
 from multipart.multipart import FormParser
 FormParser.max_size = 50 * 1024 * 1024  # 50 MB
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, inspect, desc
@@ -100,7 +100,7 @@ from backend.routers.memories import memories_router
 from backend.routers.news import news_router
 from backend.zoo_cache import load_cache
 from backend.routers.discussion import build_discussions_router
-
+from backend.routers.discussion.core import build_core_router
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 import io
@@ -684,6 +684,9 @@ app.include_router(news_router)
 app.include_router(upload_router)
 app.include_router(assets_router)
 app.include_router(build_discussions_router())
+core_router = APIRouter()
+build_core_router(core_router)
+app.include_router(core_router, prefix="/api/discussions", tags=["Discussions"])
 app.include_router(discussion_groups_router)
 app.include_router(voices_studio_router)
 app.include_router(image_studio_router)

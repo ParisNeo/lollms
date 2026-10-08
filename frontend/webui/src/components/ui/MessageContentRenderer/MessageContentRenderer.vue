@@ -1968,9 +1968,7 @@ function onMermaidReady({ svg }, partIndex) {
           <!-- Thinking block (Collapsed by default, with live sneak peek in header) -->
           <details 
             v-else-if="part.type === 'think'" 
-            class="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full text-accent"
-            role="status"
-            aria-label="streaming"
+            class="think-block my-4 card overflow-hidden"
             :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
           >
@@ -2215,14 +2213,14 @@ function onMermaidReady({ svg }, partIndex) {
           <!-- Round Divider / Milestone Marker -->
           <div v-else-if="part.type === 'round'" class="round-separator my-6 not-prose select-none flex items-center gap-3">
               <div class="h-px grow bg-gradient-to-r from-transparent via-gray-300 dark:via-gray-700 to-gray-300 dark:to-gray-700"></div>
-              <div class="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700/80 text-slate-700 dark:text-gray-300 shadow-2xs backdrop-blur-xs transition-all hover:scale-105">
-                  <div class="flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-bold">
-                      <span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span>
-                  </div>
-                  <span class="text-xs font-black uppercase tracking-wider font-mono text-gray-800 dark:text-gray-200">
+              <div class="flex items-center gap-2 px-3.5 py-2 rounded-full bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700/80 text-slate-700 dark:text-gray-300 shadow-sm backdrop-blur-sm transition-all hover:scale-105 min-w-[8rem] justify-center">
+                  <span class="flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-bold text-[10px] shrink-0">
+                      <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
+                  </span>
+                  <span class="text-xs font-black uppercase tracking-wider font-mono text-gray-800 dark:text-gray-200 shrink-0">
                       {{ formatRoundTitle(part.roundId) }}
                   </span>
-                  <span v-if="part.content" class="text-[11px] font-normal text-gray-500 dark:text-gray-400 font-sans">
+                  <span v-if="part.content" class="text-[11px] font-normal text-gray-500 dark:text-gray-400 font-sans truncate max-w-[10rem]">
                       — {{ part.content }}
                   </span>
               </div>
@@ -2281,6 +2279,26 @@ function onMermaidReady({ svg }, partIndex) {
                       </div>
                   </div>
              </div>
+          </div>
+
+          <!-- Building / Working Indicator -->
+          <div v-else-if="part.type === 'building_indicator'" class="my-3 not-prose">
+              <div class="flex items-center gap-3 px-4 py-3 rounded-xl border border-blue-200 dark:border-blue-800/60 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm"
+                   :class="part.isDone
+                    ? 'border-emerald-200 dark:border-emerald-800/50 bg-emerald-50/50 dark:bg-emerald-950/10'
+                    : ''">
+                  <span v-if="!part.isDone" class="inline-block w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent" style="animation: spin 1s linear infinite;"></span>
+                  <IconCheckCircle v-else class="w-4 h-4 text-emerald-500 shrink-0" />
+                  <div class="flex flex-col min-w-0">
+                      <span class="text-[9px] font-black uppercase tracking-[0.15em] text-secondary">
+                          {{ part.isDone ? 'Completed' : 'Building' }}
+                      </span>
+                      <span class="text-sm font-bold text-primary truncate">{{ part.label }}</span>
+                      <span v-if="part.sub_content" class="text-xs text-secondary italic truncate">{{ part.sub_content }}</span>
+                      <span v-if="part.title" class="text-[10px] font-mono text-dim truncate">{{ part.title }}</span>
+                  </div>
+                  <span v-if="part.isDone" class="ml-auto text-[9px] font-black uppercase tracking-widest text-emerald-500 shrink-0">Done</span>
+              </div>
           </div>
 
           <!-- Interactive Widget -->

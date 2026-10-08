@@ -15,106 +15,27 @@
 @import "./vibes/monochrome.css";
 
 @theme {
-  /* Colors */
-  --color-primary: var(--brand-primary);
-  --color-primary-hover: var(--brand-primary-hover);
-  --color-accent: var(--brand-accent);
-
-  --color-bg-app: var(--brand-bg-app);
-  --color-bg-app-hover: var(--brand-bg-app-hover);
-  --color-bg-card: var(--brand-bg-card);
-  --color-bg-elevated: var(--brand-bg-elevated);
-  --color-bg-overlay: var(--brand-bg-overlay);
-  --color-bg-sidebar: var(--brand-bg-sidebar);
-  --color-bg-hover: var(--brand-bg-hover);
-
-  --color-input-bg: var(--brand-input-bg);
-  --color-input-border: var(--brand-input-border);
-
-  --color-text-main: var(--brand-text-main);
-  --color-text-dim: var(--brand-text-dim);
-  --color-text-on-primary: var(--brand-text-on-primary);
-
-  --color-border-main: var(--brand-border-main);
-  --color-border-muted: var(--brand-border-muted);
-  --color-border-strong: var(--brand-border-strong);
-
-  /* Semantic Surfaces */
-  --color-surface-0: var(--color-bg-app);
-  --color-surface-1: var(--color-bg-card);
-  --color-surface-2: var(--color-bg-elevated);
-  --color-surface-3: var(--color-bg-overlay);
-
-  /* Radii */
-  --radius-sm: var(--effect-radius-sm);
-  --radius-md: var(--effect-radius-md);
-  --radius-lg: var(--effect-radius-lg);
-  --radius-xl: var(--effect-radius-xl);
-
-  /* Shadows */
-  --shadow-sm: var(--effect-shadow-sm);
-  --shadow-md: var(--effect-shadow-md);
-  --shadow-lg: var(--effect-shadow-lg);
-  --shadow-xl: var(--effect-shadow-xl);
-
-  /* Fonts */
-  --font-body: var(--effect-font-body);
-  --font-heading: var(--effect-font-heading);
-  --font-mono: var(--effect-font-mono);
+  /* Map semantic variables to Tailwind utilities so the build doesn't crash */
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-accent: var(--accent);
+  --color-bg-app: var(--bg-app);
+  --color-bg-card: var(--bg-card);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-bg-overlay: var(--bg-overlay);
+  --color-bg-sidebar: var(--bg-sidebar);
+  --color-bg-hover: var(--bg-hover);
+  --color-input-bg: var(--input-bg);
+  --color-input-border: var(--input-border);
+  --color-text-main: var(--text-main);
+  --color-text-dim: var(--text-dim);
+  --color-text-on-primary: var(--text-on-primary);
+  --color-border-main: var(--border-main);
+  --color-border-muted: var(--border-muted);
+  --color-border-strong: var(--border-strong);
 }
 
-:root {
-  /* Map Vibe Variables to Semantic Tokens used in App.vue and Global */
-  --bg-app: var(--brand-bg-app);
-  --bg-card: var(--brand-bg-card);
-  --bg-elevated: var(--brand-bg-elevated);
-  --bg-overlay: var(--brand-bg-overlay);
-  --bg-sidebar: var(--brand-bg-sidebar);
-  --bg-hover: var(--brand-bg-hover);
-  
-  --text-main: var(--brand-text-main);
-  --text-dim: var(--brand-text-dim);
-  --text-on-primary: var(--brand-text-on-primary);
-  
-  --border-main: var(--brand-border-main);
-  --border-muted: var(--brand-border-muted);
-  --border-strong: var(--brand-border-strong);
-  
-  --primary: var(--brand-primary);
-  --primary-hover: var(--brand-primary-hover);
-  --accent: var(--brand-accent);
-  
-  --radius-lg: var(--effect-radius-lg);
-  --shadow-lg: var(--effect-shadow-lg);
-  
-  --fun-fact-color: var(--brand-accent);
-  
-  --message-font-size: 1rem;
-  
-  /* Effect Defaults from Vibes */
-  --effect-radius-sm: 0.375rem;
-  --effect-radius-md: 0.5rem;
-  --effect-radius-lg: 0.75rem;
-  --effect-radius-xl: 1rem;
-
-  --effect-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
-  --effect-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --effect-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --effect-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-
-  --effect-font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --effect-font-heading: Georgia, Cambria, serif;
-  --effect-font-mono: 'Fira Code', 'JetBrains Mono', monospace;
-
-  --effect-heading-font-family: var(--effect-font-heading);
-  --effect-surface-opacity: 1;
-  --effect-surface-blur: 0px;
-  --effect-border-width: 1px;
-  --effect-card-padding: 1rem;
-  --effect-transition-speed: 0.2s;
-}
-
-/* Default Semantic Variables (Fallbacks) */
+/* Default Semantic Variables (Fallbacks) - MUST come before brand aliases */
 :root {
   --bg-app: #f8fafc;
   --bg-card: #ffffff;
@@ -133,6 +54,46 @@
   --primary: #2563eb;
   --primary-hover: #1d4ed8;
   --accent: #6366f1;
+  --fun-fact-color: var(--accent);
+  --message-font-size: 1rem;
+  --effect-radius-sm: 0.375rem;
+  --effect-radius-md: 0.5rem;
+  --effect-radius-lg: 0.75rem;
+  --effect-radius-xl: 1rem;
+  --effect-shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --effect-shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --effect-shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+  --effect-shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+  --effect-font-body: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --effect-font-heading: Georgia, Cambria, serif;
+  --effect-font-mono: 'Fira Code', 'JetBrains Mono', monospace;
+  --effect-heading-font-family: var(--effect-font-heading);
+  --effect-surface-opacity: 1;
+  --effect-surface-blur: 0px;
+  --effect-border-width: 1px;
+  --effect-card-padding: 1rem;
+  --effect-transition-speed: 0.2s;
+}
+
+/* Brand Aliases - Resolved from :root block above */
+:root {
+  --brand-primary: var(--primary);
+  --brand-primary-hover: var(--primary-hover);
+  --brand-accent: var(--accent);
+  --brand-bg-app: var(--bg-app);
+  --brand-bg-card: var(--bg-card);
+  --brand-bg-elevated: var(--bg-elevated);
+  --brand-bg-overlay: var(--bg-overlay);
+  --brand-bg-sidebar: var(--bg-sidebar);
+  --brand-bg-hover: var(--bg-hover);
+  --brand-input-bg: var(--input-bg);
+  --brand-input-border: var(--input-border);
+  --brand-text-main: var(--text-main);
+  --brand-text-dim: var(--text-dim);
+  --brand-text-on-primary: var(--text-on-primary);
+  --brand-border-main: var(--border-main);
+  --brand-border-muted: var(--border-muted);
+  --brand-border-strong: var(--border-strong);
 }
 
 @layer base {
@@ -581,7 +542,7 @@
 .list-leave-active { position: absolute; width: calc(100% - 2rem); }
 
 /* Streaming and Typing Indicators */
-.ai-bubble.is-streaming { animation: pulse-bg 2s infinite; }
+.ai-bubble.is-streaming:not(.processing-block-root):not(.think-block):not(.document-block) { animation: pulse-bg 2s infinite; }
 @keyframes pulse-bg {
     0%   { background-color: #ffffff; }
     50%  { background-color: #f3f4f6; }
@@ -980,10 +941,8 @@ details[open] > summary .toggle-icon { transform: rotate(90deg); }
 }
 .dark .category-header { color: #9ca3af; background-color: #374151; }
 
-/* ==========================================================================
-   8. Dynamic Vibe Semantic Overrides (Pristine Contrast Layer)
-========================================================================== */
 
+/* 8. Dynamic Vibe Semantic Overrides (Pristine Contrast Layer)*/
 /* Core Layout Backgrounds */
 body, .bg-bg-app {
     background-color: var(--bg-app) !important;
@@ -1005,7 +964,7 @@ body, .bg-bg-app {
 }
 
 /* Dropdown Menus & Popovers */
-.dropdown-menu, [role="menu"], .popover-content, .bg-white\/40, .dark .bg-black\/30 {
+.dropdown-menu, [role="menu"], .popover-content {
     background-color: var(--bg-card) !important;
     border-color: var(--border-main) !important;
     color: var(--text-main) !important;
@@ -1037,8 +996,6 @@ body, .bg-bg-app {
 .text-text-dim, .text-slate-500 {
     color: var(--text-dim) !important;
 }
-
-/* Section 9 moved to bottom of file */
 
 .enhanced-tab-btn:hover {
     background-image: linear-gradient(to bottom, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.5));
@@ -1565,6 +1522,33 @@ body, .bg-bg-app {
     border-color: transparent;
     border-top-color: #3b82f6;
     animation: spin 1s linear infinite;
+}
+
+/* Prevent collapsible details from inheriting spin animations */
+details.think-block,
+details.document-block,
+details.note-block-collapsible,
+details.skill-block,
+details.processing-block-root {
+    animation: none !important;
+}
+
+details.think-block .toggle-icon,
+details.document-block .toggle-icon,
+details.note-block-collapsible .toggle-icon,
+details.skill-block .toggle-icon,
+details.processing-block-root .toggle-icon {
+    transition: transform 0.2s ease;
+    animation: none !important;
+}
+
+details[open].think-block > summary .toggle-icon,
+details[open].document-block > summary .toggle-icon,
+details[open].note-block-collapsible > summary .toggle-icon,
+details[open].skill-block > summary .toggle-icon,
+details[open].processing-block-root > summary .toggle-icon {
+    transform: rotate(90deg);
+    animation: none !important;
 }
 
 /* ... Responsive adjustments for Data Zone ... */
@@ -2752,134 +2736,8 @@ details[open].document-block > .document-summary {
     color: #d1d5db;
     background-color: rgba(55, 65, 81, 0.3);
 }
-
-/* ==========================================================================
-   10. NUCLEAR THEME OVERRIDES (Absolute Bottom)
-   ========================================================================== */
-
-/* Core Layout */
-body, 
-.bg-white { background-color: var(--bg-app) !important; }
-.bg-gray-50 { background-color: var(--bg-app) !important; }
-.bg-gray-100 { background-color: var(--bg-hover) !important; }
-.bg-gray-800 { background-color: var(--bg-card) !important; }
-.bg-gray-900 { background-color: var(--bg-app) !important; }
-
-/* Cards & Surfaces */
-.artefact-card, .memory-card, .task-item-card, .processing-card,
-.modal-panel, .glass-card, .card, .document-block {
-    background-color: var(--bg-card) !important;
-    border-color: var(--border-main) !important;
-    color: var(--text-main) !important;
-    border-width: var(--effect-border-width) !important;
-}
-
-/* Backgrounds */
-.bg-surface-0 { background-color: var(--bg-app) !important; }
-.bg-surface-1 { background-color: var(--bg-card) !important; }
-.bg-surface-2 { background-color: var(--bg-elevated) !important; }
-.bg-surface-3 { background-color: var(--bg-overlay) !important; }
-
-/* Text Colors */
-.text-gray-900 { color: var(--text-main) !important; }
-.text-gray-700 { color: var(--text-main) !important; }
-.text-gray-600 { color: var(--text-dim) !important; }
-.text-gray-500 { color: var(--text-dim) !important; }
-.text-gray-400 { color: var(--text-dim) !important; }
-.text-white { color: var(--text-on-primary) !important; }
-
-/* Borders */
-.border-gray-200 { border-color: var(--border-main) !important; }
-.border-gray-300 { border-color: var(--border-strong) !important; }
-.border-gray-700 { border-color: var(--border-strong) !important; }
-.border-gray-800 { border-color: var(--border-main) !important; }
-
-/* Inputs */
-.input-field, .input, 
-input[type="text"], input[type="email"], input[type="password"],
-input[type="number"], textarea, select {
-    background-color: var(--input-bg) !important;
-    border-color: var(--input-border) !important;
-    color: var(--text-main) !important;
-}
-.input-field:focus,
-input:focus, textarea:focus, select:focus {
-    border-color: var(--primary) !important;
-}
-
-/* Buttons */
-.btn-primary {
-    background-color: var(--primary) !important;
-    color: var(--text-on-primary) !important;
-    border-color: var(--primary-hover) !important;
-}
-.btn-primary:hover {
-    background-color: var(--primary-hover) !important;
-}
-.btn-secondary {
-    background-color: var(--bg-hover) !important;
-    color: var(--text-main) !important;
-    border-color: var(--border-main) !important;
-}
-
-/* Sidebars & Headers */
-.sidebar-panel, .dashboard-sidebar, .global-header {
-    background-color: var(--bg-sidebar) !important;
-    border-color: var(--border-main) !important;
-}
-
-/* Chat Bubbles specifically */
-.ai-bubble {
-    background-color: var(--bg-card) !important;
-    border-color: var(--border-muted) !important;
-    color: var(--text-main) !important;
-}
-.user-bubble {
-    background-color: color-mix(in srgb, var(--primary) 15%, var(--bg-card)) !important;
-    border-color: var(--border-main) !important;
-    color: var(--text-main) !important;
-}
-
-/* Message Area Background */
-.message-row {
-    background-color: transparent !important;
-}
-.message-row.is-ai {
-    background-color: color-mix(in srgb, var(--bg-card) 40%, transparent) !important;
-    border-color: var(--border-muted) !important;
-}
-
-/* Code Blocks */
-.code-block-container {
-    background-color: var(--bg-card) !important;
-    border-color: var(--border-main) !important;
-    color: var(--text-main) !important;
-}
-.code-block-header {
-    background-color: var(--bg-elevated) !important;
-    border-color: var(--border-muted) !important;
-    color: var(--text-dim) !important;
-}
-
-/* Dropdowns & Modals */
-.dropdown-menu, .menu-content, [role="menu"],
-.modal-panel, .modal-content, [role="dialog"] {
-    background-color: var(--bg-card) !important;
-    border-color: var(--border-main) !important;
-    color: var(--text-main) !important;
-}
-.modal-header {
-    background-color: var(--bg-elevated) !important;
-    border-color: var(--border-muted) !important;
-}
-
-/* Scrollbars */
-::-webkit-scrollbar-track { background: var(--bg-app) !important; }
-::-webkit-scrollbar-thumb { background: var(--border-muted) !important; }
-::-webkit-scrollbar-thumb:hover { background: var(--border-strong) !important; }
-
-/* Hover Effects */
-.artefact-card:hover,
-.memory-card:hover {
-    box-shadow: var(--effect-shadow-md) !important;
-}
+.vibe-glass { --bg-card: rgba(255, 255, 255, 0.7); }
+.vibe-cyberpunk { --primary: #059669; }
+.vibe-ocean { --primary: #0891b2; --accent: #06b6d4; }
+.vibe-lavender { --primary: #7c3aed; --accent: #8b5cf6; }
+.vibe-monochrome { --bg-app: #0a0a0a; --bg-card: #171717; --text-main: #fafafa; }

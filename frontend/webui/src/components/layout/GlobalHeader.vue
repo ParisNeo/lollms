@@ -34,6 +34,7 @@ import IconRefresh from '../../assets/icons/IconRefresh.vue';
 import IconCheckCircle from '../../assets/icons/IconCheckCircle.vue';
 import IconChevronDown from '../../assets/icons/IconChevronDown.vue';
 import IconCopy from '../../assets/icons/IconCopy.vue';
+import IconScissors from '../../assets/icons/IconScissors.vue';
 
 const discussionsStore = useDiscussionsStore();
 const uiStore = useUiStore();
@@ -62,12 +63,49 @@ const showDataZoneButton = computed(() => {
     return !!discussionsStore.currentDiscussionId;
 });
 
+
+
+
 const showCopyDiscussionButton = computed(() => {
     return !!discussionsStore.currentDiscussionId && 
            Array.isArray(discussionsStore.messages) && 
            discussionsStore.messages.length > 0;
 });
 
+const showForkCompressButton = computed(() => {
+    return !!discussionsStore.currentDiscussionId && 
+           Array.isArray(discussionsStore.messages) && 
+           discussionsStore.messages.length > 1; // Need at least 2 messages to compress
+});
+
+// Compression State
+const isCompressing = ref(false);
+const compressionStartedHandler = ref(null);
+
+
+async function handleForkCompress() {
+    const confirmed = await uiStore.showConfirmation({
+        title: 'Fork & Compress',
+        message: 'Create a new discussion with an AI-generated summary of this conversation? All artefacts and context will be preserved.',
+        confirmText: 'Compress',
+        cancelText: 'Cancel'
+    });
+    
+    if (confirmed) {
+        try {
+            // Set flag immediately
+            isCompressing.value = true;
+            
+            const result = await discussionsStore.forkAndCompress(discussionsStore.currentDiscussionId);
+            if (result) {
+                isCompressing.value = false;
+                await discussionsStore.selectDiscussion(result.id);
+            }
+        } catch (e) {
+            isCompressing.value = false;
+        }
+    }
+}
 async function handleCopyDiscussion() {
     await discussionsStore.copyDiscussionAsMarkdown();
 }
@@ -585,6 +623,17 @@ async function handleRefreshModels() {
         >
             <IconCopy class="w-4 h-4" />
             <span class="text-xs font-bold hidden xl:inline">Copy MD</span>
+        </button>
+
+        <!-- Fork & Compress Discussion -->
+        <button 
+            v-if="showForkCompressButton" 
+            @click="handleForkCompress" 
+            class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition-colors flex items-center gap-1.5"
+            title="Create compressed copy with summary only"
+        >
+            <IconScissors class="w-4 h-4" />
+            <span class="text-xs font-bold hidden xl:inline">Compress</span>
         </button>
 
         <div class="h-6 w-px bg-gray-200 dark:border-gray-700 mx-1 hidden sm:block"></div>

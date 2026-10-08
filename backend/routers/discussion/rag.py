@@ -101,6 +101,10 @@ def build_rag_router(router: APIRouter):
                     raise HTTPException(status_code=400, detail=f"Invalid or inaccessible RAG datastore ID: {ds_id} ({e.detail})")
 
         discussion_obj.set_metadata_item('rag_datastore_ids', update_payload.rag_datastore_ids)
+       
+        # CRITICAL FIX: Ensure metadata is committed to the DB to persist RAG sources across generations/reloads.
+        # Without this, the next generation cycle or a fresh page load reverts to the stale DB state.
+        discussion_obj.commit()
 
         user_db = db.query(DBUser).filter(DBUser.username == username).one()
         is_starred = db.query(UserStarredDiscussion).filter_by(user_id=user_db.id, discussion_id=discussion_id).first() is not None

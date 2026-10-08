@@ -1,5 +1,5 @@
 /* Cyberpunk Vibe - Neon Dark Theme */
-:root, .vibe-cyberpunk {
+.vibe-cyberpunk {
   --brand-primary: #00ff9d;
   --brand-primary-hover: #00cc7d;
   --brand-accent: #ff00a0;
@@ -24,7 +24,7 @@
 }
 
 /* Ensure all semantic variables are derived from brand variables */
-:root, .vibe-cyberpunk {
+.vibe-cyberpunk {
   --bg-app: var(--brand-bg-app);
   --bg-card: var(--brand-bg-card);
   --bg-elevated: var(--brand-bg-elevated);

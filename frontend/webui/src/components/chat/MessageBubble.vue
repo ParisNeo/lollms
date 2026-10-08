@@ -710,6 +710,37 @@ function handleBranchOrRegenerate() {
     discussionsStore.initiateBranch(props.message);
 }
 
+async function handleSaveAndSend() {
+    if (isNewManualMessage.value) return;
+    
+    try {
+        const keptImagesB64 = editedImages.value.filter(img => !img.isNew).map(img => img.url);
+        
+        // Save the message first
+        await discussionsStore.saveMessageChanges({ 
+            messageId: props.message.id, 
+            newContent: editedContent.value, 
+            keptImagesB64: keptImagesB64, 
+            newImageFiles: newImageFiles.value 
+        });
+        
+        // Close edit mode after successful save
+        isEditing.value = false;
+        
+        // Wait a tick for state to settle, then branch with the updated message
+        await nextTick();
+        
+        // Trigger branch generation - this treats the edited message as new input
+        const savedMessage = discussionsStore.activeMessages.find(m => m.id === props.message.id);
+        if (savedMessage) {
+            discussionsStore.initiateBranch(savedMessage);
+        }
+    } catch (e) {
+        console.error("Save & Send failed:", e);
+        // Stay in edit mode on error
+    }
+}
+
 // NEW: Function to handle regeneration requests from the renderer tags
 function handleTagRegeneration(part) {
     if (areActionsDisabled.value) return;
@@ -986,6 +1017,10 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             </button>
                             <div class="flex justify-end space-x-2">
                                 <button @click="handleCancelEdit" class="btn btn-secondary !py-1 !px-3">Cancel</button>
+                                <button v-if="isCurrentUser && !isNewManualMessage" @click="handleSaveAndSend" :disabled="areActionsDisabled" class="btn btn-primary !py-1 !px-3 flex items-center gap-1.5" title="Save changes and create a new branch with regenerated response">
+                                    <IconGitBranch class="w-3.5 h-3.5" />
+                                    <span>Save & Send</span>
+                                </button>
                                 <button @click="handleSaveEdit" class="btn btn-primary !py-1 !px-3">Save</button>
                             </div>
                         </div>

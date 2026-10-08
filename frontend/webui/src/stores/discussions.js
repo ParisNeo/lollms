@@ -605,6 +605,39 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         // Store-level methods
         attachSkill,
         detachSkill,
+        async forkAndCompress(discussionId) {
+            if (!discussionId) return;
+            
+            // Emit event for UI feedback
+            emit('fork-compress-started', { discussionId });
+            
+            try {
+                const response = await apiClient.post(`/api/discussions/${discussionId}/fork_compress`);
+                const newDiscussion = response.data;
+                
+                if (newDiscussion && newDiscussion.id) {
+                    discussions.value[newDiscussion.id] = {
+                        id: newDiscussion.id,
+                        title: newDiscussion.title,
+                        is_starred: false,
+                        created_at: new Date().toISOString(),
+                        last_activity_at: new Date().toISOString(),
+                        discussion_data_zone: null,
+                        active_discussion_images: []
+                    };
+                }
+                
+                if (typeof getActions().loadDiscussions === 'function') {
+                    await getActions().loadDiscussions();
+                }
+                
+                useUiStore().addNotification('Discussion forked and compressed!', 'success');
+                return newDiscussion;
+            } catch (error) {
+                useUiStore().addNotification(error.response?.data?.detail || 'Failed to fork and compress discussion.', 'error');
+                throw error;
+            }
+        },
         generateTTSRaw,
         generateTTSForMessage,
         transcribeAudio,

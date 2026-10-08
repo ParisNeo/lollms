@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-08 22:21]
+
+- fix(discussion): restructure discussion router logic to implement RAG improvements
+
 ## [2026-10-06 23:00]
 
 - feat(app-store): remove unused asset files for AboutView, AddFriend, and AdminCreateUserModal
