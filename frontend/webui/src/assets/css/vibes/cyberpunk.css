@@ -1,45 +1,100 @@
-/* Cyberpunk Vibe - Neon Dark Theme */
-.vibe-cyberpunk {
+/* Cyberpunk / Retro Vibe - Enhanced with Light Mode Support */
+
+/* Dark Mode (Default) */
+.vibe-cyberpunk, [data-vibe="cyberpunk"], html.vibe-cyberpunk, html.dark.vibe-cyberpunk {
   --brand-primary: #00ff9d;
-  --brand-primary-hover: #00cc7d;
-  --brand-accent: #ff00a0;
+  --brand-primary-hover: #00d984;
+  --brand-accent: #ff00ff;
+  --brand-secondary: #00ffff;
   
-  --brand-bg-app: #0a0e1a;
-  --brand-bg-app-hover: #12182b;
-  --brand-bg-card: #0f1425;
-  --brand-bg-elevated: #1a2038;
-  --brand-bg-overlay: rgba(15, 20, 37, 0.95);
-  --brand-bg-sidebar: #0a0e1a;
-  --brand-bg-hover: #1a2038;
-  --brand-input-bg: #1a2038;
-  --brand-input-border: #2a3a5a;
+  --brand-bg-app: #050505;
+  --brand-bg-app-hover: #111111;
+  --brand-bg-card: #0d0d0d;
+  --brand-bg-elevated: #1a1a1a;
+  --brand-bg-overlay: rgba(13, 13, 13, 0.95);
+  --brand-bg-sidebar: #000000;
+  --brand-bg-hover: #1a1a1a;
+  --brand-bg-subtle: #0f0f0f;
   
-  --brand-border-main: #2a3a5a;
-  --brand-border-muted: #1a2038;
-  --brand-border-strong: #4a5a7a;
+  --brand-border-main: #00ff9d;
+  --brand-border-muted: #004d2e;
+  --brand-border-strong: #00ff9d;
+  --brand-border-light-line: rgba(0, 255, 157, 0.2);
   
-  --brand-text-main: #e0e7ff;
-  --brand-text-dim: #8a9ab8;
+  --brand-text-main: #00ff9d;
+  --brand-text-dim: #00b36b;
+  --brand-text-muted: #007346;
   --brand-text-on-primary: #000000;
+  
+  --brand-input-bg: #0d0d0d;
+  --brand-input-border: #00ff9d;
+  
+  /* Cyberpunk specific extras */
+  --primary-glow: 0 0 10px rgba(0, 255, 157, 0.7);
+  --danger: #ff0055;
+  --warning: #ffee00;
 }
 
-/* Ensure all semantic variables are derived from brand variables */
-.vibe-cyberpunk {
-  --bg-app: var(--brand-bg-app);
-  --bg-card: var(--brand-bg-card);
-  --bg-elevated: var(--brand-bg-elevated);
-  --bg-overlay: var(--brand-bg-overlay);
-  --bg-sidebar: var(--brand-bg-sidebar);
-  --bg-hover: var(--brand-bg-hover);
-  --input-bg: var(--brand-input-bg);
-  --input-border: var(--brand-input-border);
-  --text-main: var(--brand-text-main);
-  --text-dim: var(--brand-text-dim);
-  --text-on-primary: var(--brand-text-on-primary);
-  --border-main: var(--brand-border-main);
-  --border-muted: var(--brand-border-muted);
-  --border-strong: var(--brand-border-strong);
-  --primary: var(--brand-primary);
-  --primary-hover: var(--brand-primary-hover);
-  --accent: var(--brand-accent);
+/* Light Mode */
+:root:not(.dark) .vibe-cyberpunk, [data-theme="light"] [data-vibe="cyberpunk"] {
+  --brand-primary: #00b368;
+  --brand-primary-hover: #00994f;
+  --brand-accent: #d900b8;
+  --brand-secondary: #00b3b3;
+  
+  --brand-bg-app: #f0f0f0;
+  --brand-bg-app-hover: #e8e8e8;
+  --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #f8f8f8;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
+  --brand-bg-sidebar: #fafafa;
+  --brand-bg-hover: #e8ffe8;
+  --brand-bg-subtle: #f5f5f5;
+  
+  --brand-border-main: #00b368;
+  --brand-border-muted: #b3ffd9;
+  --brand-border-strong: #00b368;
+  --brand-border-light-line: rgba(0, 179, 104, 0.15);
+  
+  --brand-text-main: #0a0a0a;
+  --brand-text-dim: #4a7a5f;
+  --brand-text-muted: #6b8a7a;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #00b368;
+  
+  /* Cyberpunk specific extras - reduced glow for light mode */
+  --primary-glow: 0 0 4px rgba(0, 179, 104, 0.3);
+  --danger: #d9003d;
+  --warning: #cc9900;
+}
+
+/* Dark Mode Button Styles */
+.vibe-cyberpunk .btn-primary, html.dark.vibe-cyberpunk .btn-primary {
+  text-shadow: 0 0 5px rgba(0, 255, 157, 0.5);
+  box-shadow: var(--primary-glow);
+  border: 1px solid var(--brand-primary);
+}
+
+/* Light Mode Button Styles */
+:root:not(.dark) .vibe-cyberpunk .btn-primary {
+  text-shadow: none;
+  box-shadow: 0 2px 4px rgba(0, 179, 104, 0.15);
+  border: 1px solid var(--brand-primary);
+}
+
+/* Cyberpunk-specific glow effects for dark mode */
+html.dark.vibe-cyberpunk {
+  /* Optional: Add subtle background pattern or effects here */
+  background-image: 
+    radial-gradient(circle at 20% 80%, rgba(0, 255, 157, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(255, 0, 255, 0.05) 0%, transparent 50%);
+}
+
+/* Light mode gets a cleaner, more subtle aesthetic */
+:root:not(.dark) .vibe-cyberpunk {
+  background-image: 
+    radial-gradient(circle at 20% 80%, rgba(0, 179, 104, 0.02) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(217, 0, 184, 0.02) 0%, transparent 50%);
 }

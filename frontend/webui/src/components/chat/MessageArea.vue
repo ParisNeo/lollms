@@ -67,10 +67,11 @@ onMounted(() => {
     intersectionObserver = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && hasMoreMessages.value && !isLoadingMessages.value) {
             const el = messageContainer.value;
+            if (!el) return;
             const oldScrollHeight = el.scrollHeight;
             discussionsStore.loadMoreMessages().then(() => {
                 nextTick(() => {
-                    el.scrollTop = el.scrollHeight - oldScrollHeight;
+                    if(el) el.scrollTop = el.scrollHeight - oldScrollHeight;
                 });
             });
         }
@@ -150,23 +151,25 @@ function addManualMessage(sender_type) {
           <svg class="animate-spin h-6 w-6 text-gray-400 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
       </div>
       <TransitionGroup ref="messagesListRef" name="list" tag="div" class="relative flex flex-col pb-40">
-        <!-- CRITICAL FIX: TransitionGroup children must be single elements. Wrapping separators and bubbles in a div with the message ID as key ensures DOM stability. -->
         <div v-for="(message, index) in activeMessages" :key="message.id">
-          <div v-if="shouldShowDateSeparator(index)" class="date-separator">
-              <div class="flex-1 h-px"></div>
+          <div v-if="shouldShowDateSeparator(index)" class="date-separator flex items-center gap-4 my-4">
+              <div class="flex-1 h-px bg-border-muted"></div>
               <div class="text-xs font-semibold uppercase text-text-dim">
                 {{ formatDateSeparator(message.created_at) }}
               </div>
-              <div class="flex-1 h-px"></div>
+              <div class="flex-1 h-px bg-border-muted"></div>
           </div>
           <MessageBubble :message="message" />
         </div>
       </TransitionGroup>
 
-      <!-- Add Message Button, positioned after messages -->
       <div class="flex justify-center my-6">
         <div class="relative">
-            <button ref="addButtonRef" @click="isAddMenuOpen = !isAddMenuOpen" class="flex items-center justify-center w-8 h-8 rounded-full transition-colors duration-200 hover:bg-bg-hover" style="background-color: var(--bg-hover); color: var(--text-main);">
+            <button ref="addButtonRef" @click="isAddMenuOpen = !isAddMenuOpen"
+                    class="flex items-center justify-center w-8 h-8 rounded-full transition-all duration-200 shadow-md select-none"
+                    style="background-color: var(--brand-bg-elevated); border: 1.5px solid var(--brand-border-main); color: var(--brand-text-main);"
+                    @mouseenter="$event.currentTarget.style.backgroundColor='var(--brand-bg-hover)'; $event.currentTarget.style.borderColor='var(--brand-primary)'"
+                    @mouseleave="$event.currentTarget.style.backgroundColor='var(--brand-bg-elevated)'; $event.currentTarget.style.borderColor='var(--brand-border-main)'">
                 <span class="font-bold text-xl leading-none select-none">+</span>
             </button>
             <Teleport to="body">
@@ -178,12 +181,22 @@ function addManualMessage(sender_type) {
                     leave-from-class="transform opacity-100 scale-100"
                     leave-to-class="transform opacity-0 scale-95"
                 >
-                    <div v-if="isAddMenuOpen" ref="addMenuRef" :style="floatingStyles" class="z-50 w-56 origin-top-left rounded-md shadow-lg ring-1 ring-opacity-5 focus:outline-none py-1 glass-card">
-                        <button @click="addManualMessage('user')" class="w-full text-left p-2 rounded-md hover:bg-bg-hover text-sm flex items-center">
+                    <div v-if="isAddMenuOpen" ref="addMenuRef" :style="floatingStyles"
+                         class="z-50 w-56 origin-top-left rounded-xl shadow-[0_16px_40px_rgba(0,0,0,0.4)] py-1.5 focus:outline-none"
+                         style="background-color: var(--brand-bg-elevated); border: 1.5px solid var(--brand-border-main); color: var(--brand-text-main);">
+                        <button @click="addManualMessage('user')"
+                                class="w-full text-left px-3 py-2 rounded-md text-sm flex items-center transition-colors"
+                                style="color: var(--brand-text-main);"
+                                @mouseenter="$event.currentTarget.style.backgroundColor='var(--brand-bg-hover)'"
+                                @mouseleave="$event.currentTarget.style.backgroundColor=''">
                             <IconUserCircle class="w-5 h-5 mr-2" />
                             <span>Add User Message</span>
                         </button>
-                        <button @click="addManualMessage('assistant')" class="w-full text-left p-2 rounded-md hover:bg-bg-hover text-sm flex items-center">
+                        <button @click="addManualMessage('assistant')"
+                                class="w-full text-left px-3 py-2 rounded-md text-sm flex items-center transition-colors"
+                                style="color: var(--brand-text-main);"
+                                @mouseenter="$event.currentTarget.style.backgroundColor='var(--brand-bg-hover)'"
+                                @mouseleave="$event.currentTarget.style.backgroundColor=''">
                             <IconSparkles class="w-5 h-5 mr-2" />
                             <span>Add AI Message</span>
                         </button>
@@ -193,7 +206,6 @@ function addManualMessage(sender_type) {
         </div>
       </div>
     </div>
-    <!-- Scroll to Bottom Button -->
     <div class="absolute bottom-44 right-8 z-10">
         <transition
             enter-active-class="transition-opacity ease-out duration-300"

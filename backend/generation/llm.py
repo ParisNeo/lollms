@@ -2313,6 +2313,10 @@ def build_llm_generation_router(router: APIRouter):
                             forward_artefact_chunks=True,
                             suppress_images=not model_supports_vision,
                             event_mode=EventMode.PROCESSING_TAG_MODE,
+
+                            enable_data_tools=True,
+                            enforce_end_tag=True,
+                            
                             **chat_extra_kwargs
                         )
                     finally:

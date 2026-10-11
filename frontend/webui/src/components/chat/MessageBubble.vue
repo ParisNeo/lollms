@@ -919,14 +919,15 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
 
                                 <!-- Main Image Display for this Group -->
                                 <div v-if="group.images.length > 0" 
-                                     class="main-image-viewport relative aspect-video sm:aspect-square max-h-[500px] w-full rounded-[2rem] overflow-hidden bg-gray-50 dark:bg-gray-900/50 border border-gray-100 dark:border-gray-800 shadow-xl group/viewport transition-all duration-300"
-                                     :class="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'border-red-500' : 'border-transparent dark:border-gray-700'"
+                                     class="main-image-viewport relative aspect-video sm:aspect-square max-h-[500px] w-full rounded-[2rem] overflow-hidden border shadow-xl group/viewport transition-all duration-300"
+                                     style="background-color: var(--input-bg); border-color: var(--border-muted);"
+                                     :class="!isImageActive(selectedViewIndices[group.id] ?? group.indices[0]) ? 'border-red-500' : ''"
                                 >
                                     
                                     <!-- Spinner Overlay for Regenerating -->
-                                    <div v-if="isRegenerating(group.id)" class="absolute inset-0 z-20 bg-white/60 dark:bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center">
-                                        <IconAnimateSpin class="w-10 h-10 text-blue-500 animate-spin mb-2" />
-                                        <span class="text-sm font-bold text-gray-800 dark:text-gray-200">Generating variation...</span>
+                                    <div v-if="isRegenerating(group.id)" class="absolute inset-0 z-20 backdrop-blur-md flex flex-col items-center justify-center transition-all" style="background-color: color-mix(in srgb, var(--bg-app) 60%, transparent);">
+                                        <IconAnimateSpin class="w-10 h-10 animate-spin mb-2" style="color: var(--primary);"/>
+                                        <span class="text-sm font-bold" style="color: var(--text-main);">Generating variation...</span>
                                     </div>
 
                                     <!-- Handle click on image -->
@@ -995,7 +996,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                     <!-- Editing Mode -->
                     <div v-else class="w-full">
                         <input type="file" ref="editImageInput" @change="handleEditImageSelected" multiple accept="image/*" class="hidden">
-                        <div v-if="editedImages.length > 0" class="mb-2 p-2 border-dashed border-gray-300 dark:border-gray-600 rounded-md">
+                        <div v-if="editedImages.length > 0" class="mb-2 p-2 border-dashed rounded-md" style="border-color: var(--border-strong); background-color: var(--bg-card);">
                             <div class="flex flex-wrap gap-2">
                                 <div v-for="(image, index) in editedImages" :key="image.url" class="relative w-16 h-16">
                                     <img :src="image.url" class="w-full h-full object-cover rounded-md" alt="Image preview" />

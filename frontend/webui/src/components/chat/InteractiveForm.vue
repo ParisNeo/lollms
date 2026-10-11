@@ -410,7 +410,7 @@ async function submitForm() {
 </script>
 
 <template>
-    <div class="my-4 border border-blue-200/80 dark:border-blue-900/60 rounded-2xl overflow-hidden bg-white dark:bg-gray-900 shadow-lg transition-all max-w-xl mx-auto not-prose">
+    <div class="my-4 border border-blue-200/80 dark:border-blue-900/60 rounded-2xl overflow-hidden shadow-lg transition-all max-w-xl mx-auto not-prose" style="background-color: var(--bg-card);">
         <!-- Form Header -->
         <div class="px-5 py-3.5 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 dark:from-blue-950/40 dark:to-gray-800/60 border-b border-blue-100 dark:border-gray-800 flex items-center justify-between">
             <div class="flex items-center gap-3 min-w-0">
@@ -457,13 +457,14 @@ async function submitForm() {
                         <!-- TYPE: Text / Number / Email / Date / Password / Url / Time -->
                         <input v-if="['text', 'number', 'email', 'date', 'password', 'url', 'time'].includes(field.type)" 
                                :type="field.type"
-                               v-model="answers[field.name]" 
-                               :placeholder="field.placeholder || ''" 
+                               v-model="answers[field.name]"
+                               :placeholder="field.placeholder || ''"
                                :min="field.min"
                                :max="field.max"
                                :step="field.step"
                                class="input-field text-xs py-2 px-3" 
-                               :disabled="isDone">
+                               :disabled="isDone"
+                               style="background-color: var(--input-bg); border-color: var(--input-border); color: var(--text-main);">
 
                         <!-- TYPE: Textarea -->
                         <textarea v-else-if="field.type === 'textarea'" 
@@ -565,7 +566,7 @@ async function submitForm() {
         </div>
 
         <!-- Form Footer -->
-        <div v-if="!isDone" class="px-5 py-3 bg-gray-50 dark:bg-gray-950/40 border-t dark:border-gray-800 flex justify-end">
+        <div v-if="!isDone" class="px-5 py-3 border-t dark:border-gray-800 flex justify-end" style="background-color: var(--bg-app);">
             <button @click="submitForm" 
                     class="btn btn-primary px-6 py-2 rounded-xl shadow-md font-bold text-xs uppercase tracking-wider transition-all" 
                     :disabled="isSubmitting">

@@ -1,5 +1,4 @@
 <script setup>
-// ... existing imports ...
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue';
 import { useRouter } from 'vue-router'; 
 import { keymap } from '@codemirror/view';
@@ -729,7 +728,7 @@ const progressBorderColorClass = computed(() => {
     if (totalPercentage.value >= 100) return 'border-red-600 dark:border-red-500';
     if (totalPercentage.value >= 90) return 'border-red-400 dark:border-red-400';
     if (totalPercentage.value >= 75) return 'border-yellow-500 dark:border-yellow-400';
-    return 'border-gray-200 dark:border-gray-700';
+    return 'border-border-main';
 });
 
 const ragStoreSelection = computed({
@@ -1556,17 +1555,18 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="shrink-0 bg-white/95 dark:bg-gray-800/95 backdrop-blur border-t dark:border-gray-700 shadow-lg relative">
+    <div class="shrink-0 themed-chat-input backdrop-blur border-t shadow-lg relative">
 
         <!-- Vision Warning -->
         <div v-if="!currentModelVisionSupport && stagedImages.length > 0" class="px-4 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-[10px] text-yellow-700 dark:text-yellow-300 flex items-center gap-2">
+            <!-- Vision warning intentionally uses hardcoded yellow for universal attention -->
             <IconInfo class="w-3.5 h-3.5 shrink-0" />
             <p>Model lacks vision support. Your uploaded images will be ignored.</p>
         </div>
 
         <!-- Context Bar / Feature Badges Row -->
         <!-- Fixed: Removed overflow-x-auto to prevent clipping the tooltip, added relative z-40 -->
-        <div v-if="showHeaderRow" class="px-3 py-1 bg-gray-50 dark:bg-gray-900 border-b dark:border-gray-700 relative z-40">
+        <div v-if="showHeaderRow" class="px-3 py-1 themed-panel border-b relative z-40">
              <div class="max-w-4xl mx-auto flex items-center gap-3">
                 <template v-if="showContextBar">
                     <div @click="uiStore.openModal('contextViewer')" 
@@ -1575,58 +1575,59 @@ onUnmounted(() => {
                         <!-- ── [NEW] Rich Tooltip Overlay ── -->
                         <!-- Fixed: Increased z-index to 50 and ensured background is solid enough to read -->
                         <div class="absolute bottom-full left-0 mb-4 w-80 opacity-0 translate-y-2 pointer-events-none group-hover/context:opacity-100 group-hover/context:translate-y-0 group-hover/context:pointer-events-auto transition-all duration-300 z-50">
-                            <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden p-4 space-y-3">
-                                <div class="flex justify-between items-center border-b dark:border-gray-800 pb-2 mb-2">
-                                    <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Context Usage</span>
+                            <div class="themed-panel rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden p-4 space-y-3">
+                                <div class="flex justify-between items-center border-b border-b-border-muted pb-2 mb-2">
+                                    <span class="text-[10px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Context Usage</span>
                                     <span class="text-xs font-mono font-bold" :class="totalPercentage > 90 ? 'text-red-500' : 'text-blue-500'">{{ Math.round(totalPercentage) }}%</span>
                                 </div>
                                 <div class="space-y-2.5">
                                     <div v-for="part in contextParts" :key="part.label" class="flex items-center justify-between group/item">
                                         <div class="flex items-center gap-2">
                                             <div class="w-2.5 h-2.5 rounded-full shadow-sm" :class="part.colorClass"></div>
-                                            <span class="text-[11px] font-bold text-gray-700 dark:text-gray-300">{{ part.label }}</span>
+                                            <span class="text-[11px] font-bold" style="color: var(--brand-text-main);">{{ part.label }}</span>
                                         </div>
                                         <div class="flex items-center gap-2">
-                                            <span class="text-[10px] font-mono text-gray-500 dark:text-gray-400">{{ part.value.toLocaleString() }}</span>
-                                            <span class="text-[9px] text-gray-400 w-8 text-right">{{ Math.round(getPercentage(part.value)) }}%</span>
+                                            <span class="text-[10px] font-mono" style="color: var(--brand-text-dim);">{{ part.value.toLocaleString() }}</span>
+                                            <span class="text-[9px] w-8 text-right" style="color: var(--brand-text-dim);">{{ Math.round(getPercentage(part.value)) }}%</span>
                                         </div>
                                     </div>
                                 </div>
-                                <div class="pt-2 border-t dark:border-gray-800 flex justify-between items-center text-[9px] font-black uppercase text-gray-400 tracking-tighter">
+                                <div class="pt-2 border-t flex justify-between items-center text-[9px] font-black uppercase tracking-tighter"
+                                     style="color: var(--brand-text-dim); border-color: var(--brand-border-muted);">
                                     <span>Total Used</span>
-                                    <span class="font-mono text-gray-600 dark:text-gray-200">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
+                                    <span class="font-mono" style="color: var(--brand-text-main);">{{ totalCurrentTokens.toLocaleString() }} / {{ maxTokens.toLocaleString() }}</span>
                                 </div>
                             </div>
                             <!-- Tooltip Arrow -->
-                            <div class="absolute left-6 top-full -mt-1 w-3 h-3 bg-white dark:bg-gray-900 border-r border-b border-gray-200 dark:border-gray-700 transform rotate-45"></div>
+                            <div class="absolute left-6 top-full -mt-1 w-3 h-3 themed-panel transform rotate-45" style="border-right: 1px solid var(--border-main); border-bottom: 1px solid var(--border-main);"></div>
                         </div>
 
-                        <div class="flex items-center gap-1 text-gray-500 shrink-0 group-hover/context:text-blue-500 transition-colors">
+                        <div class="flex items-center gap-1 shrink-0 group-hover/context:text-blue-500 transition-colors" style="color: var(--brand-text-dim);">
                             <IconToken class="w-3.5 h-3.5" />
                             <span class="text-[10px] font-black uppercase tracking-tight hidden sm:inline">Context</span>
                         </div>
 
                         <!-- Progress Bar with improved contrast and segment dividers -->
-                        <div :class="['grow h-2.5 rounded-full overflow-hidden flex border dark:border-gray-800 transition-all shadow-inner', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'bg-gray-200 dark:bg-gray-700 group-hover/context:ring-blue-400/50', progressBorderColorClass]">
+                        <div :class="['grow h-2.5 rounded-full overflow-hidden flex border transition-all shadow-inner', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'themed-zone group-hover/context:ring-blue-400/50', progressBorderColorClass]">
                             <div v-for="part in contextParts" :key="part.label" 
                                 :class="[totalPercentage >= 100 ? 'bg-red-600' : part.colorClass, 'h-full transition-all duration-500 ease-out border-r border-black/5 last:border-0']" 
                                 :style="{ width: `${getPercentage(part.value)}%` }" 
                             ></div>
                         </div>
 
-                        <div class="font-mono text-[10px] text-gray-500 whitespace-nowrap shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors">
+                        <div class="font-mono text-[10px] whitespace-nowrap shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors" style="color: var(--brand-text-dim);">
                             <span class="font-bold">{{ totalCurrentTokens }}</span><span class="opacity-30 mx-1">/</span><span>{{ maxTokens }}</span>
                         </div>
                     </div>
                 </template>
                 <div v-else class="grow"></div> 
 
-                <div class="h-3 w-px bg-gray-300 dark:bg-gray-700 mx-1 shrink-0"></div>
+                <div class="h-3 w-px bg-bg-hover mx-1 shrink-0"></div>
 
                 <!-- ── [AMUSING] AI VIBE & RPG LOADOUT COCKPIT TRIGGER ── -->
                 <button 
                     @click="isLoadoutModalOpen = true"
-                    class="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider shadow-2xs hover:scale-105 transition-all cursor-pointer select-none shrink-0"
+                    class="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/40 dark:hover:bg-purple-900/50 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 text-[10px] font-black uppercase tracking-wider shadow-2xs hover:scale-105 transition-all cursor-pointer select-none shrink-0"
                     title="Click for AI Vibe Check & Character Loadout"
                 >
                     <span class="text-xs">{{ aiVibeEmoji }}</span>
@@ -1659,7 +1660,7 @@ onUnmounted(() => {
             </div>
 
             <!-- SPECIAL SELECTION ZONE -->
-            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0 || attachedSkills.length > 0 || loadedContextItems.length > 0 || activeRagStoresInfo.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 bg-gray-100 dark:bg-gray-900/60 rounded-xl border-2 border-dashed border-gray-300 dark:border-gray-700 transition-all">
+            <div v-if="stagedImages.length > 0 || attachedFiles.length > 0 || attachedSkills.length > 0 || loadedContextItems.length > 0 || activeRagStoresInfo.length > 0" class="flex flex-wrap gap-2 max-h-40 overflow-y-auto custom-scrollbar p-3 mb-2 themed-zone rounded-xl border-2 border-dashed transition-all">
 
                 <!-- Active RAG Database Indicators (Drop Target) -->
                 <div v-for="ragStore in activeRagStoresInfo" :key="`rag-chip-${ragStore.id}`"
@@ -1790,7 +1791,7 @@ onUnmounted(() => {
             </div>
 
             <!-- Input Controls -->
-            <div class="flex items-end gap-2 bg-gray-50 dark:bg-gray-900/50 p-2 rounded-2xl border border-gray-200 dark:border-gray-700 focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm relative">
+            <div class="flex items-end gap-2 p-2 rounded-2xl border focus-within:border-blue-500/50 focus-within:ring-4 focus-within:ring-blue-500/10 transition-all duration-200 shadow-sm relative themed-input-row">
 
                 <div class="pb-1 pl-1 flex items-center gap-1.5 shrink-0">
                     <!-- ── REWORKED TABBED WORKSPACE & KNOWLEDGE HUB MENU ── -->
@@ -1798,15 +1799,12 @@ onUnmounted(() => {
                         <button 
                             type="button" 
                             @click="isWorkspaceMenuOpen = !isWorkspaceMenuOpen" 
-                            class="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative active:scale-95 cursor-pointer"
-                            :class="{
-                                'text-blue-600 dark:text-blue-400 border-blue-400 dark:border-blue-600 bg-blue-50/60 dark:bg-blue-900/30': isWorkspaceMenuOpen,
-                                'text-gray-500': !isWorkspaceMenuOpen
-                            }"
+                            class="btn-icon themed-btn-surface w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border relative active:scale-95 cursor-pointer workspace-hub-trigger"
+                            :class="{ 'workspace-hub-trigger-active': isWorkspaceMenuOpen }"
                             title="Workspace Hub & Knowledge Injection"
                         >
                             <IconPlus class="w-4 h-4" />
-                            <span v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0 || loadedContextItems.length > 0" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2 border-white dark:border-gray-800"></span>
+                            <span v-if="ragStoreSelection.length > 0 || mcpToolSelection.length > 0 || loadedContextItems.length > 0" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-blue-500 rounded-full border-2" style="border-color: var(--bg-card);"></span>
                         </button>
 
                         <!-- Tabbed Popover Menu -->
@@ -1820,15 +1818,17 @@ onUnmounted(() => {
                         >
                             <div 
                                 v-if="isWorkspaceMenuOpen" 
-                                class="absolute bottom-full left-0 mb-3 w-88 sm:w-[420px] bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl overflow-hidden z-50 text-gray-800 dark:text-gray-100 flex flex-col max-h-[82vh]"
+                                class="absolute bottom-full left-0 mb-3 w-88 sm:w-[420px] rounded-2xl shadow-2xl overflow-hidden z-50 flex flex-col max-h-[82vh] border"
+                                style="background-color: var(--brand-bg-elevated); border-color: var(--brand-border-main);"
                             >
                                 <!-- Tab Switcher Header -->
-                                <div class="px-2 pt-2 pb-1 border-b dark:border-gray-800 bg-gray-50/80 dark:bg-gray-950/60 flex items-center gap-1 overflow-x-auto custom-scrollbar shrink-0 select-none">
+                                <div class="px-2 pt-2 pb-1 flex items-center gap-1 overflow-x-auto custom-scrollbar shrink-0 select-none border-b"
+                                     style="background-color: var(--brand-bg-card); border-color: var(--brand-border-muted);">
                                     <button 
                                         type="button" 
                                         @click="openWorkspaceMenu('attach')"
                                         class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
-                                        :class="activeWorkspaceTab === 'attach' ? 'bg-white dark:bg-gray-800 text-blue-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                        :class="activeWorkspaceTab === 'attach' ? 'themed-tab-active text-blue-600 shadow-xs' : 'themed-btn-surface'"
                                     >
                                         <span>📎 Ingest</span>
                                     </button>
@@ -1836,7 +1836,7 @@ onUnmounted(() => {
                                         type="button" 
                                         @click="openWorkspaceMenu('notes')"
                                         class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
-                                        :class="activeWorkspaceTab === 'notes' ? 'bg-white dark:bg-gray-800 text-amber-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                        :class="activeWorkspaceTab === 'notes' ? 'themed-tab-active text-amber-600 shadow-xs' : 'themed-btn-surface'"
                                     >
                                         <span>📝 Notes</span>
                                         <span class="text-[9px] px-1 py-0.2 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 font-mono">{{ notes.length }}</span>
@@ -1845,7 +1845,7 @@ onUnmounted(() => {
                                         type="button" 
                                         @click="openWorkspaceMenu('skills')"
                                         class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
-                                        :class="activeWorkspaceTab === 'skills' ? 'bg-white dark:bg-gray-800 text-teal-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                        :class="activeWorkspaceTab === 'skills' ? 'themed-tab-active text-teal-600 shadow-xs' : 'themed-btn-surface'"
                                     >
                                         <span>✨ Skills</span>
                                         <span class="text-[9px] px-1 py-0.2 rounded-full bg-teal-100 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 font-mono">{{ skills.length }}</span>
@@ -1854,7 +1854,7 @@ onUnmounted(() => {
                                         type="button" 
                                         @click="openWorkspaceMenu('prompts')"
                                         class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
-                                        :class="activeWorkspaceTab === 'prompts' ? 'bg-white dark:bg-gray-800 text-purple-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                        :class="activeWorkspaceTab === 'prompts' ? 'themed-tab-active text-purple-600 shadow-xs' : 'themed-btn-surface'"
                                     >
                                         <span>🎟️ Prompts</span>
                                     </button>
@@ -1862,7 +1862,7 @@ onUnmounted(() => {
                                         type="button" 
                                         @click="openWorkspaceMenu('context')"
                                         class="px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 shrink-0 cursor-pointer"
-                                        :class="activeWorkspaceTab === 'context' ? 'bg-white dark:bg-gray-800 text-green-600 shadow-xs' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'"
+                                        :class="activeWorkspaceTab === 'context' ? 'themed-tab-active text-green-600 shadow-xs' : 'themed-btn-surface'"
                                     >
                                         <span>⚙️ Context</span>
                                     </button>
@@ -1870,31 +1870,31 @@ onUnmounted(() => {
 
                                 <!-- Tab 1: Attach & Ingest -->
                                 <div v-if="activeWorkspaceTab === 'attach'" class="p-3 space-y-3 overflow-y-auto custom-scrollbar">
-                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1">Document & Media Ingestion</div>
+                                    <div class="text-[10px] font-black uppercase tracking-wider px-1" style="color: var(--text-dim);">Document & Media Ingestion</div>
                                     <div class="grid grid-cols-2 gap-2">
-                                        <button @click="triggerFileUpload('as_is')" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                        <button @click="triggerFileUpload('as_is')" class="p-2.5 rounded-xl text-left transition-colors flex items-center gap-2.5 group cursor-pointer border workspace-hub-tile">
                                             <IconFolder class="w-4 h-4 text-emerald-500 shrink-0" />
-                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Native File</p><p class="text-[9px] text-gray-400">Preserve as-is</p></div>
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">Native File</p><p class="text-[9px]" style="color: var(--brand-text-dim);">Preserve as-is</p></div>
                                         </button>
-                                        <button @click="triggerFileUpload('text_images')" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-blue-50 dark:hover:bg-blue-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                        <button @click="triggerFileUpload('text_images')" class="p-2.5 rounded-xl text-left transition-colors flex items-center gap-2.5 group cursor-pointer border workspace-hub-tile">
                                             <IconFileText class="w-4 h-4 text-blue-500 shrink-0" />
-                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Text + Pages</p><p class="text-[9px] text-gray-400">PDF / DOCX layout</p></div>
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">Text + Pages</p><p class="text-[9px]" style="color: var(--brand-text-dim);">PDF / DOCX layout</p></div>
                                         </button>
-                                        <button @click="triggerFileUpload('data')" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-green-50 dark:hover:bg-green-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                        <button @click="triggerFileUpload('data')" class="p-2.5 rounded-xl text-left transition-colors flex items-center gap-2.5 group cursor-pointer border workspace-hub-tile">
                                             <IconDatabase class="w-4 h-4 text-green-500 shrink-0" />
-                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Data Tables</p><p class="text-[9px] text-gray-400">CSV / DB tables</p></div>
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">Data Tables</p><p class="text-[9px]" style="color: var(--brand-text-dim);">CSV / DB tables</p></div>
                                         </button>
-                                        <button @click="triggerImageUpload" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-purple-50 dark:hover:bg-purple-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                        <button @click="triggerImageUpload" class="p-2.5 rounded-xl text-left transition-colors flex items-center gap-2.5 group cursor-pointer border workspace-hub-tile">
                                             <IconPhoto class="w-4 h-4 text-purple-500 shrink-0" />
-                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Images</p><p class="text-[9px] text-gray-400">Attach for vision</p></div>
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">Images</p><p class="text-[9px]" style="color: var(--brand-text-dim);">Attach for vision</p></div>
                                         </button>
-                                        <button @click="handleCreateManualArtefact" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-orange-50 dark:hover:bg-orange-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                        <button @click="handleCreateManualArtefact" class="p-2.5 rounded-xl text-left transition-colors flex items-center gap-2.5 group cursor-pointer border workspace-hub-tile">
                                             <IconPencil class="w-4 h-4 text-orange-500 shrink-0" />
-                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Create Blank</p><p class="text-[9px] text-gray-400">Write in workspace</p></div>
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">Create Blank</p><p class="text-[9px]" style="color: var(--brand-text-dim);">Write in workspace</p></div>
                                         </button>
-                                        <button @click="handleImportFromInternet" class="p-2.5 rounded-xl border border-gray-100 dark:border-gray-800 hover:bg-cyan-50 dark:hover:bg-cyan-950/20 text-left transition-colors flex items-center gap-2.5 group cursor-pointer">
+                                        <button @click="handleImportFromInternet" class="p-2.5 rounded-xl text-left transition-colors flex items-center gap-2.5 group cursor-pointer border workspace-hub-tile">
                                             <IconWeb class="w-4 h-4 text-cyan-500 shrink-0" />
-                                            <div class="min-w-0"><p class="text-xs font-bold truncate text-gray-800 dark:text-gray-200">Import from Internet</p><p class="text-[9px] text-gray-400">Web, Wiki, Arxiv, YouTube, etc.</p></div>
+                                            <div class="min-w-0"><p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">Import from Internet</p><p class="text-[9px]" style="color: var(--brand-text-dim);">Web, Wiki, Arxiv, YouTube, etc.</p></div>
                                         </button>
                                     </div>
                                 </div>
@@ -1915,7 +1915,7 @@ onUnmounted(() => {
                                     </div>
 
                                     <div class="overflow-y-auto custom-scrollbar space-y-1 grow max-h-72">
-                                        <div v-if="filteredNotes.length === 0" class="text-center py-8 text-xs text-gray-400 italic">
+                                        <div v-if="filteredNotes.length === 0" class="text-center py-8 text-xs italic" style="color: var(--text-dim);">
                                             {{ noteSearchTerm ? 'No matching notes found.' : 'No notes saved yet. Create your first note in Notes Studio!' }}
                                         </div>
                                         <div 
@@ -1923,20 +1923,20 @@ onUnmounted(() => {
                                             :key="note.id"
                                             @click="handleToggleNoteInDiscussion(note)"
                                             class="p-2.5 rounded-xl border transition-all flex items-center justify-between gap-3 cursor-pointer group"
-                                            :class="isNoteActiveInContext(note) ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 shadow-xs' : 'border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/60'"
+                                            :class="isNoteActiveInContext(note) ? 'bg-amber-50/80 dark:bg-amber-950/40 border-amber-300 dark:border-amber-800 shadow-xs' : 'workspace-hub-tile border'"
                                         >
                                             <div class="flex items-center gap-2.5 min-w-0">
                                                 <div class="w-7 h-7 rounded-lg bg-amber-100 dark:bg-amber-900/40 text-amber-600 flex items-center justify-center shrink-0">
                                                     <IconPencil class="w-3.5 h-3.5" />
                                                 </div>
                                                 <div class="min-w-0">
-                                                    <p class="text-xs font-bold truncate text-gray-800 dark:text-gray-100">{{ note.title || 'Untitled Note' }}</p>
-                                                    <p class="text-[9px] text-gray-400 truncate">{{ (note.content || '').substring(0, 50) }}...</p>
+                                                    <p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">{{ note.title || 'Untitled Note' }}</p>
+                                                    <p class="text-[9px] truncate" style="color: var(--brand-text-dim);">{{ (note.content || '').substring(0, 50) }}...</p>
                                                 </div>
                                             </div>
                                             <div class="shrink-0 flex items-center gap-1">
                                                 <span v-if="isNoteActiveInContext(note)" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-amber-500 text-white shadow-2xs">Loaded</span>
-                                                <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase bg-gray-100 dark:bg-gray-700 text-gray-500 group-hover:text-amber-600">+ Add</span>
+                                                <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase themed-btn-surface group-hover:text-amber-600">+ Add</span>
                                             </div>
                                         </div>
                                     </div>
@@ -1958,7 +1958,7 @@ onUnmounted(() => {
                                     </div>
 
                                     <div class="overflow-y-auto custom-scrollbar space-y-1 grow max-h-72">
-                                        <div v-if="filteredSkills.length === 0" class="text-center py-8 text-xs text-gray-400 italic">
+                                        <div v-if="filteredSkills.length === 0" class="text-center py-8 text-xs italic" style="color: var(--text-dim);">
                                             {{ skillSearchTerm ? 'No matching skills found.' : 'No skills in library. Create one in Skills Studio or install from Zoo!' }}
                                         </div>
                                         <div 
@@ -1966,7 +1966,7 @@ onUnmounted(() => {
                                             :key="skill.id"
                                             @click="handleToggleSkillInDiscussion(skill)"
                                             class="p-2.5 rounded-xl border transition-all flex items-center justify-between gap-3 cursor-pointer group"
-                                            :class="isSkillActiveInContext(skill) ? 'bg-teal-50/80 dark:bg-teal-950/40 border-teal-300 dark:border-teal-800 shadow-xs' : 'border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/60'"
+                                            :class="isSkillActiveInContext(skill) ? 'bg-teal-50/80 dark:bg-teal-950/40 border-teal-300 dark:border-teal-800 shadow-xs' : 'workspace-hub-tile border'"
                                         >
                                             <div class="flex items-center gap-2.5 min-w-0">
                                                 <div class="w-7 h-7 rounded-lg bg-teal-100 dark:bg-teal-900/40 text-teal-600 flex items-center justify-center shrink-0">
@@ -1974,17 +1974,17 @@ onUnmounted(() => {
                                                 </div>
                                                 <div class="min-w-0">
                                                     <div class="flex items-center gap-1.5">
-                                                        <p class="text-xs font-bold truncate text-gray-800 dark:text-gray-100">{{ skill.name }}</p>
+                                                        <p class="text-xs font-bold truncate" style="color: var(--brand-text-main);">{{ skill.name }}</p>
                                                         <span class="px-1 py-0.2 rounded text-[8px] font-bold uppercase font-mono" :class="skill.is_system ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300' : 'bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300'">
                                                             {{ skill.is_system ? 'System' : 'Personal' }}
                                                         </span>
                                                     </div>
-                                                    <p class="text-[9px] text-gray-400 truncate">{{ skill.description || skill.category || 'AI capability capsule' }}</p>
+                                                    <p class="text-[9px] truncate" style="color: var(--text-dim);">{{ skill.description || skill.category || 'AI capability capsule' }}</p>
                                                 </div>
                                             </div>
                                             <div class="shrink-0 flex items-center gap-1">
                                                 <span v-if="isSkillActiveInContext(skill)" class="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-teal-500 text-white shadow-2xs">Equipped</span>
-                                                <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase bg-gray-100 dark:bg-gray-700 text-gray-500 group-hover:text-teal-600">+ Equip</span>
+                                                <span v-else class="px-2 py-0.5 rounded-md text-[9px] font-bold uppercase themed-btn-surface group-hover:text-teal-600">+ Equip</span>
                                             </div>
                                         </div>
                                     </div>
@@ -1992,33 +1992,33 @@ onUnmounted(() => {
 
                                 <!-- Tab 4: Prompts -->
                                 <div v-else-if="activeWorkspaceTab === 'prompts'" class="p-3 space-y-3 overflow-y-auto custom-scrollbar max-h-72">
-                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1">Prompt Templates</div>
+                                    <div class="text-[10px] font-black uppercase tracking-wider px-1" style="color: var(--text-dim);">Prompt Templates</div>
                                     <div class="space-y-1">
                                         <div v-for="p in lollmsPrompts" :key="p.id" @click="handlePromptSelection(p.content); isWorkspaceMenuOpen = false;" class="p-2 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-950/30 cursor-pointer border border-transparent hover:border-purple-200 text-xs">
-                                            <p class="font-bold text-gray-800 dark:text-gray-200">{{ p.name }}</p>
-                                            <p class="text-[9px] text-gray-400 truncate">{{ p.description }}</p>
+                                            <p class="font-bold" style="color: var(--text-main);">{{ p.name }}</p>
+                                            <p class="text-[9px] truncate" style="color: var(--text-dim);">{{ p.description }}</p>
                                         </div>
                                     </div>
                                 </div>
 
                                 <!-- Tab 5: Context & RAG -->
                                 <div v-else-if="activeWorkspaceTab === 'context'" class="p-3 space-y-3 overflow-y-auto custom-scrollbar max-h-72">
-                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1">Active RAG Knowledge Stores</div>
+                                    <div class="text-[10px] font-black uppercase tracking-wider px-1" style="color: var(--text-dim);">Active RAG Knowledge Stores</div>
                                     <div class="space-y-1">
-                                        <button @click.stop="handleOpenCreateDatastoreModal" class="w-full text-left p-2 rounded-xl text-green-600 font-bold text-xs hover:bg-green-50 dark:hover:bg-green-950/20 border border-dashed border-green-300">
+                                        <button @click.stop="handleOpenCreateDatastoreModal" class="w-full text-left p-2 rounded-xl text-green-600 font-bold text-xs themed-panel-hover border border-dashed border-green-300 cursor-pointer">
                                             + Create New DataStore
                                         </button>
-                                        <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="w-full text-left p-2 rounded-xl flex items-center justify-between text-xs border" :class="ragStoreSelection.includes(store.id) ? 'bg-green-50 dark:bg-green-950/30 border-green-300 font-bold text-green-700' : 'border-gray-100 dark:border-gray-800'">
+                                        <button v-for="store in availableRagStores" :key="store.id" @click.stop="toggleRagStore(store.id)" class="w-full text-left p-2 rounded-xl flex items-center justify-between text-xs border cursor-pointer" :class="ragStoreSelection.includes(store.id) ? 'bg-green-50 dark:bg-green-950/30 border-green-300 font-bold text-green-700' : 'border-border-muted themed-panel-hover'">
                                             <span class="truncate pr-2">{{ store.name }}</span>
                                             <IconCheckCircle v-if="ragStoreSelection.includes(store.id)" class="w-4 h-4 text-green-500 shrink-0" />
                                         </button>
                                     </div>
 
-                                    <div class="text-[10px] font-black uppercase tracking-wider text-gray-400 px-1 pt-2 border-t dark:border-gray-800">MCP Cybernetic Tools</div>
+                                    <div class="text-[10px] font-black uppercase tracking-wider px-1 pt-2 border-t border-t-border-muted" style="color: var(--text-dim);">MCP Cybernetic Tools</div>
                                     <div class="space-y-1">
                                         <div v-for="group in availableMcpToolsForSelector" :key="group.label" class="space-y-1">
-                                            <span class="text-[9px] font-bold text-gray-400 uppercase px-1">{{ group.label }}</span>
-                                            <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="w-full text-left p-2 rounded-xl flex items-center justify-between text-xs border" :class="mcpToolSelection.includes(tool.id) ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 font-bold text-purple-700' : 'border-gray-100 dark:border-gray-800'">
+                                            <span class="text-[9px] font-bold uppercase px-1" style="color: var(--text-dim);">{{ group.label }}</span>
+                                            <button v-for="tool in group.items" :key="tool.id" @click.stop="toggleMcpTool(tool.id)" class="w-full text-left p-2 rounded-xl flex items-center justify-between text-xs border cursor-pointer" :class="mcpToolSelection.includes(tool.id) ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 font-bold text-purple-700' : 'border-border-muted themed-panel-hover'">
                                                 <span class="truncate pr-2">{{ tool.name }}</span>
                                                 <IconCheckCircle v-if="mcpToolSelection.includes(tool.id)" class="w-4 h-4 text-purple-500 shrink-0" />
                                             </button>
@@ -2034,15 +2034,12 @@ onUnmounted(() => {
                         <button 
                             type="button" 
                             @click="isTuningOpen = !isTuningOpen"
-                            class="btn-icon bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 relative active:scale-95 cursor-pointer"
-                            :class="{
-                                'text-purple-600 dark:text-purple-400 border-purple-400 dark:border-purple-600 bg-purple-50/60 dark:bg-purple-900/30': isTuningActive,
-                                'text-gray-500': !isTuningActive
-                            }"
+                            class="btn-icon w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border relative active:scale-95 cursor-pointer tuning-trigger-btn"
+                            :class="{ 'tuning-trigger-btn-active': isTuningActive }"
                             title="Generation Parameters (Temperature, Rounds, Reasoning Effort)"
                         >
                             <IconAdjustmentsHorizontal class="w-4 h-4" />
-                            <span v-if="isTuningActive" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-purple-500 rounded-full border-2 border-white dark:border-gray-800 animate-pulse"></span>
+                            <span v-if="isTuningActive" class="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-purple-500 rounded-full border-2 animate-pulse" style="border-color: var(--bg-card);"></span>
                         </button>
 
                         <!-- Floating Tuning Popover Panel -->
@@ -2056,18 +2053,19 @@ onUnmounted(() => {
                         >
                             <div 
                                 v-if="isTuningOpen"
-                                class="absolute bottom-full left-0 mb-3 w-80 sm:w-88 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl shadow-2xl p-4 space-y-4 z-50 text-gray-800 dark:text-gray-100"
+                                class="absolute bottom-full left-0 mb-3 w-80 sm:w-88 rounded-2xl shadow-2xl p-4 space-y-4 z-50 border"
+                                style="background-color: var(--brand-bg-elevated); border-color: var(--brand-border-main);"
                             >
                                 <!-- Popover Header -->
-                                <div class="flex items-center justify-between border-b dark:border-gray-800 pb-2.5">
+                                <div class="flex items-center justify-between pb-2.5 border-b" style="border-color: var(--brand-border-muted);">
                                     <div class="flex items-center gap-2">
                                         <IconAdjustmentsHorizontal class="w-4 h-4 text-purple-500" />
-                                        <span class="text-xs font-black uppercase tracking-wider text-gray-800 dark:text-gray-100">Generation Controls</span>
+                                        <span class="text-xs font-black uppercase tracking-wider" style="color: var(--brand-text-main);">Generation Controls</span>
                                     </div>
                                     <button 
                                         type="button" 
                                         @click="resetTuningDefaults" 
-                                        class="text-[10px] font-bold text-gray-400 hover:text-red-500 hover:underline transition-colors cursor-pointer"
+                                        class="text-[10px] font-bold hover:text-red-500 hover:underline transition-colors cursor-pointer" style="color: var(--text-dim);"
                                         title="Reset parameters to model and server defaults"
                                     >
                                         Reset Defaults
@@ -2084,7 +2082,7 @@ onUnmounted(() => {
                                         <button 
                                             type="button" 
                                             @click="isReasoningEffortActive = !isReasoningEffortActive" 
-                                            :class="[isReasoningEffortActive ? 'bg-indigo-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
+                                            :class="[isReasoningEffortActive ? 'bg-indigo-600' : 'bg-bg-hover', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
                                             :title="isReasoningEffortActive ? 'Deactivate thinking' : 'Activate thinking (defaults to low)'"
                                         >
                                             <span :class="[isReasoningEffortActive ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200']"></span>
@@ -2092,36 +2090,36 @@ onUnmounted(() => {
                                     </div>
 
                                     <!-- Effort Selector (Pills) -->
-                                    <div v-if="isReasoningEffortActive" class="grid grid-cols-4 gap-1 p-1 bg-gray-100 dark:bg-gray-800 rounded-xl text-xs animate-in fade-in">
+                                    <div v-if="isReasoningEffortActive" class="grid grid-cols-4 gap-1 p-1 themed-zone rounded-xl text-xs animate-in fade-in">
                                         <button 
                                             v-for="effort in ['low', 'medium', 'high', 'max']" 
                                             :key="effort"
                                             type="button"
                                             @click="setReasoningEffort(effort)"
                                             class="py-1 px-1.5 rounded-lg font-bold text-[10px] uppercase transition-all capitalize cursor-pointer text-center"
-                                            :class="reasoningEffort === effort ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-400 shadow-xs' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'"
+                                            :class="reasoningEffort === effort ? 'themed-tab-active text-indigo-600 dark:text-indigo-400 shadow-xs' : 'themed-btn-surface'"
                                         >
                                             {{ effort }}
                                         </button>
                                     </div>
-                                    <p class="text-[10px] text-gray-400">
+                                    <p class="text-[10px]" style="color: var(--brand-text-dim);">
                                         {{ isReasoningEffortActive ? `Model will reason with ${reasoningEffort.toUpperCase()} effort.` : 'Thinking deactivated (model responds directly).' }}
                                     </p>
                                 </div>
 
                                 <!-- 2. Temperature -->
-                                <div class="space-y-2 border-t dark:border-gray-800 pt-3">
+                                <div class="space-y-2 border-t border-t-border-muted pt-3">
                                     <div class="flex items-center justify-between">
-                                        <div class="flex items-center gap-1.5">
+                                        <div class="flex items-center gap-2">
                                             <span class="text-xs font-bold">Temperature</span>
-                                            <span class="text-[10px] font-mono text-gray-400">
+                                            <span class="text-[10px] font-mono" style="color: var(--brand-text-dim);">
                                                 {{ isCustomTemp ? customTemp.toFixed(2) : '(Default)' }}
                                             </span>
                                         </div>
                                         <button 
                                             type="button" 
                                             @click="isCustomTemp = !isCustomTemp" 
-                                            :class="[isCustomTemp ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
+                                            :class="[isCustomTemp ? 'bg-purple-600' : 'bg-bg-hover', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
                                             :title="isCustomTemp ? 'Deactivate custom temperature (use model default)' : 'Activate custom temperature'"
                                         >
                                             <span :class="[isCustomTemp ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200']"></span>
@@ -2136,7 +2134,7 @@ onUnmounted(() => {
                                                 min="0.0" 
                                                 max="2.0" 
                                                 step="0.05" 
-                                                class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-purple-600"
+                                                class="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-purple-600" style="background-color: var(--bg-hover);"
                                             />
                                             <input 
                                                 type="number" 
@@ -2147,31 +2145,31 @@ onUnmounted(() => {
                                                 class="input-field !py-0.5 !px-1.5 text-xs w-16 text-center font-mono font-bold"
                                             />
                                         </div>
-                                        <div class="flex items-center justify-between text-[10px] text-gray-400">
+                                        <div class="flex items-center justify-between text-[10px]" style="color: var(--text-dim);">
                                             <button type="button" @click="customTemp = 0.2" class="hover:text-purple-500 cursor-pointer">Precise (0.2)</button>
                                             <button type="button" @click="customTemp = 0.7" class="hover:text-purple-500 cursor-pointer">Balanced (0.7)</button>
                                             <button type="button" @click="customTemp = 1.2" class="hover:text-purple-500 cursor-pointer">Creative (1.2)</button>
                                         </div>
                                     </div>
-                                    <p v-else class="text-[10px] text-gray-400">
+                                    <p v-else class="text-[10px]" style="color: var(--brand-text-dim);">
                                         Deactivated. Model will use its native default temperature.
                                     </p>
                                 </div>
 
                                 <!-- 3. Number of Rounds -->
-                                <div class="space-y-2 border-t dark:border-gray-800 pt-3">
+                                <div class="space-y-2 border-t border-t-border-muted pt-3">
                                     <div class="flex items-center justify-between">
-                                        <div class="flex items-center gap-1.5">
+                                        <div class="flex items-center gap-2">
                                             <IconClock class="w-4 h-4 text-blue-500" />
                                             <span class="text-xs font-bold">Max Reasoning Rounds</span>
-                                            <span class="text-[10px] font-mono text-gray-400">
+                                            <span class="text-[10px] font-mono" style="color: var(--brand-text-dim);">
                                                 {{ isCustomRounds ? customRounds : '(Default)' }}
                                             </span>
                                         </div>
                                         <button 
                                             type="button" 
                                             @click="isCustomRounds = !isCustomRounds" 
-                                            :class="[isCustomRounds ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
+                                            :class="[isCustomRounds ? 'bg-blue-600' : 'bg-bg-hover', 'relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200']"
                                             :title="isCustomRounds ? 'Deactivate custom rounds limit (use discussion default)' : 'Activate custom rounds limit'"
                                         >
                                             <span :class="[isCustomRounds ? 'translate-x-4' : 'translate-x-0', 'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200']"></span>
@@ -2186,7 +2184,7 @@ onUnmounted(() => {
                                                 min="1" 
                                                 max="50" 
                                                 step="1" 
-                                                class="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
+                                                class="w-full h-1.5 rounded-lg appearance-none cursor-pointer accent-blue-600" style="background-color: var(--bg-hover);"
                                             />
                                             <input 
                                                 type="number" 
@@ -2204,27 +2202,27 @@ onUnmounted(() => {
                                             <button type="button" @click="customRounds = 35" class="hover:text-blue-500 cursor-pointer">Deep (35)</button>
                                         </div>
                                     </div>
-                                    <p v-else class="text-[10px] text-gray-400">
+                                    <p v-else class="text-[10px]" style="color: var(--brand-text-dim);">
                                         Deactivated. Discussion default (20 rounds) will apply.
                                     </p>
                                 </div>
 
                                 <!-- 4. Capabilities (Misc Feature Hub) -->
-                                <div class="space-y-2 border-t dark:border-gray-800 pt-3">
+                                <div class="space-y-2 pt-3 border-t" style="border-color: var(--brand-border-muted);">
                                     <button
                                         type="button"
                                         @click="isCapabilitiesOpen = !isCapabilitiesOpen"
-                                        class="w-full flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/60 -mx-2 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                        class="w-full flex items-center justify-between themed-panel-hover -mx-2 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
                                     >
-                                        <div class="flex items-center gap-1.5">
+                                        <div class="flex items-center gap-2">
                                             <IconSparkles class="w-4 h-4 text-purple-500" />
                                             <span class="text-xs font-bold">Capabilities</span>
                                             <span class="px-1.5 py-0.2 rounded-full text-[9px] font-mono font-bold"
-                                                  :class="capabilityFlags.filter(isCapabilityOn).length > 0 ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'">
+                                                  :class="capabilityFlags.filter(isCapabilityOn).length > 0 ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300' : 'themed-btn-surface'">
                                                 {{ capabilityFlags.filter(isCapabilityOn).length }}/{{ capabilityFlags.length }} on
                                             </span>
                                         </div>
-                                        <IconChevronRight class="w-3.5 h-3.5 text-gray-400 transition-transform duration-200" :class="{'rotate-90': isCapabilitiesOpen}" />
+                                        <IconChevronRight class="w-3.5 h-3.5 transition-transform duration-200" :class="{'rotate-90': isCapabilitiesOpen}" style="color: var(--brand-text-dim);" />
                                     </button>
 
                                     <Transition
@@ -2239,17 +2237,17 @@ onUnmounted(() => {
                                             <div
                                                 v-for="cap in capabilityFlags"
                                                 :key="cap.key"
-                                                class="flex items-center justify-between gap-2 p-2 rounded-xl border border-gray-100 dark:border-gray-800 hover:border-purple-300 dark:hover:border-purple-700 hover:bg-purple-50/40 dark:hover:bg-purple-950/20 transition-colors group/cap"
+                                                class="flex items-center justify-between gap-2 p-2 rounded-xl border transition-colors group/cap capability-row"
                                                 :title="cap.description"
                                             >
                                                 <div class="flex items-center gap-2 min-w-0">
                                                     <span class="text-sm shrink-0">{{ cap.emoji }}</span>
-                                                    <span class="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">{{ cap.label }}</span>
+                                                    <span class="text-[11px] font-semibold truncate" style="color: var(--brand-text-main);">{{ cap.label }}</span>
                                                 </div>
                                                 <button
                                                     type="button"
                                                     @click="toggleCapability(cap)"
-                                                    :class="[isCapabilityOn(cap) ? 'bg-purple-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
+                                                    :class="[isCapabilityOn(cap) ? 'bg-purple-600' : 'bg-bg-hover', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
                                                     :title="isCapabilityOn(cap) ? `Disable ${cap.label}` : `Enable ${cap.label}`"
                                                 >
                                                     <span :class="[isCapabilityOn(cap) ? 'translate-x-3.5' : 'translate-x-0', 'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 my-[1px]']"></span>
@@ -2258,28 +2256,28 @@ onUnmounted(() => {
 
                                             <!-- Internet Search gets a dedicated row linked to existing flow -->
                                             <div
-                                                class="flex items-center justify-between gap-2 p-2 rounded-xl border border-blue-100 dark:border-blue-900/50 hover:border-blue-300 dark:hover:border-blue-700 hover:bg-blue-50/40 dark:hover:bg-blue-950/20 transition-colors"
+                                                class="flex items-center justify-between gap-2 p-2 rounded-xl border transition-colors capability-row-blue"
                                                 :title="'Live web search via Google/DDG/Wiki. Configure API keys under Settings > User Context.'"
                                             >
                                                 <div class="flex items-center gap-2 min-w-0">
                                                     <span class="text-sm shrink-0">🛰️</span>
-                                                    <span class="text-[11px] font-semibold text-gray-700 dark:text-gray-200 truncate">Internet Search <span class="opacity-60 font-mono">({{ currentProviderName }})</span></span>
+                                                    <span class="text-[11px] font-semibold truncate" style="color: var(--brand-text-main);">Internet Search <span class="opacity-60 font-mono">({{ currentProviderName }})</span></span>
                                                 </div>
                                                 <button
                                                     type="button"
                                                     @click="toggleWebSearch()"
-                                                    :class="[isWebSearchActive ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
+                                                    :class="[isWebSearchActive ? 'bg-blue-600' : 'bg-bg-hover', 'relative inline-flex h-4.5 w-8 shrink-0 cursor-pointer rounded-full transition-colors duration-200 h-[18px]']"
                                                     :title="isWebSearchActive ? 'Disable Internet Search' : 'Enable Internet Search'"
                                                 >
                                                     <span :class="[isWebSearchActive ? 'translate-x-3.5' : 'translate-x-0', 'pointer-events-none inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow ring-0 transition duration-200 my-[1px]']"></span>
                                                 </button>
                                             </div>
 
-                                            <div class="pt-1 border-t dark:border-gray-800 mt-2">
+                                            <div class="pt-1 border-t border-t-border-muted mt-2">
                                                 <button 
                                                     type="button" 
                                                     @click="navigateToContextSettings(); isTuningOpen = false;"
-                                                    class="w-full text-center text-[10px] font-bold text-gray-400 hover:text-purple-500 hover:underline transition-colors cursor-pointer py-1"
+                                                    class="w-full text-center text-[10px] font-bold hover:text-purple-500 hover:underline transition-colors cursor-pointer py-1" style="color: var(--text-dim);"
                                                     title="Open full User Context settings for advanced configuration (API keys, Herd pools, providers, etc.)"
                                                 >
                                                     ⚙️ Advanced configuration → User Context Settings
@@ -2316,13 +2314,13 @@ onUnmounted(() => {
                             class="w-9 h-9 flex items-center justify-center rounded-xl transition-all shadow-sm border dark:border-gray-700 active:scale-95" 
                             :class="{
                                 'text-red-500 animate-pulse bg-red-50 dark:bg-red-900/30 border-red-200 dark:border-red-800': isRecording, 
-                                'text-gray-500 bg-white dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700': !isRecording
+                                'themed-btn-surface': !isRecording
                             }"
                             title="Voice Input">
                         <IconMicrophone class="w-5 h-5" />
                     </button>
                     
-                    <button v-if="!generationInProgress" @click="handleSendMessage" class="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm transition-all active:scale-95">
+                    <button v-if="!generationInProgress" @click="handleSendMessage" class="w-9 h-9 flex items-center justify-center bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-sm transition-all active:scale-95 cursor-pointer">
                          <IconSend class="w-5 h-5" />
                     </button>
                     <button v-else @click="handleStopGeneration" class="w-9 h-9 flex items-center justify-center bg-red-500 hover:bg-red-600 text-white rounded-xl shadow-sm transition-all active:scale-95" title="Stop Generation">
@@ -2347,7 +2345,7 @@ onUnmounted(() => {
             @click.self="isLoadoutModalOpen = false" 
             class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
         >
-            <div class="bg-white dark:bg-gray-900 w-full max-w-xl rounded-3xl shadow-2xl border border-purple-200/60 dark:border-purple-800/50 overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200">
+            <div class="themed-panel w-full max-w-xl rounded-3xl shadow-2xl border border-purple-200/60 dark:border-purple-800/50 overflow-hidden flex flex-col max-h-[88vh] animate-in zoom-in-95 duration-200">
 
                 <!-- Character Header -->
                 <div class="p-6 bg-gradient-to-br from-purple-600 via-indigo-600 to-blue-600 text-white relative overflow-hidden shrink-0">
@@ -2380,37 +2378,37 @@ onUnmounted(() => {
                 <!-- Attributes & Meters Grid -->
                 <div class="p-6 overflow-y-auto custom-scrollbar space-y-6 grow">
                     <div class="space-y-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Cognitive Attributes</span>
+                        <span class="text-[10px] font-black uppercase tracking-widest" style="color: var(--brand-text-dim);">Cognitive Attributes</span>
                         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <!-- Reasoning Gauge -->
-                            <div class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-800 space-y-1">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase">🧠 Brain Power</span>
+                            <div class="p-3 themed-zone rounded-2xl border border-border-muted space-y-1">
+                                <span class="text-[9px] font-bold uppercase" style="color: var(--text-dim);">🧠 Brain Power</span>
                                 <p class="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase font-mono">
                                     {{ isReasoningEffortActive ? reasoningEffort : 'Instant Instinct' }}
                                 </p>
-                                <p class="text-[9px] text-gray-400 leading-tight">
-                                    {{ isReasoningEffortActive ? 'Chain-of-thought enabled.' : 'Fast direct response.' }}
+                                <p class="text-[9px] leading-tight" style="color: var(--text-dim);">
+                                {{ isReasoningEffortActive ? 'Chain-of-thought enabled.' : 'Fast direct response.' }}
                                 </p>
                             </div>
 
                             <!-- Heat Gauge -->
-                            <div class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-800 space-y-1">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase">🌡️ Spiciness</span>
+                            <div class="p-3 themed-zone rounded-2xl border border-border-muted space-y-1">
+                                <span class="text-[9px] font-bold uppercase" style="color: var(--text-dim);">🌡️ Spiciness</span>
                                 <p class="text-xs font-black text-amber-600 dark:text-amber-400 uppercase font-mono">
                                     {{ isCustomTemp ? customTemp.toFixed(2) : 'Default' }}
                                 </p>
-                                <p class="text-[9px] text-gray-400 leading-tight">
+                                <p class="text-[9px] leading-tight" style="color: var(--text-dim);">
                                     {{ isCustomTemp ? (customTemp > 1 ? 'High creativity.' : 'Precise logic.') : 'Model calibrated.' }}
                                 </p>
                             </div>
 
                             <!-- Stamina Gauge -->
-                            <div class="p-3 bg-gray-50 dark:bg-gray-800/60 rounded-2xl border dark:border-gray-800 space-y-1">
-                                <span class="text-[9px] font-bold text-gray-400 uppercase">⏱️ Stamina</span>
+                            <div class="p-3 themed-zone rounded-2xl border border-border-muted space-y-1">
+                                <span class="text-[9px] font-bold uppercase" style="color: var(--text-dim);">⏱️ Stamina</span>
                                 <p class="text-xs font-black text-blue-600 dark:text-blue-400 uppercase font-mono">
                                     {{ isCustomRounds ? `${customRounds} Rounds` : '20 Rounds' }}
                                 </p>
-                                <p class="text-[9px] text-gray-400 leading-tight">Agentic loop budget.</p>
+                                <p class="text-[9px] leading-tight" style="color: var(--text-dim);">Agentic loop budget.</p>
                             </div>
                         </div>
                     </div>
@@ -2418,7 +2416,7 @@ onUnmounted(() => {
                     <!-- AI Capabilities (Misc Feature Hub) -->
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">⚡ AI Capabilities ({{ activeCapabilities.length }}/{{ capabilityFlags.length }})</span>
+                            <span class="text-[10px] font-black uppercase tracking-widest" style="color: var(--brand-text-dim);">⚡ AI Capabilities ({{ activeCapabilities.length }}/{{ capabilityFlags.length }})</span>
                             <button 
                                 type="button"
                                 @click="isLoadoutModalOpen = false; navigateToContextSettings();"
@@ -2436,20 +2434,20 @@ onUnmounted(() => {
                                 class="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg border transition-all cursor-pointer group/modalcap select-none"
                                 :class="cap.active 
                                     ? 'bg-purple-50 dark:bg-purple-950/30 border-purple-300 dark:border-purple-700 shadow-2xs' 
-                                    : 'bg-gray-50 dark:bg-gray-800/50 border-gray-200 dark:border-gray-700 opacity-60 hover:opacity-100'"
+                                    : 'themed-zone border-border-muted opacity-60 hover:opacity-100'"
                                 :title="cap.description"
                             >
-                                <div class="flex items-center gap-1.5 min-w-0">
+                                <div class="flex items-center gap-2 min-w-0">
                                     <span class="text-sm shrink-0">{{ cap.emoji }}</span>
-                                    <span class="text-[10px] font-bold truncate" :class="cap.active ? 'text-purple-900 dark:text-purple-200' : 'text-gray-600 dark:text-gray-400'">{{ cap.label }}</span>
+                                    <span class="text-[10px] font-bold truncate" :class="cap.active ? 'text-purple-900 dark:text-purple-200' : ''" :style="!cap.active ? 'color: var(--brand-text-dim);' : ''">{{ cap.label }}</span>
                                 </div>
                                 <span 
                                     class="w-1.5 h-1.5 rounded-full shrink-0 transition-colors" 
-                                    :class="cap.active ? 'bg-purple-500 animate-pulse' : 'bg-gray-300 dark:bg-gray-600'"
+                                    :class="cap.active ? 'bg-purple-500 animate-pulse' : 'bg-bg-hover'"
                                 ></span>
                             </div>
                         </div>
-                        <p class="text-[9px] text-gray-400 italic px-1">
+                        <p class="text-[9px] italic px-1" style="color: var(--text-dim);">
                             Toggle structural capabilities — forms, widgets, artefacts, memory, image gen & more. Internet Search & Herd Mode have dedicated controls elsewhere.
                         </p>
                     </div>
@@ -2457,11 +2455,11 @@ onUnmounted(() => {
                     <!-- Active Buffs & Equipped Inventory -->
                     <div class="space-y-2">
                         <div class="flex items-center justify-between">
-                            <span class="text-[10px] font-black uppercase tracking-widest text-gray-400">Equipped Buffs & Knowledge ({{ activeBuffs.length }})</span>
-                            <span class="text-[9px] text-gray-400 font-mono">Live conversation context</span>
+                            <span class="text-[10px] font-black uppercase tracking-widest" style="color: var(--brand-text-dim);">Equipped Buffs & Knowledge ({{ activeBuffs.length }})</span>
+                            <span class="text-[9px] font-mono" style="color: var(--brand-text-dim);">Live conversation context</span>
                         </div>
 
-                        <div v-if="activeBuffs.length === 0" class="p-6 text-center text-xs text-gray-400 italic bg-gray-50 dark:bg-gray-800/40 rounded-2xl border border-dashed dark:border-gray-800">
+                        <div v-if="activeBuffs.length === 0" class="p-6 text-center text-xs italic rounded-2xl border border-dashed themed-zone" style="color: var(--brand-text-dim); border-color: var(--brand-border-muted);">
                             No active buffs or knowledge equipped. The AI is running in clean vanilla mode!
                         </div>
 
@@ -2469,25 +2467,25 @@ onUnmounted(() => {
                             <div 
                                 v-for="buff in activeBuffs" 
                                 :key="buff.id"
-                                class="p-3.5 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-800/40 flex items-center justify-between gap-3 group"
+                                class="p-3.5 rounded-2xl border border-border-muted themed-zone flex items-center justify-between gap-3 group"
                             >
                                 <div class="flex items-start gap-3 min-w-0">
-                                    <div class="w-8 h-8 rounded-xl bg-white dark:bg-gray-700 shadow-xs flex items-center justify-center text-lg shrink-0 border border-gray-200 dark:border-gray-600">
+                                    <div class="w-8 h-8 rounded-xl themed-panel shadow-xs flex items-center justify-center text-lg shrink-0 border border-border-muted">
                                         {{ buff.icon }}
                                     </div>
                                     <div class="min-w-0">
                                         <div class="flex items-center gap-2">
-                                            <h4 class="text-xs font-bold text-gray-800 dark:text-gray-100 truncate">{{ buff.name }}</h4>
+                                            <h4 class="text-xs font-bold truncate" style="color: var(--brand-text-main);">{{ buff.name }}</h4>
                                             <span class="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-widest bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300">{{ buff.badge }}</span>
                                         </div>
-                                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 line-clamp-2">{{ buff.description }}</p>
+                                        <p class="text-[10px] mt-0.5 line-clamp-2" style="color: var(--brand-text-dim);">{{ buff.description }}</p>
                                     </div>
                                 </div>
 
                                 <button 
                                     type="button"
                                     @click="buff.action();" 
-                                    class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all shrink-0 cursor-pointer bg-gray-200/80 dark:bg-gray-700 hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-600 text-gray-600 dark:text-gray-300"
+                                    class="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase transition-all shrink-0 cursor-pointer themed-btn-surface hover:bg-red-100 dark:hover:bg-red-900/40 hover:text-red-600"
                                 >
                                     {{ buff.actionText || 'Eject' }}
                                 </button>
@@ -2497,7 +2495,8 @@ onUnmounted(() => {
                 </div>
 
                 <!-- Footer with quick actions -->
-                <div class="p-4 border-t dark:border-gray-800 bg-gray-50/70 dark:bg-gray-950/70 flex items-center justify-between gap-3 shrink-0">
+                <div class="p-4 border-t flex items-center justify-between gap-3 shrink-0"
+                     style="border-color: var(--brand-border-muted); background-color: var(--brand-bg-card);">
                     <div class="flex items-center gap-2">
                         <button @click="isLoadoutModalOpen = false; openWorkspaceMenu('notes');" class="btn btn-secondary btn-xs flex items-center gap-1">
                             <span>📝 Equip Note</span>
@@ -2514,15 +2513,90 @@ onUnmounted(() => {
 
             </div>
         </div>
-    </Teleport>
+    </Teleport>    
 </template>
+
 
 <style scoped>
 @reference "tailwindcss";
+
+.themed-chat-input { background-color: var(--brand-bg-card); border-color: var(--brand-border-main); }
+.themed-zone { background-color: var(--brand-bg-app); border-color: var(--brand-border-main); }
+.themed-panel { background-color: var(--brand-bg-card); border-color: var(--brand-border-main); }
+.themed-panel-hover:hover { background-color: var(--brand-bg-hover); }
+.themed-input-row { background-color: var(--brand-bg-card); border-color: var(--brand-border-main); }
+.themed-popover { background-color: var(--brand-bg-card); border-color: var(--brand-border-main); }
+.themed-tab-header { background-color: var(--brand-bg-app); border-color: var(--brand-border-muted); }
+.themed-tab-active { background-color: var(--brand-bg-card); }
+.themed-btn-surface { background-color: var(--brand-bg-elevated); border-color: var(--brand-border-main); color: var(--brand-text-dim); }
+.themed-btn-surface:hover { background-color: var(--brand-bg-hover); color: var(--brand-text-main); }
 .tool-badge { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[9px] font-black border shadow-sm transition-all; }
 .menu-divider { @apply my-1 border-t border-gray-100 dark:border-gray-700; }
 .custom-scrollbar::-webkit-scrollbar { width: 4px; }
 .custom-scrollbar::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-gray-600 rounded-full; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 textarea { scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent; }
+
+/* Workspace Hub tiles and rows — theme-aware */
+.workspace-hub-tile {
+    background-color: var(--brand-bg-card);
+    border-color: var(--brand-border-muted);
+    color: var(--brand-text-main);
+}
+.workspace-hub-tile:hover {
+    background-color: var(--brand-bg-hover);
+    border-color: var(--brand-border-main);
+}
+
+/* Capability rows in Generation Controls */
+.capability-row {
+    background-color: var(--brand-bg-card);
+    border-color: var(--brand-border-muted);
+    color: var(--brand-text-main);
+}
+.capability-row:hover {
+    background-color: var(--brand-bg-hover);
+    border-color: var(--brand-primary);
+}
+.capability-row-blue {
+    background-color: var(--brand-bg-card);
+    border-color: var(--brand-border-muted);
+    color: var(--brand-text-main);
+}
+.capability-row-blue:hover {
+    background-color: var(--brand-bg-hover);
+    border-color: var(--brand-primary);
+}
+
+/* + workspace trigger button */
+.workspace-hub-trigger {
+    background-color: var(--brand-bg-elevated);
+    border-color: var(--brand-border-main);
+    color: var(--brand-text-dim);
+}
+.workspace-hub-trigger:hover {
+    background-color: var(--brand-bg-hover);
+    color: var(--brand-text-main);
+}
+.workspace-hub-trigger-active {
+    background-color: var(--brand-bg-hover) !important;
+    border-color: var(--brand-primary) !important;
+    color: var(--brand-primary) !important;
+}
+
+/* Tuning (gear) trigger button */
+.tuning-trigger-btn {
+    background-color: var(--brand-bg-elevated);
+    border-color: var(--brand-border-main);
+    color: var(--brand-text-dim);
+}
+.tuning-trigger-btn:hover {
+    background-color: var(--brand-bg-hover);
+    color: var(--brand-text-main);
+}
+.tuning-trigger-btn-active {
+    background-color: var(--brand-bg-hover) !important;
+    border-color: var(--brand-accent) !important;
+    color: var(--brand-accent) !important;
+}
 </style>

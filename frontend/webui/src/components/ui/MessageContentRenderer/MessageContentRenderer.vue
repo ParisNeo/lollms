@@ -97,6 +97,45 @@ const embeddedViews = computed(() => {
     return props.metadata?.embedded_views || [];
 });
 
+// Parse YAML frontmatter metadata if present at start of content
+const parsedMetadata = computed(() => {
+    if (!props.content) return {};
+    const yamlMatch = props.content.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
+    if (!yamlMatch) return {};
+    try {
+        // Simple YAML parsing for flat key-value pairs
+        const yamlContent = yamlMatch[1];
+        const result = {};
+        const lines = yamlContent.split('\n');
+        for (const line of lines) {
+            const match = line.match(/^(\w+):\s*(.*)$/);
+            if (match) {
+                const key = match[1];
+                let value = match[2].trim();
+                // Handle quoted strings
+                if ((value.startsWith('"') && value.endsWith('"')) || 
+                    (value.startsWith("'") && value.endsWith("'"))) {
+                    value = value.slice(1, -1);
+                }
+                // Handle boolean
+                if (value === 'true') value = true;
+                else if (value === 'false') value = false;
+                else if (!isNaN(value) && value !== '') value = Number(value);
+                result[key] = value;
+            }
+        }
+        return result;
+    } catch (e) {
+        console.warn('Failed to parse YAML metadata:', e);
+        return {};
+    }
+});
+
+// Helper to format metadata keys for display
+const formatMetadataKey = (key) => {
+    return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+};
+
 const formatThinkingTime = (seconds) => {
     if (seconds === undefined || seconds === null) return '0s';
     if (seconds < 60) return `${seconds}s`;
@@ -205,11 +244,11 @@ function wrapInIsolatedShell(source, partId) {
 
     // Build the shell HTML using template literals
     // NOTE: We break up closing HTML tags to prevent Vue compiler from interpreting them
-    const closeStyle = '</style>';
-    const closeScript = '</script' + '>';
-    const closeHead = '</head' + '>';
-    const closeBody = '</body' + '>';
-    const closeHtml = '</html' + '>';
+    const closeStyle = '<\/style>';
+    const closeScript = '<\/script' + '>';
+    const closeHead = '<\/head' + '>';
+    const closeBody = '<\/body' + '>';
+    const closeHtml = '<\/html' + '>';
     
     const shellHtml = `<!DOCTYPE html>
 <html lang="en">
@@ -296,8 +335,6 @@ function wrapInIsolatedShell(source, partId) {
             text-align: left; /* Widgets often handle their own text alignment */
         }
     ${closeStyle}
-    <script>
-        ${escapedResizeScript}
     ${closeScript}
 ${closeHead}
 <body>
@@ -377,7 +414,7 @@ function renderMath() {
               { left: '$$', right: '$$', display: true },
               { left: '\\[', right: '\\]', display: true },
               { left: '\\(', right: '\\)', display: false },
-              { left: '$', right: '$', display: false }
+              { left: '$', right: '$', display: true }
             ],
             throwOnError: false
           });
@@ -1177,7 +1214,7 @@ const messageParts = computed(() => {
         } else {
             const segContent = segment.content;
             const patterns = [
-                { type: 'code', regex: /(^\s*```(?:(\w*)\r?\n)?([\s\S]*?)^\s*```\s*?$)/gm },
+                { type: 'code', regex: /(```(?:(\w*)\r?\n)?([\s\S]*?)```)/g },
                 { type: 'block_doc', regex: /--- (Document|Skill|Note):[ \t]*(.*?)[ \t]*---\s*([\s\S]*?)\s*--- End \1(?:: .*?)? ---/g },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<annotate>([\s\S]*?)(?:<\/annotate>|$))/gi },
                 { type: 'tool', regex: /(?:\n|^)[ \t]*(<generate_image[^>]*>([\s\S]*?)(?:<\/generate_image>|$))/gi },
@@ -1228,13 +1265,32 @@ const messageParts = computed(() => {
 
             allElements.sort((a, b) => (a.start - b.start) || (b.end - a.end));
             
+            // First pass: extract all code block ranges unconditionally
+            // Code blocks are authoritative: nothing inside a fence may render as a tool/form
+            const codeRanges = allElements
+                .filter(el => el.type === 'code')
+                .map(el => ({ start: el.start, end: el.end }));
+
+            const isInsideCode = (start, end) => {
+                return codeRanges.some(r => start >= r.start && end <= r.end);
+            };
+
             const activeElements = [];
             let lastEnd = 0;
 
             for (const el of allElements) {
-                if (el.start >= lastEnd || el.type === 'form_ready') {
-                    activeElements.push(el);
-                    lastEnd = Math.max(lastEnd, el.end);
+                if (el.type === 'code') {
+                    if (el.start >= lastEnd) {
+                        activeElements.push(el);
+                        lastEnd = Math.max(lastEnd, el.end);
+                    }
+                } else {
+                    // Reject any tool/block_doc match that falls inside a code fence
+                    if (isInsideCode(el.start, el.end)) continue;
+                    if (el.start >= lastEnd || el.type === 'form_ready') {
+                        activeElements.push(el);
+                        lastEnd = Math.max(lastEnd, el.end);
+                    }
                 }
             }
 
@@ -1332,19 +1388,11 @@ const messageParts = computed(() => {
                 }
 
                 if (el.type === 'code') {
+                    // Fenced code blocks must NEVER be interpreted as structural tags.
+                    // Render them as CodeBlock unconditionally, regardless of inner content.
                     const lang = (el.match && el.match[2] ? el.match[2] : 'plaintext').trim();
                     const inner = el.match && el.match[3] ? el.match[3] : '';
-                    if (inner.includes('<lollms_form')) {
-                        const parsedForm = parseSpecialBlock(inner);
-                        if (parsedForm.type === 'form_ready' && parsedForm.form) {
-                            if (parsedForm.form.id) renderedFormIds.add(parsedForm.form.id);
-                            if (parsedForm.form.form_id) renderedFormIds.add(parsedForm.form.form_id);
-                            if (parsedForm.form.title) renderedFormIds.add(parsedForm.form.title);
-                            parts.push({ ...parsedForm, id: `form-${parts.length}-${el.start}` });
-                            cursor = Math.max(cursor, el.end);
-                            return;
-                        }
-                    }
+                    const fullRaw = el.match && el.match[1] ? el.match[1] : '';
                     if (lang.toLowerCase() === 'mermaid') {
                         parts.push({ type: 'mermaid', code: inner.trim(), id: `mermaid-${parts.length}-${el.start}` });
                     } else {
@@ -1580,12 +1628,12 @@ const activeTask = computed(() => {
     const messageObj = messages.value.find(m => m.id === props.messageId);
     if (messageObj?.metadata?.active_task_id) {
         const linkedTask = runningTasks.find(t => t.id === messageObj.metadata.active_task_id);
-        if (linkedTask) return linkedTask;
+        return linkedTask;
     }
     const tracked = activeAiTasks.value[discussionId];
     if (tracked?.taskId) {
         const task = runningTasks.find(t => t.id === tracked.taskId);
-        if (task && !props.isUser) return task;
+        return (task && !props.isUser) ? task : null;
     }
     return null;
 });
@@ -1620,9 +1668,6 @@ function drawAnnotations(ctx, annotations, naturalWidth, naturalHeight, displayW
         const scaleFactor = displayWidth > 0 ? naturalWidth / displayWidth : 1;
         const color = display?.border_color || '#FF0000';
         const lineWidth = (display?.border_width || 2) * scaleFactor;
-        const fillOpacity = display?.fill_opacity !== undefined ? display.fill_opacity : 0.1;
-        const showBorder = display?.show_border !== false;
-
         ctx.strokeStyle = color;
         ctx.lineWidth = lineWidth;
         ctx.fillStyle = color;
@@ -1709,7 +1754,7 @@ async function deleteArtefactImage(title, index) {
                 imageIndex: index
             });
         } catch (e) {
-            console.error(e);
+             console.error(e);
         }
     }
 }
@@ -1842,16 +1887,44 @@ function onMermaidReady({ svg }, partIndex) {
 </script>
 
 <template>
-  <div ref="messageContentRef" @click="handleContentClick">
+  <div ref="messageContentRef" @click="handleContentClick" class="theme-aware-root">
     <div v-if="content || isUser || isStreaming || activeTask || (events && events.length > 0)" class="message-prose">
+      
+      <!-- Dynamic Style Enforcement for Markdown generated code -->
+      <!-- Uses a scoped style block to inject CSS variables for headers, code, and text elements safely -->
+      <component :is="'style'" nonce="lollms-theme-styles">
+        .message-prose { color: var(--brand-text-main); }
+        .message-prose p { color: var(--brand-text-main); margin-bottom: 0.75rem; }
+        .message-prose h1, .message-prose h2, .message-prose h3, .message-prose h4 { color: var(--brand-accent); }
+        .message-prose h1 { font-size: 1.5rem; margin-top: 1.25rem; margin-bottom: 0.75rem; }
+        .message-prose h2 { font-size: 1.25rem; margin-top: 1rem; margin-bottom: 0.5rem; }
+        .message-prose h3 { font-size: 1.1rem; margin-top: 0.875rem; margin-bottom: 0.5rem; }
+        .message-prose strong { color: var(--brand-text-main); font-weight: 600; }
+        .message-prose blockquote { border-left-color: var(--brand-border-main); color: var(--brand-text-dim); }
+        .message-prose table { border-color: var(--brand-border-main); }
+        .message-prose th, .message-prose td { border-color: var(--brand-border-main); padding: 0.5rem; }
+        .message-prose code { background-color: var(--brand-input-bg); color: var(--brand-text-main); border-color: var(--brand-input-border); padding: 0.2em 0.4em; border-radius: 4px; font-family: monospace; }
+        .message-prose pre { background-color: var(--brand-bg-card); color: var(--brand-text-main); border: 1px solid var(--brand-border-main); border-radius: var(--effect-radius-md); overflow-x: auto; padding: 1rem; margin-bottom: 1rem; }
+        .message-prose ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+        .message-prose ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+        .message-prose li { margin-bottom: 0.25rem; }
+        .message-prose .citation-btn { color: var(--brand-primary); font-weight: 600; }
+        .message-prose .citation-btn:hover { background-color: var(--brand-bg-hover); border-radius: 3px; }
+      </component>
 
-      <div v-if="isStreaming && !content" class="typing-indicator my-2 text-blue-500/60 flex items-center gap-1">
-          <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-          <span class="text-[10px] font-black uppercase tracking-widest ml-2">Awaiting first token...</span>
+      <!-- Metadata Form (if YAML frontmatter present) -->
+      <div v-if="parsedMetadata && Object.keys(parsedMetadata).length > 0" class="metadata-header mb-4 p-4 rounded-lg card" style="background-color: var(--brand-bg-elevated); border: 1px solid var(--brand-border-muted); border-left: 4px solid var(--brand-accent);">
+        <div class="metadata-grid grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div v-for="(value, key) in parsedMetadata" :key="key" class="metadata-item">
+            <label class="text-xs font-semibold uppercase tracking-wider" style="color: var(--brand-text-dim);">{{ formatMetadataKey(key) }}</label>
+            <div class="text-sm font-semibold truncate mt-1" style="color: var(--brand-text-main);">{{ value }}</div>
+          </div>
+        </div>
       </div>
 
       <template v-if="messageParts.length > 0">
         <template v-for="(part, index) in messageParts" :key="part.id">
+          
           <!-- Mermaid diagram -->
           <div v-if="part.type === 'mermaid'" class="my-4 rounded-xl overflow-hidden border shadow-sm mermaid-wrapper card">
             <MermaidViewer 
@@ -1865,7 +1938,7 @@ function onMermaidReady({ svg }, partIndex) {
           <div v-else-if="part.type === 'artefact' && part.meta?.type === 'book'" class="book-artefact-container my-6">
               <div class="book-frame card p-8 sm:p-12 mx-auto max-w-3xl overflow-hidden relative" style="border-left-width: 4px;">
                   <div class="book-content prose prose-slate max-w-none" v-html="part.content"></div>
-                  <div class="absolute bottom-4 right-8 text-[10px] font-serif italic text-slate-400">LoLLMs Digital Edition</div>
+                  <div class="absolute bottom-4 right-8 text-[10px] font-serif italic" style="color: var(--brand-text-dim);">LoLLMs Digital Edition</div>
               </div>
               <div class="flex justify-center mt-4">
                   <button @click="$emit('export', { format: 'pdf', content: part.content, title: part.meta.title })" class="btn btn-secondary btn-xs gap-2">
@@ -1882,16 +1955,16 @@ function onMermaidReady({ svg }, partIndex) {
               <details v-else-if="token.type === 'document'" class="document-block my-4 group/block">
                   <summary class="document-summary flex items-center justify-between pr-2">
                       <div class="flex items-center gap-2 overflow-hidden">
-                        <IconFileText class="w-4 h-4 text-gray-600 dark:text-gray-400 shrink-0" />
-                        <span class="font-mono truncate">{{ token.title }}</span>
+                        <IconFileText class="w-4 h-4 text-primary shrink-0" style="color: var(--brand-primary);" />
+                        <span class="font-mono truncate" style="color: var(--brand-text-main);">{{ token.title }}</span>
                       </div>
                       <button @click.stop="discussionsStore.removeContextItem(token.title, 'document')" class="opacity-0 group-hover/block:opacity-100 p-1 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity" title="Remove from context">
-                        <IconTrash class="w-3.5 h-3.5" />
+                        <IconTrash class="w-3.5 h-3.5" style="color: var(--brand-danger, #ff0055);" />
                       </button>
                   </summary>
-                  <div class="document-content p-4 max-w-none">
+                  <div class="document-content p-4 max-w-none" style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-main); border-radius: var(--effect-radius-md);">
                     <div v-if="isHtmlDocument(token)" class="w-full flex justify-center mt-4">
-                        <div class="w-full max-w-[min(100%,800px)] rounded-xl overflow-hidden border border-border-muted dark:border-border-strong bg-white" style="contain: paint; isolation: isolate;">
+                        <div class="w-full max-w-[min(100%,800px)] rounded-xl overflow-hidden card" style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-strong);">
                             <iframe 
                                 :srcdoc="wrapInIsolatedShell(token.content, token.uid || 'doc')"
                                 class="w-full h-[500px] border-none"
@@ -1904,7 +1977,7 @@ function onMermaidReady({ svg }, partIndex) {
                         :language="getDocLanguage(token.title)" 
                         :code="token.content" 
                     />
-                    <div v-else class="prose prose-sm dark:prose-invert max-w-none" v-html="parsedMarkdown(token.content)"></div>
+                    <div v-else class="prose prose-sm max-w-none" v-html="parsedMarkdown(token.content)"></div>
                   </div>
               </details>
               
@@ -1918,26 +1991,26 @@ function onMermaidReady({ svg }, partIndex) {
           </template>
 
           <!-- YouTube Video / Playlist Embed -->
-          <div v-else-if="part.type === 'youtube_video'" class="rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-800 bg-black shadow-xl max-w-2xl mx-auto group/yt card">
-              <div class="px-4 py-2.5 surface-2 border-b flex items-center justify-between text-xs text-secondary select-none">
+          <div v-else-if="part.type === 'youtube_video'" class="rounded-2xl overflow-hidden border shadow-xl max-w-2xl mx-auto group/yt" style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-main);">
+              <div class="px-4 py-2.5 flex items-center justify-between text-xs select-none" style="background-color: var(--brand-bg-elevated); border-bottom: 1px solid var(--brand-border-muted); color: var(--brand-text-main);">
                   <div class="flex items-center gap-2 min-w-0">
-                      <div class="p-1 rounded bg-red-600 text-white flex items-center justify-center shrink-0">
+                      <div class="p-1 rounded text-white flex items-center justify-center shrink-0" style="background-color: #dc2626;">
                           <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
                       </div>
-                      <span class="font-bold truncate text-white">
+                      <span class="font-bold truncate" style="color: var(--brand-text-main);">
                           {{ part.title && part.title !== part.videoId ? part.title : (part.embedType === 'playlist' ? 'YouTube Playlist' : 'YouTube Video') }}
                       </span>
-                      <span v-if="part.listId" class="text-[9px] font-mono px-1.5 py-0.2 rounded bg-red-950 text-red-300 border border-red-800 shrink-0">
-                          Playlist
-                      </span>
-                      <span v-else-if="part.videoId" class="text-[10px] font-mono text-gray-400">({{ part.videoId }})</span>
+                      <span v-if="part.listId" class="text-[9px] font-mono px-1.5 py-0.2 rounded" style="background-color: var(--brand-bg-subtle); color: var(--brand-primary); border: 1px solid var(--brand-border-main);">Playlist</span>
                   </div>
                   <div class="flex items-center gap-1.5 shrink-0">
                       <a 
                           :href="part.embedType === 'playlist' ? `https://www.youtube.com/playlist?list=${encodeURIComponent(part.listId)}` : `https://www.youtube.com/watch?v=${encodeURIComponent(part.videoId)}${part.listId ? '&list=' + encodeURIComponent(part.listId) : ''}${part.startTime ? '&t=' + part.startTime : ''}`" 
                           target="_blank" 
                           rel="noopener noreferrer" 
-                          class="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors flex items-center gap-1"
+                          class="p-1.5 rounded-lg transition-colors flex items-center gap-1" 
+                          style="color: var(--brand-text-main);"
+                          onmouseover="this.style.backgroundColor='var(--brand-bg-hover)'"
+                          onmouseout="this.style.backgroundColor=''"
                           title="Open on YouTube"
                       >
                           <IconGlobeAlt class="w-3.5 h-3.5" />
@@ -1945,10 +2018,13 @@ function onMermaidReady({ svg }, partIndex) {
                       </a>
                       <button 
                           @click="uiStore.copyToClipboard(part.embedType === 'playlist' ? `https://www.youtube.com/playlist?list=${part.listId}` : `https://www.youtube.com/watch?v=${part.videoId}`)"
-                          class="p-1.5 rounded-lg hover:bg-gray-800 text-gray-400 hover:text-white transition-colors"
+                          class="p-1.5 rounded-lg transition-colors"
+                          style="color: var(--brand-text-main);"
+                          onmouseover="this.style.backgroundColor='var(--brand-bg-hover)'"
+                          onmouseout="this.style.backgroundColor=''"
                           title="Copy Link"
                       >
-                          <IconCopy class="w-3.5 h-3.5" />
+                          <IconCopy class="w-3.5 h-3.5" style="color: var(--brand-text-main);"/>
                       </button>
                   </div>
               </div>
@@ -1971,8 +2047,9 @@ function onMermaidReady({ svg }, partIndex) {
             class="think-block my-4 card overflow-hidden"
             :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
+            style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-muted);"
           >
-            <summary class="think-summary">
+            <summary class="think-summary p-3 cursor-pointer hover:bg-opacity-10 hover:bg-black flex items-center justify-between" style="background-color: var(--brand-bg-elevated);">
               <IconChevronRight class="w-3 h-3 text-blue-500 transition-transform duration-200 think-arrow shrink-0" />
               <IconAnimateSpin v-if="!part.isClosed" class="w-4 h-4 text-blue-500 animate-spin shrink-0" />
               <IconThinking v-else class="h-4 w-4 text-blue-400 shrink-0" />
@@ -1987,43 +2064,44 @@ function onMermaidReady({ svg }, partIndex) {
                       <!-- Live sneak peek when collapsed -->
                       <span 
                           v-if="!isDetailOpen(part.id, false) && getThoughtSneakPeek(part.content, !part.isClosed || isStreaming)" 
-                          class="text-xs text-gray-500 dark:text-gray-400 italic truncate font-mono max-w-xs sm:max-w-md md:max-w-lg opacity-85"
+                          class="text-xs italic truncate opacity-85"
+                          style="color: var(--brand-text-dim); font-family: monospace;"
                           :title="getThoughtSneakPeek(part.content, !part.isClosed || isStreaming)"
                       >
                           — {{ getThoughtSneakPeek(part.content, !part.isClosed || isStreaming) }}
                       </span>
                   </div>
-                  <span class="text-[10px] font-mono opacity-60 tracking-wider shrink-0 whitespace-nowrap">
+                  <span class="text-[10px] font-mono opacity-60 tracking-wider shrink-0 whitespace-nowrap" style="color: var(--brand-text-dim);">
                       {{ part.isClosed ? `Thought for ${formatThinkingTime(thinkingTimers[part.id]?.elapsed)}` : `Thinking (${formatThinkingTime(thinkingTimers[part.id]?.elapsed)})` }}
                   </span>
               </div>
             </summary>
-            <div class="think-content select-text" v-html="parsedMarkdown(cleanThoughtContent(part.content))"></div>
+            <div class="think-content select-text p-4" style="color: var(--brand-text-main); background-color: var(--brand-bg-card);" v-html="parsedMarkdown(cleanThoughtContent(part.content))"></div>
           </details>
 
           <!-- Image tool block -->
-          <div v-else-if="part.type === 'image_tool'" class="my-4 card p-4">
+          <div v-else-if="part.type === 'image_tool'" class="my-4 card p-4" style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-main);">
              <div class="flex items-center justify-between mb-4">
                  <div class="flex items-center gap-2">
-                     <div class="p-2 rounded-lg surface-2 text-accent">
+                     <div class="p-2 rounded-lg surface-2" style="background-color: var(--brand-bg-elevated); color: var(--brand-accent);">
                          <IconPencil v-if="part.mode === 'edit'" class="w-5 h-5" />
                          <IconPresentationChartBar v-else-if="part.mode === 'slides'" class="w-5 h-5" />
                          <IconMap v-else-if="part.mode === 'street_view'" class="w-5 h-5 text-amber-500" />
                          <IconPhoto v-else class="w-5 h-5" />
                      </div>
                      <div class="flex flex-col">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-secondary leading-none mb-1">
+                        <span class="text-[10px] font-black uppercase tracking-widest block mb-1" style="color: var(--brand-text-dim);">
                             <template v-if="part.mode === 'edit'">Image Edit</template>
                             <template v-else-if="part.mode === 'slides'">Slide Deck</template>
                             <template v-else-if="part.mode === 'street_view'">Street View</template>
                             <template v-else>Image Generation</template>
                         </span>
-                        <span class="text-sm font-bold text-primary">AI Request Block</span>
+                        <span class="text-sm font-bold" style="color: var(--brand-text-main);">AI Request Block</span>
                      </div>
                  </div>
                  <div class="flex items-center gap-1">
                     <button v-if="editingPromptIdx === index" @click="cancelEdit" class="btn-icon-sm" title="Cancel">
-                        <IconRefresh class="w-4 h-4 transform rotate-45 text-red-500" />
+                        <IconRefresh class="w-4 h-4 transform rotate-45" style="color: var(--brand-danger, #ef4444);" />
                     </button>
                     <button @click="handleRegenerateClick(index, part)" class="btn btn-sm" :class="editingPromptIdx === index ? 'btn-primary' : 'btn-secondary'" title="Regenerate">
                         <IconCheckCircle v-if="editingPromptIdx === index" class="w-4 h-4 mr-1.5" />
@@ -2036,27 +2114,28 @@ function onMermaidReady({ svg }, partIndex) {
                 <TaskProgressIndicator :task="activeTask" class="text-xs" />
              </div>
              <div v-if="editingPromptIdx === index" class="space-y-3 animate-in fade-in slide-in-from-top-2">
-                <p class="text-[10px] font-bold text-blue-500 uppercase tracking-wide">Customize Prompt:</p>
+                <p class="text-[10px] font-bold uppercase tracking-wide" style="color: var(--brand-primary);">Customize Prompt:</p>
                 <textarea 
                     v-model="editedPromptText" 
                     rows="4" 
                     class="input-field w-full text-sm font-medium h-32 resize-y" 
                     placeholder="Enter customized generation prompt..."
                     @keyup.esc="cancelEdit"
+                    style="background-color: var(--brand-input-bg); color: var(--brand-text-main); border-color: var(--brand-input-border);"
                 ></textarea>
-                <p class="text-[10px] text-gray-500 italic">This will generate a new variant using the updated prompt.</p>
+                <p class="text-[10px] italic" style="color: var(--brand-text-dim);">This will generate a new variant using the updated prompt.</p>
              </div>
-             <div v-else class="relative group/prompt">
-                 <div v-if="part.mode === 'street_view'" class="text-sm font-medium text-primary">
+             <div v-else class="relative group/prompt p-2 rounded" style="background-color: var(--brand-bg-subtle); border: 1px dashed var(--brand-border-main);">
+                 <div v-if="part.mode === 'street_view'" class="text-sm font-medium" style="color: var(--brand-text-main);">
                     Fetching view for: <span class="font-bold">{{ part.prompt }}</span>
                  </div>
                  <template v-else>
-                    <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2 border-accent">
-                        <div v-for="(slide, i) in part.slides" :key="i" class="text-xs text-secondary mb-1">
+                    <div v-if="part.slides && part.slides.length > 0" class="mt-2 pl-4 border-l-2" style="border-color: var(--brand-accent);">
+                        <div v-for="(slide, i) in part.slides" :key="i" class="text-xs mb-1" style="color: var(--brand-text-main);">
                             <span class="font-bold mr-1">{{ i + 1 }}.</span> {{ slide }}
                         </div>
                     </div>
-                    <div v-else class="text-sm font-medium text-primary italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all">
+                    <div v-else class="text-sm font-medium italic line-clamp-4 group-hover/prompt:line-clamp-none transition-all" style="color: var(--brand-text-main);">
                         "{{ part.prompt }}"
                     </div>
                  </template>
@@ -2064,15 +2143,15 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- Scheduler block -->
-          <div v-else-if="part.type === 'scheduler'" class="my-4 p-4 rounded-xl border-2 dark:border-indigo-800 bg-surface-2 backdrop-blur-sm shadow-sm">
+          <div v-else-if="part.type === 'scheduler'" class="my-4 p-4 rounded-xl border-2" style="background-color: var(--brand-bg-card); border-color: var(--brand-accent);">
              <div class="flex items-center gap-3">
-                 <div class="p-2 rounded-lg surface-2 text-accent">
+                 <div class="p-2 rounded-lg" style="background-color: var(--brand-bg-elevated); color: var(--brand-accent);">
                      <IconClock class="w-6 h-6" />
                  </div>
                  <div class="flex flex-col">
-                    <span class="text-[10px] font-black uppercase tracking-widest text-secondary leading-none mb-1">Scheduled Task</span>
-                    <span class="text-sm font-bold text-primary">{{ part.name }}</span>
-                    <span class="text-xs text-secondary italic mt-1">"{{ part.prompt }}"</span>
+                    <span class="text-[10px] font-black uppercase tracking-widest block mb-0.5" style="color: var(--brand-text-dim);">Scheduled Task</span>
+                    <span class="text-sm font-bold" style="color: var(--brand-text-main);">{{ part.name }}</span>
+                    <span class="text-xs italic mt-1" style="color: var(--brand-text-dim);">"{{ part.prompt }}"</span>
                  </div>
              </div>
           </div>
@@ -2083,38 +2162,40 @@ function onMermaidReady({ svg }, partIndex) {
             class="note-block my-4 card overflow-hidden"
             :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
+            style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-main);"
           >
             <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
                 <span class="flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2" style="background-color: var(--brand-primary);"></span>
                 </span>
             </div>
-            <summary class="note-header flex items-center justify-between px-4 py-2.5 cursor-pointer list-none select-none">
+            <summary class="note-header flex items-center justify-between px-4 py-2.5 cursor-pointer select-none hover:bg-opacity-10 hover:bg-white" style="background-color: var(--brand-bg-elevated); border-bottom: 1px solid var(--brand-border-muted);">
               <div class="flex items-center gap-2.5">
                 <IconChevronRight class="w-3 h-3 text-amber-500 transition-transform duration-200 summary-arrow" />
-                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" style="color: var(--brand-warning, #eab308);">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                 </svg>
                 <div class="flex flex-col leading-tight">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary">AI Note</span>
-                  <span class="text-sm font-bold text-primary">{{ part.title }}</span>
+                  <span class="text-[9px] font-black uppercase tracking-widest" style="color: var(--brand-text-dim);">AI Note</span>
+                  <span class="text-sm font-bold" style="color: var(--brand-text-main);">{{ part.title }}</span>
                 </div>
               </div>
               <button
                 @click.stop="saveNoteFromRenderer(part.title, part.content)"
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition-colors"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-colors"
+                style="background-color: var(--brand-primary); color: var(--brand-text-on-primary);"
                 title="Save this note"
               >
                 <IconSave class="w-3.5 h-3.5" />
                 Save Note
               </button>
             </summary>
-            <div class="note-body px-5 py-4 border-t border-secondary">
-              <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
+            <div class="note-body px-5 py-4 border-t" style="border-color: var(--brand-border-muted); background-color: var(--brand-bg-card);">
+              <div class="note-content max-w-none prose prose-sm" style="color: var(--brand-text-main);">
                 <template v-for="(token, ti) in getTokens(liveArtefactBuffers[part.title] || part.content)" :key="`note-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
-                  <div v-else v-html="parsedMarkdown(token.raw)"></div>
+                  <div v-else class="markdown-text" v-html="parsedMarkdown(token.raw)"></div>
                 </template>
               </div>
             </div>
@@ -2126,36 +2207,38 @@ function onMermaidReady({ svg }, partIndex) {
             class="note-block my-4 card overflow-hidden"
             :open="isDetailOpen(part.id, false)"
             @toggle="handleToggleDetail(part.id, $event)"
+            style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-main);"
           >
             <div v-if="discussionsStore.liveArtefactBuffers[part.title] !== undefined" class="absolute top-0 right-0 p-1">
                 <span class="flex h-2 w-2">
                     <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-teal-400 opacity-75"></span>
-                    <span class="relative inline-flex rounded-full h-2 w-2 bg-teal-500"></span>
+                    <span class="relative inline-flex rounded-full h-2 w-2" style="background-color: var(--brand-primary);"></span>
                 </span>
             </div>
-            <summary class="note-header flex items-center justify-between px-4 py-2.5 bg-teal-50 dark:bg-teal-900/30 border-teal-200 dark:border-teal-800/60 cursor-pointer list-none select-none">
+            <summary class="note-header flex items-center justify-between px-4 py-2.5 cursor-pointer select-none hover:bg-opacity-10 hover:bg-white" style="background-color: var(--brand-bg-elevated); border-bottom: 1px solid var(--brand-border-muted);">
               <div class="flex items-center gap-2.5">
                 <IconChevronRight class="w-3 h-3 text-teal-500 transition-transform duration-200 summary-arrow" />
-                <IconSparkles class="w-4 h-4 text-teal-600 dark:text-teal-400 shrink-0" />
+                <IconSparkles class="w-4 h-4 shrink-0" style="color: var(--brand-accent);" />
                 <div class="flex flex-col leading-tight">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary">AI Skill Proposal</span>
-                  <span class="text-sm font-bold text-primary">{{ part.title }}</span>
+                  <span class="text-[9px] font-black uppercase tracking-widest" style="color: var(--brand-text-dim);">AI Skill Proposal</span>
+                  <span class="text-sm font-bold" style="color: var(--brand-text-main);">{{ part.title }}</span>
                 </div>
               </div>
               <button
                 @click.stop="saveSkillFromRenderer(part)"
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-teal-500 hover:bg-teal-600 text-white shadow-sm transition-colors"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold shadow-sm transition-colors"
+                style="background-color: var(--brand-primary); color: var(--brand-text-on-primary);"
               >
                 <IconSave class="w-3.5 h-3.5" />
                 Validate Skill
               </button>
             </summary>
-            <div class="note-body px-5 py-4 bg-teal-50/40 dark:bg-amber-950/20 border-t border-teal-200 dark:border-teal-800/60">
-               <div v-if="part.description" class="text-xs text-gray-500 dark:text-gray-400 italic mb-2">{{ part.description }}</div>
-              <div class="note-content prose prose-sm dark:prose-invert max-w-none text-gray-800 dark:text-gray-200">
+            <div class="note-body px-5 py-4 border-t" style="border-color: var(--brand-border-muted); background-color: var(--brand-bg-card);">
+               <div v-if="part.description" class="text-xs italic mb-2" style="color: var(--brand-text-dim);">{{ part.description }}</div>
+              <div class="note-content prose prose-sm max-w-none" style="color: var(--brand-text-main);">
                 <template v-for="(token, ti) in getTokens(liveArtefactBuffers[part.title] || part.content)" :key="`skill-token-${ti}`">
                   <CodeBlock v-if="token.type === 'code'" :language="token.lang" :code="token.text" :message-id="messageId" />
-                  <div v-else v-html="parsedMarkdown(token.raw)"></div>
+                  <div v-else class="markdown-text" v-html="parsedMarkdown(token.raw)"></div>
                 </template>
               </div>
             </div>
@@ -2165,7 +2248,7 @@ function onMermaidReady({ svg }, partIndex) {
           <template v-else-if="part.type === 'annotate'">
             <div class="annotated-image-container relative my-4 group">
                 <AuthenticatedImage v-if="lastUserImage" :src="lastUserImage" @load="onImageLoad($event, part.annotations)"/>
-                <p v-else class="text-red-500 text-sm">Could not find a previous image to annotate.</p>
+                <p v-else class="text-sm font-bold" style="color: var(--brand-danger, #ff5252);">Could not find a previous image to annotate.</p>
                 <canvas class="absolute pointer-events-none"></canvas>
                 <div class="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button @click="downloadAnnotatedImage(part.annotations, $event)" class="p-1.5 bg-black/50 text-white rounded-full hover:bg-black/80" title="Download Annotated Image">
@@ -2186,13 +2269,13 @@ function onMermaidReady({ svg }, partIndex) {
           />
 
           <!-- Active Tool Execution -->
-          <div v-else-if="part.type === 'tool_call'" class="my-4 card p-4 flex items-start gap-3 animate-in fade-in">
-              <div class="p-2 rounded-lg surface-2 text-accent shrink-0">
+          <div v-else-if="part.type === 'tool_call'" class="my-4 p-4 rounded-xl card flex items-start gap-3 animate-in fade-in" style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-main);">
+              <div class="p-2 rounded-lg" style="background-color: var(--brand-bg-elevated); color: var(--brand-accent);">
                   <IconWrenchScrewdriver class="w-5 h-5" />
               </div>
               <div class="flex-1 min-w-0">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary block mb-1">Active Tool Execution</span>
-                  <h5 class="text-sm font-bold text-primary">{{ part.name }}</h5>
+                  <span class="text-[9px] font-black uppercase tracking-widest block mb-1" style="color: var(--brand-text-dim);">Active Tool Execution</span>
+                  <h5 class="text-sm font-bold" style="color: var(--brand-text-main);">{{ part.name }}</h5>
                   <div v-if="Object.keys(part.parameters).length > 0" class="mt-2">
                        <StepDetail :data="part.parameters" :level="1" />
                   </div>
@@ -2200,40 +2283,38 @@ function onMermaidReady({ svg }, partIndex) {
           </div>
 
           <!-- Deep Memory Retrieval -->
-          <div v-else-if="part.type === 'mem_load'" class="my-4 card p-4 flex items-start gap-3 animate-in fade-in">
-              <div class="p-2 rounded-lg surface-2 text-accent shrink-0">
+          <div v-else-if="part.type === 'mem_load'" class="my-4 p-4 rounded-xl card flex items-start gap-3 animate-in fade-in" style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-main);">
+              <div class="p-2 rounded-lg" style="background-color: var(--brand-bg-elevated); color: var(--brand-accent);">
                   <IconThinking class="w-5 h-5 animate-pulse" />
               </div>
               <div class="flex-1 min-w-0">
-                  <span class="text-[9px] font-black uppercase tracking-widest text-secondary block mb-1">Deep Memory Retrieval</span>
-                  <h5 class="text-xs font-mono font-bold text-primary">Retrieving Fact ID: [{{ part.memoryId.substring(0, 8) }}...]</h5>
+                  <span class="text-[9px] font-black uppercase tracking-widest block mb-1" style="color: var(--brand-text-dim);">Deep Memory Retrieval</span>
+                  <h5 class="text-xs font-mono font-bold" style="color: var(--brand-text-main);">Retrieving Fact ID: [{{ part.memoryId.substring(0, 8) }}...]</h5>
               </div>
           </div>
 
           <!-- Round Divider / Milestone Marker -->
           <div v-else-if="part.type === 'round'" class="round-separator my-6 not-prose select-none flex items-center gap-3">
-              <div class="h-px grow bg-gradient-to-r from-transparent via-gray-300 dark:via-gray-700 to-gray-300 dark:to-gray-700"></div>
-              <div class="flex items-center gap-2 px-3.5 py-2 rounded-full bg-slate-50 dark:bg-gray-800 border border-slate-200 dark:border-gray-700/80 text-slate-700 dark:text-gray-300 shadow-sm backdrop-blur-sm transition-all hover:scale-105 min-w-[8rem] justify-center">
-                  <span class="flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 font-bold text-[10px] shrink-0">
-                      <span class="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                  </span>
-                  <span class="text-xs font-black uppercase tracking-wider font-mono text-gray-800 dark:text-gray-200 shrink-0">
+              <div class="h-px grow" style="background-color: var(--brand-border-muted);"></div>
+              <div class="flex items-center gap-2 px-3.5 py-2 rounded-full card border" style="background-color: var(--brand-bg-elevated); border-color: var(--brand-border-main);">
+                  <span class="flex items-center justify-center w-4 h-4 rounded-full" style="background-color: var(--brand-bg-subtle); color: var(--brand-accent); font-size: 10px; font-weight: bold;">&#8226;</span>
+                  <span class="text-xs font-black uppercase tracking-wider font-mono" style="color: var(--brand-text-main);">
                       {{ formatRoundTitle(part.roundId) }}
                   </span>
-                  <span v-if="part.content" class="text-[11px] font-normal text-gray-500 dark:text-gray-400 font-sans truncate max-w-[10rem]">
+                  <span v-if="part.content" class="text-[11px] font-normal truncate max-w-[10rem]" style="color: var(--brand-text-dim);">
                       — {{ part.content }}
                   </span>
               </div>
-              <div class="h-px grow bg-gradient-to-l from-transparent via-gray-300 dark:via-gray-700 to-gray-300 dark:to-gray-700"></div>
+              <div class="h-px grow" style="background-color: var(--brand-border-muted);"></div>
           </div>
 
           <!-- OWL Visualization -->
-          <div v-else-if="part.type === 'owl'" class="my-6 card overflow-hidden" style="border-width: 2px; border-color: var(--brand-accent);">
-              <div class="px-4 py-2 text-text-on-primary flex justify-between items-center" style="background-color: var(--brand-accent);">
-                  <span class="text-[10px] font-black uppercase tracking-widest">Semantic OWL / RDF</span>
+          <div v-else-if="part.type === 'owl'" class="my-6 rounded-lg overflow-hidden card" style="border: 2px solid var(--brand-accent); background-color: var(--brand-bg-card);">
+              <div class="px-4 py-2 flex justify-between items-center text-[10px] font-black uppercase tracking-widest" style="background-color: var(--brand-accent); color: var(--brand-text-on-primary);">
+                  <span>Semantic OWL / RDF</span>
                   <button @click="uiStore.copyToClipboard(part.content)" class="hover:text-indigo-200"><IconCopy class="w-4 h-4"/></button>
               </div>
-              <div class="p-4 surface-0 text-primary overflow-x-auto text-xs font-mono">
+              <div class="p-4 overflow-x-auto text-xs font-mono" style="color: var(--brand-text-main); background-color: var(--brand-bg-app);">
                   <pre>{{ part.content }}</pre>
               </div>
           </div>
@@ -2251,7 +2332,7 @@ function onMermaidReady({ svg }, partIndex) {
 
           <!-- Dynamic Spreadsheet View -->
           <template v-else-if="part.type === 'data_grid_view'">
-             <div class="my-6 card overflow-hidden h-96">
+             <div class="my-6 card overflow-hidden h-96" style="border: 1px solid var(--brand-border-main);">
                 <InteractiveDataGrid 
                     :discussionId="currentDiscussionId"
                     :title="part.title"
@@ -2262,40 +2343,42 @@ function onMermaidReady({ svg }, partIndex) {
           </template>
 
           <!-- Artefact Image Anchor -->
-          <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount card">
-             <div class="rounded-2xl border-2 border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 overflow-hidden shadow-lg group">
-                  <div class="relative">
-                      <AuthenticatedImage 
-                          :src="`/api/discussions/${currentDiscussionId}/artefacts/${encodeURIComponent(part.title)}/images/${part.index}`" 
-                          class="w-full h-auto max-h-[600px] object-contain mx-auto"
-                      />
-                      <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 z-10">
-                          <button @click="deleteArtefactImage(part.title, part.index)" class="p-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-lg transition-all active:scale-95 cursor-pointer" title="Delete this page/image">
-                              <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                          </button>
-                      </div>
-                      <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
-                           <span class="text-[10px] font-black uppercase tracking-widest text-white">{{ part.title }} — Page {{ part.index + 1 }}</span>
-                      </div>
+          <div v-else-if="part.type === 'artefact_image'" class="my-6 artefact-image-mount card border" style="border-color: var(--brand-border-main); background-color: var(--brand-bg-app);">
+             <div class="rounded-2xl overflow-hidden shadow-lg group relative">
+                  <AuthenticatedImage 
+                      :src="`/api/discussions/${currentDiscussionId}/artefacts/${encodeURIComponent(part.title)}/images/${part.index}`" 
+                      class="w-full h-auto max-h-[600px] object-contain mx-auto"
+                      style="background-color: var(--brand-bg-main);"
+                  />
+                  <div class="absolute inset-0 bg-black/10 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-3 z-10">
+                      <button @click="deleteArtefactImage(part.title, part.index)" class="p-3 bg-red-600 hover:bg-red-700 text-white rounded-full shadow-lg transition-all active:scale-95 cursor-pointer" title="Delete this page/image">
+                          <svg xmlns="http://www.w3.org/2000/svg" class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                  </div>
+                  <div class="absolute bottom-0 inset-x-0 p-3 bg-black/40 backdrop-blur-md opacity-0 group-hover:opacity-100 transition-opacity">
+                       <span class="text-[10px] font-black uppercase tracking-widest text-white">{{ part.title }} — Page {{ part.index + 1 }}</span>
                   </div>
              </div>
           </div>
 
           <!-- Building / Working Indicator -->
           <div v-else-if="part.type === 'building_indicator'" class="my-3 not-prose">
-              <div class="flex items-center gap-3 px-4 py-3 rounded-xl border border-blue-200 dark:border-blue-800/60 bg-blue-50/50 dark:bg-blue-950/20 shadow-sm"
+              <div class="flex items-center gap-3 px-4 py-3 rounded-xl border shadow-sm"
+                   style="background-color: var(--brand-bg-elevated); border-color: var(--brand-border-muted);"
                    :class="part.isDone
-                    ? 'border-emerald-200 dark:border-emerald-800/50 bg-emerald-50/50 dark:bg-emerald-950/10'
-                    : ''">
-                  <span v-if="!part.isDone" class="inline-block w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent" style="animation: spin 1s linear infinite;"></span>
-                  <IconCheckCircle v-else class="w-4 h-4 text-emerald-500 shrink-0" />
+                    ? 'border-emerald-500/50'
+                    : ''"
+                   :style="part.isDone ? { 'border-left': '4px solid var(--brand-primary)' } : ''"
+              >
+                  <span v-if="!part.isDone" class="inline-block w-4 h-4 rounded-full border-2 border-blue-400 border-t-transparent" style="animation: spin 1s linear infinite; background-color: var(--brand-primary);"></span>
+                  <IconCheckCircle v-else class="w-4 h-4" style="color: #10b981; /* Emerald for success */" />
                   <div class="flex flex-col min-w-0">
-                      <span class="text-[9px] font-black uppercase tracking-[0.15em] text-secondary">
+                      <span class="text-[9px] font-black uppercase tracking-[0.15em]" style="color: var(--brand-text-dim);">
                           {{ part.isDone ? 'Completed' : 'Building' }}
                       </span>
-                      <span class="text-sm font-bold text-primary truncate">{{ part.label }}</span>
-                      <span v-if="part.sub_content" class="text-xs text-secondary italic truncate">{{ part.sub_content }}</span>
-                      <span v-if="part.title" class="text-[10px] font-mono text-dim truncate">{{ part.title }}</span>
+                      <span class="text-sm font-bold truncate" style="color: var(--brand-text-main);">{{ part.label }}</span>
+                      <span v-if="part.sub_content" class="text-xs italic truncate" style="color: var(--brand-text-dim);">{{ part.sub_content }}</span>
+                      <span v-if="part.title" class="text-[10px] font-mono truncate" style="color: var(--brand-text-dim);">{{ part.title }}</span>
                   </div>
                   <span v-if="part.isDone" class="ml-auto text-[9px] font-black uppercase tracking-widest text-emerald-500 shrink-0">Done</span>
               </div>
@@ -2304,31 +2387,33 @@ function onMermaidReady({ svg }, partIndex) {
           <!-- Interactive Widget -->
           <div v-else-if="part.type === 'interactive_widget' && part.widget" 
                class="my-4 flex justify-center w-full group/widget-container" style="isolation: isolate; contain: paint;">
-              <div class="w-full max-w-[min(100%,800px)] rounded-2xl border-2 border-border-muted dark:border-border-strong bg-surface-1 overflow-hidden shadow-lg transition-all duration-300 hover:border-primary/30 hover:shadow-xl" style="contain: paint;">
+              <div class="w-full max-w-[min(100%,800px)] rounded-2xl card overflow-hidden shadow-lg transition-all duration-300 hover:shadow-xl" style="background-color: var(--brand-bg-card); border: 1px solid var(--brand-border-strong);">
 
-                  <div class="px-4 py-2.5 border-b border-primary bg-surface-1 flex items-center justify-between">
+                  <div class="px-4 py-2.5 border-b flex items-center justify-between" style="border-color: var(--brand-border-muted); background-color: var(--brand-bg-elevated);">
                       <div class="flex items-center gap-3 min-w-0">
-                          <div class="p-1.5 rounded-lg surface-2 text-accent">
+                          <div class="p-1.5 rounded-lg" style="background-color: var(--brand-bg-card); color: var(--brand-accent);">
                               <IconAnimateSpin v-if="part.widget.is_loading" class="w-4 h-4 animate-spin" />
                               <IconCpuChip v-else class="w-4 h-4" />
                           </div>
                           <div class="flex flex-col min-w-0">
-                              <span class="text-[9px] font-black uppercase tracking-widest text-secondary leading-none mb-1">Sandbox Preview</span>
-                              <h4 class="text-xs font-bold text-primary truncate">{{ part.widget.title || 'Interactive Component' }}</h4>
+                              <span class="text-[9px] font-black uppercase tracking-widest" style="color: var(--brand-text-dim);">Sandbox Preview</span>
+                              <h4 class="text-xs font-bold truncate" style="color: var(--brand-text-main);">{{ part.widget.title || 'Interactive Component' }}</h4>
                           </div>
                       </div>
 
                       <div v-if="!part.widget.is_loading" class="flex items-center gap-1">
                           <button 
                             @click="openWidgetFullscreen(part.widget)"
-                            class="p-1.5 rounded-lg hover:bg-blue-500 hover:text-white text-gray-400 transition-all cursor-pointer"
+                            class="p-1.5 rounded-lg hover:bg-blue-500 hover:text-white transition-all cursor-pointer"
+                            style="color: var(--brand-text-main);"
                             title="Full Screen View"
                           >
                               <IconMaximize class="w-3.5 h-3.5" />
                           </button>
                           <button 
                             @click="openWidgetInNewTab(part.widget)"
-                            class="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 transition-all cursor-pointer"
+                            class="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-all cursor-pointer"
+                            style="color: var(--brand-text-main);"
                             title="Open in New Tab"
                           >
                               <IconGlobeAlt class="w-3.5 h-3.5" />
@@ -2336,30 +2421,30 @@ function onMermaidReady({ svg }, partIndex) {
                       </div>
                   </div>
 
-                  <div class="relative w-full bg-surface-1 transition-all overflow-hidden border-b border-primary flex justify-center items-center min-h-[100px]" style="contain: paint;">
+                  <div class="relative w-full transition-all overflow-hidden flex justify-center items-center min-h-[100px]" style="background-color: var(--brand-bg-card);">
                        <iframe 
                         v-if="getWidgetContent(part.widget)"
                         :data-part-id="part.id"
                         :key="`${part.id}-${isStreaming ? 'live' : 'stable'}`"
                         :srcdoc="wrapInIsolatedShell(getWidgetContent(part.widget), part.id)" 
-                        class="w-full max-w-full border-none pointer-events-auto bg-transparent transition-all duration-300" 
+                        class="w-full max-w-full border-none pointer-events-auto transition-all duration-300" 
                         style="height: 400px; display: block;"
                         sandbox="allow-scripts allow-forms allow-modals" 
                         referrerpolicy="no-referrer"
                       ></iframe>
                       
-                      <div v-else class="absolute inset-0 flex flex-col items-center justify-center bg-surface-1">
-                         <IconAnimateSpin class="w-8 h-8 text-blue-500 animate-spin mb-3 opacity-30" />
-                         <p class="text-[10px] font-black uppercase text-gray-400 tracking-widest">Awaiting source data...</p>
+                      <div v-else class="absolute inset-0 flex flex-col items-center justify-center" style="background-color: var(--brand-bg-app);">
+                         <IconAnimateSpin class="w-8 h-8 animate-spin opacity-30" style="color: var(--brand-accent);" />
+                         <p class="text-[10px] font-black uppercase tracking-widest" style="color: var(--brand-text-dim);">Awaiting source data...</p>
                       </div>
                   </div>
 
-                  <div class="px-4 py-2 bg-surface-2 flex items-center justify-between border-t border-primary">
+                  <div class="px-4 py-2 flex items-center justify-between border-t" style="border-color: var(--brand-border-muted); background-color: var(--brand-bg-elevated);">
                        <div class="flex items-center gap-2">
-                          <div class="w-1.5 h-1.5 rounded-full" :class="part.widget.is_loading ? 'bg-gray-400' : 'bg-green-500 animate-pulse'"></div>
-                          <span class="text-[9px] font-bold text-secondary uppercase tracking-tighter">{{ part.widget.is_loading ? 'Preparing Environment' : 'Sandbox Ready' }}</span>
+                          <div class="w-1.5 h-1.5 rounded-full" :class="part.widget.is_loading ? 'bg-gray-400' : 'bg-green-500 animate-pulse'" style="background-color: var(--brand-primary);"></div>
+                          <span class="text-[9px] font-bold uppercase tracking-tighter" style="color: var(--brand-text-dim);">{{ part.widget.is_loading ? 'Preparing Environment' : 'Sandbox Ready' }}</span>
                        </div>
-                       <button v-if="!part.widget.is_loading" @click="openWidgetFullscreen(part.widget)" class="text-[9px] font-black text-accent uppercase tracking-widest hover:underline">
+                       <button v-if="!part.widget.is_loading" @click="openWidgetFullscreen(part.widget)" class="text-[9px] font-black uppercase tracking-widest hover:underline" style="color: var(--brand-accent);">
                            Launch Visualizer &rarr;
                        </button>
                   </div>
@@ -2370,16 +2455,16 @@ function onMermaidReady({ svg }, partIndex) {
 
         <!-- Live Active Event Indicator -->
         <div v-if="isStreaming && $attrs.message?.lastEvent" class="mt-4 animate-in fade-in slide-in-from-bottom-1">
-             <div class="flex items-center gap-3 p-3 rounded-xl bg-blue-50/50 dark:bg-blue-900/10 border border-blue-100/50 dark:border-blue-800/30">
+             <div class="flex items-center gap-3 p-3 rounded-xl border card" style="background-color: var(--brand-bg-card); border-color: var(--brand-accent);">
                   <div class="relative shrink-0">
-                      <IconAnimateSpin class="w-5 h-5 text-blue-500 animate-spin" />
+                      <IconAnimateSpin class="w-5 h-5 animate-spin" style="color: var(--brand-accent);" />
                       <div class="absolute inset-0 flex items-center justify-center">
-                          <component :is="getEventIcon($attrs.message.lastEvent.type)" class="w-2.5 h-2.5 text-blue-600" />
+                          <component :is="getEventIcon($attrs.message.lastEvent.type)" class="w-2.5 h-2.5" style="color: var(--brand-primary);" />
                       </div>
                   </div>
                   <div class="flex flex-col min-w-0">
-                      <span class="text-[9px] font-black uppercase tracking-widest text-blue-500/60 leading-none mb-1">Active Step</span>
-                      <span class="text-xs font-bold text-gray-700 dark:text-gray-300 truncate">
+                      <span class="text-[9px] font-black uppercase tracking-widest leading-none mb-1" style="color: var(--brand-primary);">Active Step</span>
+                      <span class="text-xs font-bold truncate" style="color: var(--brand-text-main);">
                           {{ $attrs.message.lastEvent.content?.name || $attrs.message.lastEvent.content || 'Thinking...' }}
                       </span>
                   </div>
@@ -2389,3 +2474,16 @@ function onMermaidReady({ svg }, partIndex) {
     </div>
   </div>
 </template>
+
+<style scoped>
+/* Ensure smooth font transitions and consistent theme inheritance */
+.message-prose {
+    font-family: inherit;
+    line-height: 1.6;
+}
+
+/* Code Block Skeleton Fix (used when markdownParser replaces fences) */
+.markdown-text :deep(.code-block-skeleton) {
+    transition: background-color 0.2s ease;
+}
+</style>

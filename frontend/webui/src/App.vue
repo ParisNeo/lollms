@@ -1,3 +1,4 @@
+
 <script setup>
 import { computed, onMounted, watch, ref, defineAsyncComponent } from 'vue';
 import { useRoute } from 'vue-router';
@@ -148,6 +149,8 @@ watch(user, (newUser) => {
 watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setProperty('--message-font-size', `${sz}px`); }, { immediate: true });
 </script>
 
+
+
 <template>
   <div class="h-screen w-screen overflow-hidden font-sans antialiased text-text-main bg-bg-app flex flex-col transition-colors duration-500">
 
@@ -163,17 +166,18 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
         leave-from-class="opacity-100 translate-y-0"
         leave-to-class="opacity-0 -translate-y-10 scale-95"
     >
-        <div v-if="((!wsConnected || isConnectionLost) && isAuthenticated && hasConnectedOnce && layoutState !== 'maintenance') || isReconnecting" 
-             class="fixed top-6 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
-            <div class="px-6 py-3 rounded-full border shadow-2xl backdrop-blur-xl flex items-center gap-4 transition-all duration-500"
-                 :class="isReconnecting ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-rose-500/10 border-rose-500/20 text-rose-600'">
-                <div class="relative shrink-0">
-                    <div class="w-3 h-3 rounded-full bg-current animate-pulse"></div>
-                    <div class="absolute inset-0 w-3 h-3 rounded-full bg-current animate-ping opacity-40"></div>
-                </div>
-                <div class="flex flex-col leading-none">
-                    <span class="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 mb-0.5">Connectivity</span>
-                    <span class="text-sm font-bold">{{ isReconnecting ? 'Resyncing Cluster' : 'Server Connection Interrupted' }}</span>
+        <div v-if="((!wsConnected || isConnectionLost) && isAuthenticated && hasConnectedOnce && layoutState !== 'maintenance') || isReconnecting">
+            <div class="fixed top-6 left-1/2 -translate-x-1/2 z-[100] pointer-events-none">
+                <div class="px-6 py-3 rounded-full border shadow-2xl backdrop-blur-xl flex items-center gap-4 transition-all duration-500"
+                    :class="isReconnecting ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-600' : 'bg-rose-500/10 border-rose-500/20 text-rose-600'">
+                    <div class="relative shrink-0">
+                        <div class="w-3 h-3 rounded-full bg-current animate-pulse"></div>
+                        <div class="absolute inset-0 w-3 h-3 rounded-full bg-current animate-ping opacity-40"></div>
+                    </div>
+                    <div class="flex flex-col leading-none">
+                        <span class="text-[10px] font-black uppercase tracking-[0.2em] opacity-60 mb-0.5">Connectivity</span>
+                        <span class="text-sm font-bold">{{ isReconnecting ? 'Resyncing Cluster' : 'Server Connection Interrupted' }}</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -246,7 +250,7 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
                             title="Pin & Expand Fact"
                         >
                             <!-- Sleek Pushpin Icon -->
-                            <svg xmlns="http://www.w3.org/2000/svg" class="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                            <svg xmlns="http://www.w.org/2000/svg" class="w-4.5 h-4.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
                                 <path stroke-linecap="round" stroke-linejoin="round" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a3 3 0 016 0v2M7 7h10" />
                             </svg>
                         </button>
@@ -321,7 +325,6 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 
     <!-- Main Authenticated Layout -->
     <div v-else-if="layoutState === 'authenticated'" class="flex flex-col grow min-h-0 relative overflow-hidden bg-bg-app">
-      <!-- FORCE SYNC: Ensure this is the component from components/layout/GlobalHeader.vue -->
       <GlobalHeader :key="authStore.user?.id" />
 
       <div class="flex grow min-h-0 relative w-full h-full">
@@ -334,7 +337,9 @@ watch(message_font_size, (sz) => { if (sz) document.documentElement.style.setPro
 
         <!-- Mobile Sidebar Backdrop -->
         <Transition enter-active-class="duration-300 ease-out" enter-from-class="opacity-0" enter-to-class="opacity-100" leave-active-class="duration-200 ease-in" leave-from-class="opacity-100" leave-to-class="opacity-0">
-            <div v-if="showMainSidebar && isSidebarOpen" @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/40 backdrop-blur-sm z-30 md:hidden"></div>
+            <div v-if="showMainSidebar && isSidebarOpen">
+                <div @click="uiStore.toggleSidebar" class="absolute inset-0 bg-black/40 backdrop-blur-sm z-30 md:hidden"></div>
+            </div>
         </Transition>
 
         <!-- Principal Viewport -->

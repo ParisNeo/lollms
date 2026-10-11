@@ -208,33 +208,57 @@ export const useUiStore = defineStore('ui', {
 
     setVibe(vibe) {
         const root = document.documentElement;
-        const vibeClasses = Array.from(root.classList).filter(c => c.startsWith('vibe-'));
-        vibeClasses.forEach(c => root.classList.remove(c));
+        if (!root) return;
+
+        root.style.transition = 'none';
+
+        // Cleanup: Remove all existing vibe classes
+        const currentClasses = Array.from(root.classList).filter(c => c.startsWith('vibe-'));
+        currentClasses.forEach(c => root.classList.remove(c));
+        
+        // Reset all CSS variables to ensure a clean slate
+        const varsToClear = [
+            '--brand-primary', '--brand-primary-hover', '--brand-accent',
+            '--brand-bg-app', '--brand-bg-card', '--brand-bg-elevated',
+            '--brand-bg-overlay', '--brand-bg-sidebar', '--brand-bg-hover',
+            '--brand-text-main', '--brand-text-dim', '--brand-text-on-primary',
+            '--brand-border-main', '--brand-border-muted', '--brand-border-strong',
+            '--brand-input-bg', '--brand-input-border'
+        ];
+        
+        varsToClear.forEach(varName => {
+            root.style.removeProperty(varName);
+        });
+
+        // Reset effect attribute
+        root.removeAttribute('data-effect');
 
         this.currentVibe = vibe;
         this.currentCustomTheme = null;
         localStorage.setItem('lollms-vibe', vibe);
         localStorage.removeItem('lollms-custom-theme');
 
-        // Clear any inline custom properties when reverting to preset vibes
-        const customProps = [
-            '--brand-primary', '--brand-primary-hover', '--brand-accent', 
-            '--brand-bg-app', '--brand-bg-app-hover', '--brand-bg-card', 
-            '--brand-bg-elevated', '--brand-bg-overlay', '--brand-bg-sidebar',
-            '--brand-bg-hover', '--brand-input-bg', '--brand-input-border',
-            '--brand-border-main', '--brand-border-muted', '--brand-border-strong',
-            '--brand-text-main', '--brand-text-dim', '--brand-text-on-primary',
-            '--effect-radius-md', '--effect-radius-lg', '--effect-radius-sm'
-        ];
-        customProps.forEach(prop => root.style.removeProperty(prop));
+        const sanitizedVibe = String(vibe).replace(/[^a-zA-Z0-9-]/g, '');
+        const targetVibe = sanitizedVibe === 'default' ? 'indigo' : sanitizedVibe;
 
-        if (vibe && vibe !== 'default') {
-            root.classList.add(`vibe-${vibe}`);
+        if (targetVibe) {
+            root.classList.add(`vibe-${targetVibe}`);
         }
 
-        console.log(`[UI] Vibe applied: ${vibe || 'default'}. Active classes:`, root.className);
+        requestAnimationFrame(() => {
+            root.style.transition = 'background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1), color 0.3s cubic-bezier(0.4, 0, 0.2, 1)';
+            window.dispatchEvent(new Event('resize'));
+
+            setTimeout(() => {
+                const computedStyle = getComputedStyle(root);
+                const bgApp = computedStyle.getPropertyValue('--bg-app').trim();
+                console.log(`[UI Debug] Vibe ${targetVibe} applied. Background: ${bgApp}`);
+            }, 100);
+        });
+
+        console.log(`[UI] Vibe ${targetVibe} applied.`);
     },
-    
+
     setEffect(effect) {
         const root = document.documentElement;
         if (effect === 'default' || effect === 'none') {
@@ -301,14 +325,20 @@ export const useUiStore = defineStore('ui', {
     },
 
     initializeTheme() {
-        this.setTheme(this.currentTheme);
-        if (this.currentEffect && this.currentEffect !== 'default') {
-            this.setEffect(this.currentEffect);
+        // Apply base theme first
+        const theme = localStorage.getItem('lollms-theme') || 'light';
+        this.setTheme(theme);
+
+        // Apply Vibe & Effect second
+        const savedVibe = localStorage.getItem('lollms-vibe') || 'default';
+        const savedEffect = localStorage.getItem('lollms-effect') || 'default';
+        
+        if (savedVibe !== 'custom' && !localStorage.getItem('lollms-custom-theme')) {
+             this.setVibe(savedVibe);
         }
-        if (this.currentVibe === 'custom' && this.currentCustomTheme) {
-            this.setCustomTheme(this.currentCustomTheme);
-        } else {
-            this.setVibe(this.currentVibe);
+        
+        if (savedEffect !== 'default') {
+             this.setEffect(savedEffect);
         }
     },
 

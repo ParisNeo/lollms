@@ -1,51 +1,59 @@
-/* Lavender Fields - Elegant Purple */
+/* Lavender (Purple) Vibe */
 
-:root, .vibe-lavender {
-  --brand-primary: #8b5cf6;
-  --brand-primary-hover: #7c3aed;
-  --brand-accent: #c084fc;
+.vibe-lavender, [data-vibe="lavender"] {
+  --brand-primary: #7c3aed;
+  --brand-primary-hover: #6d28d9;
+  --brand-accent: #a855f7;
+  --brand-secondary: #d946ef;
   
   --brand-bg-app: #faf5ff;
   --brand-bg-app-hover: #f3e8ff;
   --brand-bg-card: #ffffff;
-  --brand-bg-elevated: #ffffff;
-  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
-  --brand-bg-sidebar: #faf5ff;
+  --brand-bg-elevated: #faf5ff;
+  --brand-bg-overlay: rgba(250, 245, 255, 0.95);
+  --brand-bg-sidebar: #ffffff;
   --brand-bg-hover: #e9d5ff;
+  --brand-bg-subtle: #f3e8ff;
   
   --brand-border-main: #e9d5ff;
   --brand-border-muted: #f3e8ff;
   --brand-border-strong: #d8b4fe;
+  --brand-border-light-line: rgba(124, 58, 237, 0.1);
   
-  --brand-text-main: #581c87;
-  --brand-text-dim: #9333ea;
+  --brand-text-main: #4c1d95;
+  --brand-text-dim: #6d28d9;
+  --brand-text-muted: #a78bfa;
   --brand-text-on-primary: #ffffff;
   
   --brand-input-bg: #ffffff;
-  --brand-input-border: #e9d5ff;
+  --brand-input-border: #d8b4fe;
 }
 
-.dark.vibe-lavender {
+.dark .vibe-lavender, .dark[data-vibe="lavender"] {
   --brand-primary: #a78bfa;
   --brand-primary-hover: #8b5cf6;
-  --brand-accent: #d8b4fe;
+  --brand-accent: #c084fc;
+  --brand-secondary: #e879f9;
   
-  --brand-bg-app: #1e1b4b;
-  --brand-bg-app-hover: #2e1065;
-  --brand-bg-card: #2e1065;
-  --brand-bg-elevated: #4c1d95;
+  --brand-bg-app: #2e1065;
+  --brand-bg-app-hover: #4c1d95;
+  --brand-bg-card: #4c1d95;
+  --brand-bg-elevated: #5b21b6;
   --brand-bg-overlay: rgba(46, 16, 101, 0.95);
-  --brand-bg-sidebar: #1e1b4b;
-  --brand-bg-hover: #4c1d95;
+  --brand-bg-sidebar: #2e1065;
+  --brand-bg-hover: #5b21b6;
+  --brand-bg-subtle: #4c1d95;
   
-  --brand-border-main: #4c1d95;
+  --brand-border-main: #6d28d9;
   --brand-border-muted: #5b21b6;
-  --brand-border-strong: #7c3aed;
+  --brand-border-strong: #8b5cf6;
+  --brand-border-light-line: rgba(255, 255, 255, 0.1);
   
-  --brand-text-main: #f3e8ff;
-  --brand-text-dim: #d8b4fe;
-  --brand-text-on-primary: #1e1b4b;
+  --brand-text-main: #faf5ff;
+  --brand-text-dim: #e9d5ff;
+  --brand-text-muted: #d8b4fe;
+  --brand-text-on-primary: #2e1065;
   
-  --brand-input-bg: #2e1065;
-  --brand-input-border: #5b21b6;
+  --brand-input-bg: #5b21b6;
+  --brand-input-border: #6d28d9;
 }

@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-11 22:07]
+
+- feat(markdown-parser): refactor markdown parsing and theme-related UI components for better interactive chat interface
+
 ## [2026-10-08 22:34]
 
 - fix(deps): remove unused assets for static modules in vite

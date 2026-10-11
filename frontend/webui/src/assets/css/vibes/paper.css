@@ -1,53 +1,60 @@
-/* ==========================================================================
-   Paper Effect Layer
-   Warm tones, serif typography, lifted shadows, generous spacing.
-   ========================================================================== */
+/* Paper (Warm Serif) Vibe */
 
-[data-effect="paper"] {
-    --effect-radius-sm: 0.25rem;
-    --effect-radius-md: 0.375rem;
-    --effect-radius-lg: 0.5rem;
-    --effect-radius-xl: 0.75rem;
-
-    --effect-shadow-sm: 0 1px 3px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.04);
-    --effect-shadow-md: 0 4px 10px rgb(0 0 0 / 0.1), 0 1px 3px rgb(0 0 0 / 0.06);
-    --effect-shadow-lg: 0 8px 20px rgb(0 0 0 / 0.12), 0 2px 6px rgb(0 0 0 / 0.08);
-    --effect-shadow-xl: 0 16px 36px rgb(0 0 0 / 0.16), 0 4px 12px rgb(0 0 0 / 0.1);
-
-    --effect-font-body: 'Georgia', 'Cambria', 'Times New Roman', serif;
-    --effect-font-heading: 'Georgia', 'Cambria', serif;
-    --effect-font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+.vibe-paper, [data-vibe="paper"] {
+  --brand-primary: #44403c;
+  --brand-primary-hover: #292524;
+  --brand-accent: #78350f;
+  
+  --brand-bg-app: #fefce8;
+  --brand-bg-app-hover: #fef9c3;
+  --brand-bg-card: #fffbeb;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 251, 235, 0.98);
+  --brand-bg-sidebar: #fefce8;
+  --brand-bg-hover: #fef3c7;
+  --brand-bg-subtle: #fef9c3;
+  
+  --brand-border-main: #e7e5e4;
+  --brand-border-muted: #f5f5f4;
+  --brand-border-strong: #d6d3d1;
+  --brand-border-light-line: rgba(120, 53, 15, 0.1);
+  
+  --brand-text-main: #1c1917;
+  --brand-text-dim: #44403c;
+  --brand-text-muted: #78716c;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #d6d3d1;
+  
+  /* Paper specific: serif font stack */
+  font-family: 'Georgia', 'Times New Roman', serif;
 }
 
-/* Paper-specific overrides */
-[data-effect="paper"] {
-    --brand-bg-app: #fffbf5;
-    --brand-bg-card: #ffffff;
-}
-
-.dark[data-effect="paper"] {
-    --brand-bg-app: #1a1814;
-    --brand-bg-card: #252118;
-}
-
-[data-effect="paper"] .modal-title,
-[data-effect="paper"] .welcome-title,
-[data-effect="paper"] .processing-card-title {
-    font-family: var(--effect-font-heading);
-}
-
-[data-effect="paper"] .ai-bubble {
-    border-left: 3px solid var(--brand-primary);
-    border-radius: var(--effect-radius-md);
-    box-shadow: var(--effect-shadow-sm);
-}
-
-[data-effect="paper"] .user-bubble {
-    border-radius: var(--effect-radius-md);
-    border-left: 3px solid var(--brand-accent);
-}
-
-[data-effect="paper"] .code-block-container {
-    border-radius: var(--effect-radius-md);
-    border-top: 3px solid var(--brand-accent);
+.dark .vibe-paper, .dark[data-vibe="paper"] {
+  --brand-primary: #a8a29e;
+  --brand-primary-hover: #d6d3d1;
+  --brand-accent: #fbbf24;
+  
+  --brand-bg-app: #1c1917;
+  --brand-bg-app-hover: #292524;
+  --brand-bg-card: #292524;
+  --brand-bg-elevated: #44403c;
+  --brand-bg-overlay: rgba(28, 25, 23, 0.95);
+  --brand-bg-sidebar: #0c0a09;
+  --brand-bg-hover: #44403c;
+  --brand-bg-subtle: #292524;
+  
+  --brand-border-main: #44403c;
+  --brand-border-muted: #292524;
+  --brand-border-strong: #57534e;
+  --brand-border-light-line: rgba(255, 255, 255, 0.1);
+  
+  --brand-text-main: #f5f5f4;
+  --brand-text-dim: #a8a29e;
+  --brand-text-muted: #78716c;
+  --brand-text-on-primary: #1c1917;
+  
+  --brand-input-bg: #292524;
+  --brand-input-border: #44403c;
 }

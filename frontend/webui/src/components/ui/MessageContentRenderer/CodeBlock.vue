@@ -678,11 +678,11 @@ async function downloadCreatedFile(filename) {
             <div class="output-header flex justify-between items-center">
                 <span>Execution Output</span>
                 <div v-if="language.toLowerCase() === 'mermaid' && lastRenderedMermaidSvg" class="flex gap-2">
-                    <button @click="downloadMermaidAsSVG" class="text-[10px] bg-blue-50 dark:bg-blue-900/30 text-blue-600 px-2 py-0.5 rounded hover:bg-blue-100 transition-colors">Save SVG</button>
-                    <button @click="downloadMermaidAsPNG" class="text-[10px] bg-green-50 dark:bg-green-900/30 text-green-600 px-2 py-0.5 rounded hover:bg-green-100 transition-colors">Save PNG</button>
+                    <button @click="downloadMermaidAsSVG" class="text-[10px] px-2 py-0.5 rounded transition-colors" style="background-color: var(--bg-elevated); color: var(--primary); border: 1px solid var(--border-muted);">Save SVG</button>
+                    <button @click="downloadMermaidAsPNG" class="text-[10px] px-2 py-0.5 rounded transition-colors" style="background-color: var(--bg-elevated); color: #16a34a; border: 1px solid var(--border-muted);">Save PNG</button>
                 </div>
             </div>
-            <pre>{{ executionOutput }}</pre>
+            <pre style="color: var(--text-main);">{{ executionOutput }}</pre>
         </div>
         <div v-if="compilationResult" class="output-section">
             <div class="output-header">Compilation Result</div>
@@ -748,44 +748,45 @@ async function downloadCreatedFile(filename) {
 .output-section:not(:first-child) { margin-top: 1rem; }
 .file-list { list-style: none; padding: 0; margin: 0; }
 .file-link { display: flex; align-items: center; text-decoration: none; padding: 4px 0; border-radius: 4px; }
-.theme-dark { background-color: #1e1e1e; border: 1px solid #333; color: #d4d4d4; }
-.theme-dark .code-block-header { background-color: #252526; border-bottom: 1px solid #333; }
-.theme-dark .code-language { color: #cecece; }
-.theme-dark .code-action-btn { background-color: #3e3e42; color: #f0f0f0; border: 1px solid #606060; }
-.theme-dark .code-action-btn:hover:not(:disabled) { background-color: #5a5a5e; color: #ffffff; }
-.theme-dark .install-input { color: #d4d4d4; border-bottom-color: #606060; }
-.theme-dark .install-input:focus { border-bottom-color: #a2c1ff; }
-.theme-dark .install-confirm-btn { background-color: #2c622f; border-color: #4CAF50; }
-.theme-dark .uploaded-files-list { border-top-color: #333; }
-.theme-dark .uploaded-file-item { background-color: #3e3e42; }
-.theme-dark .remove-file-btn { color: #f0f0f0; }
-.theme-dark .remove-file-btn:hover { background-color: #5a5a5e; }
-.theme-dark .code-block-scrollable { scrollbar-color: #555 #252526; }
-.theme-dark .code-execution-output { background-color: #252526; border-top: 1px solid #333; }
-.theme-dark .code-execution-output.is-error { background-color: #4a1d1d; border-top-color: #842e2e; color: #f8d7da; }
-.theme-dark .code-execution-output.is-error pre { color: #f8d7da; }
-.theme-dark .code-execution-output pre { color: #d4d4d4; }
-.theme-dark .output-header { color: #888; }
-.theme-dark .file-link { color: #a2c1ff; }
-.theme-dark .file-link:hover { background-color: #3e3e42; }
-.theme-light { background-color: #ffffff; border: 1px solid #e0e0e0; color: #212121; }
-.theme-light .code-block-header { background-color: #f5f5f5; border-bottom: 1px solid #e0e0e0; }
-.theme-light .code-language { color: #333; }
-.theme-light .code-action-btn { background-color: #e0e0e0; color: #212121; border: 1px solid #bdbdbd; }
-.theme-light .code-action-btn:hover:not(:disabled) { background-color: #d4d4d4; }
-.theme-light .install-input { color: #212121; border-bottom-color: #bdbdbd; }
-.theme-light .install-input:focus { border-bottom-color: #0059b3; }
-.theme-light .install-confirm-btn { background-color: #e8f5e9; border-color: #a5d6a7; }
-.theme-light .uploaded-files-list { border-top-color: #e0e0e0; }
-.theme-light .uploaded-file-item { background-color: #e0e0e0; }
-.theme-light .remove-file-btn { color: #212121; }
-.theme-light .remove-file-btn:hover { background-color: #bdbdbd; }
-.theme-light .code-block-scrollable { scrollbar-color: #bdbdbd #f5f5f5; }
-.theme-light .code-execution-output { background-color: #f5f5f5; border-top: 1px solid #e0e0e0; }
-.theme-light .code-execution-output.is-error { background-color: #fff1f0; border-top-color: #ffccc7; color: #a8071a; }
-.theme-light .code-execution-output.is-error pre { color: #a8071a; }
-.theme-light .code-execution-output pre { color: #212121; }
-.theme-light .output-header { color: #757575; }
-.theme-light .file-link { color: #0059b3; }
-.theme-light .file-link:hover { background-color: #e0e0e0; }
+.theme-dark { background-color: var(--input-bg); border: 1px solid var(--border-main); color: var(--text-main); }
+.theme-dark .code-block-header { background-color: var(--bg-elevated); border-bottom: 1px solid var(--border-muted); color: var(--text-main); }
+.theme-dark .code-language { color: var(--text-dim); }
+.theme-dark .code-action-btn { background-color: var(--bg-elevated); color: var(--text-main); border: 1px solid var(--border-muted); }
+.theme-dark .code-action-btn:hover:not(:disabled) { background-color: var(--bg-hover); color: var(--primary); }
+.theme-dark .install-input { color: var(--text-main); border-bottom-color: var(--border-muted); }
+.theme-dark .install-input:focus { border-bottom-color: var(--primary); }
+.theme-dark .install-confirm-btn { background-color: #16a34a; border-color: #15803d; color: #fff; }
+.theme-dark .uploaded-files-list { border-top-color: var(--border-muted); }
+.theme-dark .uploaded-file-item { background-color: var(--bg-hover); }
+.theme-dark .remove-file-btn { color: var(--text-main); }
+.theme-dark .remove-file-btn:hover { background-color: var(--bg-hover); }
+.theme-dark .code-block-scrollable { scrollbar-color: var(--border-muted) var(--input-bg); }
+.theme-dark .code-execution-output { background-color: var(--bg-elevated); border-top: 1px solid var(--border-muted); }
+.theme-dark .code-execution-output.is-error { background-color: rgba(190, 24, 93, 0.1); border-top-color: #be185d; color: #f472b6; }
+.theme-dark .code-execution-output.is-error pre { color: #f472b6; }
+.theme-dark .code-execution-output pre { color: var(--text-main); }
+.theme-dark .output-header { color: var(--text-dim); }
+.theme-dark .file-link { color: var(--primary); }
+.theme-dark .file-link:hover { background-color: var(--bg-hover); }
+
+.theme-light { background-color: var(--input-bg); border: 1px solid var(--border-main); color: var(--text-main); }
+.theme-light .code-block-header { background-color: var(--bg-elevated); border-bottom: 1px solid var(--border-muted); color: var(--text-main); }
+.theme-light .code-language { color: var(--text-dim); }
+.theme-light .code-action-btn { background-color: var(--bg-elevated); color: var(--text-main); border: 1px solid var(--border-muted); }
+.theme-light .code-action-btn:hover:not(:disabled) { background-color: var(--bg-hover); }
+.theme-light .install-input { color: var(--text-main); border-bottom-color: var(--border-muted); }
+.theme-light .install-input:focus { border-bottom-color: var(--primary); }
+.theme-light .install-confirm-btn { background-color: #16a34a; border-color: #15803d; color: #fff; }
+.theme-light .uploaded-files-list { border-top-color: var(--border-muted); }
+.theme-light .uploaded-file-item { background-color: var(--bg-hover); }
+.theme-light .remove-file-btn { color: var(--text-main); }
+.theme-light .remove-file-btn:hover { background-color: var(--border-muted); }
+.theme-light .code-block-scrollable { scrollbar-color: var(--border-main) var(--input-bg); }
+.theme-light .code-execution-output { background-color: var(--bg-elevated); border-top: 1px solid var(--border-muted); }
+.theme-light .code-execution-output.is-error { background-color: #fff1f0; border-top-color: #ffccc7; color: #ff4d4f; }
+.theme-light .code-execution-output.is-error pre { color: #ff4d4f; }
+.theme-light .code-execution-output pre { color: var(--text-main); }
+.theme-light .output-header { color: var(--text-dim); }
+.theme-light .file-link { color: var(--primary); }
+.theme-light .file-link:hover { background-color: var(--bg-hover); }
 </style>

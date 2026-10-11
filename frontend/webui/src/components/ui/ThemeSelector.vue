@@ -61,7 +61,8 @@ function closeThemeLab() {
     <button 
         @click="toggleDark" 
         class="relative p-2 rounded-lg transition-all duration-300 shrink-0 group"
-        :class="uiStore.currentTheme === 'dark' ? 'bg-gray-800 text-yellow-400 shadow-inner' : 'bg-white text-gray-500 shadow border border-gray-200'"
+        :class="uiStore.currentTheme === 'dark' ? 'shadow-inner' : 'shadow'"
+        style="background-color: var(--brand-bg-elevated); color: var(--brand-text-main); border-color: var(--brand-border-main);"
         :title="uiStore.currentTheme === 'dark' ? 'Switch to Light' : 'Switch to Dark'">
         <div class="relative w-5 h-5">
             <svg v-if="uiStore.currentTheme === 'dark'" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="w-5 h-5 transition-transform duration-500 group-hover:rotate-12">
@@ -76,32 +77,32 @@ function closeThemeLab() {
     <div class="w-px h-5 bg-gray-200 dark:bg-gray-700 mx-0.5 shrink-0"></div>
 
     <!-- Theme Dropdown Trigger -->
-    <DropdownMenu title="Theme Selector" buttonClass="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300 transition-all flex items-center gap-2 shrink-0 border border-transparent hover:border-gray-200 dark:hover:border-gray-600">
+    <DropdownMenu title="Theme Selector" buttonClass="p-2 rounded-lg transition-all flex items-center gap-2 shrink-0 border transition-colors" style="background-color: var(--brand-bg-elevated); border-color: var(--brand-border-main); color: var(--brand-text-main);">
         <template #icon>
-            <IconAdjustmentsHorizontal class="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <IconAdjustmentsHorizontal class="w-5 h-5" style="color: var(--brand-accent);" />
         </template>
         <template #label>
-            <span class="text-xs font-bold uppercase tracking-wider hidden sm:inline">Themes</span>
+            <span class="text-xs font-bold uppercase tracking-wider hidden sm:inline" style="color: var(--brand-text-main);">Themes</span>
         </template>
 
         <!-- Dropdown Content Container - Fixed Height with Scroll -->
-        <div class="fixed-dropdown-content p-0 max-h-[70vh] overflow-y-auto custom-scrollbar flex flex-col gap-1">
+        <div class="fixed-dropdown-content p-0 max-h-[70vh] overflow-y-auto custom-scrollbar flex flex-col gap-1" style="background-color: var(--brand-bg-app);">
             <!-- Active Custom Theme Badge -->
-            <div v-if="isCustomActive" class="mb-3 p-3 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 rounded-xl border border-blue-200/50 dark:border-blue-800/50 flex items-center justify-between">
+            <div v-if="isCustomActive" class="mb-3 p-3 rounded-xl border flex items-center justify-between" style="background-color: var(--brand-bg-card); border-color: var(--brand-border-main);">
                 <div class="flex items-center gap-2.5">
-                    <IconSparkles class="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                    <IconSparkles class="w-4 h-4" style="color: var(--brand-accent);" />
                     <div>
-                        <div class="text-xs font-black text-blue-900 dark:text-blue-100 uppercase tracking-wider">Custom Active</div>
-                        <div class="text-[10px] text-blue-700 dark:text-blue-300 font-medium">{{ uiStore.currentCustomTheme.name }}</div>
+                        <div class="text-xs font-black uppercase tracking-wider" style="color: var(--brand-text-main);">Custom Active</div>
+                        <div class="text-[10px] font-medium" style="color: var(--brand-text-dim);">{{ uiStore.currentCustomTheme.name }}</div>
                     </div>
                 </div>
-                <button @click="openThemeLab" class="p-1.5 bg-white dark:bg-blue-900/30 rounded-lg text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors shadow-sm" title="Edit Theme">
+                <button @click="openThemeLab" class="p-1.5 rounded-lg transition-colors shadow-sm" style="background-color: var(--brand-bg-hover); color: var(--brand-accent);" title="Edit Theme">
                     <IconAdjustmentsHorizontal class="w-4 h-4" />
                 </button>
             </div>
 
             <!-- Section Label -->
-            <div class="px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] border-b border-secondary mb-2 pb-1 sticky top-0 bg-surface-0 z-10" style="background-color: var(--brand-bg-sidebar); border-color: var(--brand-border-main);">
+            <div class="px-3 py-2 text-[9px] font-black uppercase tracking-[0.2em] border-b mb-2 pb-1 sticky top-0 z-10" style="background-color: var(--brand-bg-sidebar); border-color: var(--brand-border-main); color: var(--brand-text-dim);">
                 Preset Atmospheres
             </div>
 
@@ -123,18 +124,18 @@ function closeThemeLab() {
                     <div class="flex items-start gap-3 relative z-0">
                         <!-- Color Swatch -->
                         <div class="mt-0.5 w-8 h-8 rounded-lg shadow-sm flex-shrink-0 flex items-center justify-center border" 
-                             :class="[vibe.color, uiStore.currentVibe === vibe.id ? 'border-blue-300 dark:border-blue-700' : 'border-black/5 dark:border-white/5']">
+                             :class="vibe.color"
+                             :style="{ borderColor: uiStore.currentVibe === vibe.id ? 'var(--brand-accent)' : 'var(--brand-border-main)' }">
                             <div class="w-2 h-2 rounded-full bg-white/20" v-if="vibe.darkOnly && uiStore.currentTheme !== 'dark'"></div>
                         </div>
                         
                         <!-- Text Content -->
                         <div class="flex flex-col min-w-0 flex-1">
-                            <span class="text-xs font-bold leading-tight truncate text-primary"
-                                  :class="uiStore.currentVibe === vibe.id ? 'opacity-100' : ''"
-                                  style="color: var(--brand-text-main);">
+                            <span class="text-xs font-bold leading-tight truncate"
+                                  :style="{ color: uiStore.currentVibe === vibe.id ? 'var(--brand-accent)' : 'var(--brand-text-main)' }">
                                 {{ vibe.name }}
                             </span>
-                            <span class="text-[10px] leading-tight truncate mt-0.5 text-secondary"
+                            <span class="text-[10px] leading-tight truncate mt-0.5"
                                   style="color: var(--brand-text-dim);">
                                 {{ vibe.desc }}
                             </span>
@@ -143,8 +144,12 @@ function closeThemeLab() {
 
                     <!-- Dark Mode Indicator -->
                     <div v-if="vibe.darkOnly && uiStore.currentTheme !== 'dark'" 
-                         class="absolute inset-0 bg-white/60 dark:bg-black/60 flex items-center justify-center rounded-xl backdrop-blur-[1px]">
-                        <span class="text-[9px] font-black uppercase tracking-widest text-gray-500 dark:text-gray-400 bg-white/80 dark:bg-black/80 px-2 py-1 rounded shadow-sm">Requires Dark Mode</span>
+                         class="absolute inset-0 flex items-center justify-center rounded-xl backdrop-blur-[1px]"
+                         style="background-color: rgba(var(--brand-bg-app-rgb, 255, 255, 255), 0.6);">
+                        <span class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded shadow-sm"
+                              style="background-color: var(--brand-bg-elevated); color: var(--brand-text-dim);">
+                            Requires Dark Mode
+                        </span>
                     </div>
                 </button>
             </div>
@@ -158,30 +163,32 @@ function closeThemeLab() {
                 <button v-for="effect in materialEffects" :key="effect.id"
                         @click="uiStore.setEffect(effect.id)"
                         class="p-2 rounded-lg text-center transition-all border"
-                        :class="uiStore.currentEffect === effect.id 
-                            ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-200 dark:border-blue-800' 
-                            : 'bg-gray-50 dark:bg-gray-800/50 border-transparent hover:bg-gray-100 dark:hover:bg-gray-700'">
+                        :style="{
+                            backgroundColor: uiStore.currentEffect === effect.id ? 'var(--brand-accent)' : 'var(--brand-bg-card)',
+                            borderColor: uiStore.currentEffect === effect.id ? 'var(--brand-accent)' : 'var(--brand-border-main)',
+                            color: uiStore.currentEffect === effect.id ? 'var(--brand-text-on-primary)' : 'var(--brand-text-dim)'
+                        }">
                     <svg class="w-4 h-4 mx-auto mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="effect.icon" />
                     </svg>
-                    <span class="text-[10px] font-medium" 
-                          :class="uiStore.currentEffect === effect.id ? 'text-blue-700 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'">
+                    <span class="text-[10px] font-medium">
                         {{ effect.name }}
                     </span>
                 </button>
             </div>
 
-            <div class="border-t-2 border-gray-100 dark:border-gray-800 pt-2 mt-2">
+            <div class="border-t-2 pt-2 mt-2" style="border-color: var(--brand-border-muted);">
                 <button @click="openThemeLab" 
-                        class="w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left hover:bg-gradient-to-r hover:from-blue-50 hover:to-indigo-50 dark:hover:from-gray-800 dark:hover:to-gray-700 border border-dashed border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700 group">
-                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-md shadow-blue-500/20 group-hover:scale-110 transition-transform">
+                        class="w-full flex items-center gap-3 p-2.5 rounded-xl transition-all text-left border border-dashed hover:opacity-80 group"
+                        style="border-color: var(--brand-border-main); background-color: var(--brand-bg-card);">
+                    <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-500 flex items-center justify-center shadow-md group-hover:scale-110 transition-transform">
                         <svg class="w-4.5 h-4.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                         </svg>
                     </div>
                     <div class="flex flex-col">
-                        <span class="text-xs font-bold text-gray-900 dark:text-white leading-none">Theme Lab</span>
-                        <span class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">Create custom palette</span>
+                        <span class="text-xs font-bold leading-none" style="color: var(--brand-text-main);">Theme Lab</span>
+                        <span class="text-[10px] mt-0.5" style="color: var(--brand-text-dim);">Create custom palette</span>
                     </div>
                 </button>
             </div>
@@ -199,4 +206,9 @@ function closeThemeLab() {
 .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--brand-border-main); border-radius: 3px; }
 .custom-scrollbar::-webkit-scrollbar-track { background: var(--brand-bg-app); }
 .theme-item-hover:hover { transform: translateX(4px); }
+
+.theme-container {
+    background-color: var(--brand-bg-app);
+    transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
 </style>

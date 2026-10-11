@@ -110,7 +110,8 @@ function copyAllLogs() {
         <button 
             type="button"
             @click="isExpanded = !isExpanded"
-            class="group flex items-center gap-2 text-left transition-all focus:outline-none py-1 px-2.5 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800/70 border border-gray-200/60 dark:border-gray-700/60 shadow-2xs select-none cursor-pointer"
+            class="group flex items-center gap-2 text-left transition-all focus:outline-none py-1 px-2.5 rounded-xl border shadow-2xs select-none cursor-pointer"
+            style="background-color: var(--input-bg); border-color: var(--border-muted); color: var(--text-main);"
         >
             <!-- Status Indicator -->
             <IconAnimateSpin 
@@ -201,7 +202,7 @@ function copyAllLogs() {
                                     <IconChevronRight class="w-3 h-3 transition-transform group-open/details:rotate-90" />
                                     <span>{{ step.subLines.length }} output lines</span>
                                 </summary>
-                                <div class="mt-1.5 p-2.5 bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200/80 dark:border-gray-800 font-mono text-xs leading-relaxed text-gray-700 dark:text-gray-300 overflow-x-auto custom-scrollbar whitespace-pre-wrap max-h-60">
+                                <div class="mt-1.5 p-2.5 rounded-xl border font-mono text-xs leading-relaxed overflow-x-auto custom-scrollbar whitespace-pre-wrap max-h-60 transition-colors" style="background-color: var(--input-bg); border-color: var(--border-muted); color: var(--text-main);">
                                     <div v-for="(sub, sIdx) in step.subLines" :key="sIdx">
                                         {{ sub }}
                                     </div>

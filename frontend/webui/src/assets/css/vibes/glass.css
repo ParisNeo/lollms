@@ -1,46 +1,68 @@
-/* ==========================================================================
-   Glassmorphism Effect Layer
-   Translucent surfaces with blur, subtle glows, and floating shadows.
-   ========================================================================== */
+/* Glass (Material Transparency) Vibe */
 
-[data-effect="glass"] {
-    --effect-surface-opacity: 72%;
-    --effect-surface-blur: 12px;
-    --effect-radius-md: 1rem;
-    --effect-radius-lg: 1.5rem;
-
-    --effect-shadow-sm: 0 2px 8px -1px rgb(0 0 0 / 0.08), 0 1px 3px -1px rgb(0 0 0 / 0.04);
-    --effect-shadow-md: 0 8px 24px -4px rgb(0 0 0 / 0.12), 0 2px 8px -2px rgb(0 0 0 / 0.06);
-    --effect-shadow-lg: 0 16px 48px -8px rgb(0 0 0 / 0.18), 0 4px 16px -4px rgb(0 0 0 / 0.08);
-    --effect-shadow-xl: 0 24px 64px -12px rgb(0 0 0 / 0.22), 0 8px 24px -6px rgb(0 0 0 / 0.1);
-
-    --effect-border-width: 1px;
-    --effect-border-color: color-mix(in srgb, var(--brand-border-main) 50%, transparent);
+.vibe-glass, [data-vibe="glass"] {
+  --brand-primary: #2563eb;
+  --brand-primary-hover: #1d4ed8;
+  --brand-accent: #3b82f6;
+  
+  --brand-bg-app: rgba(255, 255, 255, 0.7);
+  --brand-bg-app-hover: rgba(255, 255, 255, 0.9);
+  --brand-bg-card: rgba(255, 255, 255, 0.5);
+  --brand-bg-elevated: rgba(255, 255, 255, 0.8);
+  --brand-bg-overlay: rgba(255, 255, 255, 0.6);
+  --brand-bg-sidebar: rgba(255, 255, 255, 0.4);
+  --brand-bg-hover: rgba(255, 255, 255, 0.8);
+  --brand-bg-subtle: rgba(255, 255, 255, 0.3);
+  
+  --brand-border-main: rgba(0, 0, 0, 0.05);
+  --brand-border-muted: rgba(0, 0, 0, 0.03);
+  --brand-border-strong: rgba(0, 0, 0, 0.1);
+  --brand-border-light-line: rgba(255, 255, 255, 0.3);
+  
+  --brand-text-main: rgba(0, 0, 0, 0.8);
+  --brand-text-dim: rgba(0, 0, 0, 0.5);
+  --brand-text-muted: rgba(0, 0, 0, 0.4);
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: rgba(255, 255, 255, 0.5);
+  --brand-input-border: rgba(0, 0, 0, 0.1);
 }
 
-.dark[data-effect="glass"] {
-    --effect-surface-opacity: 55%;
-    --effect-surface-blur: 16px;
-    --effect-shadow-sm: 0 2px 8px -1px rgb(0 0 0 / 0.25), 0 1px 3px -1px rgb(0 0 0 / 0.15);
-    --effect-shadow-md: 0 8px 32px -4px rgb(0 0 0 / 0.35), 0 2px 8px -2px rgb(0 0 0 / 0.2);
-    --effect-shadow-lg: 0 16px 56px -8px rgb(0 0 0 / 0.45), 0 4px 16px -4px rgb(0 0 0 / 0.3);
-    --effect-shadow-xl: 0 24px 80px -12px rgb(0 0 0 / 0.55), 0 8px 24px -6px rgb(0 0 0 / 0.35);
+.dark .vibe-glass, .dark[data-vibe="glass"] {
+  --brand-primary: #60a5fa;
+  --brand-primary-hover: #3b82f6;
+  --brand-accent: #93c5fd;
+  
+  --brand-bg-app: rgba(15, 23, 42, 0.7);
+  --brand-bg-app-hover: rgba(15, 23, 42, 0.9);
+  --brand-bg-card: rgba(30, 41, 59, 0.5);
+  --brand-bg-elevated: rgba(30, 41, 59, 0.8);
+  --brand-bg-overlay: rgba(15, 23, 42, 0.8);
+  --brand-bg-sidebar: rgba(2, 6, 23, 0.6);
+  --brand-bg-hover: rgba(51, 65, 85, 0.8);
+  --brand-bg-subtle: rgba(30, 41, 59, 0.3);
+  
+  --brand-border-main: rgba(255, 255, 255, 0.05);
+  --brand-border-muted: rgba(255, 255, 255, 0.03);
+  --brand-border-strong: rgba(255, 255, 255, 0.1);
+  --brand-border-light-line: rgba(255, 255, 255, 0.1);
+  
+  --brand-text-main: rgba(255, 255, 255, 0.9);
+  --brand-text-dim: rgba(255, 255, 255, 0.6);
+  --brand-text-muted: rgba(255, 255, 255, 0.5);
+  --brand-text-on-primary: #0f172a;
+  
+  --brand-input-bg: rgba(30, 41, 59, 0.5);
+  --brand-input-border: rgba(255, 255, 255, 0.1);
 }
 
-/* Glass-specific surface treatments */
-[data-effect="glass"] .modal-panel,
-[data-effect="glass"] .artefact-card,
-[data-effect="glass"] .memory-card,
-[data-effect="glass"] .task-item-card,
-[data-effect="glass"] .processing-card,
-[data-effect="glass"] .glass-card {
-    backdrop-filter: blur(var(--effect-surface-blur)) saturate(160%);
-    -webkit-backdrop-filter: blur(var(--effect-surface-blur)) saturate(160%);
-    box-shadow: var(--effect-shadow-lg), inset 0 1px 0 color-mix(in srgb, var(--brand-text-main) 4%, transparent);
+/* Glass effect classes */
+.vibe-glass .bg-bg-card {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
-[data-effect="glass"] .btn,
-[data-effect="glass"] .input-field {
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+.vibe-glass .bg-bg-app {
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }

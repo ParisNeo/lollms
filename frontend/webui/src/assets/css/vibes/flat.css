@@ -1,60 +1,69 @@
-/* ==========================================================================
-   Flat / Minimal Effect Layer
-   Zero shadows, zero radius, clean lines, compact density.
-   ========================================================================== */
+/* Flat (No Shadow, Minimalist) Vibe */
 
-[data-effect="flat"] {
-    --effect-radius-sm: 0px;
-    --effect-radius-md: 0px;
-    --effect-radius-lg: 0px;
-    --effect-radius-xl: 0px;
-
-    --effect-shadow-sm: none;
-    --effect-shadow-md: none;
-    --effect-shadow-lg: none;
-    --effect-shadow-xl: none;
-
-    --effect-border-width: 1px;
-    --effect-card-padding: 0.75rem;
+.vibe-flat, [data-vibe="flat"] {
+  --brand-primary: #2563eb;
+  --brand-primary-hover: #1d4ed8;
+  --brand-accent: #3b82f6;
+  
+  --brand-bg-app: #ffffff;
+  --brand-bg-app-hover: #f3f4f6;
+  --brand-bg-card: #f9fafb;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.9);
+  --brand-bg-sidebar: #f9fafb;
+  --brand-bg-hover: #e5e7eb;
+  --brand-bg-subtle: #f3f4f6;
+  
+  --brand-border-main: #d1d5db;
+  --brand-border-muted: #e5e7eb;
+  --brand-border-strong: #9ca3af;
+  --brand-border-light-line: rgba(0, 0, 0, 0.05);
+  
+  --brand-text-main: #111827;
+  --brand-text-dim: #4b5563;
+  --brand-text-muted: #9ca3af;
+  --brand-text-on-primary: #ffffff;
+  
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #9ca3af;
+  
+  /* Flat specific: no shadows */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
 }
 
-/* Remove all decorative shadows in flat mode */
-[data-effect="flat"] .artefact-card,
-[data-effect="flat"] .memory-card,
-[data-effect="flat"] .task-item-card,
-[data-effect="flat"] .processing-card,
-[data-effect="flat"] .modal-panel,
-[data-effect="flat"] .code-block-container,
-[data-effect="flat"] .glass-card {
-    box-shadow: none !important;
-    border-radius: 0 !important;
+.vibe-flat .card,
+.vibe-flat .btn-primary,
+.vibe-flat .input-field {
+  box-shadow: none !important;
+  border: 2px solid var(--brand-border-main);
 }
 
-[data-effect="flat"] .btn {
-    box-shadow: none !important;
-    border-radius: 0;
-    text-transform: uppercase;
-    font-size: 0.75rem;
-    letter-spacing: 0.05em;
-}
-
-[data-effect="flat"] .btn:not(:disabled):active {
-    transform: none;
-    filter: brightness(0.9);
-}
-
-/* Flat mode uses color-coded left borders */
-[data-effect="flat"] .artefact-card {
-    border-left-width: 4px;
-}
-
-[data-effect="flat"] .memory-card {
-    border-left-width: 4px;
-}
-
-[data-effect="flat"] .message-bubble,
-[data-effect="flat"] .ai-bubble,
-[data-effect="flat"] .user-bubble {
-    border-radius: 0;
-    box-shadow: none !important;
+.dark .vibe-flat, .dark[data-vibe="flat"] {
+  --brand-primary: #60a5fa;
+  --brand-primary-hover: #3b82f6;
+  --brand-accent: #93c5fd;
+  
+  --brand-bg-app: #111827;
+  --brand-bg-app-hover: #1f2937;
+  --brand-bg-card: #1f2937;
+  --brand-bg-elevated: #374151;
+  --brand-bg-overlay: rgba(17, 24, 39, 0.9);
+  --brand-bg-sidebar: #111827;
+  --brand-bg-hover: #374151;
+  --brand-bg-subtle: #1f2937;
+  
+  --brand-border-main: #374151;
+  --brand-border-muted: #1f2937;
+  --brand-border-strong: #4b5563;
+  --brand-border-light-line: rgba(255, 255, 255, 0.05);
+  
+  --brand-text-main: #f9fafb;
+  --brand-text-dim: #9ca3af;
+  --brand-text-muted: #6b7280;
+  --brand-text-on-primary: #111827;
+  
+  --brand-input-bg: #1f2937;
+  --brand-input-border: #374151;
 }

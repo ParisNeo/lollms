@@ -1,10 +1,8 @@
-@import "tailwindcss";
+/* External Vibe Files */
 @import "./vibes/glass.css";
 @import "./vibes/skeuo.css";
 @import "./vibes/paper.css";
 @import "./vibes/flat.css";
-
-/* Color Theme Vibes */
 @import "./vibes/indigo.css";
 @import "./vibes/midnight.css";
 @import "./vibes/cyberpunk.css";
@@ -13,6 +11,58 @@
 @import "./vibes/sunset.css";
 @import "./vibes/lavender.css";
 @import "./vibes/monochrome.css";
+
+@import "tailwindcss";
+
+/* ══════════════════════════════════════════════════════════════════
+   VIBE → SEMANTIC BRIDGE (FINAL)
+   This block ensures variables cascade correctly. 
+   It MUST be placed after all imports to override base :root definitions.
+   ══════════════════════════════════════════════════════════════════ */
+html[class*="vibe-"] {
+  --bg-app: var(--brand-bg-app);
+  --bg-card: var(--brand-bg-card);
+  --bg-elevated: var(--brand-bg-elevated);
+  --bg-overlay: var(--brand-bg-overlay);
+  --bg-sidebar: var(--brand-bg-sidebar);
+  --bg-hover: var(--brand-bg-hover);
+  --input-bg: var(--brand-input-bg);
+  --input-border: var(--brand-input-border);
+  --text-main: var(--brand-text-main);
+  --text-dim: var(--brand-text-dim);
+  --text-on-primary: var(--brand-text-on-primary);
+  --border-main: var(--brand-border-main);
+  --border-muted: var(--brand-border-muted);
+  --border-strong: var(--brand-border-strong);
+  --primary: var(--brand-primary);
+  --primary-hover: var(--brand-primary-hover);
+  --accent: var(--brand-accent);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BRIDGE VARIABLES (Fallback)
+   Ensure semantic variables exist even if the vibe file hasn't loaded yet
+   or if it defines none. This prevents unstyled content flashing.
+   ══════════════════════════════════════════════════════════════════ */
+:root {
+  --brand-bg-app: #f8fafc;
+  --brand-bg-card: #ffffff;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-overlay: rgba(255, 255, 255, 0.8);
+  --brand-bg-sidebar: #f8fafc;
+  --brand-bg-hover: #e2e8f0;
+  --brand-input-bg: #ffffff;
+  --brand-input-border: #cbd5e1;
+  --brand-text-main: #0f172a;
+  --brand-text-dim: #64748b;
+  --brand-text-on-primary: #ffffff;
+  --brand-border-main: #e2e8f0;
+  --brand-border-muted: #f1f5f9;
+  --brand-border-strong: #cbd5e1;
+  --brand-primary: #4f46e5;
+  --brand-primary-hover: #4338ca;
+  --brand-accent: #ec4899;
+}
 
 @theme {
   /* Map semantic variables to Tailwind utilities so the build doesn't crash */
@@ -75,7 +125,7 @@
   --effect-transition-speed: 0.2s;
 }
 
-/* Brand Aliases - Resolved from :root block above */
+/* Brand Aliases & Reverse Bridge */
 :root {
   --brand-primary: var(--primary);
   --brand-primary-hover: var(--primary-hover);
@@ -93,7 +143,36 @@
   --brand-text-on-primary: var(--text-on-primary);
   --brand-border-main: var(--border-main);
   --brand-border-muted: var(--border-muted);
-  --brand-border-strong: var(--border-strong);
+  --brand-border-strong: var(--brand-border-strong);
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   VIBE → SEMANTIC BRIDGE
+   When a vibe class sets --brand-*, these selectors re-point the
+   layout-level --* variables to consume them. This is the critical
+   missing link: without this block, vibes set --brand-* but the app
+   reads --bg-app, --text-main etc. and the two are never connected.
+   ══════════════════════════════════════════════════════════════════ */
+.vibe-indigo, .vibe-midnight, .vibe-cyberpunk, .vibe-forest,
+.vibe-ocean, .vibe-sunset, .vibe-lavender, .vibe-monochrome,
+[class*="vibe-"] {
+  --bg-app: var(--brand-bg-app);
+  --bg-card: var(--brand-bg-card);
+  --bg-elevated: var(--brand-bg-elevated);
+  --bg-overlay: var(--brand-bg-overlay);
+  --bg-sidebar: var(--brand-bg-sidebar);
+  --bg-hover: var(--brand-bg-hover);
+  --input-bg: var(--brand-input-bg);
+  --input-border: var(--brand-input-border);
+  --text-main: var(--brand-text-main);
+  --text-dim: var(--brand-text-dim);
+  --text-on-primary: var(--brand-text-on-primary);
+  --border-main: var(--brand-border-main);
+  --border-muted: var(--brand-border-muted);
+  --border-strong: var(--brand-border-strong);
+  --primary: var(--brand-primary);
+  --primary-hover: var(--brand-primary-hover);
+  --accent: var(--brand-accent);
 }
 
 @layer base {
@@ -144,6 +223,10 @@
    ========================================================================== */
 
 @layer components {
+    .message-row:not(.is-ai) {
+        background-color: var(--bg-card);
+    }
+
     /* --- Input Fields --- */
     .input-field {
         display: block;
@@ -453,6 +536,10 @@
   background-color: var(--bg-app);
   border-color: var(--border-muted);
 }
+
+.user-message-row {
+  background-color: var(--bg-card);
+}
 .message-content-container {
     max-width: 80rem;
     margin-left: auto;
@@ -484,8 +571,9 @@
 .user-bubble {
   width: 100%;
   padding: 0.75rem;
-  background: color-mix(in srgb, var(--primary) 10%, var(--bg-card));
+  background: color-mix(in srgb, var(--primary) 15%, var(--bg-card));
   color: var(--text-main);
+  border: 1px solid var(--border-muted);
   border-radius: var(--effect-radius-lg) var(--effect-radius-lg) var(--effect-radius-sm) var(--effect-radius-lg);
 }
 .ai-bubble {
@@ -2650,13 +2738,20 @@ details[open].document-block > .document-summary {
 .theme-light .file-link { color: #0059b3; }
 .theme-light .file-link:hover { background-color: #e0e0e0; }
 
-/* Code Mirror & Editor Controls */
+/* Editor container */
 .editor-content-host > .cm-editor {
     height: 100%;
     padding: 0.75rem;
-    background-color: transparent;
+    background-color: var(--input-bg) !important;
+    color: var(--text-main) !important;
     font-family: 'Fira Code', 'JetBrains Mono', monospace;
     font-size: 1rem;
+}
+
+.cm-editor .cm-gutters {
+    background-color: var(--bg-elevated) !important;
+    color: var(--text-dim) !important;
+    border-right: 1px solid var(--border-muted) !important;
 }
 
 /* UI Icons inside editor buttons */
@@ -2734,7 +2829,18 @@ body {
 .bg-bg-card { background-color: var(--bg-card) !important; }
 .bg-bg-elevated { background-color: var(--bg-elevated) !important; }
 .bg-bg-hover { background-color: var(--bg-hover) !important; }
+.bg-bg-sidebar { background-color: var(--bg-sidebar) !important; }
+.bg-bg-overlay { background-color: var(--bg-overlay) !important; }
 .text-text-main { color: var(--text-main) !important; }
 .text-text-dim { color: var(--text-dim) !important; }
+.text-text-on-primary { color: var(--text-on-primary) !important; }
+.text-primary { color: var(--primary) !important; }
+.text-accent { color: var(--accent) !important; }
 .border-border-main { border-color: var(--border-main) !important; }
 .border-border-muted { border-color: var(--border-muted) !important; }
+.border-border-strong { border-color: var(--border-strong) !important; }
+.border-input-border { border-color: var(--input-border) !important; }
+.bg-input-bg { background-color: var(--input-bg) !important; }
+.bg-primary { background-color: var(--primary) !important; }
+.bg-primary-hover { background-color: var(--primary-hover) !important; }
+.bg-accent { background-color: var(--accent) !important; }

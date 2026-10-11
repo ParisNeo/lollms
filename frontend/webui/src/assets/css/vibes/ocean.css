@@ -1,51 +1,59 @@
-/* Ocean Breeze - Deep Blue & Cyan */
+/* Ocean (Deep Blue) Vibe */
 
-:root, .vibe-ocean {
-  --brand-primary: #0ea5e9;
-  --brand-primary-hover: #0284c7;
-  --brand-accent: #22d3ee;
+.vibe-ocean, [data-vibe="ocean"] {
+  --brand-primary: #0284c7;
+  --brand-primary-hover: #0369a1;
+  --brand-accent: #06b6d4;
+  --brand-secondary: #3b82f6;
   
   --brand-bg-app: #f0f9ff;
   --brand-bg-app-hover: #e0f2fe;
   --brand-bg-card: #ffffff;
-  --brand-bg-elevated: #ffffff;
-  --brand-bg-overlay: rgba(255, 255, 255, 0.95);
-  --brand-bg-sidebar: #e0f2fe;
+  --brand-bg-elevated: #f0f9ff;
+  --brand-bg-overlay: rgba(240, 249, 255, 0.95);
+  --brand-bg-sidebar: #ffffff;
   --brand-bg-hover: #bae6fd;
+  --brand-bg-subtle: #e0f2fe;
   
   --brand-border-main: #bae6fd;
   --brand-border-muted: #e0f2fe;
   --brand-border-strong: #7dd3fc;
+  --brand-border-light-line: rgba(2, 132, 199, 0.1);
   
   --brand-text-main: #0c4a6e;
   --brand-text-dim: #0369a1;
+  --brand-text-muted: #38bdf8;
   --brand-text-on-primary: #ffffff;
   
   --brand-input-bg: #ffffff;
-  --brand-input-border: #bae6fd;
+  --brand-input-border: #7dd3fc;
 }
 
-.dark.vibe-ocean {
+.dark .vibe-ocean, .dark[data-vibe="ocean"] {
   --brand-primary: #38bdf8;
-  --brand-primary-hover: #0ea5e9;
-  --brand-accent: #67e8f9;
+  --brand-primary-hover: #0284c7;
+  --brand-accent: #22d3ee;
+  --brand-secondary: #60a5fa;
   
-  --brand-bg-app: #0c1a26;
-  --brand-bg-app-hover: #0f2432;
-  --brand-bg-card: #0f2432;
-  --brand-bg-elevated: #164e63;
-  --brand-bg-overlay: rgba(15, 36, 50, 0.95);
-  --brand-bg-sidebar: #09141e;
-  --brand-bg-hover: #155e75;
+  --brand-bg-app: #082f49;
+  --brand-bg-app-hover: #0c4a6e;
+  --brand-bg-card: #0c4a6e;
+  --brand-bg-elevated: #075985;
+  --brand-bg-overlay: rgba(8, 47, 73, 0.95);
+  --brand-bg-sidebar: #082f49;
+  --brand-bg-hover: #075985;
+  --brand-bg-subtle: #0c4a6e;
   
-  --brand-border-main: #155e75;
-  --brand-border-muted: #164e63;
-  --brand-border-strong: #0e7490;
+  --brand-border-main: #0369a1;
+  --brand-border-muted: #075985;
+  --brand-border-strong: #0ea5e9;
+  --brand-border-light-line: rgba(255, 255, 255, 0.1);
   
-  --brand-text-main: #e0f2fe;
-  --brand-text-dim: #67e8f9;
-  --brand-text-on-primary: #0c1a26;
+  --brand-text-main: #f0f9ff;
+  --brand-text-dim: #bae6fd;
+  --brand-text-muted: #7dd3fc;
+  --brand-text-on-primary: #082f49;
   
-  --brand-input-bg: #0f2432;
-  --brand-input-border: #155e75;
+  --brand-input-bg: #075985;
+  --brand-input-border: #0369a1;
 }
