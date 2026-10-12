@@ -10,7 +10,10 @@ const uiStore = useUiStore();
 const props = computed(() => uiStore.modalData('sourceViewer'));
 
 const title = computed(() => props.value?.title || 'Source');
-const content = computed(() => props.value?.content || '');
+const content = computed(() => {
+    if (!props.value) return '';
+    return props.value.content || props.value.chunk_text || props.value.text || props.value.full_text || props.value.body || '';
+});
 const score = computed(() => props.value?.score ? Math.round(props.value.score) : null);
 const metadata = computed(() => (props.value?.metadata && Object.keys(props.value.metadata).length > 0) ? props.value.metadata : null);
 
@@ -132,7 +135,6 @@ function navigateSearch(direction) {
                     </div>
                 </div>
 
-                <!-- Structured Embedded Metadata Banner (if present in chunk) -->
                 <div v-if="parsedSource.extractedMetadata" 
                      class="p-4 rounded-xl bg-gradient-to-br from-blue-50/80 to-indigo-50/40 dark:from-blue-950/30 dark:to-indigo-950/20 border border-blue-100 dark:border-blue-900/50 space-y-2.5">
 

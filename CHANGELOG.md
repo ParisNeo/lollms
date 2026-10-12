@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-12 12:54]
+
+- refactor: backend(generation): update LLM generation config for better modularization
+
 ## [2026-10-11 23:43]
 
 - Update frontend assets and LLM generation module to reflect new skills list integration:

@@ -8,7 +8,7 @@ import traceback
 import zipfile
 import tempfile
 from datetime import datetime
-from ascii_colors import trace_exception
+from ascii_colors import ASCIIColors, trace_exception
 import os
 from pydantic import BaseModel
 from sqlalchemy.orm import joinedload
@@ -1110,6 +1110,158 @@ async def batch_delete_rag_documents_from_datastore(
         "failed_files": failed_files
     }
 
+def _hydrate_datalake_chunk_texts(db_path: Path, raw_view: List[Dict[str, Any]]) -> List[str]:
+    """Resolve plaintext content for every datalake projection point.
+
+    SafeStore's get_datalake_view only guarantees point coordinates and document
+    titles, so chunk text is recovered through a priority chain:
+      1. Full-text keys carried by the projection points themselves.
+      2. Adaptive raw-SQL hydration against the chunks table. The schema is
+         discovered at runtime via PRAGMA, so column naming drift across
+         safe_store versions (id/chunk_id, document_id/doc_id, ...) cannot
+         silently empty the result. Hydration is skipped entirely for encrypted
+         stores, because raw SQL would bypass SafeStore's transparent
+         decryption layer and serve ciphertext blobs.
+      3. Snippet/preview keys carried by the projection points.
+    Returns a list aligned with raw_view ordering.
+    """
+    if not raw_view:
+        return []
+
+    texts: List[str] = [""] * len(raw_view)
+    full_text_keys = ("chunk_text", "content", "text", "chunk_content", "body", "full_text")
+    snippet_keys = ("text_snippet", "snippet", "preview")
+
+    for idx, point in enumerate(raw_view):
+        for key in full_text_keys:
+            value = point.get(key)
+            if value:
+                texts[idx] = str(value)
+                break
+
+    unresolved = [idx for idx, value in enumerate(texts) if not value]
+
+    if unresolved and db_path.exists():
+        lookup_by_id: Dict[str, str] = {}
+        lookup_by_doc_index: Dict[str, str] = {}
+        sequence_by_document: Dict[str, List[str]] = {}
+        try:
+            import sqlite3 as _sqlite3
+            connection = _sqlite3.connect(str(db_path))
+            connection.row_factory = _sqlite3.Row
+            try:
+                cursor = connection.cursor()
+                cursor.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'chunks'")
+                if cursor.fetchone():
+                    available_columns = {row["name"] for row in cursor.execute("PRAGMA table_info(chunks)")}
+
+                    def pick_column(*candidates: str) -> Optional[str]:
+                        for candidate in candidates:
+                            if candidate in available_columns:
+                                return candidate
+                        return None
+
+                    text_column = pick_column("chunk_text", "text", "content", "chunk_content")
+                    id_column = pick_column("id", "chunk_id")
+                    doc_column = pick_column("document_id", "doc_id", "file_path")
+                    index_column = pick_column("chunk_index", "chunk_seq", "position")
+
+                    is_encrypted_store = False
+                    if "is_encrypted" in available_columns:
+                        is_encrypted_store = cursor.execute(
+                            "SELECT 1 FROM chunks WHERE is_encrypted = 1 LIMIT 1"
+                        ).fetchone() is not None
+
+                    if text_column and not is_encrypted_store:
+                        selected_columns = ["rowid", text_column]
+                        for extra_column in (id_column, doc_column, index_column):
+                            if extra_column:
+                                selected_columns.append(extra_column)
+                        select_query = f"SELECT {', '.join(dict.fromkeys(selected_columns))} FROM chunks"
+                        if doc_column and index_column:
+                            select_query += f" ORDER BY {doc_column}, {index_column}"
+                        for row in cursor.execute(select_query):
+                            row_dict = dict(row)
+                            text_value = str(row_dict.get(text_column) or "")
+                            row_id = row_dict.get(id_column) if id_column else None
+                            if row_id is None:
+                                row_id = row_dict.get("rowid")
+                            if row_id is not None:
+                                lookup_by_id[str(row_id)] = text_value
+                            doc_value = row_dict.get(doc_column) if doc_column else None
+                            if doc_value is None:
+                                continue
+                            doc_key = str(doc_value)
+                            doc_basename = Path(doc_key).name
+                            index_value = row_dict.get(index_column) if index_column else None
+                            if index_value is not None:
+                                lookup_by_doc_index.setdefault(f"{doc_key}::{index_value}", text_value)
+                                if doc_basename and doc_basename != doc_key:
+                                    lookup_by_doc_index.setdefault(f"{doc_basename}::{index_value}", text_value)
+                            sequence_by_document.setdefault(doc_key, []).append(text_value)
+                            if doc_basename and doc_basename != doc_key:
+                                sequence_by_document.setdefault(doc_basename, []).append(text_value)
+            finally:
+                connection.close()
+        except Exception as hydration_error:
+            trace_exception(hydration_error)
+
+        if lookup_by_id or lookup_by_doc_index or sequence_by_document:
+            doc_sequence_cursors: Dict[int, int] = {}
+            for idx in unresolved:
+                point = raw_view[idx]
+                point_id = point.get("id") or point.get("chunk_id")
+                if point_id is not None and str(point_id) in lookup_by_id:
+                    texts[idx] = lookup_by_id[str(point_id)]
+                    continue
+
+                raw_doc = (
+                    point.get("document_id")
+                    or point.get("doc_id")
+                    or point.get("file_path")
+                    or point.get("document_title")
+                    or point.get("title")
+                )
+                doc_key = str(raw_doc) if raw_doc is not None else None
+                index_value = point.get("chunk_index")
+                if index_value is None:
+                    index_value = point.get("chunk_seq")
+
+                if doc_key and index_value is not None:
+                    matched = lookup_by_doc_index.get(f"{doc_key}::{index_value}")
+                    if matched is None:
+                        matched = lookup_by_doc_index.get(f"{Path(doc_key).name}::{index_value}")
+                    if matched:
+                        texts[idx] = matched
+                        continue
+
+                if doc_key:
+                    sequence = sequence_by_document.get(doc_key)
+                    if sequence is None:
+                        sequence = sequence_by_document.get(Path(doc_key).name)
+                    if sequence:
+                        sequence_key = id(sequence)
+                        position = doc_sequence_cursors.get(sequence_key, 0)
+                        if position < len(sequence):
+                            texts[idx] = sequence[position]
+                            doc_sequence_cursors[sequence_key] = position + 1
+
+    for idx, point in enumerate(raw_view):
+        if not texts[idx]:
+            for key in snippet_keys:
+                value = point.get(key)
+                if value:
+                    texts[idx] = str(value)
+                    break
+
+    resolved_count = sum(1 for value in texts if value)
+    coverage_log = f"Data lake hydration: {resolved_count}/{len(texts)} chunk texts resolved."
+    if resolved_count < len(texts):
+        ASCIIColors.warning(f"{coverage_log} (possible schema drift or encrypted store)")
+    else:
+        ASCIIColors.info(coverage_log)
+    return texts
+
 @store_files_router.get("/data-lake", response_model=DataLakeResponse)
 async def get_datastore_data_lake_projection(
     datastore_id: str,
@@ -1153,7 +1305,7 @@ async def get_datastore_data_lake_projection(
                     n_components=dims,
                     output_format='dict'
                 )
-            except (ImportError, Exception) as first_err:
+            except Exception as first_err:
                 if method_clean == 'umap':
                     ASCIIColors.warning(f"UMAP projection failed ({first_err}), falling back to PCA...")
                     raw_view = ss.get_datalake_view(
@@ -1168,13 +1320,22 @@ async def get_datastore_data_lake_projection(
         if not raw_view:
             return DataLakeResponse(points=[], documents=[], total_chunks=0, dimensions=dims, reduction_method=method_clean.upper())
 
+        hydrated_texts = _hydrate_datalake_chunk_texts(db_path, raw_view)
+
         document_chunks_count = {}
         doc_titles = {}
         doc_color_map = {}
         doc_coords_accumulator = {}
 
-        for p in raw_view:
-            doc_id = str(p.get("document_id") or p.get("doc_id") or p.get("file_path") or "doc_1")
+        for idx, p in enumerate(raw_view):
+            doc_id = str(
+                p.get("document_id")
+                or p.get("doc_id")
+                or p.get("file_path")
+                or p.get("document_title")
+                or p.get("title")
+                or f"doc_{idx}"
+            )
             raw_title = str(p.get("document_title") or p.get("title") or Path(doc_id).name or "Document")
             doc_titles[doc_id] = raw_title
             document_chunks_count[doc_id] = document_chunks_count.get(doc_id, 0) + 1
@@ -1185,7 +1346,14 @@ async def get_datastore_data_lake_projection(
 
         points = []
         for idx, p in enumerate(raw_view):
-            doc_id = str(p.get("document_id") or p.get("doc_id") or p.get("file_path") or "doc_1")
+            doc_id = str(
+                p.get("document_id")
+                or p.get("doc_id")
+                or p.get("file_path")
+                or p.get("document_title")
+                or p.get("title")
+                or f"doc_{idx}"
+            )
             x_val = float(p.get("x", 0.0))
             y_val = float(p.get("y", 0.0))
             z_val = float(p.get("z", 0.0)) if (dims == 3 or "z" in p) else None
@@ -1194,14 +1362,18 @@ async def get_datastore_data_lake_projection(
             if np.isnan(y_val) or np.isinf(y_val): y_val = 0.0
             if z_val is not None and (np.isnan(z_val) or np.isinf(z_val)): z_val = 0.0
 
-            text_content = str(p.get("chunk_text") or p.get("content") or p.get("text") or "")
+            text_content = hydrated_texts[idx] if idx < len(hydrated_texts) else ""
             snippet = text_content[:180] + ("..." if len(text_content) > 180 else "")
+
+            chunk_index_value = p.get("chunk_index")
+            if chunk_index_value is None:
+                chunk_index_value = p.get("chunk_seq") if p.get("chunk_seq") is not None else idx
 
             points.append(DataLakeChunkPoint(
                 id=str(p.get("id") or p.get("chunk_id") or f"c_{idx}"),
                 document_id=doc_id,
                 document_name=doc_titles.get(doc_id, "Document"),
-                chunk_index=int(p.get("chunk_index", idx)),
+                chunk_index=int(chunk_index_value),
                 text_snippet=snippet,
                 full_text=text_content,
                 x=round(x_val, 5),

@@ -467,14 +467,22 @@ const sortedSources = computed(() => {
         }
     }
     if (!Array.isArray(raw) || !raw.length) return [];
-    return [...raw].map((s, idx) => ({
-        ...s,
-        index: s.index || (idx + 1)
-    })).sort((a, b) => {
+    
+    return [...raw].map((s, idx) => {
+        const content = s.content || s.chunk_text || s.text || s.full_text || s.body || '';
+        const title = s.title || s.source || 'Source Reference';
+
+        return {
+            ...s,
+            content,
+            title,
+            index: s.index || (idx + 1)
+        };
+    }).sort((a, b) => {
         if (a.index && b.index) return a.index - b.index;
         return (b.score || 0) - (a.score || 0);
     });
-});
+});;
 
 const hasSources = computed(() => sortedSources.value.length > 0);
 
@@ -754,10 +762,9 @@ function handleTagRegeneration(part) {
 }
 
 function showSourceDetails(source) { 
-    // Normalize data: ensure it has 'content' and 'title' for the viewer modal
     const data = {
         title: source.title || source.name || 'Source Details',
-        content: source.content || source.chunk_text || source.text || '',
+        content: source.content || source.chunk_text || source.text || source.full_text || '',
         source: source.source || source.url || '',
         score: source.relevance_score || source.score || 0,
         metadata: source.metadata || {}

@@ -1399,6 +1399,16 @@ def build_llm_generation_router(router: APIRouter):
                             "metadata": entry.get('document_metadata', entry.get('metadata', {}))
                         })
 
+                    # Emit sources immediately so the frontend gets them before generation completes
+                    if sources:
+                        try:
+                            main_loop.call_soon_threadsafe(
+                                stream_queue.put_nowait,
+                                json.dumps(jsonable_encoder({"type": "sources", "content": sources})) + "\n"
+                            )
+                        except Exception:
+                            pass
+
                     return sources
                 except Exception as e:
                     trace_exception(e)
@@ -2384,6 +2394,9 @@ def build_llm_generation_router(router: APIRouter):
                             if not isinstance(s, dict):
                                 if isinstance(s, str): s = {"title": s, "source": s, "content": s}
                                 else: continue
+                            # Normalize: ensure 'content' key always carries the text body
+                            if not s.get('content'):
+                                s['content'] = s.get('chunk_text') or s.get('text') or s.get('full_text') or s.get('body') or ''
                             key = s.get('source') or s.get('title') or s.get('content', '')[:30]
                             if key and key not in seen_sources:
                                 s['index'] = len(unique_sources) + 1
