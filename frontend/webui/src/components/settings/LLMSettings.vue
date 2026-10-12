@@ -25,7 +25,9 @@ const form = ref({
     put_thoughts_in_context: false,
     reasoning_activation: false,
     reasoning_effort: null,
-    reasoning_summary: false
+    reasoning_summary: false,
+    enable_image_generation: user.value?.enable_image_generation ?? false,
+    enable_image_editing: user.value?.enable_image_editing ?? false
 });
 const isLoading = ref(false);
 const hasChanges = ref(false);
@@ -121,7 +123,9 @@ const populateForm = () => {
             put_thoughts_in_context: user.value.put_thoughts_in_context || false,
             reasoning_activation: user.value.reasoning_activation || false,
             reasoning_effort: user.value.reasoning_effort || null,
-            reasoning_summary: user.value.reasoning_summary || false
+            reasoning_summary: user.value.reasoning_summary || false,
+            enable_image_generation: user.value.enable_image_generation ?? false,
+            enable_image_editing: user.value.enable_image_editing ?? false
         };
         pristineState = JSON.parse(JSON.stringify(form.value));
         hasChanges.value = false;
@@ -281,6 +285,31 @@ async function handleSave() {
                             </span>
                             <button @click="form.put_thoughts_in_context = !form.put_thoughts_in_context" type="button" :disabled="areSettingsForced" :class="[form.put_thoughts_in_context ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
                                 <span :class="[form.put_thoughts_in_context ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Image Generation & Editing -->
+                <div class="border-t dark:border-gray-700/60 pt-4">
+                    <h3 class="font-bold text-xs uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-3">Image Capabilities</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-900/40 p-3 rounded-xl border dark:border-gray-700">
+                            <span class="grow flex flex-col pr-4">
+                                <span class="text-xs font-bold text-gray-800 dark:text-gray-200">Image Generation</span>
+                                <span class="text-[10px] text-gray-400">Allow the AI to generate images via the configured TTI binding when requested in chat.</span>
+                            </span>
+                            <button @click="form.image_generation_enabled = !form.image_generation_enabled" type="button" :disabled="areSettingsForced" :class="[form.image_generation_enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.image_generation_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
+                            </button>
+                        </div>
+                        <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-900/40 p-3 rounded-xl border dark:border-gray-700">
+                            <span class="grow flex flex-col pr-4">
+                                <span class="text-xs font-bold text-gray-800 dark:text-gray-200">Image Editing</span>
+                                <span class="text-[10px] text-gray-400">Allow the AI to edit existing images via the configured TTI binding.</span>
+                            </span>
+                            <button @click="form.image_editing_enabled = !form.image_editing_enabled" type="button" :disabled="areSettingsForced" :class="[form.image_editing_enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
+                                <span :class="[form.image_editing_enabled ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out']"></span>
                             </button>
                         </div>
                     </div>
