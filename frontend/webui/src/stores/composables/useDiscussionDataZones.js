@@ -64,23 +64,79 @@ export function useDiscussionDataZones(state, stores, getActions) {
     async function fetchDataZones(discussionId) {
         if (!discussionId) return;
         try {
+            // Hydrate from full discussion metadata first when RAG ids are unknown
+            if (!Array.isArray(discussions.value[discussionId]?.rag_datastore_ids) || 
+                discussions.value[discussionId].rag_datastore_ids.length === 0) {
+                try {
+                    const fullRes = await apiClient.get(`/api/discussions/${discussionId}`);
+                    // Backend returns metadata AT TOP LEVEL: { id, title, rag_datastore_ids, active_tools, ... }
+                    const meta = fullRes.data;
+                    if (meta && discussions.value[discussionId]) {
+                        const serverRagIds = meta.rag_datastore_ids;
+                        if (serverRagIds && Array.isArray(serverRagIds) && serverRagIds.length > 0) {
+                            console.log("[HYDRATION][fetchDataZones] Hydrating rag_ids from full discussion fetch:", serverRagIds);
+                            discussions.value[discussionId].rag_datastore_ids = serverRagIds;
+                        }
+                        if (Array.isArray(meta?.active_tools)) {
+                            discussions.value[discussionId].active_tools = meta.active_tools;
+                        }
+                    }
+                } catch (metaErr) {
+                    console.warn("Failed to hydrate metadata before data_zones:", metaErr);
+                }
+            }
+            
             const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);
             const data = response.data;
+            console.log("[HYDRATION][fetchDataZones] discussionId:", discussionId);
+            console.log("[HYDRATION][fetchDataZones] raw /data_zones payload:", data);
+            console.log("[HYDRATION][fetchDataZones] rag_ids in payload:", data?.rag_datastore_ids);
+            console.log("[HYDRATION][fetchDataZones] existing store rag_ids:", discussions.value[discussionId]?.rag_datastore_ids);
 
             // Ensure we update the discussion object in the map for reactivity
             if (discussions.value[discussionId]) {
+                // CRITICAL: Prevent null/undefined from wiping hydrated arrays.
+                // Spread-merge is safe, but we must explicitly preserve keys the
+                // /data_zones endpoint might return as null when empty.
+                const preservedRagIds = discussions.value[discussionId].rag_datastore_ids;
+                const preservedTools = discussions.value[discussionId].active_tools;
+
                 discussions.value[discussionId] = { 
                     ...discussions.value[discussionId], 
                     ...data 
                 };
+
+                // Restore protected keys if the new data provided null/undefined
+                console.log("[HYDRATION][fetchDataZones] preservedRagIds:", preservedRagIds);
+
+                if (!data.rag_datastore_ids && preservedRagIds !== undefined) {
+                    console.log("[HYDRATION][fetchDataZones] PRESERVING local rag_ids, server sent:", data.rag_datastore_ids);
+                    discussions.value[discussionId].rag_datastore_ids = preservedRagIds;
+                }
+                if (!data.active_tools && preservedTools !== undefined) {
+                    console.log("[HYDRATION][fetchDataZones] PRESERVING local active_tools, server sent:", data.active_tools);
+                    discussions.value[discussionId].active_tools = preservedTools;
+                }
+
+                // Guarantee array shapes for UI consumers
+                if (!Array.isArray(discussions.value[discussionId].rag_datastore_ids)) {
+                    discussions.value[discussionId].rag_datastore_ids = [];
+                }
+                if (!Array.isArray(discussions.value[discussionId].active_tools)) {
+                    discussions.value[discussionId].active_tools = [];
+                }
             } else {
                 // If it's a shared discussion not in the 'discussions' map, check 'sharedWithMe'
                 const sharedIdx = sharedWithMe.value.findIndex(d => d.id === discussionId);
                 if (sharedIdx !== -1) {
+                    const preservedRag = sharedWithMe.value[sharedIdx].rag_datastore_ids;
                     sharedWithMe.value[sharedIdx] = {
                         ...sharedWithMe.value[sharedIdx],
                         ...data
                     };
+                    if (!data.rag_datastore_ids && preservedRag !== undefined) {
+                        sharedWithMe.value[sharedIdx].rag_datastore_ids = preservedRag;
+                    }
                 }
             }
 

@@ -1376,7 +1376,21 @@ def build_llm_generation_router(router: APIRouter):
 
                     sources = []
                     for entry in retrieved_chunks:
-                        chunk_text = entry.get("chunk_text") or entry.get("content") or entry.get("text") or ""
+                        # Rank by longest available text body, so a short `chunk_text`
+                        # never masks a richer `full_text`/`content` payload
+                        # never masks a richer `full_text`/`content` payload
+                        body_candidates = [
+                            entry.get("chunk_text"),
+                            entry.get("content"),
+                            entry.get("text"),
+                            entry.get("full_text"),
+                            entry.get("body"),
+                            entry.get("chunk_content"),
+                            entry.get("snippet"),
+                            entry.get("preview"),
+                        ]
+                        body_candidates = [str(c) for c in body_candidates if c]
+                        chunk_text = max(body_candidates, key=len, default="")
                         if not chunk_text: continue
 
                         score_val = entry.get("similarity_percent")
@@ -2388,20 +2402,66 @@ def build_llm_generation_router(router: APIRouter):
                         lib_sources = ai_msg.metadata.get('sources', []) if isinstance(ai_msg.metadata.get('sources'), list) else []
                         msg_direct_sources = getattr(ai_msg, 'sources', []) if isinstance(getattr(ai_msg, 'sources', []), list) else []
 
+                        content_fallback_keys = (
+                            'chunk_text', 'text', 'full_text', 'body',
+                            'chunk_content', 'snippet', 'text_snippet',
+                            'preview', 'passage', 'excerpt', 'body_text'
+                        )
+
                         unique_sources = []
-                        seen_sources = set()
+                        seen_source_positions = {}
                         for s in result_sources + rag_sources + collected_sources + lib_sources + msg_direct_sources:
+                            if isinstance(s, str):
+                                s = {"title": s, "source": s, "content": s}
                             if not isinstance(s, dict):
-                                if isinstance(s, str): s = {"title": s, "source": s, "content": s}
-                                else: continue
-                            # Normalize: ensure 'content' key always carries the text body
+                                continue
+
+                            # Normalize: ensure 'content' always carries the text body,
+                            # whichever payload key the producing channel used
                             if not s.get('content'):
-                                s['content'] = s.get('chunk_text') or s.get('text') or s.get('full_text') or s.get('body') or ''
-                            key = s.get('source') or s.get('title') or s.get('content', '')[:30]
-                            if key and key not in seen_sources:
+                                for ck in content_fallback_keys:
+                                    if s.get(ck):
+                                        s['content'] = str(s[ck])
+                                        break
+                                else:
+                                    s['content'] = ''
+
+                            # Normalize: guarantee a human-readable title even for raw
+                            # safe_store entries leaking through library channels
+                            if not s.get('title'):
+                                file_path = s.get('file_path')
+                                meta = s.get('metadata') if isinstance(s.get('metadata'), dict) else {}
+                                s['title'] = (
+                                    s.get('name')
+                                    or (Path(str(file_path)).name if file_path else None)
+                                    or meta.get('title')
+                                    or s.get('source')
+                                    or "Document Chunk"
+                                )
+
+                            key = s.get('source') or s.get('title') or str(s.get('content', ''))[:30]
+                            if not key:
+                                continue
+
+                            existing_pos = seen_source_positions.get(key)
+                            if existing_pos is None:
                                 s['index'] = len(unique_sources) + 1
+                                seen_source_positions[key] = len(unique_sources)
                                 unique_sources.append(s)
-                                seen_sources.add(key)
+                            elif len(str(s.get('content') or '')) > len(str(unique_sources[existing_pos].get('content') or '')):
+                                # Richest wins: upgrade the stored copy in place when a later
+                                # channel carries the same source with a fuller text body
+                                s['index'] = unique_sources[existing_pos].get('index', existing_pos + 1)
+                                unique_sources[existing_pos] = s
+                            else:
+                                existing = unique_sources[existing_pos]
+                                for merge_key in ('metadata', 'score'):
+                                    if not existing.get(merge_key) and s.get(merge_key):
+                                        existing[merge_key] = s[merge_key]
+
+                        empty_content_count = sum(1 for s in unique_sources if not s.get('content'))
+                        if empty_content_count:
+                            ASCIIColors.warning(f"Source merge coverage: {len(unique_sources) - empty_content_count}/{len(unique_sources)} sources carry text content.")
 
                         ai_msg.set_metadata_item('sources', unique_sources, discussion_obj)
                         ai_msg.sources = unique_sources

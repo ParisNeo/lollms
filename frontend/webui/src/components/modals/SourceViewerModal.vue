@@ -12,7 +12,21 @@ const props = computed(() => uiStore.modalData('sourceViewer'));
 const title = computed(() => props.value?.title || 'Source');
 const content = computed(() => {
     if (!props.value) return '';
-    return props.value.content || props.value.chunk_text || props.value.text || props.value.full_text || props.value.body || '';
+    const candidates = [
+        props.value.content,
+        props.value.chunk_text,
+        props.value.text,
+        props.value.full_text,
+        props.value.body,
+        props.value.chunk_content,
+        props.value.snippet,
+        props.value.text_snippet,
+        props.value.preview,
+        props.value.passage,
+        props.value.excerpt,
+        props.value.body_text,
+    ].filter(Boolean).map(String);
+    return candidates.length ? candidates.reduce((a, b) => (b.length > a.length ? b : a)) : '';
 });
 const score = computed(() => props.value?.score ? Math.round(props.value.score) : null);
 const metadata = computed(() => (props.value?.metadata && Object.keys(props.value.metadata).length > 0) ? props.value.metadata : null);
@@ -33,7 +47,9 @@ const parsedSource = computed(() => {
     const metaBlockRegex = /^---\s*(?:Document Context|Metadata|Context)\s*---([\s\S]*?)(?:---[-]*|\n\n)/i;
     const match = raw.match(metaBlockRegex);
 
-    if (match) {
+    // Only treat it as a metadata header when there's real body text left over;
+    // otherwise the entire chunk IS the content and must not be hidden.
+    if (match && raw.slice(match[0].length).trim().length > 0) {
         const rawMeta = match[1].trim();
         const metaEntries = [];
         const lines = rawMeta.split('\n');
@@ -172,7 +188,7 @@ function navigateSearch(direction) {
                             <button @click="navigateSearch(1)" class="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600" :disabled="searchResults.count === 0"><IconChevronRight class="w-4 h-4" /></button>
                         </div>
                     </div>
-                    <div ref="contentRef" class="mt-2 p-4 bg-gray-50 dark:bg-gray-900/60 rounded-xl border dark:border-gray-800 max-h-96 overflow-y-auto break-words prose prose-sm dark:prose-invert max-w-none text-xs">
+                    <div ref="contentRef" class="mt-2 p-4 bg-gray-50 dark:bg-gray-900/60 rounded-xl border dark:border-gray-800 max-h-[70vh] overflow-y-auto break-words prose prose-sm dark:prose-invert max-w-none text-xs">
                         <div v-html="renderedMarkdownContent"></div>
                     </div>
                 </div>

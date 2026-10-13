@@ -42,6 +42,20 @@ export function useDiscussionMessages(state, stores, getActions) {
         if (!currentDiscussionId.value) return;
         try {
             const response = await apiClient.get(`/api/discussions/${currentDiscussionId.value}`);
+            
+            // Preserve hydrated metadata before message objects are replaced
+            const existingDiscussion = discussions.value[currentDiscussionId.value];
+            if (existingDiscussion && response.data?.discussion_metadata) {
+                Object.assign(existingDiscussion, response.data.discussion_metadata);
+                // Guarantee array shapes for UI consumers
+                if (!Array.isArray(existingDiscussion.rag_datastore_ids)) {
+                    existingDiscussion.rag_datastore_ids = [];
+                }
+                if (!Array.isArray(existingDiscussion.active_tools)) {
+                    existingDiscussion.active_tools = [];
+                }
+            }
+
             messages.value = processMessages(response.data);
             state.emit('discussion:refreshed');
             await getActions().fetchContextStatus(currentDiscussionId.value);

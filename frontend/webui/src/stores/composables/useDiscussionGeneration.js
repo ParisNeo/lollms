@@ -358,6 +358,26 @@ export function useDiscussionGeneration(state, stores, getActions) {
                 console.warn("Failed to auto-refresh memories list:", memErr);
             }
 
+            // Rehydrate discussion metadata BEFORE refreshing zones so that
+            // fetchDataZones sees the server-truth RAG ids and never clobbers them.
+            try {
+                const discId = currentDiscussionId.value;
+                if (discId) {
+                    const fullRes = await apiClient.get(`/api/discussions/${discId}`);
+                    const meta = fullRes.data?.discussion_metadata || fullRes.data;
+                    if (meta && discussions.value?.[discId]) {
+                        if (Array.isArray(meta.rag_datastore_ids)) {
+                            discussions.value[discId].rag_datastore_ids = meta.rag_datastore_ids;
+                        }
+                        if (Array.isArray(meta.active_tools)) {
+                            discussions.value[discId].active_tools = meta.active_tools;
+                        }
+                    }
+                }
+            } catch (hydErr) {
+                console.warn("Failed to rehydrate metadata after generation:", hydErr);
+            }
+
             getActions().refreshDataZones(currentDiscussionId.value);
         }
     }

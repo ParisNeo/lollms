@@ -681,7 +681,6 @@ const getPercentage = (tokens) => maxTokens.value > 0 ? (tokens / maxTokens.valu
 const contextParts = computed(() => {
     if (!activeDiscussionContextStatus.value) return [];
     
-    // Safety check for zone existence
     const zones = activeDiscussionContextStatus.value.zones || {};
     const sys = zones.system_context?.breakdown || {};
     const history = zones.message_history?.breakdown || {};
@@ -702,7 +701,13 @@ const contextParts = computed(() => {
     if (zoneTokens > 0) parts.push({ label: 'Context Zones', value: zoneTokens, colorClass: 'bg-amber-500' });
 
     // 4. Workspace Artefacts (Blue): Active documents in workspace
-    const artefactTokens = sys.artefacts?.tokens || 0;
+    // Zones expose artefacts at TOP-LEVEL zones.artefacts, not inside system_context.breakdown.
+    // Try both: zones.artefacts.tokens (correct path) and sys.artefacts (defensive legacy fallback).
+    const artefactTokens =
+        (zones.artefacts?.tokens ?? null) ??
+        (zones.loaded_artefacts?.tokens ?? null) ??
+        (sys.artefacts?.tokens ?? null) ??
+        0;
     if (artefactTokens > 0) parts.push({ label: 'Workspace Files', value: artefactTokens, colorClass: 'bg-blue-600' });
 
     // 5. Message Text History (Emerald): Previous conversation text
@@ -761,6 +766,15 @@ const currentActiveTask = computed(() => {
     if (!tracked || !tracked.taskId) return null;
     return tasksStore.tasks.find(t => t.id === tracked.taskId) || null;
 });
+
+// Helper to normalize fractional progress values (e.g., 0.05 representing 5%) into valid [0-100] metrics
+function normalizeProgressFraction(val) {
+    if (val === undefined || val === null) return 0;
+    const num = Number(val);
+    if (isNaN(num)) return 0;
+    if (num > 0 && num <= 1) return num * 100;
+    return Math.max(0, Math.min(100, num));
+}
 
 function toggleRagStore(storeId) {
     const current = new Set(ragStoreSelection.value);
@@ -1578,7 +1592,7 @@ onUnmounted(() => {
                             <div class="themed-panel rounded-2xl shadow-[0_20px_50px_rgba(0,0,0,0.3)] overflow-hidden p-4 space-y-3">
                                 <div class="flex justify-between items-center border-b border-b-border-muted pb-2 mb-2">
                                     <span class="text-[10px] font-black uppercase tracking-widest" style="color: var(--text-dim);">Context Usage</span>
-                                    <span class="text-xs font-mono font-bold" :class="totalPercentage > 90 ? 'text-red-500' : 'text-blue-500'">{{ Math.round(totalPercentage) }}%</span>
+                                    <span class="text-xs font-mono font-bold" :class="totalPercentage >= 90 ? 'text-red-500' : (totalPercentage >= 75 ? 'text-amber-500' : 'text-blue-500')">{{ Math.round(totalPercentage) }}%</span>
                                 </div>
                                 <div class="space-y-2.5">
                                     <div v-for="part in contextParts" :key="part.label" class="flex items-center justify-between group/item">
@@ -1588,7 +1602,7 @@ onUnmounted(() => {
                                         </div>
                                         <div class="flex items-center gap-2">
                                             <span class="text-[10px] font-mono" style="color: var(--brand-text-dim);">{{ part.value.toLocaleString() }}</span>
-                                            <span class="text-[9px] w-8 text-right" style="color: var(--brand-text-dim);">{{ Math.round(getPercentage(part.value)) }}%</span>
+                                            <span class="text-[9px] w-8 text-right" style="color: var(--brand-text-dim);">{{ Number(getPercentage(part.value)).toFixed(1) }}%</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1608,11 +1622,11 @@ onUnmounted(() => {
                         </div>
 
                         <!-- Progress Bar with improved contrast and segment dividers -->
-                        <div :class="['grow h-2.5 rounded-full overflow-hidden flex border transition-all shadow-inner', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'themed-zone group-hover/context:ring-blue-400/50', progressBorderColorClass]">
-                            <div v-for="part in contextParts" :key="part.label" 
-                                :class="[totalPercentage >= 100 ? 'bg-red-600' : part.colorClass, 'h-full transition-all duration-500 ease-out border-r border-black/5 last:border-0']" 
-                                :style="{ width: `${getPercentage(part.value)}%` }" 
-                            ></div>
+                        <div :class="['grow h-2.5 rounded-full overflow-hidden flex border transition-all shadow-inner relative w-full', totalPercentage >= 100 ? 'bg-red-600/20 group-hover/context:ring-red-500/50 border-red-500' : 'bg-gray-200 dark:bg-gray-800 group-hover/context:ring-blue-400/50', progressBorderColorClass]">
+                           <div v-for="part in contextParts" :key="part.label" 
+                                :class="[part.colorClass, 'h-full transition-all duration-300 border-r border-black/10 last:border-0 shrink-0']" 
+                                :style="{ width: `${Math.max(part.value > 0 ? 2 : 0, Math.min(100, getPercentage(part.value)))}%` }" 
+                           ></div>
                         </div>
 
                         <div class="font-mono text-[10px] whitespace-nowrap shrink-0 group-hover/context:text-blue-600 dark:group-hover/context:text-blue-400 transition-colors" style="color: var(--brand-text-dim);">

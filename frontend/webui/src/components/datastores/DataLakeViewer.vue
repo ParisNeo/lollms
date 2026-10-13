@@ -1221,7 +1221,7 @@ onUnmounted(() => {
                                 <IconCopy class="w-3.5 h-3.5" /> Copy
                             </button>
                         </div>
-                        <div class="p-3 bg-gray-50 dark:bg-gray-950 rounded-xl border dark:border-gray-800 text-xs font-mono max-h-64 overflow-y-auto custom-scrollbar leading-relaxed whitespace-pre-wrap text-gray-800 dark:text-gray-200">
+                        <div class="p-3 bg-gray-50 dark:bg-gray-950 rounded-xl border dark:border-gray-800 text-xs font-mono max-h-[70vh] overflow-y-auto custom-scrollbar leading-relaxed whitespace-pre-wrap text-gray-800 dark:text-gray-200">
                             {{ selectedPoint.full_text }}
                         </div>
                     </div>

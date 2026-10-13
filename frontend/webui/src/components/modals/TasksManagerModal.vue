@@ -124,21 +124,39 @@ const filteredLogs = computed(() => {
     );
 });
 
-function formatTime(iso) { 
+function normalizeProgress(progress) {
+    if (progress === undefined || progress === null) return 0;
+    const num = Number(progress);
+    if (isNaN(num)) return 0;
+    // If backend sends a fractional float (e.g. 0.05 for 5%)
+    if (num > 0 && num <= 1) return num * 100;
+    // Ensure it is cleanly clamped between 0 and 100
+    return Math.max(0, Math.min(100, num));
+}
+
+function formatTime(iso) {
     if (!iso) return '—';
-    return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    try {
+        return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } catch {
+        return '—';
+    }
 }
 
 function calculateDuration(task) {
     if (!task?.started_at) return 'Queued';
-    const start = new Date(task.started_at).getTime();
-    const end = task.completed_at ? new Date(task.completed_at).getTime() : nowTimestamp.value;
-    const diffSeconds = Math.max(0, Math.floor((end - start) / 1000));
-    
-    if (diffSeconds < 60) return `${diffSeconds}s`;
-    const mins = Math.floor(diffSeconds / 60);
-    const secs = diffSeconds % 60;
-    return `${mins}m ${secs}s`;
+    try {
+        const start = new Date(task.started_at).getTime();
+        const end = task.completed_at ? new Date(task.completed_at).getTime() : nowTimestamp.value;
+        const diffSeconds = Math.max(0, Math.floor((end - start) / 1000));
+        
+        if (diffSeconds < 60) return `${diffSeconds}s`;
+        const mins = Math.floor(diffSeconds / 60);
+        const secs = diffSeconds % 60;
+        return `${mins}m ${secs}s`;
+    } catch {
+        return '—';
+    }
 }
 
 async function handleCancelTask(task) {
@@ -292,11 +310,16 @@ function downloadLogs() {
                             </div>
 
                             <!-- Progress Track -->
-                            <div class="h-1.5 w-full bg-gray-200/80 dark:bg-gray-800 rounded-full overflow-hidden mb-2">
+                            <div class="h-1.5 w-full bg-gray-200/80 dark:bg-gray-800 rounded-full overflow-hidden mb-2 relative shadow-inner">
+                                <div v-if="task.status === 'running' && normalizeProgress(task.progress) === 0" class="absolute inset-0 bg-blue-400/50 dark:bg-blue-600/50 animate-pulse rounded-full"></div>
                                 <div 
-                                    class="h-full transition-all duration-500 rounded-full"
-                                    :class="task.status === 'failed' ? 'bg-rose-500' : (task.status === 'completed' ? 'bg-emerald-500' : 'bg-blue-600')"
-                                    :style="{ width: `${task.progress || 0}%` }"
+                                    class="h-full transition-all duration-500 ease-out rounded-full"
+                                    :class="{
+                                        'bg-rose-500': task.status === 'failed',
+                                        'bg-emerald-500': task.status === 'completed',
+                                        'bg-blue-500': task.status === 'running' || task.status === 'pending'
+                                    }"
+                                    :style="{ width: `${normalizeProgress(task.progress)}%` }"
                                 ></div>
                             </div>
 
@@ -309,7 +332,7 @@ function downloadLogs() {
                                     👤 {{ task.owner_username || 'System' }}
                                 </span>
                                 <div class="flex items-center gap-1.5">
-                                    <span class="font-bold text-gray-600 dark:text-gray-400">{{ task.progress }}%</span>
+                                    <span class="font-bold text-gray-600 dark:text-gray-400">{{ normalizeProgress(task.progress).toFixed(0) }}%</span>
                                     <span>•</span>
                                     <span>{{ calculateDuration(task) }}</span>
                                 </div>

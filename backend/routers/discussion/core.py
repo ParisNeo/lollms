@@ -119,12 +119,23 @@ def build_core_router(router: APIRouter):
         if isinstance(generation_status, dict):
             is_active_generation = generation_status.get('status', 0) == 1
 
+        # Promote critical metadata fields to the top level of the response
+        # for easier and more reliable frontend access, while keeping the
+        # nested metadata object for other potential consumers.
+        metadata = discussion_db.discussion_metadata or {}
+        rag_ids = metadata.get("rag_datastore_ids", [])
+        tools = metadata.get("active_tools", [])
+
         return {
             "discussion_id": discussion_db.id,
             "title": discussion_db.title,
             "current_branch_id": discussion_obj.get_current_branch_id(),
             "discussion_data_zone": discussion_db.discussion_data_zone,
-            "discussion_metadata": discussion_db.discussion_metadata,
+            "discussion_metadata": metadata,
+            # --- PROMOTED FIELDS ---
+            "rag_datastore_ids": rag_ids if isinstance(rag_ids, list) else [],
+            "active_tools": tools if isinstance(tools, list) else [],
+            # -----------------------
             "active_personality_id": discussion_db.active_personality_id,
             "active_brain_id": discussion_db.active_brain_id,
             "llm_binding_name": discussion_db.llm_binding_name,

@@ -32,6 +32,24 @@ export function useDiscussionCore(state, stores, getActions) {
             for (const disc of response.data) {
                 newDiscussions[disc.id] = disc;
             }
+
+            // Graft server-truth metadata for the last active discussion so the
+            // UI never boots into an empty RAG/tools state after reload.
+            const lastId = localStorage.getItem('lollms_last_discussion_id');
+            if (lastId && newDiscussions[lastId]) {
+                try {
+                    const full = await apiClient.get(`/api/discussions/${lastId}`);
+                    const meta = full.data;
+                    console.log("[HYDRATION][loadDiscussions] full response discussion metadata source:", meta);
+                    console.log("[HYDRATION][loadDiscussions] rag_ids in meta:", meta?.rag_datastore_ids);
+                    if (meta) {
+                        newDiscussions[lastId] = { ...newDiscussions[lastId], ...meta };
+                    }
+                } catch (metaErr) {
+                    console.warn("Could not hydrate active discussion metadata:", metaErr);
+                }
+            }
+
             discussions.value = newDiscussions;
         } catch (error) {
             console.error("Failed to load discussions:", error);
@@ -112,6 +130,40 @@ export function useDiscussionCore(state, stores, getActions) {
                     getActions().fetchContextStatus(discussionId),
                     getActions().fetchArtefacts(discussionId)
                 ]);
+
+                // Persist server-truth metadata (RAG DataStores, MCP tools, etc.)
+                // into the reactive store so UI components hydrate from server state.
+                // Backend returns metadata AT TOP LEVEL: { id, title, rag_datastore_ids, active_tools, ... }
+                const meta = msgResponse.data || {};
+                console.log("[HYDRATION][selectDiscussion] discussionId:", discussionId);
+                console.log("[HYDRATION][selectDiscussion] raw response.data:", msgResponse.data);
+                console.log("[HYDRATION][selectDiscussion] metadata source (top-level or nested):", meta);
+                console.log("[HYDRATION][selectDiscussion] rag_ids in meta:", meta?.rag_datastore_ids);
+                console.log("[HYDRATION][selectDiscussion] existing store entry:", discussions.value[discussionId]);
+                if (meta && discussions.value[discussionId]) {
+                    // Null-safe merge: never overwrite a populated local array
+                    // with a null/undefined server value.
+                    for (const key of Object.keys(meta)) {
+                        const serverVal = meta[key];
+                        const localVal = discussions.value[discussionId][key];
+                        const localIsPopulatedArray = Array.isArray(localVal) && localVal.length > 0;
+                        if (serverVal == null && localIsPopulatedArray) {
+                            console.log(`[HYDRATION][selectDiscussion] SKIPPING null overwrite for key '${key}'`, { serverVal, localVal });
+                            continue;
+                        }
+                        console.log(`[HYDRATION][selectDiscussion] APPLY ${key}:`, serverVal, "was:", localVal);
+                        discussions.value[discussionId][key] = serverVal;
+                    }
+                    // Guarantee array shape for UI consumers
+                    if (!Array.isArray(discussions.value[discussionId].rag_datastore_ids)) {
+                        discussions.value[discussionId].rag_datastore_ids = [];
+                    }
+                    if (!Array.isArray(discussions.value[discussionId].active_tools)) {
+                        discussions.value[discussionId].active_tools = [];
+                    }
+                    console.log("[HYDRATION][selectDiscussion] post-merge store rag_ids:", discussions.value[discussionId].rag_datastore_ids);
+                    console.log("[HYDRATION][selectDiscussion] post-merge store active_tools:", discussions.value[discussionId].active_tools);
+                }
 
                 // Sync generation state with server
                 if (genStatusRes?.data?.is_generating) {

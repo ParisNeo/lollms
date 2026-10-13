@@ -469,7 +469,7 @@ const sortedSources = computed(() => {
     if (!Array.isArray(raw) || !raw.length) return [];
     
     return [...raw].map((s, idx) => {
-        const content = s.content || s.chunk_text || s.text || s.full_text || s.body || '';
+        const content = s.content || s.chunk_text || s.text || s.full_text || s.body || s.chunk_content || s.snippet || s.text_snippet || s.preview || s.passage || s.excerpt || s.body_text || '';
         const title = s.title || s.source || 'Source Reference';
 
         return {
@@ -764,7 +764,7 @@ function handleTagRegeneration(part) {
 function showSourceDetails(source) { 
     const data = {
         title: source.title || source.name || 'Source Details',
-        content: source.content || source.chunk_text || source.text || source.full_text || '',
+        content: source.content || source.chunk_text || source.text || source.full_text || source.body || source.chunk_content || source.snippet || source.text_snippet || source.preview || source.passage || source.excerpt || source.body_text || '',
         source: source.source || source.url || '',
         score: source.relevance_score || source.score || 0,
         metadata: source.metadata || {}

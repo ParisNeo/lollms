@@ -96,17 +96,21 @@ export const useDiscussionsStore = defineStore('discussions', () => {
     // --- COMPUTEDS ---
     const activeDiscussion = computed(() => {
         if (!currentDiscussionId.value) return null;
-        if (discussions.value[currentDiscussionId.value]) {
-            return discussions.value[currentDiscussionId.value];
+        const existing = discussions.value[currentDiscussionId.value];
+        if (existing) {
+            return existing;
         }
         const shared = sharedWithMe.value.find(d => d.id === currentDiscussionId.value);
         if (shared) return shared;
 
+        // Fallback stub: preserve hydrated metadata so UI never loses selections
         return {
             id: currentDiscussionId.value,
             title: 'Discussion',
             created_at: new Date().toISOString(),
-            last_activity_at: new Date().toISOString()
+            last_activity_at: new Date().toISOString(),
+            rag_datastore_ids: existing?.rag_datastore_ids ?? [],
+            active_tools: existing?.active_tools ?? []
         };
     });
 
