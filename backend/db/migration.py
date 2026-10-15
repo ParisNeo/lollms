@@ -299,7 +299,8 @@ def _bootstrap_lollms_user(connection):
                     default_rag_chunk_size, default_rag_chunk_overlap, default_rag_metadata_mode, status,
                     max_image_width, max_image_height,
                     slide_maker_enabled, activate_generated_images, compress_images, image_compression_quality,
-                    web_search_enabled, web_search_deep_analysis, artefacts_enabled
+                    web_search_enabled, web_search_providers, web_search_deep_analysis, artefacts_enabled,
+                    rlm_enabled, herd_mode_enabled
                 )
                 VALUES (
                     :username, :hashed_password, :is_admin, :is_active, :is_searchable, 
@@ -313,7 +314,8 @@ def _bootstrap_lollms_user(connection):
                     :default_rag_chunk_size, :default_rag_chunk_overlap, :default_rag_metadata_mode, :status,
                     -1, -1,
                     :slide_maker_enabled, :activate_generated_images, :compress_images, :image_compression_quality,
-                    :web_search_enabled, :web_search_deep_analysis, :artefacts_enabled
+                    :web_search_enabled, :web_search_providers, :web_search_deep_analysis, :artefacts_enabled,
+                    :rlm_enabled, :herd_mode_enabled
                 )
             """),
             {
@@ -352,9 +354,11 @@ def _bootstrap_lollms_user(connection):
                 "compress_images": False,
                 "image_compression_quality": 85,
                 "web_search_enabled": False,
-                "web_search_providers": "JSON DEFAULT '[\"google\"]'", # NEW COLUMN
+                "web_search_providers": ["google"],
                 "web_search_deep_analysis": False,
-                "artefacts_enabled": True
+                "artefacts_enabled": True,
+                "rlm_enabled": False,
+                "herd_mode_enabled": False
             }
         )
         connection.commit()
