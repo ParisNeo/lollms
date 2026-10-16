@@ -39,11 +39,22 @@ const isCustomActive = computed(() => uiStore.currentVibe === 'custom' && uiStor
 
 function toggleDark() {
     uiStore.toggleTheme();
+    // Force update document class
+    const html = document.documentElement;
+    if (uiStore.currentTheme === 'dark') {
+        html.classList.add('dark');
+    } else {
+        html.classList.remove('dark');
+    }
 }
 
 function selectVibe(id) {
     uiStore.setVibe(id);
-    // Close dropdown by simulating click outside (optional, relying on dropdown behavior)
+    // Ensure dark class is maintained
+    const html = document.documentElement;
+    if (uiStore.currentTheme === 'dark' && !html.classList.contains('dark')) {
+        html.classList.add('dark');
+    }
 }
 
 function openThemeLab() {

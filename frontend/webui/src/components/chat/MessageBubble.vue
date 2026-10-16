@@ -784,7 +784,10 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
     <div v-if="isSystem" class="w-full flex justify-center my-2" :data-message-id="message.id">
         <div class="system-bubble" v-html="parsedMarkdown(message.content)"></div>
     </div>
-    <div v-else class="message-row group" :class="{ 'is-ai': isAi || isOtherUser }" style="background-color: var(--brand-bg-card); border-top: 1px solid var(--brand-border-muted);">
+    <div v-else class="message-row group" :class="{ 'is-ai': isAi || isOtherUser, 'dark-mode': uiStore.currentTheme === 'dark' }" :style="{
+  backgroundColor: isAi || isOtherUser ? 'var(--brand-bg-card)' : 'var(--brand-primary-light, #3b82f620)',
+  borderTop: '1px solid var(--brand-border-muted)'
+}">
         <div class="message-content-container">
             <!-- Avatar -->
             <div class="shrink-0 pt-1">
@@ -1082,7 +1085,7 @@ function getSimilarityColor(score) { if (score === undefined || score === null) 
                             <div @click="showSourceDetails(source)" 
                                     class="p-4 card cursor-pointer transition-all relative overflow-hidden">
 
-                                <div class="flex items-start justify-between gap-3 mb-2 relative z-10">
+                                <div class="flex items-start justify-between gap-3 mb-2 relative z-10" :style="{ color: 'var(--brand-text-main)' }">
                                     <div class="flex items-center gap-2.5 min-w-0">
                                         <!-- Favicon for Web / Index for RAG -->
                                         <img v-if="isUrl(source.source)" :src="getFavicon(source.source)" class="w-6 h-6 rounded-lg surface-0 p-0.5 shadow-sm shrink-0 border border-primary" alt="" />

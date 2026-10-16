@@ -14,6 +14,41 @@
 
 @import "tailwindcss";
 
+/* Dark Mode CSS Variables */
+:root {
+  --brand-bg-app: #ffffff;
+  --brand-bg-card: #f8fafc;
+  --brand-bg-elevated: #ffffff;
+  --brand-bg-sidebar: #f1f5f9;
+  --brand-bg-hover: #e2e8f0;
+  --brand-text-main: #0f172a;
+  --brand-text-dim: #64748b;
+  --brand-text-on-primary: #ffffff;
+  --brand-border-main: #e2e8f0;
+  --brand-border-muted: #cbd5e1;
+  --brand-primary: #3b82f6;
+  --brand-primary-hover: #2563eb;
+  --brand-primary-light: rgba(59, 130, 246, 0.125);
+  --brand-accent: #8b5cf6;
+}
+
+.dark {
+  --brand-bg-app: #0f172a;
+  --brand-bg-card: #1e293b;
+  --brand-bg-elevated: #334155;
+  --brand-bg-sidebar: #1e293b;
+  --brand-bg-hover: #334155;
+  --brand-text-main: #f1f5f9;
+  --brand-text-dim: #94a3b8;
+  --brand-text-on-primary: #ffffff;
+  --brand-border-main: #334155;
+  --brand-border-muted: #475569;
+  --brand-primary: #3b82f6;
+  --brand-primary-hover: #2563eb;
+  --brand-primary-light: rgba(59, 130, 246, 0.25);
+  --brand-accent: #a78bfa;
+}
+
 /* ══════════════════════════════════════════════════════════════════
    VIBE → SEMANTIC BRIDGE (FINAL)
    This block ensures variables cascade correctly. 
@@ -459,6 +494,24 @@ html[class*="vibe-"] {
         transition-duration: 150ms;
     }
     .menu-item:hover { background-color: #f3f4f6; }
+    .action-btn {
+        padding: 0.375rem;
+        border-radius: 0.5rem;
+        color: var(--brand-text-dim);
+        transition-property: all;
+        transition-duration: 200ms;
+        cursor: pointer;
+        background: transparent;
+        border: none;
+    }
+    .action-btn:hover {
+        background-color: var(--brand-bg-hover);
+        color: var(--brand-text-main);
+    }
+    .action-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
     .dark .menu-item { color: #e5e7eb; }
     .dark .menu-item:hover { background-color: #374151; }
 

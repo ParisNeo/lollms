@@ -641,8 +641,13 @@ function download() {
 </script>
 
 <template>
-    <div class="h-full flex flex-col bg-white dark:bg-gray-950">
-        <div class="flex-1 flex flex-col min-w-0">
+    <div class="h-full flex flex-col" :style="{
+        backgroundColor: 'var(--brand-bg-app)',
+        color: 'var(--brand-text-main)'
+    }">
+        <div class="flex-1 flex flex-col min-w-0" :style="{
+            backgroundColor: 'var(--brand-bg-card)'
+        }">
         <div class="p-3 border-b flex justify-between items-center bg-gray-50 dark:bg-gray-800 shadow-sm relative overflow-hidden">
             <!-- ── [NEW] Generation Animation Bar ── -->
             <div v-if="isLiveUpdating" class="absolute bottom-0 left-0 h-0.5 bg-blue-500 w-full animate-pulse-fast"></div>
@@ -842,16 +847,27 @@ function download() {
             <!-- Conditional Rendering: Native AS-IS File Card, Interactive Data Grid, or CodeMirror Editor -->
             <template v-else>
                 <!-- Interactive Audio Player -->
-                <div v-if="isAudioArtefact" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
-                    <div class="max-w-xl w-full p-8 bg-white dark:bg-gray-850 rounded-3xl border border-gray-200/80 dark:border-gray-700 shadow-xl space-y-6 animate-in fade-in">
+                <div v-if="isAudioArtefact" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center" :style="{
+                    backgroundColor: 'var(--brand-bg-app)'
+                }">
+                    <div class="max-w-xl w-full p-8 rounded-3xl shadow-xl space-y-6 animate-in fade-in" :style="{
+                        backgroundColor: 'var(--brand-bg-card)',
+                        borderColor: 'var(--brand-border-main)',
+                        color: 'var(--brand-text-main)'
+                    }" style="border-width: 1px;">
                         <div class="w-20 h-20 rounded-2xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto shadow-inner">
                             <IconSpeakerWave class="w-10 h-10" />
                         </div>
                         <div class="space-y-1">
-                            <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 font-mono">
+                            <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider font-mono" :style="{
+                                backgroundColor: 'var(--brand-primary-light)',
+                                color: 'var(--brand-primary)'
+                            }">
                                 {{ (title.split('.').pop() || 'AUDIO').toUpperCase() }} AUDIO
                             </span>
-                            <h3 class="text-base font-black text-gray-900 dark:text-white break-all">{{ title }}</h3>
+                            <h3 class="text-base font-black break-all" :style="{
+                                color: 'var(--brand-text-main)'
+                            }">{{ title }}</h3>
                         </div>
                         <div v-if="audioBlobUrl" class="w-full">
                             <audio :src="audioBlobUrl" controls preload="metadata" class="w-full rounded-lg"></audio>

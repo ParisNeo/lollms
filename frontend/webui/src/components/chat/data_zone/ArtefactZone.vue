@@ -3,6 +3,7 @@ import { computed, ref, onMounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useDiscussionsStore } from '../../../stores/discussions';
 import { useUiStore } from '../../../stores/ui';
+import { downloadBlob } from '../../../services/api';
 
 import ArtefactCard from '../../ui/Cards/ArtefactCard.vue';
 import DropdownMenu from '../../ui/DropdownMenu/DropdownMenu.vue';
@@ -376,6 +377,22 @@ async function handleBatchCreateDiscussion() {
     });
     exitSelectionMode();
 }
+
+async function handleDownload(group) {
+    const latest = group.versions[0];
+    if (!latest || !idToUse.value) return;
+    
+    const fileExt = latest.file_ext || '';
+    const filename = `${latest.title}${fileExt}`;
+    const endpoint = `/api/discussions/${idToUse.value}/artefacts/${latest.title}/download`;
+    
+    try {
+        uiStore.addNotification(`Downloading ${filename}...`, 'info');
+        await downloadBlob(endpoint, filename);
+    } catch (e) {
+        uiStore.addNotification(`Failed to download ${latest.title}`, 'error');
+    }
+}
 </script>
 
 <template>
@@ -486,6 +503,7 @@ async function handleBatchCreateDiscussion() {
                         @star="handleStarToggle(group.title)"
                         @share="handleShareArtefact(group)"
                         @import="handleImportToCurrent(group)"
+                        @download="handleDownload(group)"
                         @send-to-datastore="(dsId, dsName) => handleSendToDataStore(group.title, dsId, dsName)"
                     />
                 </div>

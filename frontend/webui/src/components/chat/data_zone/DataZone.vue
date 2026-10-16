@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useUiStore } from '../../../stores/ui';
 import { useDiscussionsStore } from '../../../stores/discussions';
+import { downloadBlob } from '../../../services/api';
 
 // Views
 import DiscussionZone from './DiscussionZone.vue';
@@ -93,6 +94,17 @@ onMounted(() => {
     const savedWidth = localStorage.getItem('lollms_unifiedWidth');
     if (savedWidth) dataZoneWidth.value = parseInt(savedWidth, 10);
 });
+
+async function handleDownloadDataZone() {
+    if (!discussionsStore.currentDiscussionId) return;
+    try {
+        uiStore.addNotification('Preparing export...', 'info');
+        await downloadBlob(`/api/discussions/${discussionsStore.currentDiscussionId}/export`, 'datazone_export.zip');
+        uiStore.addNotification('Download started', 'success');
+    } catch (e) {
+        uiStore.addNotification('Failed to download export', 'error');
+    }
+}
 </script>
 
 <template>
