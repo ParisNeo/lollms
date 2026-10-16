@@ -96,11 +96,13 @@ const showMainSidebar = computed(() => {
 function toggleFactHang() { isFunFactHanging.value = !isFunFactHanging.value; }
 
 onMounted(async () => {
-    // 1. Start Auth/Connection check immediately (Async)
+    // 1. Apply theme immediately to prevent flash
+    uiStore.initializeTheme();
+
+    // 2. Start Auth/Connection check immediately (Async)
     const authPromise = authStore.attemptInitialAuth();
 
-    // 2. Initialize UI (Synchronous)
-    uiStore.initializeTheme();
+    // 3. Initialize Sidebar State (Synchronous)
     uiStore.initializeSidebarState();
 
     // 3. Await Auth Result

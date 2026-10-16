@@ -1569,7 +1569,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <div class="shrink-0 themed-chat-input backdrop-blur border-t shadow-lg relative">
+    <div class="shrink-0 themed-chat-input backdrop-blur border-t shadow-lg relative border-border-main" style="background-color: var(--bg-app); color: var(--text-main);">
 
         <!-- Vision Warning -->
         <div v-if="!currentModelVisionSupport && stagedImages.length > 0" class="px-4 py-1.5 bg-yellow-50 dark:bg-yellow-900/20 border-b border-yellow-200 dark:border-yellow-800 text-[10px] text-yellow-700 dark:text-yellow-300 flex items-center gap-2">

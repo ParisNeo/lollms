@@ -96,7 +96,7 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="relative h-full flex shrink-0 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 z-10 shadow-2xl transition-[width] duration-300" 
+    <div class="relative h-full flex shrink-0 border-l border-border-main z-10 shadow-2xl transition-[width] duration-300" style="background-color: var(--bg-app);"
          :class="[isDataZoneExpanded ? 'absolute inset-0 w-full' : '']" 
          :style="isDataZoneExpanded ? {} : { width: `${dataZoneWidth}px` }">
 
@@ -106,7 +106,7 @@ onMounted(() => {
              v-if="!isDataZoneExpanded"></div>
 
         <!-- Vertical Navigation Rail (5 Distinct First-Class Tabs, Zero Accordions) -->
-        <div class="w-14 shrink-0 border-r dark:border-gray-800 bg-gray-50/70 dark:bg-black flex flex-col items-center py-4 gap-3 select-none">
+        <div class="w-14 shrink-0 border-r border-border-main flex flex-col items-center py-4 gap-3 select-none" style="background-color: var(--bg-card);">
             <!-- 1. Workspace Files -->
             <button @click="activeTab = 'files'" 
                     class="p-2.5 rounded-2xl transition-all relative group cursor-pointer"
@@ -166,7 +166,7 @@ onMounted(() => {
 
         <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
             <!-- Unified Header -->
-            <div class="shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center px-4 h-14 shadow-sm">
+            <div class="shrink-0 border-b border-border-main flex justify-between items-center px-4 h-14 shadow-sm" style="background-color: var(--bg-card);">
                 <div class="flex flex-col min-w-0">
                     <span class="text-[9px] font-black uppercase tracking-widest text-gray-400 truncate">
                         {{ headerSubtitle }}
@@ -190,12 +190,12 @@ onMounted(() => {
             <div class="flex-1 overflow-hidden relative">
 
                 <!-- TAB 1: WORKSPACE FILES LIST -->
-                <div v-if="activeTab === 'files'" class="h-full overflow-hidden bg-white dark:bg-gray-900">
+                <div v-if="activeTab === 'files'" class="h-full overflow-hidden" style="background-color: var(--bg-app);">
                     <ArtefactZone />
                 </div>
 
                 <!-- TAB 2: ACTIVE WORKSPACE EDITOR -->
-                <div v-else-if="activeTab === 'workspace'" class="h-full overflow-hidden bg-white dark:bg-gray-950">
+                <div v-else-if="activeTab === 'workspace'" class="h-full overflow-hidden" style="background-color: var(--bg-app);">
                     <div v-if="!uiStore.activeSplitArtefactTitle" class="h-full flex flex-col items-center justify-center p-12 text-center opacity-40">
                          <IconPencil class="w-16 h-16 mb-4 text-gray-400" />
                          <h4 class="text-lg font-bold uppercase tracking-widest text-gray-500">Editor Offline</h4>

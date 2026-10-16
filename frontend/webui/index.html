@@ -4,6 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LoLLMs</title>
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('lollms-theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('lollms-theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('lollms-theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {}
+        })();
+    </script>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 
     <!-- Guard against Chromium DevTools SoftNav instrumentation bug (Chromium Issue 543499029 / 555794190) -->

@@ -44,6 +44,63 @@ from backend.db.models.user import User as DBUser
 from backend.db.models.saved_artefact import SavedArtefact, SharedArtefactLink
 from pydantic import BaseModel
 
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".webm", ".aac", ".opus"}
+AUDIO_MIME_TYPES = {
+    ".mp3": "audio/mpeg", ".mpga": "audio/mpeg",
+    ".wav": "audio/wav", ".wave": "audio/wav",
+    ".ogg": "audio/ogg", ".oga": "audio/ogg",
+    ".opus": "audio/ogg",
+    ".m4a": "audio/mp4", ".aac": "audio/aac",
+    ".flac": "audio/flac",
+    ".webm": "audio/webm",
+    ".wma": "audio/x-ms-wma",
+}
+BINARY_ASSET_MARKER = {"__binary_asset__": True}
+
+def _is_audio_filename(title: str) -> bool:
+    return Path(title or "").suffix.lower() in AUDIO_EXTENSIONS
+
+def _audio_media_type(title: str) -> str:
+    return AUDIO_MIME_TYPES.get(Path(title or "").suffix.lower(), "application/octet-stream")
+
+def _stream_audio_with_range(file_path: Path, request_range: Optional[str], filename: str, media_type: str):
+    from fastapi import Request
+    from starlette.responses import StreamingResponse
+    file_size = file_path.stat().st_size
+    start, end = 0, file_size - 1
+    status_code = 200
+    if request_range:
+        import re as _re
+        m = _re.match(r"bytes=(\d*)-(\d*)", request_range.strip())
+        if m:
+            if m.group(1):
+                start = int(m.group(1))
+            if m.group(2):
+                end = min(int(m.group(2)), file_size - 1)
+            if start <= end:
+                status_code = 206
+            else:
+                start, end = 0, file_size - 1
+    content_length = end - start + 1
+    def _iter():
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            remaining = content_length
+            while remaining > 0:
+                chunk = f.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+    headers = {
+        "Accept-Ranges": "bytes",
+        "Content-Length": str(content_length),
+        "Content-Disposition": f'inline; filename="{filename}"',
+    }
+    if status_code == 206:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
+    return StreamingResponse(_iter(), status_code=status_code, headers=headers, media_type=media_type)
+
 class IndividualShareRequest(BaseModel):
     target_username: str
     permission_level: str = "interact"
@@ -142,7 +199,10 @@ def _map_artefact_for_ui(art: dict, discussion_id: str = None) -> dict:
     mapped = {k: v for k, v in art.items() if k not in ['content', 'images']}
     if 'discussion_id' not in mapped and discussion_id:
         mapped['discussion_id'] = discussion_id
-    mapped['artefact_type'] = art.get('type', 'document')
+    mapped_type = art.get('type', 'document')
+    if mapped_type in ('document', 'file') and _is_audio_filename(mapped.get('title', '')):
+        mapped_type = 'audio'
+    mapped['artefact_type'] = mapped_type
     mapped['is_loaded'] = bool(art.get('active', False))
     for date_key in ['created_at', 'updated_at']:
         if isinstance(mapped.get(date_key), datetime):
@@ -156,12 +216,15 @@ def _map_saved_artefact_for_ui(saved: SavedArtefact, current_user_id: Optional[i
     elif saved.description:
         if saved.description.startswith("Shared by ") or saved.description == "Shared":
             author_val = saved.description
+    saved_type = saved.artefact_type or "document"
+    if saved_type in ('document', 'file') and _is_audio_filename(saved.title):
+        saved_type = 'audio'
     return {
         "title": saved.title,
         "version": saved.version,
         "is_loaded": False,
         "author": author_val,
-        "artefact_type": saved.artefact_type or "document",
+        "artefact_type": saved_type,
         "created_at": saved.created_at.isoformat() if saved.created_at else datetime.now().isoformat(),
         "updated_at": saved.updated_at.isoformat() if saved.updated_at else datetime.now().isoformat(),
         "content": saved.content,
@@ -1148,11 +1211,23 @@ def build_artefacts_router(router: APIRouter):
         if not artefact:
             raise HTTPException(status_code=404, detail=f"Artefact '{decoded_title}' not found")
 
-        content = artefact.get('content', '')
-
-        from fastapi.responses import PlainTextResponse
+        from fastapi.responses import PlainTextResponse, JSONResponse
         from urllib.parse import quote
         encoded_title = quote(decoded_title, safe='')
+
+        if _is_audio_filename(decoded_title):
+            return JSONResponse(
+                content={
+                    **BINARY_ASSET_MARKER,
+                    "kind": "audio",
+                    "mime": _audio_media_type(decoded_title),
+                    "download_url": f"/api/discussions/{discussion_id}/artefacts/{encoded_title}/download",
+                },
+                headers={"X-Artefact-Title": encoded_title, "X-Artefact-Version": str(artefact.get('version', 1))}
+            )
+
+        content = artefact.get('content', '')
+
         return PlainTextResponse(
             content=content,
             media_type="text/plain; charset=utf-8",
@@ -1204,6 +1279,13 @@ def build_artefacts_router(router: APIRouter):
         for cand in candidate_paths:
             if cand.exists() and cand.is_file():
                 if ws_data_dir and cand.is_relative_to(ws_data_dir.parent):
+                    if _is_audio_filename(cand.name):
+                        range_header = None
+                        try:
+                            range_header = None
+                        except Exception:
+                            range_header = None
+                        return _stream_audio_with_range(cand, range_header, cand.name, _audio_media_type(cand.name))
                     return FileResponse(
                         str(cand),
                         filename=cand.name,

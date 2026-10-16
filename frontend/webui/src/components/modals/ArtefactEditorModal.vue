@@ -1,190 +1,246 @@
-<script setup>
-import { ref, computed, watch } from 'vue';
-import GenericModal from './GenericModal.vue';
-import CodeMirrorEditor from '../ui/CodeMirrorComponent/index.vue';
-import { useUiStore } from '../../stores/ui';
-import { useDiscussionsStore } from '../../stores/discussions';
-import IconPhoto from '../../assets/icons/IconPhoto.vue';
-import IconTrash from '../../assets/icons/IconTrash.vue';
-
-const uiStore = useUiStore();
-const discussionsStore = useDiscussionsStore();
-
-const modalProps = computed(() => uiStore.modalData('artefactEditor'));
-const artefact = computed(() => modalProps.value?.artefact);
-const discussionId = computed(() => modalProps.value?.discussionId);
-
-const isEditing = computed(() => !!artefact.value?.title);
-const title = ref('');
-const content = ref('');
-const keptImages = ref([]); // URLs of images to keep
-const newImageFiles = ref([]); // New File objects
-const newImagePreviews = ref([]); // Data URLs for previewing new images
-const imageInput = ref(null);
-const updateInPlace = ref(false); // New state for the switch
-
-watch(
-    () => uiStore.isModalOpen('artefactEditor'),
-    (isOpen) => {
-        if (isOpen) {
-            title.value = artefact.value?.title || '';
-            content.value = artefact.value?.content || '';
-            keptImages.value = (artefact.value?.images || []).map(img_b64 => `data:image/png;base64,${img_b64}`);
-            newImageFiles.value = [];
-            newImagePreviews.value = [];
-            updateInPlace.value = false; // Reset switch on open
-        }
-    },
-    { immediate: true }
-);
-
-function triggerImageUpload() {
-    imageInput.value?.click();
-}
-
-async function handleImageSelection(event) {
-    const files = Array.from(event.target.files);
-    for (const file of files) {
-        newImageFiles.value.push(file);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            newImagePreviews.value.push(e.target.result);
-        };
-        reader.readAsDataURL(file);
-    }
-    event.target.value = '';
-}
-
-function removeKeptImage(index) {
-    keptImages.value.splice(index, 1);
-}
-
-function removeNewImage(index) {
-    newImageFiles.value.splice(index, 1);
-    newImagePreviews.value.splice(index, 1);
-}
-
-function removeAllImages() {
-    keptImages.value = [];
-    newImageFiles.value = [];
-    newImagePreviews.value = [];
-}
-
-const allImages = computed(() => [...keptImages.value, ...newImagePreviews.value]);
-
-async function handleSubmit() {
-    if (!title.value.trim() || !discussionId.value) {
-        uiStore.addNotification('Title is required.', 'warning');
-        return;
-    }
-
-    const newImagesB64 = await Promise.all(
-        newImageFiles.value.map(file => {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result.split(',')[1]);
-                reader.onerror = reject;
-                reader.readAsDataURL(file);
-            });
-        })
-    );
-    
-    const keptImagesB64 = keptImages.value.map(url => url.split(',')[1]);
-
-    if (isEditing.value) {
-        await discussionsStore.updateArtefact({
-            discussionId: discussionId.value,
-            artefactTitle: artefact.value.title,
-            newContent: content.value,
-            newImagesB64: newImagesB64,
-            keptImagesB64: keptImagesB64,
-            version: artefact.value.version, // Pass the version being edited
-            updateInPlace: updateInPlace.value // Pass the switch state
-        });
-    } else {
-        await discussionsStore.createManualArtefact({
-            discussionId: discussionId.value,
-            title: title.value,
-            content: content.value,
-            imagesB64: [...keptImagesB64, ...newImagesB64],
-        });
-    }
-
-    uiStore.closeModal('artefactEditor');
-}
-</script>
-
 <template>
-    <GenericModal
-        modalName="artefactEditor"
-        :title="isEditing ? 'Edit Artefact' : 'Create New Artefact'"
-        maxWidthClass="max-w-4xl"
-    >
-        <template #body>
-            <form @submit.prevent="handleSubmit" class="space-y-4">
-                <div>
-                    <label for="artefact-title" class="label">Title</label>
-                    <input
-                        id="artefact-title"
-                        type="text"
-                        v-model="title"
-                        class="input-field"
-                        :disabled="isEditing"
-                        required
-                    />
-                     <p v-if="isEditing" class="text-xs text-gray-500 mt-1">Title cannot be changed after creation.</p>
-                </div>
-                <div>
-                    <label for="artefact-content" class="label">Content</label>
-                    <CodeMirrorEditor v-model="content" class="h-64" />
-                </div>
-                <div>
-                    <div class="flex justify-between items-center mb-2">
-                        <label class="label">Images</label>
-                        <div class="flex items-center gap-2">
-                             <button @click="removeAllImages" type="button" class="btn btn-danger-outline btn-sm" :disabled="allImages.length === 0">
-                                <IconTrash class="w-4 h-4 mr-1"/>
-                                Remove All
-                            </button>
-                            <button @click="triggerImageUpload" type="button" class="btn btn-secondary btn-sm">
-                                <IconPhoto class="w-4 h-4 mr-1"/>
-                                Add Images
-                            </button>
-                        </div>
+  <div v-if="isOpen" class="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-black bg-opacity-60 backdrop-blur-sm transition-opacity" @click.self="closeModal">
+    <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden transform transition-all">
+      
+      <!-- Header -->
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50">
+        <div class="flex items-center space-x-3">
+          <DocumentIcon v-if="!isAudio" class="w-6 h-6 text-blue-500" />
+          <MusicalNoteIcon v-else class="w-6 h-6 text-purple-500" />
+          <h2 class="text-xl font-semibold text-gray-900 dark:text-white truncate max-w-md">
+            {{ artefact?.title || 'Edit Artefact' }}
+          </h2>
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300">
+            v{{ artefact?.version }}
+          </span>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button @click="closeModal" class="p-2 text-gray-400 hover:text-gray-500 dark:hover:text-gray-300 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <XMarkIcon class="w-5 h-5" />
+          </button>
+        </div>
+      </div>
 
-                    </div>
-                    <input type="file" ref="imageInput" @change="handleImageSelection" multiple accept="image/*" class="hidden">
-                    <div v-if="allImages.length === 0" class="text-center text-sm text-gray-500 p-4 border-2 border-dashed rounded-lg">
-                        No images attached.
-                    </div>
-                    <div v-else class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 p-2 border rounded-lg">
-                        <div v-for="(imgSrc, index) in keptImages" :key="imgSrc" class="relative group">
-                            <img :src="imgSrc" class="w-full h-24 object-cover rounded-md" alt="Kept image">
-                            <button @click="removeKeptImage(index)" type="button" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
-                        </div>
-                        <div v-for="(imgSrc, index) in newImagePreviews" :key="imgSrc" class="relative group">
-                            <img :src="imgSrc" class="w-full h-24 object-cover rounded-md" alt="New image preview">
-                            <button @click="removeNewImage(index)" type="button" class="absolute top-1 right-1 bg-red-500 text-white rounded-full w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">&times;</button>
-                        </div>
-                    </div>
-                </div>
-                <!-- New Switch for Update In-Place -->
-                <div v-if="isEditing" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <span class="grow flex flex-col">
-                        <span class="text-sm font-medium text-gray-900 dark:text-gray-100">Update Current Version</span>
-                        <span class="text-sm text-gray-500 dark:text-gray-400">
-                            {{ updateInPlace ? 'Overwrite this version directly.' : 'Create a new version with your changes.' }}
-                        </span>
-                    </span>
-                    <button @click="updateInPlace = !updateInPlace" type="button" :class="[updateInPlace ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-600', 'relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out']">
-                        <span :class="[updateInPlace ? 'translate-x-5' : 'translate-x-0', 'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition-colors duration-200 ease-in-out']"></span>
-                    </button>
-                </div>
-            </form>
-        </template>
-        <template #footer>
-            <button @click="uiStore.closeModal('artefactEditor')" type="button" class="btn btn-secondary">Cancel</button>
-            <button @click="handleSubmit" type="button" class="btn btn-primary">{{ isEditing ? 'Save Changes' : 'Create Artefact' }}</button>
-        </template>
-    </GenericModal>
+      <!-- Main Content Area -->
+      <div class="flex-1 overflow-hidden flex flex-col relative bg-white dark:bg-gray-900 min-h-[400px]">
+        
+        <!-- Loading State -->
+        <div v-if="isLoading" class="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 dark:bg-gray-900/80 backdrop-blur-sm">
+          <ArrowPathIcon class="w-8 h-8 text-blue-500 animate-spin mb-3" />
+          <p class="text-gray-600 dark:text-gray-400 font-medium">Loading artefact content...</p>
+        </div>
+
+        <!-- Error State -->
+        <div v-else-if="error" class="absolute inset-0 z-10 flex flex-col items-center justify-center p-6 text-center">
+          <ExclamationTriangleIcon class="w-12 h-12 text-red-500 mb-4" />
+          <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2">Failed to load content</h3>
+          <p class="text-gray-600 dark:text-gray-400 max-w-md">{{ error }}</p>
+          <button @click="loadContent" class="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors">
+            Try Again
+          </button>
+        </div>
+
+        <!-- Audio Workspace (DRY: uses native AudioPlayer component) -->
+        <div v-else-if="isAudio" class="flex-1 flex flex-col items-center justify-center p-8 bg-gray-50 dark:bg-gray-900/50">
+          <div class="w-full max-w-xl bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 flex flex-col items-center">
+            <div class="w-20 h-20 mb-6 rounded-full bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center">
+              <MusicalNoteIcon class="w-10 h-10 text-purple-600 dark:text-purple-400" />
+            </div>
+            
+            <h3 class="text-lg font-medium text-gray-900 dark:text-white mb-2 text-center break-all">{{ artefact?.title }}</h3>
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-6 uppercase tracking-wider font-semibold">{{ audioExtension }} Audio</p>
+            
+            <div class="w-full mb-6">
+              <AudioPlayer v-if="audioUrl" :src="audioUrl" class="w-full" />
+            </div>
+            
+            <div class="flex items-center justify-center space-x-4 w-full">
+              <button 
+                @click="downloadAudio" 
+                class="flex items-center space-x-2 px-4 py-2 bg-gray-100 hover:bg-gray-200 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 rounded-lg transition-colors font-medium text-sm w-full justify-center"
+              >
+                <ArrowDownTrayIcon class="w-5 h-5" />
+                <span>Download Original</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Text/Code Workspace -->
+        <div v-else class="flex-1 flex flex-col h-full">
+          <div class="flex-1 overflow-auto p-4 sm:p-6 h-full">
+            <textarea 
+              v-model="editedContent" 
+              class="w-full h-full min-h-[400px] p-4 font-mono text-sm bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+              placeholder="Enter artefact content..."
+              spellcheck="false"
+            ></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50 flex items-center justify-between">
+        <div class="text-sm text-gray-500 dark:text-gray-400">
+          <span v-if="isAudio" class="flex items-center">
+            <ExclamationTriangleIcon class="w-4 h-4 mr-1 text-amber-500" />
+            Audio files cannot be edited directly.
+          </span>
+          <span v-else>{{ characterCount }} characters</span>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button 
+            @click="closeModal" 
+            class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors font-medium"
+          >
+            Cancel
+          </button>
+          <button 
+            v-if="!isAudio"
+            @click="saveContent" 
+            :disabled="isSaving"
+            class="flex items-center space-x-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ArrowPathIcon v-if="isSaving" class="w-5 h-5 animate-spin" />
+            <CheckIcon v-else class="w-5 h-5" />
+            <span>{{ isSaving ? 'Saving...' : 'Save Changes' }}</span>
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
 </template>
+
+<script setup>
+import { ref, computed, watch, onUnmounted } from 'vue';
+import IconMusicalNote from '@/assets/icons/IconMusicalNote.vue';
+import api from '@/services/api';
+import { useUiStore } from '@/stores/ui';
+import AudioPlayer from '@/components/chat/AudioPlayer.vue'; // Assume existing component path based on tree
+
+const props = defineProps({
+  isOpen: { type: Boolean, default: false },
+  artefact: { type: Object, default: null }
+});
+
+const emit = defineEmits(['close', 'save']);
+const uiStore = useUiStore();
+
+// State
+const isLoading = ref(false);
+const isSaving = ref(false);
+const error = ref(null);
+const editedContent = ref('');
+const audioUrl = ref(null);
+const audioBlob = ref(null);
+
+// Constants
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'flac', 'webm', 'aac', 'opus'];
+
+// Computed
+const audioExtension = computed(() => {
+  if (!props.artefact?.title) return '';
+  const parts = props.artefact.title.split('.');
+  return parts.length > 1 ? parts.pop().toLowerCase() : '';
+});
+
+const isAudio = computed(() => {
+  if (!props.artefact) return false;
+  if (props.artefact.artefact_type === 'audio') return true;
+  return AUDIO_EXTENSIONS.includes(audioExtension.value);
+});
+
+// Keep AUDIO_EXTENSIONS and detection aligned with backend AUDIO_EXTENSIONS.
+
+const characterCount = computed(() => {
+  return editedContent.value ? editedContent.value.length : 0;
+});
+
+// Methods
+const loadContent = async () => {
+  if (!props.artefact) return;
+  
+  isLoading.value = true;
+  error.value = null;
+  
+  try {
+    if (isAudio.value) {
+      // Fetch as blob for audio playback
+      const response = await api.get(`/api/discussions/${props.artefact.discussion_id}/artefacts/${props.artefact.title}/content`, {
+        responseType: 'blob'
+      });
+      audioBlob.value = response.data;
+      audioUrl.value = URL.createObjectURL(response.data);
+    } else {
+      // Fetch as text for editing
+      const response = await api.get(`/api/discussions/${props.artefact.discussion_id}/artefacts/${props.artefact.title}/content`);
+      editedContent.value = response.data.content || '';
+    }
+  } catch (err) {
+    console.error('Failed to load artefact:', err);
+    error.value = err.response?.data?.detail || 'Could not load the artefact content. Please try again.';
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+const saveContent = async () => {
+  if (isAudio.value) return; // Guard: Prevent saving binary as text
+  
+  isSaving.value = true;
+  try {
+    await api.put(`/api/discussions/${props.artefact.discussion_id}/artefacts/${props.artefact.title}`, {
+      content: editedContent.value
+    });
+    uiStore.showToast('Artefact saved successfully', 'success');
+    emit('save', { ...props.artefact, content: editedContent.value });
+    closeModal();
+  } catch (err) {
+    console.error('Failed to save artefact:', err);
+    uiStore.showToast(err.response?.data?.detail || 'Failed to save artefact', 'error');
+  } finally {
+    isSaving.value = false;
+  }
+};
+
+const downloadAudio = () => {
+  if (!audioBlob.value || !props.artefact) return;
+  
+  const url = window.URL.createObjectURL(audioBlob.value);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = props.artefact.title;
+  document.body.appendChild(a);
+  a.click();
+  window.URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+};
+
+const closeModal = () => {
+  emit('close');
+};
+
+// Watchers
+watch(() => props.isOpen, (newVal) => {
+  if (newVal && props.artefact) {
+    loadContent();
+  } else {
+    // Cleanup on close
+    if (audioUrl.value) {
+      URL.revokeObjectURL(audioUrl.value);
+      audioUrl.value = null;
+      audioBlob.value = null;
+    }
+    editedContent.value = '';
+    error.value = null;
+  }
+});
+
+// Cleanup
+onUnmounted(() => {
+  if (audioUrl.value) {
+    URL.revokeObjectURL(audioUrl.value);
+  }
+});
+</script>

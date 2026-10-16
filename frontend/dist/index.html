@@ -4,6 +4,38 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LoLLMs</title>
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('lollms-theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('lollms-theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {}
+        })();
+    </script>
+    <script>
+        (function() {
+            try {
+                var theme = localStorage.getItem('lollms-theme') || 'light';
+                if (theme === 'dark') {
+                    document.documentElement.classList.add('dark');
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {}
+        })();
+    </script>
     <link rel="icon" href="/favicon.ico" type="image/x-icon">
 
     <!-- Guard against Chromium DevTools SoftNav instrumentation bug (Chromium Issue 543499029 / 555794190) -->
@@ -30,12 +62,12 @@
     <script defer src="https://cdn.jsdelivr.net/pyodide/v0.25.1/full/pyodide.js"></script>
 
     <!-- The main application script, a module handled by Vite -->
-  <script type="module" crossorigin src="/assets/index-vRyAgXlB.js"></script>
+  <script type="module" crossorigin src="/assets/index-DdCyQ9iT.js"></script>
   <link rel="modulepreload" crossorigin href="/assets/rolldown-runtime-Dd_uD5pT.js">
-  <link rel="modulepreload" crossorigin href="/assets/app-stores-B9RU6_iK.js">
-  <link rel="modulepreload" crossorigin href="/assets/vendor-CSSbEq24.js">
-  <link rel="stylesheet" crossorigin href="/assets/app-stores-CxdB6eL-.css">
-  <link rel="stylesheet" crossorigin href="/assets/index-BHNdQ_Nb.css">
+  <link rel="modulepreload" crossorigin href="/assets/app-stores-DgMbARPW.js">
+  <link rel="modulepreload" crossorigin href="/assets/vendor-CvLw4aRv.js">
+  <link rel="stylesheet" crossorigin href="/assets/app-stores-DslYd1NP.css">
+  <link rel="stylesheet" crossorigin href="/assets/index-CHYJeGNG.css">
 </head>
 <body>
     <!-- The Vue application will mount here -->

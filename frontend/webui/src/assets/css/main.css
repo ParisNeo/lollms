@@ -66,6 +66,14 @@ html[class*="vibe-"] {
 
 @theme {
   /* Map semantic variables to Tailwind utilities so the build doesn't crash */
+  --color-bg-primary: var(--bg-app);
+  --color-bg-secondary: var(--bg-card);
+  --color-bg-tertiary: var(--bg-elevated);
+  --color-text-primary: var(--text-main);
+  --color-text-secondary: var(--text-dim);
+  --color-text-muted: var(--text-dim);
+  --color-border: var(--border-main);
+  --color-surface-hover: var(--bg-hover);
   --color-primary: var(--primary);
   --color-primary-hover: var(--primary-hover);
   --color-accent: var(--accent);
@@ -85,6 +93,24 @@ html[class*="vibe-"] {
   --color-border-strong: var(--border-strong);
 }
 
+/* Dark Mode Semantic Variables (Fixes cascade for all vibes) */
+.dark, .dark[class*="vibe-"] {
+  --bg-app: #0b1120;
+  --bg-card: #151e32;
+  --bg-elevated: #1e293b;
+  --bg-overlay: rgba(15, 23, 42, 0.75);
+  --bg-sidebar: #151e32;
+  --bg-hover: #2a3b55;
+  --input-bg: #1e293b;
+  --input-border: #334155;
+  --text-main: #f8fafc;
+  --text-dim: #94a3b8;
+  --text-on-primary: #ffffff;
+  --border-main: #334155;
+  --border-muted: #1e293b;
+  --border-strong: #475569;
+}
+
 /* Default Semantic Variables (Fallbacks) - MUST come before brand aliases */
 :root {
   --bg-app: #f8fafc;
@@ -93,6 +119,23 @@ html[class*="vibe-"] {
   --bg-overlay: rgba(255, 255, 255, 0.95);
   --bg-sidebar: #f8fafc;
   --bg-hover: #e2e8f0;
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8fafc;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-border: #e2e8f0;
+  --color-accent: #6366f1;
+  --color-accent-hover: #4f46e5;
+  --color-surface-hover: rgba(0, 0, 0, 0.04);
+  
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8fafc;
+  --color-text-primary: #1e293b;
+  --color-text-secondary: #64748b;
+  --color-border: #e2e8f0;
+  --color-accent: #6366f1;
+  --color-accent-hover: #4f46e5;
+  --color-surface-hover: rgba(0, 0, 0, 0.04);
   --input-bg: #ffffff;
   --input-border: #e2e8f0;
   --text-main: #0f172a;

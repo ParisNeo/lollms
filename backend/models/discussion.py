@@ -29,8 +29,9 @@ class ArtefactInfo(BaseModel):
     created_at: str
     updated_at: str
     discussion_id: Optional[str] = None
-    content: Optional[str] = Field(default=None, description="Only populated on direct fetch")
-    images: Optional[List[str]] = Field(default=None, description="Only populated on direct fetch")
+    content: Optional[str] = None
+    images: Optional[List[str]] = None
+    tokens: Optional[int] = None
 
 class ArtefactUploadResponse(BaseModel):
     new_artefact_info: ArtefactInfo
@@ -107,8 +108,9 @@ class ContextZoneDetail(BaseModel):
 
 class ContextStatusResponse(BaseModel):
     current_tokens: int
-    max_tokens: Optional[int]
+    max_tokens: Optional[int] = None
     zones: Dict[str, ContextZoneDetail]
+    percent: Optional[float] = None
 
 class MessageOutput(BaseModel):
     id: str

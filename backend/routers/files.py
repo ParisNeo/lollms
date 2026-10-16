@@ -196,6 +196,8 @@ def _process_msg_attachment(att_bytes: bytes, att_name: str, images: List[str], 
     return f"- Attachment: {att_name} ({len(att_bytes)} bytes - content ignored)"
 
 
+AUDIO_FILE_EXTENSIONS = {".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".webm", ".aac", ".opus", ".wma", ".mpga"}
+
 def extract_text_from_file_bytes(file_bytes: bytes, filename: str, extract_images: bool = True) -> Tuple[str, List[str]]:
     """
     Extracts text and embedded/generated images (as base64) from file bytes.
@@ -205,6 +207,14 @@ def extract_text_from_file_bytes(file_bytes: bytes, filename: str, extract_image
     
     extracted_text = ""
     images: List[str] = []
+    
+    # --- Binary Audio Guard: never feed audio bytes into text decoding paths ---
+    if extension in AUDIO_FILE_EXTENSIONS:
+        return (
+            f"[Audio file: {filename} — {len(file_bytes)} bytes. "
+            f"Binary audio content is not text-extractable. Use the audio player or transcription tools.]",
+            [],
+        )
     
     # --- Document Type Handling ---
     

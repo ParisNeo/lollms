@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch, onMounted } from 'vue';
+import { computed, ref, watch, onMounted, onUnmounted } from 'vue';
 import { useUiStore } from '../../stores/ui';
 import { useDiscussionsStore } from '../../stores/discussions';
 import { useNotesStore } from '../../stores/notes';
@@ -164,6 +164,7 @@ const isFetching = ref(false);
 const isGeneratingAudio = ref(false);
 const loadError = ref(null);
 const isExecuting = ref(false);
+const audioBlobUrl = ref(null);
 const pyodideStore = usePyodideStore();
 
 const isExecutable = computed(() => {
@@ -331,61 +332,25 @@ async function handleExecute() {
         return ['markdown', 'html', 'svg', 'mermaid'].includes(type);
     });
 
-    async function loadVersion(v) {
-        if (!title.value || v === null) return;
+    async function loadVersion(version) {
+        if (!version) { isFetching.value = false; return; }
         isFetching.value = true;
+        loadError.value = null;
+        if (audioBlobUrl.value && !isAudioArtefact.value) {
+            URL.revokeObjectURL(audioBlobUrl.value);
+            audioBlobUrl.value = null;
+        }
         try {
-            const data = await discussionsStore.fetchArtefactContent({
-                discussionId: discussionsStore.currentDiscussionId,
-                artefactTitle: title.value,
-                version: v,
-                strategy: 'raw'
-            });
-            
-            console.log('[ArtefactSplitView] fetchArtefactContent response:', data);
-            
-            // Handle different response formats
-            let rawContent = '';
-            
-            if (typeof data === 'string') {
-                // Direct string response
-                rawContent = data;
-            } else if (data && typeof data === 'object') {
-                // Object response with content field
-                rawContent = data.content ?? '';
-            }
-            
-            // Detect if we got the Vue app's HTML (error) vs actual artefact HTML content
-            const isVueAppHtml = rawContent.includes('id="app"') && 
-                                (rawContent.includes('/ui_assets/') || rawContent.includes('index-'));
-            
-            if (isVueAppHtml) {
-                console.error('[ArtefactSplitView] Received Vue app HTML instead of artefact content. Backend API routing issue.');
-                loadError.value = 'API routing error: Static file handler intercepted the request. Please report this issue.';
+            if (isAudioArtefact.value) {
                 dbContent.value = '';
-                return;
-            }
-            
-            // Valid HTML content from artefact - keep it as-is
-            loadError.value = null;
-            
-            if (rawContent) {
-                // Strip out library-injected context markers to keep the Workspace view "Pure"
-                let cleaned = rawContent.trim();
-                const headerPattern = /^--- (Document|Skill|Note|Artefact): .*? ---/i;
-                const footerPattern = /--- End (Document|Skill|Note|Artefact)(?:: .*?)? ---$/i;
-                
-                cleaned = cleaned.replace(headerPattern, '').replace(footerPattern, '').trim();
-                dbContent.value = cleaned;
-                
-                console.log('[ArtefactSplitView] Content loaded, length:', cleaned.length);
-            } else {
-                console.warn('[ArtefactSplitView] Empty content received');
+                await fetchAudioBlobUrl(version);
+            } else if (!isAsIsFile.value) {
                 dbContent.value = '';
+                const { data } = await apiClient.get(`/api/discussions/${discussionsStore.currentDiscussionId}/artefacts/${encodeURIComponent(title.value)}/content?version=${version}`);
+                dbContent.value = typeof data === 'string' ? data : (data?.content ?? '');
             }
-        } catch (err) {
-            console.error('[ArtefactSplitView] Failed to load artefact content:', err);
-            dbContent.value = '';
+        } catch (error) {
+            loadError.value = "Failed to load version. It might not exist or you may lack permission.";
         } finally {
             isFetching.value = false;
         }
@@ -589,6 +554,36 @@ async function handlePushToLibrary(type) {
     }
 }
 
+const AUDIO_EXTENSIONS = ['mp3', 'wav', 'ogg', 'oga', 'm4a', 'flac', 'webm', 'aac', 'opus'];
+const isAudioArtefact = computed(() => {
+    const artType = artefactGroup.value?.versions[0]?.artefact_type;
+    if (artType === 'audio') return true;
+    const ext = (artefactGroup.value?.title || '').split('.').pop()?.toLowerCase();
+    return AUDIO_EXTENSIONS.includes(ext);
+});
+
+async function fetchAudioBlobUrl(version) {
+    if (audioBlobUrl.value) {
+        URL.revokeObjectURL(audioBlobUrl.value);
+        audioBlobUrl.value = null;
+    }
+    try {
+        const downloadUrl = `/api/discussions/${encodeURIComponent(discussionsStore.currentDiscussionId)}/artefacts/${encodeURIComponent(title.value)}/download${version ? `?version=${version}` : ''}`;
+        const response = await apiClient.get(downloadUrl, { responseType: 'blob' });
+        const mimeExt = (title.value || '').split('.').pop()?.toLowerCase();
+        const mimeMap = {
+            mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg',
+            opus: 'audio/ogg', m4a: 'audio/mp4', aac: 'audio/aac',
+            flac: 'audio/flac', webm: 'audio/webm'
+        };
+        const blob = new Blob([response.data], { type: mimeMap[mimeExt] || 'audio/mpeg' });
+        audioBlobUrl.value = URL.createObjectURL(blob);
+    } catch (e) {
+        console.error('Failed to load audio artefact:', e);
+        loadError.value = 'Failed to load audio stream.';
+    }
+}
+
 // AS-IS Native Binary File Detection
 const isAsIsFile = computed(() => {
     const c = (dbContent.value || '').trim();
@@ -608,6 +603,12 @@ const asIsMetadata = computed(() => {
         size: sizeMatch ? sizeMatch[1].trim() : null,
         location: locMatch ? locMatch[1].trim() : title.value
     };
+});
+
+onUnmounted(() => {
+    if (audioBlobUrl.value) {
+        URL.revokeObjectURL(audioBlobUrl.value);
+    }
 });
 
 function download() {
@@ -655,12 +656,13 @@ function download() {
                             'bg-amber-100 text-amber-600': artefactGroup?.versions[0]?.artefact_type === 'note',
                             'bg-emerald-100 text-emerald-600': artefactGroup?.versions[0]?.artefact_type === 'skill',
                             'bg-blue-100 text-blue-600': ['document', 'file'].includes(artefactGroup?.versions[0]?.artefact_type),
-                            'bg-purple-100 text-purple-600': artefactGroup?.versions[0]?.artefact_type === 'code'
+                            'bg-purple-100 text-purple-600': ['code', 'audio'].includes(artefactGroup?.versions[0]?.artefact_type)
                         }
                     ]">
                         <IconPencil v-if="artefactGroup?.versions[0]?.artefact_type === 'note'" class="w-4 h-4" />
                         <IconSparkles v-else-if="artefactGroup?.versions[0]?.artefact_type === 'skill'" class="w-4 h-4" />
                         <IconCode v-else-if="artefactGroup?.versions[0]?.artefact_type === 'code'" class="w-4 h-4" />
+                        <IconSpeakerWave v-else-if="artefactGroup?.versions[0]?.artefact_type === 'audio'" class="w-4 h-4" />
                         <IconFileText v-else class="w-4 h-4" />
                     </div>
                     <!-- Live Dot -->
@@ -675,13 +677,14 @@ function download() {
                         <span class="text-[9px] font-black uppercase tracking-widest" :class="{
                             'text-amber-500': artefactGroup?.versions[0]?.artefact_type === 'note',
                             'text-emerald-500': artefactGroup?.versions[0]?.artefact_type === 'skill',
-                            'text-purple-500': artefactGroup?.versions[0]?.artefact_type === 'code',
-                            'text-gray-400': !['note', 'skill', 'code'].includes(artefactGroup?.versions[0]?.artefact_type)
+                            'text-purple-500': ['code', 'audio'].includes(artefactGroup?.versions[0]?.artefact_type),
+                            'text-gray-400': !['note', 'skill', 'code', 'audio'].includes(artefactGroup?.versions[0]?.artefact_type)
                         }">
                             {{ 
                               artefactGroup?.versions[0]?.artefact_type === 'note' ? 'RESEARCH NOTE' :
                               artefactGroup?.versions[0]?.artefact_type === 'skill' ? 'AI CAPABILITY' :
                               artefactGroup?.versions[0]?.artefact_type === 'code' ? 'CODE SNIPPET' :
+                              artefactGroup?.versions[0]?.artefact_type === 'audio' ? 'AUDIO TRACK' :
                               artefactGroup?.versions[0]?.artefact_type === 'file' ? 'EXTERNAL DOCUMENT' :
                               'DOCUMENT'
                             }} WORKSPACE
@@ -818,7 +821,7 @@ function download() {
                 </DropdownMenu>
 
             <!-- Primary Action Button -->
-            <div class="flex gap-1">
+            <div v-if="!isAudioArtefact" class="flex gap-1">
                 <button @click="handleSave()" class="btn btn-primary btn-sm h-8 flex items-center gap-2 shadow-lg shadow-blue-500/10" :disabled="isSaving || isLiveUpdating" :title="`Save new version v${(artefactGroup?.versions[0]?.version || 0) + 1} to discussion workspace`">
                     <IconRefresh v-if="isSaving" class="w-3.5 h-3.5 animate-spin" />
                     <IconPencil v-else class="w-3.5 h-3.5" />
@@ -838,8 +841,37 @@ function download() {
 
             <!-- Conditional Rendering: Native AS-IS File Card, Interactive Data Grid, or CodeMirror Editor -->
             <template v-else>
+                <!-- Interactive Audio Player -->
+                <div v-if="isAudioArtefact" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
+                    <div class="max-w-xl w-full p-8 bg-white dark:bg-gray-850 rounded-3xl border border-gray-200/80 dark:border-gray-700 shadow-xl space-y-6 animate-in fade-in">
+                        <div class="w-20 h-20 rounded-2xl bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 flex items-center justify-center mx-auto shadow-inner">
+                            <IconSpeakerWave class="w-10 h-10" />
+                        </div>
+                        <div class="space-y-1">
+                            <span class="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300 font-mono">
+                                {{ (title.split('.').pop() || 'AUDIO').toUpperCase() }} AUDIO
+                            </span>
+                            <h3 class="text-base font-black text-gray-900 dark:text-white break-all">{{ title }}</h3>
+                        </div>
+                        <div v-if="audioBlobUrl" class="w-full">
+                            <audio :src="audioBlobUrl" controls preload="metadata" class="w-full rounded-lg"></audio>
+                        </div>
+                        <div v-else class="w-full flex items-center justify-center py-4">
+                            <IconAnimateSpin class="w-6 h-6 text-purple-500 animate-spin" />
+                        </div>
+                        <button
+                            type="button"
+                            @click="download"
+                            class="w-full btn btn-primary py-3 rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20 text-xs font-bold uppercase tracking-wider cursor-pointer transition-all"
+                        >
+                            <IconArrowDownTray class="w-4 h-4" />
+                            <span>Download Original</span>
+                        </button>
+                    </div>
+                </div>
+
                 <!-- AS-IS Native Binary File Card with Direct Download -->
-                <div v-if="isAsIsFile" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
+                <div v-else-if="isAsIsFile" class="absolute inset-0 h-full overflow-y-auto custom-scrollbar p-6 flex flex-col items-center justify-center text-center bg-gray-50/50 dark:bg-gray-900/30">
                     <div class="max-w-md w-full p-8 bg-white dark:bg-gray-850 rounded-3xl border border-gray-200/80 dark:border-gray-700 shadow-xl space-y-5 animate-in fade-in">
                         <div class="w-20 h-20 rounded-2xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center mx-auto shadow-inner">
                             <IconFileText class="w-10 h-10" />

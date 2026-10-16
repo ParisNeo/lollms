@@ -4,15 +4,18 @@ import router from '../router';
 import apiClient from '../services/api';
 
 export const useUiStore = defineStore('ui', {
+
   state: () => ({
     mainView: 'chat',
     modalStack: [],
     modalProps: {},
     notifications: [],
-    currentTheme: localStorage.getItem('lollms-theme') || 'light',
     currentVibe: localStorage.getItem('lollms-vibe') || 'default',
+    currentTheme: localStorage.getItem('lollms-theme') || 'light',
     currentCustomTheme: JSON.parse(localStorage.getItem('lollms-custom-theme') || 'null'),
     currentLanguage: localStorage.getItem('lollms-language') || 'en',
+    uiScale: parseFloat(localStorage.getItem('lollms-ui-scale')) || 1.0,
+    uiScale: parseFloat(localStorage.getItem('lollms-ui-scale')) || 1.0,
     message_font_size: 14,
     imageViewer: {
       isOpen: false,

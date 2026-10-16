@@ -90,7 +90,8 @@ def build_context_router(router: APIRouter):
                     pass
 
             discussion.max_context_size = resolved_ctx or 32000
-            status = discussion.get_context_status()
+            from backend.routers.discussion.artefact_context import inject_loaded_artefact_tokens
+            status = inject_loaded_artefact_tokens(discussion.get_context_status(), discussion)
 
             # Guard against status returning max_tokens <= 1
             if isinstance(status, dict):
