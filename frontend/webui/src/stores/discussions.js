@@ -354,6 +354,31 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         }
     }
 
+    function handleDataZoneSynced(data) {
+        if (!data || data.discussion_id !== currentDiscussionId.value) return;
+
+        const discussion = discussions.value[data.discussion_id];
+        if (discussion) {
+            discussions.value[data.discussion_id] = {
+                ...discussion,
+                discussion_data_zone: data.discussion_data_zone ?? discussion.discussion_data_zone,
+                discussion_images: Array.isArray(data.discussion_images) ? data.discussion_images : discussion.discussion_images,
+                active_discussion_images: Array.isArray(data.active_discussion_images) ? data.active_discussion_images : discussion.active_discussion_images
+            };
+        }
+
+        if (Array.isArray(data.artefacts)) {
+            activeDiscussionArtefacts.value = data.artefacts;
+        }
+
+        if (typeof getActions().fetchContextStatus === 'function') {
+            getActions().fetchContextStatus(data.discussion_id);
+        }
+        if (data.synced_artefacts && data.synced_artefacts.length > 0) {
+            uiStore.addNotification(`Synced ${data.synced_artefacts.length} artefact(s) to workspace.`, 'success');
+        }
+    }
+
     async function toggleDiscussionImage(imageIndex) {
         if (!currentDiscussionId.value) return;
         try {
@@ -649,6 +674,7 @@ export const useDiscussionsStore = defineStore('discussions', () => {
         onAudioPausedOrEnded,
         stopCurrentAudio,
         handleDiscussionImagesUpdated,
+        handleDataZoneSynced,
         toggleDiscussionImage,
         triggerTagGeneration,
         handleGenerationStatus(statusData) {

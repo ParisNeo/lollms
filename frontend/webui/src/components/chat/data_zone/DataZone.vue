@@ -15,6 +15,7 @@ import ArtefactSplitView from '../ArtefactSplitView.vue';
 // Icons
 import IconMaximize from '../../../assets/icons/IconMaximize.vue';
 import IconMinimize from '../../../assets/icons/IconMinimize.vue';
+import IconArrowPath from '../../../assets/icons/IconArrowPath.vue';
 import IconChevronDown from '../../../assets/icons/IconChevronDown.vue';
 import IconXMark from '../../../assets/icons/IconXMark.vue';
 import IconDataZone from '../../../assets/icons/IconDataZone.vue';
@@ -105,6 +106,19 @@ async function handleDownloadDataZone() {
         uiStore.addNotification('Failed to download export', 'error');
     }
 }
+
+const isSyncingDataZones = ref(false);
+
+async function handleSyncDataZones() {
+    if (isSyncingDataZones.value) return;
+    if (!discussionsStore.currentDiscussionId) return;
+    isSyncingDataZones.value = true;
+    try {
+        await discussionsStore.syncDataZones(discussionsStore.currentDiscussionId);
+    } finally {
+        isSyncingDataZones.value = false;
+    }
+}
 </script>
 
 <template>
@@ -188,6 +202,9 @@ async function handleDownloadDataZone() {
                     </h3>
                 </div>
                 <div class="flex items-center gap-1">
+                    <button @click="handleSyncDataZones" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-green-600 transition-colors" :class="{ 'opacity-50 cursor-not-allowed': isSyncingDataZones }" :title="isSyncingDataZones ? 'Syncing...' : 'Sync artefacts with backend'">
+                        <IconArrowPath class="w-5 h-5" :class="{ 'animate-spin': isSyncingDataZones }" />
+                    </button>
                     <button @click="uiStore.toggleDataZoneExpansion()" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 transition-colors" :title="isDataZoneExpanded ? 'Shrink' : 'Expand'">
                         <IconMinimize v-if="isDataZoneExpanded" class="w-5 h-5" />
                         <IconMaximize v-else class="w-5 h-5" />

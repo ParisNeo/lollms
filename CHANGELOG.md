@@ -42,6 +42,10 @@ All notable changes to the LoLLMs Platform will be documented in this file.
 
 - feat(notebook): add tab support and extend creation schema
 
+## [2026-10-18 16:54]
+
+- feat(data-zone): add artefact syncing between LLM generation and discussion views
+
 ## [2026-10-13 23:32]
 
 - fix(discussion): optimize LLM generation core logic to enhance performance for large-scale text processing

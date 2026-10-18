@@ -316,6 +316,82 @@ def _sanitize_b64(data: str) -> str:
         return data.split("base64,")[1]
     return data
 
+
+def sync_artefacts_to_workspace(discussion_obj, touched_artefacts=None):
+    """
+    Materializes generated artefacts (images, documents, slides) into the
+    discussion workspace so data zones and file listings reflect them.
+    Returns the list of synced artefact titles.
+    """
+    synced_titles = []
+    try:
+        art_store = getattr(discussion_obj, "artefacts", None)
+        if art_store is None:
+            return synced_titles
+
+        if touched_artefacts:
+            titles = [a.get("title") for a in touched_artefacts if isinstance(a, dict) and a.get("title")]
+        else:
+            titles = [a.get("title") for a in (art_store.list() or []) if isinstance(a, dict) and a.get("title")]
+
+        for title in titles:
+            try:
+                if hasattr(art_store, "sync_to_workspace"):
+                    art_store.sync_to_workspace(title)
+                synced_titles.append(title)
+            except Exception as e:
+                print(f"[sync_artefacts_to_workspace] Failed to sync '{title}': {e}")
+    except Exception as e:
+        print(f"[sync_artefacts_to_workspace] Error: {e}")
+    return synced_titles
+
+
+def build_data_zones_sync_payload(discussion_obj, owner_db_user, discussion_id, synced_titles=None):
+    """
+    Builds the data zones payload broadcast after generation so the Data Zones
+    panel reflects generated images and workspace files.
+    """
+    payload = {
+        "discussion_id": discussion_id,
+        "user_data_zone": owner_db_user.data_zone if owner_db_user else "",
+        "discussion_data_zone": discussion_obj.discussion_data_zone or "",
+        "personality_data_zone": discussion_obj.personality_data_zone or "",
+        "memory": "",
+        "artefacts": [],
+        "synced_artefacts": synced_titles or []
+    }
+
+    try:
+        if owner_db_user and owner_db_user.memories:
+            payload["memory"] = "\n".join(
+                ["---" + m.title + "---\n" + m.content + "\n------" for m in owner_db_user.memories]
+            )
+    except Exception:
+        pass
+
+    try:
+        payload["artefacts"] = [
+            {
+                "title": art.get("title"),
+                "version": art.get("version"),
+                "artefact_type": art.get("type", "document"),
+                "is_loaded": art.get("active", False)
+            }
+            for art in (discussion_obj.list_artefacts() or [])
+        ]
+    except Exception:
+        payload["artefacts"] = []
+
+    try:
+        images_info = discussion_obj.get_discussion_images()
+        payload["discussion_images"] = [img["data"] for img in images_info]
+        payload["active_discussion_images"] = [img["active"] for img in images_info]
+    except Exception:
+        payload["discussion_images"] = []
+        payload["active_discussion_images"] = []
+
+    return payload
+
 def resize_base64_image(b64_str: str, max_width: int = -1, max_height: int = -1) -> str:
     """
     Resizes and compresses a base64 encoded image.
@@ -2472,6 +2548,23 @@ def build_llm_generation_router(router: APIRouter):
                                 stream_queue.put_nowait,
                                 json.dumps(jsonable_encoder({"type": "sources", "content": unique_sources})) + "\n"
                             )
+
+                        # Sync generated artefacts (images, slides, documents) to the workspace
+                        # and broadcast the refreshed data zones to the frontend panel.
+                        try:
+                            touched_artefacts = result.get('artefacts') if isinstance(result.get('artefacts'), list) else []
+                            synced_titles = sync_artefacts_to_workspace(discussion_obj, touched_artefacts)
+                            discussion_obj.commit()
+                            if synced_titles:
+                                dz_payload = build_data_zones_sync_payload(
+                                    discussion_obj, owner_db_user, discussion_id, synced_titles
+                                )
+                                manager.send_personal_message_sync(
+                                    {"type": "data_zone_synced", "data": dz_payload},
+                                    current_user.id
+                                )
+                        except Exception as sync_err:
+                            print(f"Warning: post-generation artefact sync failed: {sync_err}")
 
                     def msg_to_out(m): 
                         if not m: return None

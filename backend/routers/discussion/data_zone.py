@@ -8,7 +8,7 @@ import fitz # PyMuPDF
 from PIL import Image
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
-from ascii_colors import trace_exception
+from ascii_colors import ASCIIColors, trace_exception
 
 from backend.db import get_db
 from backend.models import UserAuthDetails, DataZones, DiscussionDataZoneUpdate, TaskInfo, DiscussionImageUpdateResponse
@@ -105,6 +105,48 @@ def build_datazone_router(router: APIRouter):
             owner_username=current_user.username
         )
         return db_task
+
+    @router.post("/{discussion_id}/sync_data_zones", response_model=DataZones)
+    async def sync_discussion_data_zones(
+        discussion_id: str,
+        current_user: UserAuthDetails = Depends(get_current_active_user),
+        db: Session = Depends(get_db)
+    ):
+        """
+        Reconciles the discussion workspace with generated artefacts and returns
+        the refreshed data zones payload (zones, images, and artefact metadata).
+        """
+        discussion, owner_username, _, owner_db_user = await get_discussion_and_owner_for_request(
+            discussion_id, current_user, db, 'interact'
+        )
+
+        art_store = getattr(discussion, "artefacts", None)
+        if art_store is not None and hasattr(art_store, "sync_to_workspace"):
+            for art in (art_store.list() or []):
+                title = art.get("title") if isinstance(art, dict) else None
+                if not title:
+                    continue
+                try:
+                    art_store.sync_to_workspace(title)
+                except Exception as sync_ex:
+                    ASCIIColors.warning(f"Failed to sync artefact '{title}': {sync_ex}")
+
+        discussion.commit()
+
+        discussion.memory = "\n".join(
+            ["---" + m.title + "---\n" + m.content + "\n------" for m in owner_db_user.memories]
+        ) if owner_db_user and owner_db_user.memories else ""
+
+        images_info = discussion.get_discussion_images()
+
+        return DataZones(
+            user_data_zone=owner_db_user.data_zone if owner_db_user else "",
+            discussion_data_zone=discussion.discussion_data_zone,
+            personality_data_zone=discussion.personality_data_zone,
+            memory=discussion.memory,
+            discussion_images=[img['data'] for img in images_info],
+            active_discussion_images=[img['active'] for img in images_info]
+        )
 
     @router.post("/{discussion_id}/memorize", response_model=TaskInfo, status_code=202)
     async def memorize_ltm(

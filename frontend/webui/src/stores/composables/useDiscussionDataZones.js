@@ -88,44 +88,49 @@ export function useDiscussionDataZones(state, stores, getActions) {
             
             const response = await apiClient.get(`/api/discussions/${discussionId}/data_zones`);
             const data = response.data;
-            console.log("[HYDRATION][fetchDataZones] discussionId:", discussionId);
-            console.log("[HYDRATION][fetchDataZones] raw /data_zones payload:", data);
-            console.log("[HYDRATION][fetchDataZones] rag_ids in payload:", data?.rag_datastore_ids);
-            console.log("[HYDRATION][fetchDataZones] existing store rag_ids:", discussions.value[discussionId]?.rag_datastore_ids);
+            applyDataZonesPayload(discussionId, data);
+        } catch (error) {
+            console.error("Failed to fetch data zones:", error);
+            uiStore.addNotification('Could not load discussion data zones.', 'error');
+        }
+    }
 
-            // Ensure we update the discussion object in the map for reactivity
-            if (discussions.value[discussionId]) {
-                // CRITICAL: Prevent null/undefined from wiping hydrated arrays.
-                // Spread-merge is safe, but we must explicitly preserve keys the
-                // /data_zones endpoint might return as null when empty.
-                const preservedRagIds = discussions.value[discussionId].rag_datastore_ids;
-                const preservedTools = discussions.value[discussionId].active_tools;
+    async function syncDataZones(discussionId) {
+        if (!discussionId) return;
+        try {
+            const response = await apiClient.post(`/api/discussions/${discussionId}/sync_data_zones`);
+            applyDataZonesPayload(discussionId, response.data);
+        } catch (error) {
+            console.error('Failed to sync data zones:', error);
+            uiStore.addNotification('Could not sync data zones with backend.', 'error');
+        }
+    }
 
-                discussions.value[discussionId] = { 
-                    ...discussions.value[discussionId], 
-                    ...data 
-                };
+    function applyDataZonesPayload(discussionId, data) {
+        console.log("[HYDRATION][applyDataZonesPayload] discussionId:", discussionId, "payload:", data);
+        const preservedRagIds = discussions.value[discussionId]?.rag_datastore_ids;
+        const preservedTools = discussions.value[discussionId]?.active_tools;
 
-                // Restore protected keys if the new data provided null/undefined
-                console.log("[HYDRATION][fetchDataZones] preservedRagIds:", preservedRagIds);
+        if (discussions.value[discussionId]) {
+            discussions.value[discussionId] = {
+                ...discussions.value[discussionId],
+                ...data
+            };
 
-                if (!data.rag_datastore_ids && preservedRagIds !== undefined) {
-                    console.log("[HYDRATION][fetchDataZones] PRESERVING local rag_ids, server sent:", data.rag_datastore_ids);
-                    discussions.value[discussionId].rag_datastore_ids = preservedRagIds;
-                }
-                if (!data.active_tools && preservedTools !== undefined) {
-                    console.log("[HYDRATION][fetchDataZones] PRESERVING local active_tools, server sent:", data.active_tools);
-                    discussions.value[discussionId].active_tools = preservedTools;
-                }
+            if (data.rag_datastore_ids == null && preservedRagIds !== undefined) {
+                discussions.value[discussionId].rag_datastore_ids = preservedRagIds;
+            }
+            if (data.active_tools == null && preservedTools !== undefined) {
+                discussions.value[discussionId].active_tools = preservedTools;
+            }
 
-                // Guarantee array shapes for UI consumers
-                if (!Array.isArray(discussions.value[discussionId].rag_datastore_ids)) {
-                    discussions.value[discussionId].rag_datastore_ids = [];
-                }
-                if (!Array.isArray(discussions.value[discussionId].active_tools)) {
-                    discussions.value[discussionId].active_tools = [];
-                }
-            } else {
+            if (!Array.isArray(discussions.value[discussionId].rag_datastore_ids)) {
+                discussions.value[discussionId].rag_datastore_ids = [];
+            }
+            if (!Array.isArray(discussions.value[discussionId].active_tools)) {
+                discussions.value[discussionId].active_tools = [];
+            }
+        } else {
                 // If it's a shared discussion not in the 'discussions' map, check 'sharedWithMe'
                 const sharedIdx = sharedWithMe.value.findIndex(d => d.id === discussionId);
                 if (sharedIdx !== -1) {
@@ -140,10 +145,6 @@ export function useDiscussionDataZones(state, stores, getActions) {
                 }
             }
 
-        } catch (error) {
-            console.error("Failed to fetch data zones:", error);
-            uiStore.addNotification('Could not load discussion data zones.', 'error');
-        }
     }
 
     async function updateDataZone({ discussionId, content }) {
@@ -385,7 +386,7 @@ export function useDiscussionDataZones(state, stores, getActions) {
     return {
         fetchContextStatus, fetchDataZones, updateDataZone, appendToDataZone,
         summarizeDiscussionDataZone, generateImageFromDataZone, memorizeLTM,
-        cleanDataZone,
+        cleanDataZone, syncDataZones,
         handleDataZoneUpdate, setDiscussionDataZoneContent, refreshDataZones,
         updateLiveTokenCount, handleDiscussionImagesUpdated,
         updateDiscussionRagStores,
