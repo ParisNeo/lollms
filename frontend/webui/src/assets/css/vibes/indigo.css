@@ -1,11 +1,12 @@
 /* Indigo (Default) Vibe - Aligned with :root defaults */
 
-.vibe-indigo, [data-vibe="indigo"], html.vibe-indigo, html.dark.vibe-indigo {
+/* Light Mode (Default) */
+.vibe-indigo, [data-vibe="indigo"], html.vibe-indigo {
   --brand-primary: #4f46e5;
   --brand-primary-hover: #4338ca;
   --brand-accent: #ec4899;
   --brand-secondary: #8b5cf6;
-  
+
   --brand-bg-app: #f8fafc;
   --brand-bg-app-hover: #f1f5f9;
   --brand-bg-card: #ffffff;
@@ -14,17 +15,47 @@
   --brand-bg-sidebar: #ffffff;
   --brand-bg-hover: #e0e7ff;
   --brand-bg-subtle: #eef2ff;
-  
+
   --brand-border-main: #e2e8f0;
   --brand-border-muted: #f1f5f9;
   --brand-border-strong: #cbd5e1;
   --brand-border-light-line: rgba(79, 70, 229, 0.1);
-  
+
   --brand-text-main: #0f172a;
   --brand-text-dim: #64748b;
   --brand-text-muted: #94a3b8;
   --brand-text-on-primary: #ffffff;
-  
+
   --brand-input-bg: #ffffff;
   --brand-input-border: #cbd5e1;
+}
+
+/* Dark Mode Override */
+html.dark.vibe-indigo, .dark .vibe-indigo, .dark [data-vibe="indigo"] {
+  --brand-primary: #6366f1;
+  --brand-primary-hover: #818cf8;
+  --brand-accent: #f472b6;
+  --brand-secondary: #a78bfa;
+
+  --brand-bg-app: #0b1120;
+  --brand-bg-app-hover: #151e32;
+  --brand-bg-card: #151e32;
+  --brand-bg-elevated: #1e293b;
+  --brand-bg-overlay: rgba(11, 17, 32, 0.8);
+  --brand-bg-sidebar: #0b1120;
+  --brand-bg-hover: #2a3b55;
+  --brand-bg-subtle: #151e32;
+
+  --brand-border-main: #334155;
+  --brand-border-muted: #1e293b;
+  --brand-border-strong: #475569;
+  --brand-border-light-line: rgba(129, 140, 248, 0.15);
+
+  --brand-text-main: #f8fafc;
+  --brand-text-dim: #94a3b8;
+  --brand-text-muted: #64748b;
+  --brand-text-on-primary: #ffffff;
+
+  --brand-input-bg: #1e293b;
+  --brand-input-border: #334155;
 }

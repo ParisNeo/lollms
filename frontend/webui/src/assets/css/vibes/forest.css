@@ -1,11 +1,12 @@
 /* Forest (Green Nature) Vibe */
 
-.vibe-forest, [data-vibe="forest"] {
+/* Light Mode (Default) */
+.vibe-forest, [data-vibe="forest"], html.vibe-forest {
   --brand-primary: #15803d;
   --brand-primary-hover: #166534;
   --brand-accent: #84cc16;
   --brand-secondary: #eab308;
-  
+
   --brand-bg-app: #f0fdf4;
   --brand-bg-app-hover: #dcfce7;
   --brand-bg-card: #ffffff;
@@ -14,46 +15,47 @@
   --brand-bg-sidebar: #ffffff;
   --brand-bg-hover: #bbf7d0;
   --brand-bg-subtle: #dcfce7;
-  
+
   --brand-border-main: #bbf7d0;
   --brand-border-muted: #dcfce7;
   --brand-border-strong: #86efac;
   --brand-border-light-line: rgba(21, 128, 61, 0.1);
-  
+
   --brand-text-main: #14532d;
   --brand-text-dim: #166534;
   --brand-text-muted: #4ade80;
   --brand-text-on-primary: #ffffff;
-  
+
   --brand-input-bg: #ffffff;
   --brand-input-border: #86efac;
 }
 
-.dark .vibe-forest, .dark[data-vibe="forest"] {
-  --brand-primary: #4ade80;
-  --brand-primary-hover: #22c55e;
+/* Dark Mode Override */
+html.dark.vibe-forest, .dark .vibe-forest, .dark [data-vibe="forest"] {
+  --brand-primary: #22c55e;
+  --brand-primary-hover: #4ade80;
   --brand-accent: #a3e635;
   --brand-secondary: #facc15;
-  
-  --brand-bg-app: #022c22;
-  --brand-bg-app-hover: #064e3b;
-  --brand-bg-card: #064e3b;
-  --brand-bg-elevated: #065f46;
-  --brand-bg-overlay: rgba(2, 44, 34, 0.95);
-  --brand-bg-sidebar: #022c22;
-  --brand-bg-hover: #065f46;
-  --brand-bg-subtle: #064e3b;
-  
-  --brand-border-main: #059669;
-  --brand-border-muted: #065f46;
-  --brand-border-strong: #34d399;
-  --brand-border-light-line: rgba(255, 255, 255, 0.1);
-  
-  --brand-text-main: #ecfdf5;
-  --brand-text-dim: #a7f3d0;
-  --brand-text-muted: #6ee7b7;
-  --brand-text-on-primary: #022c22;
-  
-  --brand-input-bg: #065f46;
-  --brand-input-border: #059669;
+
+  --brand-bg-app: #0b1120;
+  --brand-bg-app-hover: #151e32;
+  --brand-bg-card: #151e32;
+  --brand-bg-elevated: #1e293b;
+  --brand-bg-overlay: rgba(11, 17, 32, 0.8);
+  --brand-bg-sidebar: #0b1120;
+  --brand-bg-hover: #2a3b34;
+  --brand-bg-subtle: #151e32;
+
+  --brand-border-main: #334155;
+  --brand-border-muted: #1e293b;
+  --brand-border-strong: #475569;
+  --brand-border-light-line: rgba(74, 222, 128, 0.15);
+
+  --brand-text-main: #f8fafc;
+  --brand-text-dim: #94a3b8;
+  --brand-text-muted: #4ade80;
+  --brand-text-on-primary: #0b1120;
+
+  --brand-input-bg: #1e293b;
+  --brand-input-border: #334155;
 }

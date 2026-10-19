@@ -1,10 +1,12 @@
 /* Flat (No Shadow, Minimalist) Vibe */
 
-.vibe-flat, [data-vibe="flat"] {
+/* Light Mode (Default) */
+.vibe-flat, [data-vibe="flat"], html.vibe-flat {
   --brand-primary: #2563eb;
   --brand-primary-hover: #1d4ed8;
   --brand-accent: #3b82f6;
-  
+  --brand-secondary: #0ea5e9;
+
   --brand-bg-app: #ffffff;
   --brand-bg-app-hover: #f3f4f6;
   --brand-bg-card: #f9fafb;
@@ -13,20 +15,55 @@
   --brand-bg-sidebar: #f9fafb;
   --brand-bg-hover: #e5e7eb;
   --brand-bg-subtle: #f3f4f6;
-  
+
   --brand-border-main: #d1d5db;
   --brand-border-muted: #e5e7eb;
   --brand-border-strong: #9ca3af;
   --brand-border-light-line: rgba(0, 0, 0, 0.05);
-  
+
   --brand-text-main: #111827;
   --brand-text-dim: #4b5563;
   --brand-text-muted: #9ca3af;
   --brand-text-on-primary: #ffffff;
-  
+
   --brand-input-bg: #ffffff;
   --brand-input-border: #9ca3af;
-  
+
+  /* Flat specific: no shadows */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+}
+
+/* Dark Mode Override */
+html.dark.vibe-flat, .dark .vibe-flat, .dark [data-vibe="flat"] {
+  --brand-primary: #60a5fa;
+  --brand-primary-hover: #3b82f6;
+  --brand-accent: #93c5fd;
+  --brand-secondary: #38bdf8;
+
+  --brand-bg-app: #0b1120;
+  --brand-bg-app-hover: #151e32;
+  --brand-bg-card: #151e32;
+  --brand-bg-elevated: #1e293b;
+  --brand-bg-overlay: rgba(11, 17, 32, 0.8);
+  --brand-bg-sidebar: #0b1120;
+  --brand-bg-hover: #2c3947;
+  --brand-bg-subtle: #151e32;
+
+  --brand-border-main: #334155;
+  --brand-border-muted: #1e293b;
+  --brand-border-strong: #475569;
+  --brand-border-light-line: rgba(59, 130, 246, 0.15);
+
+  --brand-text-main: #f9fafb;
+  --brand-text-dim: #94a3b8;
+  --brand-text-muted: #9ca3af;
+  --brand-text-on-primary: #0b1120;
+
+  --brand-input-bg: #1e293b;
+  --brand-input-border: #334155;
+
   /* Flat specific: no shadows */
   --shadow-sm: none;
   --shadow-md: none;
@@ -38,32 +75,4 @@
 .vibe-flat .input-field {
   box-shadow: none !important;
   border: 2px solid var(--brand-border-main);
-}
-
-.dark .vibe-flat, .dark[data-vibe="flat"] {
-  --brand-primary: #60a5fa;
-  --brand-primary-hover: #3b82f6;
-  --brand-accent: #93c5fd;
-  
-  --brand-bg-app: #111827;
-  --brand-bg-app-hover: #1f2937;
-  --brand-bg-card: #1f2937;
-  --brand-bg-elevated: #374151;
-  --brand-bg-overlay: rgba(17, 24, 39, 0.9);
-  --brand-bg-sidebar: #111827;
-  --brand-bg-hover: #374151;
-  --brand-bg-subtle: #1f2937;
-  
-  --brand-border-main: #374151;
-  --brand-border-muted: #1f2937;
-  --brand-border-strong: #4b5563;
-  --brand-border-light-line: rgba(255, 255, 255, 0.05);
-  
-  --brand-text-main: #f9fafb;
-  --brand-text-dim: #9ca3af;
-  --brand-text-muted: #6b7280;
-  --brand-text-on-primary: #111827;
-  
-  --brand-input-bg: #1f2937;
-  --brand-input-border: #374151;
 }

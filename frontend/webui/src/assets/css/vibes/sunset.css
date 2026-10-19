@@ -1,11 +1,12 @@
 /* Sunset (Orange/Red) Vibe */
 
-.vibe-sunset, [data-vibe="sunset"] {
+/* Light Mode (Default) */
+.vibe-sunset, [data-vibe="sunset"], html.vibe-sunset {
   --brand-primary: #ea580c;
   --brand-primary-hover: #c2410c;
   --brand-accent: #f43f5e;
   --brand-secondary: #eab308;
-  
+
   --brand-bg-app: #fff7ed;
   --brand-bg-app-hover: #ffedd5;
   --brand-bg-card: #ffffff;
@@ -14,46 +15,47 @@
   --brand-bg-sidebar: #ffffff;
   --brand-bg-hover: #fed7aa;
   --brand-bg-subtle: #ffedd5;
-  
+
   --brand-border-main: #fed7aa;
   --brand-border-muted: #ffedd5;
   --brand-border-strong: #fdba74;
   --brand-border-light-line: rgba(234, 88, 12, 0.1);
-  
+
   --brand-text-main: #7c2d12;
   --brand-text-dim: #c2410c;
   --brand-text-muted: #fb923c;
   --brand-text-on-primary: #ffffff;
-  
+
   --brand-input-bg: #ffffff;
   --brand-input-border: #fdba74;
 }
 
-.dark .vibe-sunset, .dark[data-vibe="sunset"] {
+/* Dark Mode Override */
+html.dark.vibe-sunset, .dark .vibe-sunset, .dark [data-vibe="sunset"] {
   --brand-primary: #fb923c;
-  --brand-primary-hover: #ea580c;
+  --brand-primary-hover: #fdba74;
   --brand-accent: #fb7185;
   --brand-secondary: #facc15;
-  
-  --brand-bg-app: #431407;
-  --brand-bg-app-hover: #7c2d12;
-  --brand-bg-card: #7c2d12;
-  --brand-bg-elevated: #9a3412;
-  --brand-bg-overlay: rgba(67, 20, 7, 0.95);
-  --brand-bg-sidebar: #431407;
-  --brand-bg-hover: #9a3412;
-  --brand-bg-subtle: #7c2d12;
-  
-  --brand-border-main: #c2410c;
-  --brand-border-muted: #9a3412;
-  --brand-border-strong: #f97316;
-  --brand-border-light-line: rgba(255, 255, 255, 0.1);
-  
-  --brand-text-main: #fff7ed;
-  --brand-text-dim: #fed7aa;
+
+  --brand-bg-app: #0b1120;
+  --brand-bg-app-hover: #151e32;
+  --brand-bg-card: #151e32;
+  --brand-bg-elevated: #1e293b;
+  --brand-bg-overlay: rgba(11, 17, 32, 0.8);
+  --brand-bg-sidebar: #0b1120;
+  --brand-bg-hover: #3b2f2a;
+  --brand-bg-subtle: #151e32;
+
+  --brand-border-main: #334155;
+  --brand-border-muted: #1e293b;
+  --brand-border-strong: #475569;
+  --brand-border-light-line: rgba(253, 186, 116, 0.15);
+
+  --brand-text-main: #f8fafc;
+  --brand-text-dim: #94a3b8;
   --brand-text-muted: #fdba74;
-  --brand-text-on-primary: #431407;
-  
-  --brand-input-bg: #9a3412;
-  --brand-input-border: #c2410c;
+  --brand-text-on-primary: #0b1120;
+
+  --brand-input-bg: #1e293b;
+  --brand-input-border: #334155;
 }
